@@ -558,31 +558,37 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // flush the backing page
         ExtentHeader header(type, xid, _schema->row_size(), _schema->field_types(), this->extent_id);
 
-        std::vector<std::shared_ptr<MutableBTree::Page>> new_pages;
+        auto promise = std::make_shared<std::promise<std::vector<std::shared_ptr<MutableBTree::Page>>>>();
+        auto future = promise->get_future();
+        LOG_INFO("ABOUT TO FLUSH EXTENTS");
+        _cache_page->async_flush(std::move(header), [p = std::move(promise), this](std::vector<uint64_t> ids){
+                std::vector<std::shared_ptr<MutableBTree::Page>> new_pages;
 
-        auto flush_future = _cache_page->async_flush(std::move(header));
-        auto ids = flush_future.get();
-        for (auto id : ids) {
-            // XXX how to handle XIDs?
-            auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+                LOG_INFO("GOT THE NEW EXTENT IDS");
+                for (auto id : ids) {
+                    // XXX how to handle XIDs?
+                    auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
-            // XXX need a better way to create these combined tuples
-            ValueTuplePtr value_key;
-            {
-                auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
-                auto row = *row_i;
-                auto key = std::make_shared<MutableTuple>(_key_fields, &row);
-                value_key = std::make_shared<ValueTuple>(key);
-            }
+                    // XXX need a better way to create these combined tuples
+                    ValueTuplePtr value_key;
+                    {
+                        auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
+                        auto row = *row_i;
+                        auto key = std::make_shared<MutableTuple>(_key_fields, &row);
+                        value_key = std::make_shared<ValueTuple>(key);
+                    }
 
-            auto page = std::make_shared<Page>(_btree, id, std::move(value_key), std::move(cache_page), _schema);
+                    auto page = std::make_shared<Page>(_btree, id, std::move(value_key), std::move(cache_page), _schema);
 
-            LOG_DEBUG(LOG_BTREE, "Creating MutableBTree Page: {} {}", id, page->extent_id);
+                    LOG_DEBUG(LOG_BTREE, "Creating MutableBTree Page: {} {}", id, page->extent_id);
 
-            new_pages.push_back(std::move(page));
-        }
+                    new_pages.push_back(std::move(page));
+                }
 
-        return new_pages;
+                p->set_value(new_pages);
+        });
+
+        return future.get();
     }
 
     void

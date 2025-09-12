@@ -179,7 +179,9 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
         StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::PutCalls>();
 
+        LOG_INFO("GETTING THE LOCK");
         boost::unique_lock lock(_mutex);
+        LOG_INFO("GOT THE LOCK");
 
         // set the flush callback for the page if it doesn't have one yet
         if (flush_callback && !page->_flush_callback) {
@@ -200,6 +202,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
         // release the page back to the cache
        _put(page);
+       LOG_INFO("NOT HERE");
     }
 
     void
@@ -667,7 +670,7 @@ StorageCache::PageCache::background_cleaner()
 
 
     std::future<std::vector<uint64_t>>
-    StorageCache::Page::async_flush(const ExtentHeader &header)
+    StorageCache::Page::async_flush(const ExtentHeader &header, std::function<void(std::vector<uint64_t>)> callback)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = false;
@@ -675,7 +678,7 @@ StorageCache::PageCache::background_cleaner()
         // note: if the page is empty, we should be calling flush_empty()
         CHECK(!_extents.empty());
 
-        return _async_flush(std::move(header));
+        return _async_flush(std::move(header), std::move(callback));
     }
 
     std::vector<uint64_t>
@@ -1171,35 +1174,39 @@ StorageCache::PageCache::background_cleaner()
     }
 
     std::future<std::vector<uint64_t>>
-    StorageCache::Page::_async_flush(const ExtentHeader &header)
+    StorageCache::Page::_async_flush(const ExtentHeader &header, std::function<void(std::vector<uint64_t>)> callback)
     {
-        return std::async(std::launch::async,
-                &StorageCache::Page::_async_flush_extents,
-                this, std::move(header));
-    }
-
-    std::vector<uint64_t>
-    StorageCache::Page::_async_flush_extents(const ExtentHeader &header)
-    {
-        // Acquire lock in the async thread
-        boost::unique_lock lock(this->_mutex);
-
         auto cache = StorageCache::get_instance();
-        std::vector<uint64_t> offsets;
-
-        {
-            std::vector<std::future<void>> offset_futures;
 
             struct FlushTask {
                 ExtentRef& ext_ref;
                 std::optional<SafeExtent> safe_ext;
-                bool is_flushing;
+                bool ref_clean;
+                bool extent_state_dirty;
+            };
+
+            struct DirtySafeExtentsCounter {
+                std::atomic<int> value{0};
+
+                void increment(int delta = 1) {
+                    value.fetch_add(delta, std::memory_order::relaxed);
+                }
+
+                void decrement(int delta = 1) {
+                    value.fetch_sub(delta, std::memory_order::relaxed);
+                }
+
+                int get() const {
+                    return value.load(std::memory_order::relaxed);
+                }
             };
 
             std::vector<FlushTask> tasks;
+            auto dirty_safe_extents_counter = std::make_shared<DirtySafeExtentsCounter>();
 
             for (auto &ref : _extents) {
                 // note: we don't need to do anything to CLEAN extents here
+                LOG_INFO("BEFORE FLUSH: REF ID:: {}", ref.id());
                 if (!ref.is_clean()) {
                     // XXX if the extent was already flushed to disk in the background, we don't
                     //     actually need to read it in again here, we just need to get the extent ID
@@ -1210,38 +1217,86 @@ StorageCache::PageCache::background_cleaner()
                     if ((*e)->state() == CacheExtent::State::DIRTY) {
                         // update the extent header
                         (*e)->header() = header;
-                        auto flush_task = FlushTask{ref, std::move(e), true};
-                        auto flush_future_opt = cache->_data_cache->async_flush(*flush_task.safe_ext.value());
-                        if (flush_future_opt) {
-                            offset_futures.push_back(std::move(*flush_future_opt));
-                        }
+                        auto flush_task = FlushTask{ref, std::move(e), false, true};
                         tasks.push_back(std::move(flush_task));
+                        dirty_safe_extents_counter->increment();
                     } else {
-                        tasks.push_back(std::move(FlushTask{ref, std::move(e), true}));
+                        tasks.push_back(std::move(FlushTask{ref, std::move(e), false, false}));
                     }
                 } else {
-                    tasks.push_back(std::move(FlushTask{ref, std::nullopt, false}));
+                    tasks.push_back(std::move(FlushTask{ref, std::nullopt, true, false}));
                 }
             }
 
-            for (auto& fut: offset_futures) {
-                fut.get();
-            }
+            auto promise = std::make_shared<std::promise<std::vector<uint64_t>>>();
+            auto flush_future = promise->get_future();
+            LOG_INFO("COUNT OF DIRTY SAFE EXTENTS:: {}", dirty_safe_extents_counter->get());
 
-            for (auto& task: tasks) {
-                if (task.is_flushing) {
-                    // bring MUTABLE extents to CLEAN
-                    if ((*task.safe_ext.value())->state() == CacheExtent::State::MUTABLE) {
-                        // return the now MUTABLE extent back to the read cache
-                        cache->_data_cache->reinsert(*task.safe_ext.value());
+            for (auto &task: tasks) {
+                if (!task.ref_clean) {
+                    if(task.extent_state_dirty) {
+                        cache->_data_cache->async_flush(*task.safe_ext.value(), [task_ptr=std::make_shared<FlushTask>(std::move(task)),
+                            //e_ptr = std::make_shared<SafeExtent>(std::move(task.safe_ext.value())),
+                            promise, dirty_safe_extents_counter, callback, this]() mutable
+                            {
+                                {
+                                    LOG_INFO("Get the lock");
+                                    //boost::unique_lock lock(this->_mutex);
+                                    LOG_INFO("Lock acquired");
+                                    auto cache = StorageCache::get_instance();
+                                    // bring MUTABLE extents to CLEAN
+                                    if ((*task_ptr->safe_ext.value())->state() == CacheExtent::State::MUTABLE) {
+                                        // return the now MUTABLE extent back to the read cache
+                                        cache->_data_cache->reinsert(*task_ptr->safe_ext.value());
+                                    }
+
+                                    // update the reference with the details of the new extent
+                                    LOG_DEBUG(LOG_CACHE, "Before Flushing extent {} -- new extent {}", _extent_id, task_ptr->ext_ref.id());
+                                    task_ptr->ext_ref = task_ptr->safe_ext.value().get_ref();
+                                    LOG_DEBUG(LOG_CACHE, "Flushing extent {} -- new extent {}", _extent_id, task_ptr->ext_ref.id());
+
+                                    dirty_safe_extents_counter->decrement();
+                                    LOG_INFO("COUNT OF DIRTY SAFE EXTENTS:: {}", dirty_safe_extents_counter->get());
+                                    if (dirty_safe_extents_counter->get() == 0) {
+                                        auto offsets = this->_get_extent_ids_post_flush();
+                                        //lock.unlock();
+                                        promise->set_value(offsets);
+                                        if (callback) {
+                                            callback(offsets);
+                                            LOG_INFO("INVOKED THE OFFSETS");
+                                        }
+                                    }
+                                }
+                            });
+                    } else {
+
+                        if ((*task.safe_ext.value())->state() == CacheExtent::State::MUTABLE) {
+                            // return the now MUTABLE extent back to the read cache
+                            cache->_data_cache->reinsert(*task.safe_ext.value());
+                        }
+
+                        // update the reference with the details of the new extent
+                        task.ext_ref = task.safe_ext.value().get_ref();
+                        LOG_DEBUG(LOG_CACHE, "Flushing extent {} -- new extent {}", _extent_id, task.ext_ref.id());
                     }
-                    task.ext_ref = task.safe_ext.value().get_ref();
-                }
-                CHECK(task.ext_ref.is_clean());
-                offsets.push_back(task.ext_ref.id());
-            }
-        }
 
+                }
+            }
+
+            return flush_future;
+    }
+
+    std::vector<uint64_t>
+    StorageCache::Page::_get_extent_ids_post_flush()
+    {
+        std::vector<uint64_t> offsets;
+        for (auto &ref : _extents) {
+            // extent should always be clean at this point
+            LOG_INFO("REF ID:: {}", ref.id());
+            CHECK(ref.is_clean());
+            offsets.push_back(ref.id());
+        }
+        LOG_INFO("GOT THE OFFSETS");
         return offsets;
     }
 
@@ -1464,13 +1519,15 @@ StorageCache::PageCache::background_cleaner()
         _flush(extent);
     }
 
-    std::optional<std::future<void>>
-    StorageCache::DataCache::async_flush(CacheExtentPtr extent)
+    void
+    StorageCache::DataCache::async_flush(CacheExtentPtr extent, std::function<void()> callback)
     {
+        LOG_INFO("Getting the lock");
         boost::unique_lock lock(_mutex);
+        LOG_INFO("Lock acquired");
 
         // call the internal flush() helper
-        return _async_flush(extent);
+        return _async_flush(extent, std::move(callback));
     }
 
     void
@@ -1572,8 +1629,9 @@ StorageCache::PageCache::background_cleaner()
         return extent;
     }
 
-    std::optional<std::future<void>>
-    StorageCache::DataCache::_async_flush(CacheExtentPtr extent)
+    void
+    StorageCache::DataCache::_async_flush(CacheExtentPtr extent,
+            std::function<void()> callback)
     {
         // if already flushing, wait for completion
         if (extent->_state == CacheExtent::State::FLUSHING) {
@@ -1584,12 +1642,14 @@ StorageCache::PageCache::background_cleaner()
 
             // note: this doesn't unlock, just releases the adopt_lock
             lock.release();
-            return std::nullopt;
+            callback();
+            return;
         }
 
         // if the extent isn't DIRTY, don't need to flush
         if (extent->_state != CacheExtent::State::DIRTY) {
-            return std::nullopt;
+            callback();
+            return;
         }
 
         // mark the extent as FLUSHING so that other callers will block until flush complete
@@ -1602,25 +1662,27 @@ StorageCache::PageCache::background_cleaner()
             boost::unique_lock lock(_mutex, boost::adopt_lock);
             lock.unlock();
             auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
-            auto async_flush_future = extent->async_flush(handle);
-
+            auto async_flush_future = extent->async_flush(handle,
+                    [extent = std::move(extent), callback = std::move(callback), 
+                        this](std::shared_ptr<IOResponseAppend> response) mutable {
+                        _flush_and_update_extent(std::move(extent), response);
+                        callback();
+                    });
+        LOG_INFO("Waiting for the lock");
             lock.lock();
+        LOG_INFO("Got the lock");
             lock.release();
-            return std::async(std::launch::async,
-                    &StorageCache::DataCache::_flush_and_update_extent,
-                    this, std::move(extent), std::move(async_flush_future));
         }
     }
 
     void
     StorageCache::DataCache::_flush_and_update_extent(CacheExtentPtr extent,
-            std::future<std::shared_ptr<IOResponseAppend>> async_flush_future)
+            std::shared_ptr<IOResponseAppend> flush_response)
     {
-        // Get the flush response
-        auto flush_response = async_flush_future.get();
-
+        LOG_INFO("Waiting for the lock");
         // Lock and update cache, extent
         boost::unique_lock lock(this->_mutex);
+        LOG_INFO("Got the lock");
 
         // On-disk size of the originating extent
         uint64_t prev_extent_size = extent->_extent_size;
@@ -1643,21 +1705,28 @@ StorageCache::PageCache::background_cleaner()
         // notify anyone waiting
         extent->_flush_cv->notify_all();
         extent->_flush_cv = nullptr;
+        LOG_INFO("Done _flush_and_update_extent");
     }
 
     void
     StorageCache::DataCache::_flush(CacheExtentPtr extent)
     {
-        auto async_flush_future = _async_flush(extent);
-        if (async_flush_future) {
+        auto promise = std::make_shared<std::promise<void>>();
+        auto flush_future = promise->get_future();
+
+        _async_flush(extent, [p = std::move(promise)]() {
+                    p->set_value();
+                });
+
+        {
             boost::unique_lock lock(_mutex, boost::adopt_lock);
-            // _flush async will take care of locking
+            // _flush callback will take care of locking
             lock.unlock();
-
-            async_flush_future.value().get();
-
+            LOG_INFO("Waiting for the flush to be done");
+            flush_future.get();
             lock.lock();
             lock.release();
+            LOG_INFO("Flush completed and locked");
         }
     }
 

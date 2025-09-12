@@ -429,7 +429,7 @@ namespace springtail {
              * @brief Returns a future which writes the provided DIRTY extent to disk.  Extent is returned to the MUTABLE state
              * after the flush() is complete.
              */
-            std::optional<std::future<void>> async_flush(CacheExtentPtr extent);
+            void async_flush(CacheExtentPtr extent, std::function<void()> callback);
 
             /**
              * Invalidates the provided DIRTY extent, ensuring that it is released without being
@@ -514,15 +514,15 @@ namespace springtail {
              *
              * @returns optional future which is nullopt if flush is not needed (not dirty)
              */
-            std::optional<std::future<void>> _async_flush(CacheExtentPtr extent);
+            void _async_flush(CacheExtentPtr extent, std::function<void()> callback);
 
             /**
              * @brief Helper that writes the provided DIRTY extent to disk, updates cache and extent
              * @param extent             Extent to be flushed to the disk
-             * @param async_flush_future IO flush future thats doing the actual disk flush
+             * @param flush_response     IO Flush response
              */
             void _flush_and_update_extent(CacheExtentPtr extent,
-                    std::future<std::shared_ptr<IOResponseAppend>> async_flush_future);
+                    std::shared_ptr<IOResponseAppend> flush_response);
 
             /**
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
@@ -619,7 +619,7 @@ namespace springtail {
              *
              * @return future that returns ordered list of extent IDs that represent the data of the Page.
              */
-            std::future<std::vector<uint64_t>> async_flush(const ExtentHeader &header);
+            std::future<std::vector<uint64_t>> async_flush(const ExtentHeader &header, std::function<void(std::vector<uint64_t>)> callback = {});
 
             /**
              * Flushes an empty page to disk by creating an empty extent and flushing that to disk,
@@ -653,7 +653,9 @@ namespace springtail {
              * Registers an eviction callback.
              */
             void _register_flush(std::function<bool(std::shared_ptr<Page>)> callback) {
+                LOG_INFO("STUCK HERE??");
                 boost::unique_lock lock(_mutex);
+                LOG_INFO("NOT STUCK");
                 _flush_callback = callback;
             }
 
@@ -986,15 +988,14 @@ namespace springtail {
              *
              * @return future that returns ordered list of extent IDs that represent the data of the Page.
              */
-            std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header);
+            std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header, std::function<void(std::vector<uint64_t>)> callback = {});
 
             /**
-             * @brief Helper that flushes the underlying extents of a page and returns on-disk extent IDsa
-             * @param header  Extent header which will be used as header for all the in-memory extents
+             * @brief Helper that returns extent IDs, ideally called as a continuation of async_flush
              *
              * @return vector of extent IDs
              */
-            std::vector<uint64_t> _async_flush_extents(const ExtentHeader &header);
+            std::vector<uint64_t> _get_extent_ids_post_flush();
 
 
         private:
