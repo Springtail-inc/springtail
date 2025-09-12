@@ -174,7 +174,7 @@ namespace springtail::pg_log_mgr {
             bool
             should_skip(uint32_t pg_xid) const
             {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "pg_xid={} xmax={} inflight={}", pg_xid, _xmax, _inflight.size());
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "pg_xid={} xmax={} inflight={}", pg_xid, _xmax, _inflight.size());
 
                 // do a guess-timate if the pgxid wrapped ahead of xmax
                 if (pg_xid < (1 << 26) && _xmax > (1 << 30)) {

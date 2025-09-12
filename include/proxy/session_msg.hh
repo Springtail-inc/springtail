@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <string>
-#include <variant>
 #include <cstdint>
 #include <vector>
 #include <queue>

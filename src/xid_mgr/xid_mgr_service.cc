@@ -158,7 +158,7 @@ GrpcXidMgrService::Notifier::OnDone()
 void
 GrpcXidMgrService::Notifier::OnCancel()
 {
-    LOG_DEBUG(LOG_XID_MGR, "GrpcXidMgrService::Notifier::OnCancel");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "GrpcXidMgrService::Notifier::OnCancel");
     // Will OnDone still be called if OnCancel is called? Yes.
 }
 

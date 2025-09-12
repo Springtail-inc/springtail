@@ -252,10 +252,10 @@ namespace springtail::pg_proxy {
                 buffer += n;
                 max_size -= n;
                 at_least -= n;
-                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Read {} bytes from socket, remaining={}", n, at_least);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Read {} bytes from socket, remaining={}", n, at_least);
             } else if (n == 0) {
                 // Connection closed by the client
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Connection closed by client");
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Connection closed by client");
                 close();
                 throw ProxyIOError();
             } else if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
@@ -364,7 +364,7 @@ namespace springtail::pg_proxy {
         switch (err) {
             case SSL_ERROR_WANT_READ:
             case SSL_ERROR_WANT_WRITE:
-                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL handshake in progress, need data: err={}", err);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL handshake in progress, need data: err={}", err);
                 return;
             case SSL_ERROR_SYSCALL:
                 LOG_ERROR("SSL handshake failed: error syscall: errno={}\n", errno);

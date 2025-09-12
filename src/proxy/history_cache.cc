@@ -1,7 +1,5 @@
 #include <proxy/history_cache.hh>
 
-#include <proxy/logging.hh>
-
 namespace springtail {
 namespace pg_proxy {
 
@@ -188,7 +186,7 @@ namespace pg_proxy {
     StatementCache::sync_transaction(char xact_status)
     {
         // status is either: I - idle, T - in transaction, E - error
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Syncing transaction: status: {}, in_error: {}", xact_status, _in_error);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Syncing transaction: status: {}, in_error: {}", xact_status, _in_error);
 
         // finished processing statements, if we are not in a xact at this point
         // then either we saw a commit earlier and are done, or were in a
@@ -216,7 +214,7 @@ namespace pg_proxy {
     void
     StatementCache::commit_statement(QueryStmtPtr stmt, int completed, bool success)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Committing statement: stmt_type: {}, completed: {}, children: {}, in_error: {}, success: {}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Committing statement: stmt_type: {}, completed: {}, children: {}, in_error: {}, success: {}",
                     (uint8_t)stmt->type, completed, stmt->children.size(), _in_error, success);
 
         if (!success) {

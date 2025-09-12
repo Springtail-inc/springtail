@@ -183,7 +183,7 @@ namespace springtail::pg_fdw {
                     escape_identifier(namespace_name), escape_identifier(table), tid);
             }
 
-            LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Generated SQL: {}", create);
 
             return create;
         }
@@ -262,7 +262,7 @@ namespace springtail::pg_fdw {
         {
             std::vector<std::string> commands;
 
-            LOG_DEBUG(LOG_FDW, "Getting schema ddl for {} @ {}:{}", namespace_name, schema_xid, constant::MAX_LSN);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Getting schema ddl for {} @ {}:{}", namespace_name, schema_xid, constant::MAX_LSN);
 
             // lookup the namespace_id for the requested schema
             auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
@@ -351,7 +351,7 @@ namespace springtail::pg_fdw {
                     continue;
                 }
 
-                LOG_DEBUG(LOG_FDW, "Found table in schemas table: {}, xid: {}, schema_xid: {}", tid, xid, schema_xid);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found table in schemas table: {}, xid: {}, schema_xid: {}", tid, xid, schema_xid);
 
                 // check if we have moved to next tid
                 if (tid != current_tid) {
@@ -370,7 +370,7 @@ namespace springtail::pg_fdw {
                     auto it = tid_map.find(tid);
                     if (it == tid_map.end()) {
                         // not found skip it
-                        LOG_DEBUG(LOG_FDW, "Table {} not found in table map, skipping", tid);
+                        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Table {} not found in table map, skipping", tid);
                         continue;
                     }
 

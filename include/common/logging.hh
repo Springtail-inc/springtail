@@ -6,20 +6,15 @@
 
 #include <fmt/format.h>
 #include <fmt/std.h>
+#include <nlohmann/json.hpp>
 
 #include <spdlog/spdlog.h>
 
 #include <common/open_telemetry.hh>
 #include <common/singleton.hh>
 
-#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_TRACE
-    #define LOG_TRACE(module,fmt, ...) springtail::logging::Logger::debug(module, __func__, __FILE__, __LINE__, spdlog::level::trace, fmt, ##__VA_ARGS__)
-#else
-    #define LOG_TRACE(module, fmt, ...) (void)0
-#endif
-
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
-    #define LOG_DEBUG(module, fmt, ...) springtail::logging::Logger::debug(module, __func__, __FILE__, __LINE__, spdlog::level::debug, fmt, ##__VA_ARGS__)
+    #define LOG_DEBUG(module, level, fmt, ...) springtail::logging::Logger::debug(module, __func__, __FILE__, __LINE__, level, fmt, ##__VA_ARGS__)
 #else
     #define LOG_DEBUG(module, fmt, ...) (void)0
 #endif
@@ -68,8 +63,15 @@ namespace springtail {
         LOG_SCHEMA = 0x400,
         LOG_COMMITTER = 0x800,
         LOG_SYS_TBL_MGR = 0x1000,
-        LOG_PG_LOG_MGR_DATA = 0x2000,
         LOG_ALL = 0xFFFFFFFF
+    };
+
+    /** Log levels for debug calls */
+    enum LogDebugLevel : uint32_t {
+        LOG_LEVEL_DEBUG1 = 1, // highest level, most priority
+        LOG_LEVEL_DEBUG2 = 2,
+        LOG_LEVEL_DEBUG3 = 3,
+        LOG_LEVEL_DEBUG4 = 4  // lowest level, least priority
     };
 
     namespace logging {
@@ -93,14 +95,17 @@ namespace springtail {
              * @param args - argument list
              */
             template <typename... Args> static void
-            debug(int log_id, const char *func, const char *file, int line, spdlog::level::level_enum level, fmt::format_string<Args...> fmt, Args&&... args)
+            debug(int log_id, const char *func, const char *file, int line, LogDebugLevel level, fmt::format_string<Args...> fmt, Args&&... args)
             {
                 if (_inited_flag) {
                     if ((log_id & get_instance()->_log_mask) == 0) {
                         return;
                     }
                 }
-                _log(spdlog::source_loc{file, line, func}, level, fmt, std::forward<Args>(args)...);
+                if (level > _debug_log_level) {
+                    return;
+                }
+                _log(spdlog::source_loc{file, line, func}, spdlog::level::debug, fmt, std::forward<Args>(args)...);
             }
 
             /**
@@ -131,7 +136,42 @@ namespace springtail {
                       const std::optional<std::string> &log_name = std::nullopt,
                       bool is_daemon = false);
 
+            /**
+             * @brief Get the log level value from string
+             *
+             * @param level - log level string
+             * @return spdlog::level::level_enum - log level value
+             */
             static spdlog::level::level_enum get_log_level_from_string(const std::string &level);
+
+            /**
+             * @brief Get internal data of the Logger object in json format
+             *
+             * @return nlohmann::json - internal data
+             */
+            nlohmann::json get_stats();
+
+            /**
+             * @brief Change log level to the specified value
+             *
+             * @param lvl - log level value
+             */
+            void set_log_level(uint32_t lvl) {
+                if (lvl >= spdlog::level::trace && lvl < spdlog::level::n_levels) {
+                    spdlog::default_logger()->set_level(static_cast<spdlog::level::level_enum>(lvl));
+                }
+            }
+
+            /**
+             * @brief Change debug log level to the specified value
+             *
+             * @param lvl - debug log level
+             */
+            void set_debug_level(uint32_t lvl) {
+                if (lvl >= LOG_LEVEL_DEBUG1 && lvl <= LOG_LEVEL_DEBUG4) {
+                    _debug_log_level = static_cast<LogDebugLevel>(lvl);
+                }
+            }
 
         protected:
             /** Helper class for forwarding failed CHECKs and DCHECKs to the log */
@@ -167,6 +207,8 @@ namespace springtail {
             };
 
             static std::map<std::string, uint32_t> _log_module_map;    ///< mapping from log id name to value
+            static inline std::atomic<LogDebugLevel> _debug_log_level{LOG_LEVEL_DEBUG1};  ///< log level for debugging
+
             /**
              * @brief flag that indicates if logging was fully initialized, as it determins behavior of
              *      the log function
@@ -175,7 +217,7 @@ namespace springtail {
             static inline std::atomic<bool> _inited_flag{false};
             SpdlogSink _spdlog_sink;        ///< sink object for CHECKs and DCHECKs
 
-            uint32_t _log_mask{LOG_ALL};    ///< current log mask
+            std::atomic<uint32_t> _log_mask{LOG_ALL};    ///< current log mask
 
             /**
              * @brief function that performs logging shutdown
