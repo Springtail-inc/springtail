@@ -157,42 +157,32 @@ namespace springtail::pg_log_mgr {
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
 
-
         std::vector<SchemaColumn> new_columns{op, lsn};
-        schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
 
         INSTRUMENT_INGEST( {
-            columns = table_schema->column_order();
-
-            std::vector<SchemaColumn> new_columns;
             new_columns.emplace_back("__springtail_ts_msg_created", 0, SchemaType::UINT64, 0, false);
             new_columns.emplace_back("__springtail_ts_msg_pop", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_msg_queue_size", 0, SchemaType::UINT64, 0, false);
 
-            new_columns.emplace_back("__springtail_msg_queue_enter_size", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_msg_queue_exit_size", 0, SchemaType::UINT64, 0, false);
-
-            new_columns.emplace_back("__springtail_ts_log_created", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_ts_log_pop", 0, SchemaType::UINT64, 0, false);
-
-            new_columns.emplace_back("__springtail_log_queue_enter_size", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_msg_queue_exit_size", 0, SchemaType::UINT64, 0, false);
-
-            schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
+            new_columns.emplace_back("__springtail_ts_log_entry_created", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_ts_log_entry_pop", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_log_queue_size", 0, SchemaType::UINT64, 0, false);
         } );
 
+
+        schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
 
         INSTRUMENT_INGEST( {
-                ts_created_f = schema->get_mutable_field("__springtail_ts_created");
-                ts_pop_f = schema->get_mutable_field("__springtail_ts_pop");
-                msg_queue_enter_size_f = schema->get_mutable_field("__springtail_msg_queue_enter_size");
-                msg_queue_exit_size_f = schema->get_mutable_field("__springtail_msg_queue_exit_size");
+                ts_msg_created_f = schema->get_mutable_field("__springtail_ts_msg_created");
+                ts_msg_pop_f = schema->get_mutable_field("__springtail_ts_msg_pop");
+                msg_queue_size_f = schema->get_mutable_field("__springtail_msg_queue_size");
+
                 ts_log_entry_created_f = schema->get_mutable_field("__springtail_ts_log_entry_created");
                 ts_log_entry_pop_f = schema->get_mutable_field("__springtail_ts_log_entry_pop");
-                log_queue_enter_size_f = schema->get_mutable_field("__springtail_log_queue_enter_size");
-                log_queue_exit_size_f = schema->get_mutable_field("__springtail_log_queue_exit_size");
-                })
+                log_queue_size_f = schema->get_mutable_field("__springtail_log_queue_size");
+                } )
 
         // reset fields; forces a resync of fields during add_mutation()
         fields = nullptr;
@@ -259,7 +249,8 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::add_mutation(uint64_t current_xid,
                                      int32_t pg_xid,
                                      int32_t tid,
-                                     PgMsgTupleData &data)
+                                     PgMsgTupleData &data,
+                                     const PgMsgPtr& msg)
     {
         time_trace::Trace add_mutation_trace;
         TIME_TRACE_START(add_mutation_trace);
@@ -325,6 +316,16 @@ namespace springtail::pg_log_mgr {
         }
         entry.op_f->set_uint8(&row, T);
         entry.lsn_f->set_uint64(&row, _lsn++);
+
+
+        INSTRUMENT_INGEST( {
+                entry.ts_msg_created_f->set_uint64(&row, time_point_to_numeric(msg->ts_created));
+                entry.ts_msg_pop_f->set_uint64(&row, time_point_to_numeric(msg->ts_pop));
+                entry.msg_queue_size_f->set_uint64(&row, msg->msg_queue_size);
+                entry.ts_log_entry_created_f->set_uint64(&row, time_point_to_numeric(msg->ts_log_entry_created));
+                entry.ts_log_entry_pop_f->set_uint64(&row, time_point_to_numeric(msg->ts_log_entry_pop));
+                entry.log_queue_size_f->set_uint64(&row, msg->log_queue_size);
+                } )
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
@@ -912,7 +913,7 @@ namespace springtail::pg_log_mgr {
     {
         INSTRUMENT_INGEST(
                 {
-                    msg->msg_queue_enter_size = _msg_queue.size();
+                    msg->msg_queue_size = _msg_queue.size();
                 })
 
         _msg_queue.push(msg);
@@ -921,8 +922,6 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_msg_worker()
     {
-        using clock = std::chrono::steady_clock;
-
         std::string coordinator_id = fmt::format(PgLogMgr::MSG_WORKER_ID, _db_id);
         auto coordinator = Coordinator::get_instance();
         auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
@@ -933,14 +932,14 @@ namespace springtail::pg_log_mgr {
 
             // get message from queue
             PgMsgPtr msg = _msg_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            INSTRUMENT_INGEST(
-                    {
-                        msg->msg_queue_exit_size = _msg_queue.size();
-                        msg->ts_pop = clock::now();
-                    })
             if (msg == nullptr) {
                 continue; // timeout, check for shutdown
             }
+
+            INSTRUMENT_INGEST(
+                    {
+                        msg->ts_pop = std::chrono::steady_clock::now();
+                    })
 
             _process_msg(msg);
         }
@@ -981,16 +980,15 @@ namespace springtail::pg_log_mgr {
             // read next message
             PgMsgPtr msg = _reader.read_message(filter, eos);
 
-            INSTRUMENT_INGEST( {
-                    if (entry.has_value()) {
-                        msg->ts_log_entry_created = (*entry)->ts_created;
-                        msg->ts_log_entry_pop = (*entry)->ts_pop;
-                        msg->log_queue_enter_size = (*entry)->enter_queue_size;
-                        msg->log_queue_exit_size = (*entry)->exit_queue_size;
-                    }});
-
             if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
+
+                INSTRUMENT_INGEST( {
+                        if (entry.has_value()) {
+                            msg->ts_log_entry_created = (*entry)->ts_created;
+                            msg->ts_log_entry_pop = (*entry)->ts_pop;
+                            msg->log_queue_size = (*entry)->queue_size;
+                        }});
 
                 // process the message
                 this->enqueue_msg(msg);
@@ -1071,7 +1069,7 @@ namespace springtail::pg_log_mgr {
 
                 // note: the current XID is only used to determine table existence
                 _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
-                                                                insert.rel_id, insert.new_tuple);
+                                                                insert.rel_id, insert.new_tuple, msg);
                 break;
             }
         case PgMsgEnum::DELETE:
@@ -1087,7 +1085,7 @@ namespace springtail::pg_log_mgr {
 
                 // note: the current XID is only used to determine table existence
                 _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
-                                                                remove.rel_id, remove.tuple);
+                                                                remove.rel_id, remove.tuple, msg);
                 break;
             }
         case PgMsgEnum::UPDATE:
@@ -1105,12 +1103,12 @@ namespace springtail::pg_log_mgr {
                 uint64_t current_xid = this->get_current_xid();
                 if (update.old_type == 0) {
                     _current_batch->add_mutation<PgMsgEnum::UPDATE>(current_xid, pg_xid,
-                                                                    update.rel_id, update.new_tuple);
+                                                                    update.rel_id, update.new_tuple, msg);
                 } else {
                     _current_batch->add_mutation<PgMsgEnum::DELETE>(current_xid, pg_xid,
-                                                                    update.rel_id, update.old_tuple);
+                                                                    update.rel_id, update.old_tuple, msg);
                     _current_batch->add_mutation<PgMsgEnum::INSERT>(current_xid, pg_xid,
-                                                                    update.rel_id, update.new_tuple);
+                                                                    update.rel_id, update.new_tuple, msg);
                 }
                 break;
             }

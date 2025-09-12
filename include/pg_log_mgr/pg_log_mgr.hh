@@ -15,6 +15,7 @@
 #include <common/properties.hh>
 #include <common/state_synchronizer.hh>
 #include <common/time_trace.hh>
+#include <common/event_frequency.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>
@@ -285,6 +286,8 @@ namespace springtail::pg_log_mgr {
 
         /** Function for writer thread to read data from connection and store it */
         bool _writer_read_data(PgCopyData &data, PgLogWriterPtr &logger, uint64_t &start_offset, std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);
+
+        INSTRUMENT_INGEST_DATA(EventFrequency<256>, _queue_insert_freq);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

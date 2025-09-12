@@ -361,23 +361,19 @@ namespace springtail
 
         INSTRUMENT_INGEST_DATA(clock::time_point, ts_created)
         INSTRUMENT_INGEST_DATA(clock::time_point, ts_pop)
-        INSTRUMENT_INGEST_DATA(size_t, msg_queue_enter_size)
-        INSTRUMENT_INGEST_DATA(size_t, msg_queue_exit_size)
+        INSTRUMENT_INGEST_DATA(size_t, msg_queue_size)
 
         INSTRUMENT_INGEST_DATA(clock::time_point, ts_log_entry_created)
         INSTRUMENT_INGEST_DATA(clock::time_point, ts_log_entry_pop)
-        INSTRUMENT_INGEST_DATA(size_t, log_queue_enter_size)
-        INSTRUMENT_INGEST_DATA(size_t, log_queue_exit_size)
+        INSTRUMENT_INGEST_DATA(size_t, log_queue_size)
 
         explicit PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
             : msg_type(type)
         {
             INSTRUMENT_INGEST( { 
                     ts_created = clock::now();
-                    log_queue_enter_size = 0;
-                    log_queue_exit_size = 0;
-                    msg_queue_enter_size = 0;
-                    msg_queue_exit_size = 0;
+                    log_queue_size = 0;
+                    msg_queue_size = 0;
                     } )
         }
 

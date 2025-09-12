@@ -553,6 +553,16 @@ namespace springtail::committer {
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
         std::vector<SchemaColumn> new_columns{op, lsn};
 
+        INSTRUMENT_INGEST( {
+            new_columns.emplace_back("__springtail_ts_msg_created", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_ts_msg_pop", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_msg_queue_size", 0, SchemaType::UINT64, 0, false);
+
+            new_columns.emplace_back("__springtail_ts_log_entry_created", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_ts_log_entry_pop", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_log_queue_size", 0, SchemaType::UINT64, 0, false);
+        } );
+
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
 
         time_trace::Trace process_extent_trace;

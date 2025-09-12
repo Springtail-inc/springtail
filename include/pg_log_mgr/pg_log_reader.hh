@@ -188,7 +188,7 @@ namespace springtail::pg_log_mgr {
              * Adds a mutation to a given table's batch.
              */
             template <int T>
-            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, PgMsgTupleData &data);
+            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, PgMsgTupleData &data, const PgMsgPtr& msg);
 
             /**
              * Records a truncation of a given set of tables into the batch.
@@ -220,14 +220,12 @@ namespace springtail::pg_log_mgr {
                 MutableFieldPtr op_f; ///< The field accessor for the mutation's operation type.
                 MutableFieldPtr lsn_f; ///< The field accessor for the mutation's LSN.
 
-                INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_created_f)
-                INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_pop_f)
-                INSTRUMENT_INGEST_DATA(MutableFieldPtr, msg_queue_enter_size_f)
-                INSTRUMENT_INGEST_DATA(MutableFieldPtr, msg_queue_exit_size_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_msg_created_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_msg_pop_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, msg_queue_size_f)
                 INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_log_entry_created_f)
                 INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_log_entry_pop_f)
-                INSTRUMENT_INGEST_DATA(MutableFieldPtr, log_queue_enter_size_f)
-                INSTRUMENT_INGEST_DATA(MutableFieldPtr, log_queue_exit_size_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, log_queue_size_f)
 
                 MutableFieldArrayPtr fields; ///< The underlying fields of the schema that match the columns from the table schema.
                 MutableFieldArrayPtr pkey_fields; ///< The underlying fields of the schema that match the pkey columns from the table schema.

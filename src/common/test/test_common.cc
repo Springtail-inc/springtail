@@ -3,6 +3,7 @@
 #include <common/logging.hh>
 #include <common/json.hh>
 #include <common/circular_buffer.hh>
+#include <common/event_frequency.hh>
 
 using namespace springtail;
 
@@ -123,4 +124,63 @@ TEST(CommonTest, CircularBuffer) {
     ASSERT_EQ(cb.empty(), false);
     ASSERT_EQ(cb.next(), 10);
     ASSERT_EQ(cb.size(), 0);
+}
+
+TEST(CommonTest, EventFrequency) {
+    {
+        EventFrequency<100> ef;
+
+
+        for (size_t i = 0; i != 15; ++i) {
+            ef.event();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        auto f = ef.frequency();
+        ASSERT_TRUE(f > 80 && f < 110);
+
+        for (size_t i = 0; i != 90; ++i) {
+            ef.event();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    
+        f = ef.frequency();
+        ASSERT_TRUE(f > 80 && f < 110);
+
+        for (size_t i = 0; i != 10; ++i) {
+            ef.event();
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        auto f1 = ef.frequency();
+        ASSERT_LT(f1, f);
+
+        for (size_t i = 0; i != 120; ++i) {
+            ef.event();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        auto f2 = ef.frequency();
+        ASSERT_TRUE(f2 > 900 && f2 < 1100);
+    }
+
+    // corner case
+    {
+        EventFrequency<2> ef;
+
+        ef.event();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        ef.event();
+
+        auto f = ef.frequency();
+
+        ASSERT_TRUE(f > 0.9 && f < 1.1);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        ef.event();
+
+        f = ef.frequency();
+
+        ASSERT_TRUE(f > 0.9 && f < 1.1);
+    }
 }

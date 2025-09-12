@@ -49,6 +49,12 @@ namespace springtail {
             return _b[i];
         }
 
+        /** Get elements by index */
+        const T& operator[](size_t i) const {
+            DCHECK(i < size());
+            return _b[( _read_pnt + i ) % _b.size()];
+        }
+
     private:
         std::vector<value_type> _b;
         size_t _cnt = 0; // number of elements in the buffer

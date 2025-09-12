@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -641,6 +642,15 @@ namespace springtail::pg_log_mgr {
             if (!done && !_shutdown) {
                 // copy queue from
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Moving data to _logger_queue");
+
+                INSTRUMENT_INGEST( {
+                    _queue_insert_freq.event();
+                    double f = _queue_insert_freq.frequency();
+                    if (f > std::numeric_limits<double>::min()) {
+                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_EVENT_FREQ, f);
+                    }
+                } )
+
                 _logger_queue.push(post_recovery_queue);
             }
         }
@@ -654,6 +664,15 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in normal mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
+
+                    INSTRUMENT_INGEST( {
+                                _queue_insert_freq.event();
+                                double f = _queue_insert_freq.frequency();
+                                if (f > std::numeric_limits<double>::min()) {
+                                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_EVENT_FREQ, f);
+                                }
+                            } )
+
                         _logger_queue.push(start_offset, end_offset, file_path);
                     }
                 )) {
@@ -679,8 +698,6 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_log_reader_thread()
     {
-        using clock = std::chrono::steady_clock;
-
         std::string coordinator_id = fmt::format(READER_WORKER_ID, _db_id);
         auto coordinator = Coordinator::get_instance();
         auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
@@ -695,7 +712,9 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            INSTRUMENT_INGEST( {log_entry->ts_pop = clock::now(); log_entry->exit_queue_size = this->_logger_queue.size();} )
+            INSTRUMENT_INGEST( {
+                        log_entry->ts_pop = std::chrono::steady_clock::now();
+                    } )
 
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Got log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);

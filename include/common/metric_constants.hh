@@ -18,6 +18,7 @@ namespace springtail {
     // storage cache histogram metrics
     constexpr std::string_view STORAGE_CACHE_FLUSH_LATENCIES = "storage_cache_flush_latencies";
     constexpr std::string_view STORAGE_CACHE_DROP_LATENCIES = "storage_cache_drop_latencies";
+    constexpr std::string_view LOG_READER_EVENT_FREQ = "log_reader_push_freq";
 
     // sys_tbl_mgr counter metrics
     constexpr std::string_view SYS_TBL_MGR_CREATE_INDEX_CALLS = "sys_tbl_mgr_create_index_calls";
@@ -82,6 +83,9 @@ namespace springtail {
             // storage cache histogram metrics
             {STORAGE_CACHE_FLUSH_LATENCIES, "Latency of storage cache flush calls"},
             {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"},
+
+            // log reader metrics
+            {LOG_READER_EVENT_FREQ, "Frequency of incoming log reader events"},
 
             // log manager histogram metrics
             {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"},

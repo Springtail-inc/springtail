@@ -31,8 +31,7 @@ namespace springtail::pg_log_mgr {
 
         INSTRUMENT_INGEST_DATA(clock::time_point, ts_created)
         INSTRUMENT_INGEST_DATA(clock::time_point, ts_pop)
-        INSTRUMENT_INGEST_DATA(size_t, enter_queue_size)
-        INSTRUMENT_INGEST_DATA(size_t, exit_queue_size)
+        INSTRUMENT_INGEST_DATA(size_t, queue_size)
 
         PgLogQueueEntry() = delete;
 
@@ -41,16 +40,14 @@ namespace springtail::pg_log_mgr {
               path(path), num_messages(1), is_stall_message(false)
         {
             INSTRUMENT_INGEST( { ts_created = clock::now();
-                    enter_queue_size = 0;
-                    exit_queue_size = 0;
+                    queue_size = 0;
                     } )
         }
 
         explicit PgLogQueueEntry(bool stall) : is_stall_message(stall)
         {
             INSTRUMENT_INGEST( { ts_created = clock::now();
-                    enter_queue_size = 0;
-                    exit_queue_size = 0;
+                    queue_size = 0;
                     } )
         }
 
@@ -90,11 +87,13 @@ namespace springtail::pg_log_mgr {
         }
 
         void push(const std::vector<PgLogQueueEntry> &entries) {
+            [[maybe_unused]] int queue_size = 0;
+            INSTRUMENT_INGEST({queue_size = size();})
             std::unique_lock<std::mutex> write_lock{_mutex};
             for (const auto& entry: entries) {
                 PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(entry.start_offset, entry.end_offset, entry.path);
                 new_entry->num_messages = entry.num_messages;
-                INSTRUMENT_INGEST( {new_entry->enter_queue_size = size();})
+                INSTRUMENT_INGEST( {new_entry->queue_size = queue_size++;})
                 _internal_push(std::move(new_entry), write_lock);
             }
         }
@@ -104,10 +103,10 @@ namespace springtail::pg_log_mgr {
          */
         void push_stall()
         {
-            std::unique_lock<std::mutex> write_lock{_mutex};
-
             auto v = std::make_shared<PgLogQueueEntry>(true);
-            INSTRUMENT_INGEST( {v->enter_queue_size = size();})
+            INSTRUMENT_INGEST( {v->queue_size = size();})
+
+            std::unique_lock<std::mutex> write_lock{_mutex};
             _internal_push(std::move(v), write_lock);
         }
     };
