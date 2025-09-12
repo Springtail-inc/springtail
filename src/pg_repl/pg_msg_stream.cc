@@ -43,7 +43,7 @@ namespace springtail {
     PgMsgStreamReader::set_file(const std::filesystem::path &file,
                                 uint64_t start_offset)
     {
-        LOG_DEBUG(LOG_PG_REPL, "Setting file to: {}, offset: {}", file, start_offset);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Setting file to: {}, offset: {}", file, start_offset);
 
         if (file != _current_path || !_stream.is_open()) {
             // file isn't currently open, so open it
@@ -82,14 +82,14 @@ namespace springtail {
             _seek_stream(offset);
         }
 
-        LOG_DEBUG(LOG_PG_REPL, "Opened file: {}, offset: {}, xlog_msg_end_offset: {}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Opened file: {}, offset: {}, xlog_msg_end_offset: {}",
                   file, _current_offset, _xlog_msg_end_offset);
     }
 
     void
     PgMsgStreamReader::_seek_stream(uint64_t file_offset)
     {
-        LOG_DEBUG(LOG_PG_REPL, "Seeking to offset: {}, current_offset: {}, xlog_msg_end_offset: {}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Seeking to offset: {}, current_offset: {}, xlog_msg_end_offset: {}",
                   file_offset, _current_offset, _xlog_msg_end_offset);
 
         // jumping to next message, read in xlog header
@@ -204,7 +204,7 @@ namespace springtail {
         // set the end message offset
         _xlog_msg_end_offset = _header.msg_length + _current_offset;
 
-        LOG_DEBUG(LOG_PG_REPL, "Read header: {}, current_offset: {}, xlog_msg_end_offset: {}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Read header: {}, current_offset: {}, xlog_msg_end_offset: {}",
                   _header.to_string(),  _current_offset, _xlog_msg_end_offset);
 
         return true;
@@ -222,7 +222,7 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
-        LOG_DEBUG(LOG_PG_REPL, "Reading message, current_offset: {}, xlog_msg_end_offset: {}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Reading message, current_offset: {}, xlog_msg_end_offset: {}",
                   _current_offset, _xlog_msg_end_offset);
 
         // check if we've already encountered the end of the file
@@ -1571,14 +1571,14 @@ namespace springtail {
         _current_offset = 0;
         _xlog_msg_end_offset = 0;
 
+        LOG_INFO("Repairing file: {}", file);
+
         // get file size
         auto file_end_offset = std::filesystem::file_size(file);
 
         // check if file too small to contain a valid header
         if (file_end_offset < PgMsgStreamHeader::SIZE) {
-            if (truncate) {
-                _truncate_file(file, 0);
-            }
+            LOG_INFO("File too small to contain valid header, size: {}", file_end_offset);
             return INVALID_LSN;
         }
 
@@ -1649,6 +1649,7 @@ namespace springtail {
             // return INVALID_LSN and caller will remove file
             // although we should technically know the restart LSN,
             // but have no way to indicate that this file should be removed
+            LOG_INFO("No complete commit record found in file");
             return INVALID_LSN;
         }
 
@@ -1657,6 +1658,9 @@ namespace springtail {
         if (truncate && truncate_offset != file_end_offset) {
             _truncate_file(file, truncate_offset);
         }
+
+        LOG_INFO("Repair complete, truncation offset: {}, restart LSN: {}",
+                 truncate_offset, restart_lsn);
 
         // replay this message (LSN)
         return restart_lsn;

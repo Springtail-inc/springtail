@@ -143,7 +143,7 @@ namespace springtail
         char *wal_status = _connection->get_value(0, 0);
         char *lsn_str = _connection->get_value(0, 1);
         LSN_t confirmed_flush_lsn = pg_msg::str_to_LSN(lsn_str);
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Found current LSN: {}", confirmed_flush_lsn);
+        LOG_INFO("Found current LSN: {}", confirmed_flush_lsn);
 
         if (wal_status != nullptr && std::strcmp(wal_status, "lost") == 0) {
             // if we have a 'lost' status, we need to recreate the slot or hard fail
@@ -153,6 +153,7 @@ namespace springtail
             if (do_init) {
                 // try and re-establish the slot
                 try {
+                    // XXX may need to drop the publication as well, but we don't know how to recreate it
                     drop_replication_slot();
                     LSN = create_replication_slot();
                     confirmed_flush_lsn = LSN;
@@ -268,7 +269,7 @@ namespace springtail
         if (_started_streaming) {
             // check to see if we should fetch latest LSN to sync back
             int64_t now = get_pgtime_in_millis();
-            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Now: {}, Last received time: {}, now - last received time: {}", now, _last_received_time, now - _last_received_time);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG2, "Now: {}, Last received time: {}, now - last received time: {}", now, _last_received_time, now - _last_received_time);
             if ((now - _last_received_time) > IDLE_SLOT_TIMEOUT_MSEC) {
                 // see if we've been idle for longer (received no data)
                 // than IDLE_SLOT_TIMEOUT_MSEC; if so we force an update
@@ -331,7 +332,7 @@ namespace springtail
             // Extract the errno into a separate variable to ensure the the LOG_DEBUG below this
             // doesn't overwrite the err code
             auto err_no = errno;
-            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Read {} bytes from connection (errno={})", r, err_no);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG2, "Read {} bytes from connection (errno={})", r, err_no);
             if (r == -1 && (err_no == EWOULDBLOCK || err_no == EAGAIN || err_no == EINTR)) {
                 r = wait_for_data();
                 if (r >= 0) {
@@ -358,8 +359,8 @@ namespace springtail
             return r;
         }
 
-        assert(_shutdown);
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Shutting down recv copy data");
+        DCHECK(_shutdown);
+        LOG_INFO("Shutting down recv copy data");
         throw PgIOShutdown();
     }
 
@@ -623,7 +624,7 @@ namespace springtail
         [[maybe_unused]] int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG2, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
                             wal_end, send_time, _last_flushed_lsn);
 
         bool response_requested = false;
@@ -676,7 +677,7 @@ namespace springtail
         _message_end_lsn = wal_end;
         _message_send_time = send_time + MSEC_SINCE_Y2K;
 
-        LOG_DEBUG(LOG_PG_REPL, "XLOG data msg recvd: wal_start={}, wal_end={}, send_time={}",
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG3, "XLOG data msg recvd: wal_start={}, wal_end={}, send_time={}",
                             wal_start, wal_end, send_time);
 
         if (_message_end_lsn > _server_latest_lsn) {
@@ -733,7 +734,7 @@ namespace springtail
 
         // fast forward stream
         _last_flushed_lsn = lsn;
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Fast forwarding stream to LSN: {}", lsn);
+        LOG_INFO("Fast forwarding stream to LSN: {}", lsn);
 
         _send_standby_status_msg();
     }
@@ -880,7 +881,7 @@ namespace springtail
         std::string cmd = fmt::format("DROP PUBLICATION IF EXISTS {}", pub_name);
 
         // execute query
-        LOG_DEBUG(LOG_PG_REPL, "Executing query drop publication: cmd={}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query drop publication: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
@@ -906,7 +907,7 @@ namespace springtail
         std::string cmd = fmt::format("SELECT 1 FROM pg_catalog.pg_publication WHERE pubname='{}'", pub_name);
 
         // execute query
-        LOG_DEBUG(LOG_PG_REPL, "Executing query check publication: cmd={}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query check publication: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
@@ -919,7 +920,7 @@ namespace springtail
         }
 
         if (_connection->ntuples() > 0 && _connection->nfields() == 1) {
-            LOG_DEBUG(LOG_PG_REPL, "Publication exists: name={}\n", pub_name);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Publication exists: name={}\n", pub_name);
             _connection->clear();
             return true;
         }
@@ -944,7 +945,7 @@ namespace springtail
         }
 
         // execute query
-        LOG_DEBUG(LOG_PG_REPL, "Executing query create publication: cmd={}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query create publication: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
@@ -955,7 +956,7 @@ namespace springtail
             throw PgQueryError();
         }
 
-        LOG_DEBUG(LOG_PG_REPL, "Publication created successfully: {}", pub_name);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Publication created successfully: {}", pub_name);
 
         _connection->clear();
     }

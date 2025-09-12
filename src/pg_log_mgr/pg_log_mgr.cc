@@ -626,8 +626,10 @@ namespace springtail::pg_log_mgr {
             return true;
         }
 
-        LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Processing data: type={}, length={}, msg_length={}, msg_offset={}, start_lsn={}, end_lsn={}",
-                  (data.msg_offset == 0) ? data.buffer[0] : _current_msg_type, data.length, data.msg_length, data.msg_offset, data.starting_lsn, data.ending_lsn);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                  "Processing data: type={}, length={}, msg_length={}, msg_offset={}, start_lsn={}, end_lsn={}",
+                  (data.msg_offset == 0) ? data.buffer[0] : _current_msg_type, data.length, data.msg_length,
+                  data.msg_offset, data.starting_lsn, data.ending_lsn);
 
         auto current_log_offset = logger->offset();
 
@@ -656,13 +658,13 @@ namespace springtail::pg_log_mgr {
         if (_current_msg_type == pg_msg::MSG_COMMIT ||
             _current_msg_type == pg_msg::MSG_STREAM_COMMIT) {
 
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Complete commit message: path={}, start_offset={}, end_offset={}, msg_type={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Complete commit message: path={}, start_offset={}, end_offset={}, msg_type={}",
                       logger->filename(), _msg_log_start_offset, end_offset, (char)_current_msg_type);
 
             // check if we need to do a rotation
             // at this point we have a full message an know it is a COMMIT
             if (current_log_offset > _log_size_rollover_threshold) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Rollover log before write: path={}, offset={}",
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Rollover log, old path={}, offset={}",
                         logger->filename(), logger->offset());
 
                 logger->close();
@@ -716,7 +718,7 @@ namespace springtail::pg_log_mgr {
             // once recovery is done, move all the entries to the _logger_queue
             if (!done && !_shutdown) {
                 // copy queue from
-                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Moving data to _logger_queue");
+                LOG_INFO("Moving data to _logger_queue, recovery is done");
                 _logger_queue.push(post_recovery_queue);
             }
         }
@@ -727,7 +729,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Received data in normal mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in normal mode");
                 if (!_writer_read_data(data, logger,
                     [this](uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &file_path) {
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Queueing log entry: start_offset={}, end_offset={}, file_path={}",

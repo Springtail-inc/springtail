@@ -170,8 +170,8 @@ namespace springtail::pg_log_mgr {
 
             _last_commit_lsn = ack_lsn;
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Write repl message end: start lsn={}, length={}, msg_length={}",
-                      data.ending_lsn, data.length, data.msg_length);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Commit complete, ack lsn={}, length={}, msg_length={}",
+                      ack_lsn, data.length, data.msg_length);
 
             return true;
         }
