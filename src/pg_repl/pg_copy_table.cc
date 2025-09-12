@@ -198,6 +198,14 @@ namespace springtail
         "ON relnamespace=ns.oid "
         "WHERE c.oid = {};";
 
+    /** Query a table's namespace and name given its OID */
+    static constexpr char TABLE_NAMESPACE_NAME_QUERY[] =
+        "SELECT n.nspname AS schema_name, c.relname AS table_name FROM pg_class c JOIN "
+        "pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = {}";
+
+    /** Lock a table in ACCESS SHARE mode */
+    static constexpr char TABLE_LOCK_QUERY[] = "LOCK TABLE {}.{} IN ACCESS SHARE MODE";
+
     /**
      * @brief Connect to database
      *
@@ -934,10 +942,7 @@ namespace springtail
     void
     PgCopyTable::lock_table(uint32_t table_oid)
     {
-        std::string name_query = fmt::format(
-            "SELECT n.nspname AS schema_name, c.relname AS table_name FROM pg_class c JOIN "
-            "pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = {}",
-            table_oid);
+        std::string name_query = fmt::format(TABLE_NAMESPACE_NAME_QUERY, table_oid);
 
         int retry = 3;
         while (retry) {
@@ -947,16 +952,17 @@ namespace springtail
                     throw PgTableNotFoundError();
                 }
 
-                std::string schema_name = _connection.get_string(0, 0);
-                std::string table_name = _connection.get_string(0, 1);
-                std::string lock_query = fmt::format(
-                    "LOCK TABLE \"{}\".\"{}\" IN ACCESS SHARE MODE", schema_name, table_name);
+                std::string schema_name =
+                    _connection.escape_identifier(_connection.get_string(0, 0));
+                std::string table_name =
+                    _connection.escape_identifier(_connection.get_string(0, 1));
+                std::string lock_query = fmt::format(TABLE_LOCK_QUERY, schema_name, table_name);
 
                 _connection.exec(lock_query);
                 return;
             } catch (PgQueryError &e) {
                 // re-start the transaction and retry
-                _connection.end_transaction();
+                _connection.rollback_transaction();
                 _connection.start_transaction();
             }
 
@@ -1117,7 +1123,7 @@ namespace springtail
             //       the table data that is returned, which can cause failures.
             copy_table.lock_table(request->table_oid);
 
-            // start transaction and get the xids associated w/snapshot
+            // get the xids associated w/snapshot
             std::pair<uint64_t, std::string> snapshot_info = copy_table._get_xact_xids();
             copy_result->set_snapshot(snapshot_info.first, snapshot_info.second);
 
@@ -1146,7 +1152,7 @@ namespace springtail
             } catch (PgQueryError &e) {
                 e.log_backtrace();
                 LOG_ERROR("Error copying table: oid {}", request->table_oid);
-                assert(false);
+                CHECK(false);
             }
 
             // end the copy
