@@ -80,7 +80,7 @@ then
     # Commit 3db09f58b750b9d097d2eb2223b4dba220ee5275 is latest known working commit
     # The one after it: https://github.com/microsoft/vcpkg/commit/11972bdacefc3eaade76df037b0f5fa112c0d36e
     # breaks the logic to find the installed packages.
-    git reset --hard "${VCPKG_COMMIT_HASH:-3db09f58b750b9d097d2eb2223b4dba220ee5275}"
+    git reset --hard "${VCPKG_COMMIT_HASH:-120deac3062162151622ca4860575a33844ba10b}"
    ./bootstrap-vcpkg.sh
    ./vcpkg integrate install
 fi

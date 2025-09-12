@@ -59,7 +59,7 @@ namespace springtail::pg_proxy {
         ~UserLogin() {
             // release the scram state pointers.  The keys are copied into the User object
             if (type == SCRAM || type == TEXT) {
-                LOG_DEBUG(LOG_PROXY, "Freeing scram state: {:p}", (void *)&scram_state);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Freeing scram state: {:p}", (void *)&scram_state);
                 free_scram_state(&scram_state);
             }
         }
@@ -217,7 +217,7 @@ namespace springtail::pg_proxy {
          *
          */
         void _internal_shutdown() override {
-            LOG_DEBUG(LOG_PROXY, "Stopping User Manager thread {}", _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Stopping User Manager thread {}", _id);
         }
 
     private:

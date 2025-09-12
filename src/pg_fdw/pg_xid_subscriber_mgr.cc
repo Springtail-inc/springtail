@@ -16,19 +16,19 @@ PgXidSubscriberMgr::init(size_t cache_size, size_t worker_count)
 {
     _cache_size = cache_size;
     _worker_count = worker_count;
-    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr creating {}, {}", _cache_size, _worker_count);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr creating {}, {}", _cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
 }
 
 PgXidSubscriberMgr::~PgXidSubscriberMgr()
 {
-    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr deleted");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr deleted");
 }
 
 void
 PgXidSubscriberMgr::task(std::stop_token st)
 {
-    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr task starting");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr task starting");
 
     static constexpr char const * const XID_SUBSCRIBER_WORKER_ID = "xid_subscriber";
 
@@ -52,12 +52,12 @@ PgXidSubscriberMgr::task(std::stop_token st)
         // when we get an XID push notification, we pass it to the workers
         // and return immediately. A worker calls get_roots() that will
         // attempt to populate the cache.
-        LOG_DEBUG(LOG_XID_MGR, "XID push notification {} - {}", db, xid);
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {}", db, xid);
         _cache->update_committed_xid(db, xid);
         _enqueue_populate_job(db, xid);
     };
     auto on_disconnect = [&connected]() {
-        LOG_DEBUG(LOG_XID_MGR, "XidMgrSubscriber disconnected");
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber disconnected");
         connected = false;
     };
 
@@ -104,7 +104,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
             p->cancel();
         }
     }
-    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr thread stopping");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
     workers.clear();
     client = sys_tbl_mgr::Client::get_instance();
     client->use_roots_cache({});
@@ -167,7 +167,7 @@ PgXidSubscriberMgr::start()
     size_t roots_cache_size = 0;
     Json::get_to<size_t>(json, "roots_shm_cache_size", roots_cache_size);
 
-    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
 
     CHECK(roots_cache_size) << "Bad cache size, terminating PgXidSubscriberRunner";
 

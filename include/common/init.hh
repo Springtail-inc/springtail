@@ -1,5 +1,7 @@
 #pragma once
 
+#include <admin_http/admin_server.hh>
+
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -17,7 +19,7 @@ public:
         return true;
     }
     virtual void stop() {
-        // no default actions
+        LOG_INFO("Default stop for service {}", _name);
     }
     const std::string &get_name() const { return _name; };
 
@@ -72,7 +74,7 @@ springtail_retreive_argument(ServiceId service_id, const std::string &arg_name, 
 inline void
 springtail_store_arguments(ServiceId service_id, const std::map<std::string, std::any> &args_list)
 {
-    for (auto it: args_list) {
+    for (auto &it: args_list) {
         springtail_store_argument_internal(service_id, it.first, it.second);
     }
 }
@@ -82,6 +84,20 @@ springtail_store_arguments(ServiceId service_id, const std::map<std::string, std
  *
  */
 void springtail_shutdown();
+
+class AdminServerRunner : public ServiceRunner {
+public:
+    AdminServerRunner() : ServiceRunner("AdminService") {}
+    bool start() override
+    {
+        AdminServer::get_instance();
+        return true;
+    }
+    void stop() override
+    {
+        AdminServer::shutdown();
+    }
+};
 
 /**
  * Intialize the exception and backtrace handling.

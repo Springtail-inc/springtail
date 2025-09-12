@@ -25,7 +25,6 @@ namespace springtail::logging {
         {"schema", LOG_SCHEMA},
         {"committer", LOG_COMMITTER},
         {"sys_tbl_mgr", LOG_SYS_TBL_MGR},
-        {"log_mgr_data", LOG_PG_LOG_MGR_DATA},
         {"none", LOG_NONE},
         {"all", LOG_ALL}
     };
@@ -33,21 +32,7 @@ namespace springtail::logging {
     spdlog::level::level_enum
     Logger::get_log_level_from_string(const std::string &level_str)
     {
-        spdlog::level::level_enum log_level = spdlog::level::off;
-        if (level_str == "debug") {
-            log_level = spdlog::level::debug;
-        } else if (level_str == "info") {
-            log_level = spdlog::level::info;
-        } else if (level_str == "warn") {
-            log_level = spdlog::level::warn;
-        } else if (level_str == "error") {
-            log_level = spdlog::level::err;
-        } else if (level_str == "critical") {
-            log_level = spdlog::level::critical;
-        } else {
-            log_level = spdlog::level::trace;
-        }
-        return log_level;
+        return spdlog::level::from_str(level_str);
     }
 
     void
@@ -64,6 +49,7 @@ namespace springtail::logging {
         int max_size = Json::get_or<int>(props, "log_file_size", 1024 * 1024 * 5);
         int max_files = Json::get_or<int>(props, "log_file_count", 5);
         std::string log_level = Json::get_or<std::string>(props, "log_level", "trace");
+        set_debug_level(Json::get_or<uint32_t>(props, "log_level_debug", 1));
         std::string pattern = Json::get_or<std::string>(props, "log_pattern", "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
         bool log_rotation_enabled = Json::get_or<bool>(props, "log_rotation_enabled", true);
         spdlog::level::level_enum log_level_value = get_log_level_from_string(log_level);
@@ -158,7 +144,8 @@ namespace springtail::logging {
         _inited_flag = true;
     }
 
-    void Logger::_internal_shutdown()
+    void
+    Logger::_internal_shutdown()
     {
         absl::FlushLogSinks();
         absl::RemoveLogSink(&_spdlog_sink);
@@ -166,4 +153,21 @@ namespace springtail::logging {
         spdlog::shutdown();
     }
 
+    nlohmann::json
+    Logger::get_stats()
+    {
+        std::string log_name = spdlog::default_logger()->name();
+        spdlog::level::level_enum log_level = spdlog::default_logger()->level();
+        spdlog::level::level_enum flush_level =spdlog::default_logger()->flush_level();
+        auto str_log_level = spdlog::level::to_string_view(log_level);
+        auto str_flush_level = spdlog::level::to_string_view(flush_level);
+
+        nlohmann::json stats = {
+            {"name", log_name},
+            {"log_level", std::string(str_log_level.data(), str_log_level.size())},
+            {"flush_level", std::string(str_flush_level.data(), str_flush_level.size())},
+            {"debug_level", _debug_log_level.load(std::memory_order_relaxed)}
+        };
+        return stats;
+    }
 } // namespace springtail::logging

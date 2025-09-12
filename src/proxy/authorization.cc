@@ -12,7 +12,6 @@
 #include <proxy/database.hh>
 #include <proxy/errors.hh>
 #include <proxy/exception.hh>
-#include <proxy/logging.hh>
 #include <proxy/server.hh>
 #include <proxy/user_mgr.hh>
 
@@ -58,7 +57,7 @@ ClientAuthorization::process_auth_data(uint64_t seq_id)
 
         default:
             // do nothing
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Client auth invalid state: {}", _id, (int8_t)_state);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Client auth invalid state: {}", _id, (int8_t)_state);
             break;
     }
 
@@ -80,12 +79,12 @@ ClientAuthorization::_handle_startup(uint64_t seq_id)
     int32_t msg_length = recvint32(buffer) - 4;
     int32_t code = recvint32(buffer + 4);
 
-    PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Startup message: msg_length={}, code={}, seq_id={}", _id,
+    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Startup message: msg_length={}, code={}, seq_id={}", _id,
                 msg_length, code, seq_id);
 
     switch (code) {
         case MSG_SSLREQ:
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] SSL negotiation requested", _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] SSL negotiation requested", _id);
             _process_ssl_request();
             break;
 
@@ -117,12 +116,12 @@ ClientAuthorization::_handle_ssl_handshake()
     // this will return 1 on success, -1 if more data is needed; throws exception on fatal error
     int rc = _connection->SSL_accept();
     if (rc < 0) {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] SSL client handshake in progress, need more data",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] SSL client handshake in progress, need more data",
                     _id);
         return;
     }
 
-    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] SSL client handshake complete", _id);
+    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] SSL client handshake complete", _id);
 
     _state = STARTUP;
 }
@@ -130,7 +129,7 @@ ClientAuthorization::_handle_ssl_handshake()
 void
 ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
 {
-    PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Proto version 3.0 requested", _id);
+    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Proto version 3.0 requested", _id);
 
     // read parameter strings
     std::string key;
@@ -153,7 +152,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
         key = read_buffer.get_string();
         value = read_buffer.get_string();
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Parameter: {}={}", _id, key, value);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Parameter: {}={}", _id, key, value);
 
         if (key == "user") {
             username = value;
@@ -250,14 +249,14 @@ ClientAuthorization::_send_auth_req(uint64_t seq_id)
 
     switch (_login->type) {
         case MD5:
-            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticating with md5", _id,
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticating with md5", _id,
                         _user->username());
             _encode_auth_md5(buffer);
             break;
 
         case TEXT:
         case SCRAM:
-            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticating with scram", _id,
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticating with scram", _id,
                         _user->username());
             _encode_auth_scram(buffer);
             break;
@@ -297,7 +296,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
         Session::log_buffer(Session::Type::CLIENT, _id, true, code, msg_length,
                             buffer->current_data(), seq_id);
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Auth continue: msg_length={}, seq_id={}", _id,
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Auth continue: msg_length={}, seq_id={}", _id,
                     msg_length, seq_id);
 
         switch (_login->type) {
@@ -333,7 +332,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
                     throw ProxyAuthError();
                 }
 
-                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] MD5 password match", _id);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] MD5 password match", _id);
 
                 // auth successful on client side
                 _state = READY;
@@ -345,7 +344,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
             case SCRAM: {
                 // see if this is the first or second message
                 if (_login->scram_state.server_nonce == nullptr) {
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Handling SCRAM SASL initial response",
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Handling SCRAM SASL initial response",
                                 _id);
 
                     // process as SASLInitialResponse
@@ -359,7 +358,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
                     std::string_view data = buffer->get_bytes(len);
                     _handle_scram_auth(data, seq_id);
                 } else {
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Handling SCRAM SASL response", _id);
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Handling SCRAM SASL response", _id);
                     // process as SASLResponse
                     std::string_view data = buffer->get_bytes(msg_length);
                     _handle_scram_auth_continue(data, seq_id);
@@ -527,7 +526,7 @@ ClientAuthorization::send_auth_done(uint64_t seq_id,
     // free login info
     _login.reset();
 
-    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, ready for queries", _id);
+    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, ready for queries", _id);
 }
 
 void
@@ -571,7 +570,7 @@ ClientAuthorization::_encode_parameter_status(BufferPtr buffer,
         buffer->put_string(value);
     }
 
-    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Parameter status: {}={}", _id, key, value);
+    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Parameter status: {}={}", _id, key, value);
 }
 
 ///////// Server Authorization
@@ -615,7 +614,7 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
     auto [code, msg_length] = Session::read_hdr(_connection);
     BufferPtr buffer = Session::read_msg(_connection, code, msg_length, _type, _id, seq_id);
 
-    PROXY_DEBUG(LOG_LEVEL_DEBUG1,
+    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
                 "[S:{}] Server authorization message: code={}, length={}, state={}", _id, code,
                 msg_length, (int8)_state);
 
@@ -648,7 +647,7 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
             std::string_view key = buffer->get_string();
             std::string_view value = buffer->get_string();
 
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}", _id, key,
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}", _id, key,
                         value);
 
             if (_state <= AUTH_DONE) {
@@ -671,7 +670,7 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
             // Ready for query
             // I - Idle, T - Transaction, E - Error in transaction
             char status = buffer->get();
-            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id,
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id,
                         status);
 
             CHECK_EQ(_state, AUTH_DONE);
@@ -729,7 +728,7 @@ ServerAuthorization::_handle_ssl_response(uint64_t seq_id)
     ssize_t n = _connection->read(&ssl_response, 1, 1);
     CHECK_EQ(n, 1);
 
-    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL response from server: {}", _id, ssl_response);
+    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] SSL response from server: {}", _id, ssl_response);
     if (ssl_response == 'S') {
         // server is ready for ssl negotiation
         _send_ssl_handshake(seq_id);
@@ -765,12 +764,12 @@ ServerAuthorization::_handle_ssl_handshake(uint64_t seq_id)
     // do the SSL handshake; exception thrown on fatal error
     int rc = _connection->SSL_connect();
     if (rc < 0) {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL server handshake in progress, need more data",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] SSL server handshake in progress, need more data",
                     _id);
         return;
     }
 
-    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL server handshake complete", _id);
+    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] SSL server handshake complete", _id);
 
     // send the startup message and then move to AUTH state
     _send_startup_msg(seq_id);
@@ -827,12 +826,12 @@ ServerAuthorization::_handle_auth(BufferPtr buffer, uint64_t seq_id)
 
     switch (auth_type) {
         case MSG_AUTH_OK:
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: OK", _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Auth type: OK", _id);
             _state = AUTH_DONE;
             break;
 
         case MSG_AUTH_MD5:
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: MD5", _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Auth type: MD5", _id);
             _handle_auth_md5(buffer, seq_id);
             // set state to auth done
             _state = AUTH_DONE;
@@ -840,21 +839,21 @@ ServerAuthorization::_handle_auth(BufferPtr buffer, uint64_t seq_id)
 
         case MSG_AUTH_SASL:
             // first message in SASL flow (SCRAM-SHA-256)
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL", _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL", _id);
             // encode reply for first scram message to server
             _handle_auth_scram(buffer, seq_id);
             break;
 
         case MSG_AUTH_SASL_CONTINUE:
             // continue SASL flow
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL continue", _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL continue", _id);
             // encode reply to continue message
             _handle_auth_scram_continue(buffer, seq_id);
             break;
 
         case MSG_AUTH_SASL_COMPLETE:
             // complete SASL flow
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL complete", _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL complete", _id);
             // verify the server signature
             _handle_auth_scram_complete(buffer);
             _state = AUTH_DONE;
@@ -990,7 +989,7 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
     } else if (_login->type == TEXT) {
         user.has_scram_keys = false;
         user.passwd = _login->password.c_str();
-        LOG_DEBUG(LOG_PROXY, "Using TEXT password for SCRAM for password: {}", user.passwd);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Using TEXT password for SCRAM for password: {}", user.passwd);
     } else {
         LOG_ERROR("Invalid password type for SCRAM");
         throw ProxyAuthError();

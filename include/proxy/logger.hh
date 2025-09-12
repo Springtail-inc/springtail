@@ -78,7 +78,7 @@ namespace springtail::pg_proxy {
             auto ts = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
             int64_t timestamp = ts.count();
 
-            LOG_DEBUG(LOG_PROXY, "Logging data: proxy_id={} session_id={} seq_id={} code={} data_length={} final={}",
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Logging data: proxy_id={} session_id={} seq_id={} code={} data_length={} final={}",
                          proxy_id, session_id, seq_id, code, data_length, final);
 
             // generate header:

@@ -85,7 +85,7 @@ namespace {
 
         static void TearDownTestSuite() {
             // shutdown server
-            LOG_DEBUG(LOG_XID_MGR, "Shutting down server");
+            LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Shutting down server");
             springtail_shutdown();
         }
 

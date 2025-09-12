@@ -315,7 +315,7 @@ namespace springtail
 
         for (const auto &index : secondary_indexes) {
             _schema.secondary_keys.push_back(index.second);
-            LOG_DEBUG(LOG_PG_REPL, "Adding to secondary keys {} {}", index.second.id, index.second.name);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Adding to secondary keys {} {}", index.second.id, index.second.name);
         }
 
         _connection.clear();
@@ -446,7 +446,7 @@ namespace springtail
                 // springtail type
                 column.type = convert_pg_type(column.pg_type, column.type_category);
 
-                LOG_DEBUG(LOG_PG_REPL,
+                LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1,
                                     "Column: {} type={} position={} nullable={} default_value={} pkey={} is_generated={} is_non_standard_collation={} is_user_defined_type={}",
                                     column.name, column.pg_type, column.position, column.nullable,
                                     column.default_value.value_or("NULL"), column.pkey_position, column.is_generated, column.is_non_standard_collation, column.is_user_defined_type);
@@ -487,11 +487,11 @@ namespace springtail
                 }
                 pkey_order += fmt::format("{}", _connection.escape_identifier(pkey));
             }
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Copying table {}.{} with primary keys: {}", schema_name, table_name, pkey_order);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying table {}.{} with primary keys: {}", schema_name, table_name, pkey_order);
             _connection.exec(fmt::format(COPY_PKEY_QUERY, schema_name, table_name, pkey_order));
         } else {
             // no primary keys, just copy the table in storage order
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Copying table {}.{} without primary keys", schema_name, table_name);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying table {}.{} without primary keys", schema_name, table_name);
             _connection.exec(fmt::format(COPY_QUERY, schema_name, table_name));
         }
 
@@ -575,7 +575,7 @@ namespace springtail
         auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns,
                 Properties::get_include_schemas(db_id));
         if (invalid_columns.size() > 0) {
-            LOG_DEBUG(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
             nlohmann::json table_info = {
                 {"schema", _schema.schema_name},
                 {"table", table_oid},
@@ -766,7 +766,7 @@ namespace springtail
         }
 
         int32_t flags = recvint32(header.data() + 11);
-        LOG_DEBUG(LOG_PG_REPL, "header flags: 0x{:X}", flags);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "header flags: 0x{:X}", flags);
         if ((flags >> 16) & 0x1) {
             // bit 16 tells us if oids are present
             _oid_flag = true;
@@ -1085,7 +1085,7 @@ namespace springtail
     PgCopyTable::copy_table(uint64_t db_id, uint64_t xid,
                             const nlohmann::json &include_json)
     {
-        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, include_json);
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, std::optional{include_json});
     }
 
     void
@@ -1285,7 +1285,7 @@ namespace springtail
             udt_req.set_value_json(enum_value_json);
             udt_req.set_type(constant::USER_TYPE_ENUM); // only support enum types
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Creating user defined type: {}, values: {}", enum_type_name, enum_value_json);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Creating user defined type: {}, values: {}", enum_type_name, enum_value_json);
 
             client->create_usertype(udt_req);
         }
@@ -1311,7 +1311,7 @@ namespace springtail
         auto client = sys_tbl_mgr::Client::get_instance();
         // create the namespaces
         for (const auto &namespace_info : namespaces) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Creating namespace: {}", namespace_info.second);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Creating namespace: {}", namespace_info.second);
 
             proto::NamespaceRequest ns_req;
             ns_req.set_db_id(db_id);
@@ -1410,7 +1410,7 @@ namespace springtail
 
         // iterate through the tables and copy them
         for (const auto &table_oid : table_oids) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Queueing copy for table_oid: {}", table_oid);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Queueing copy for table_oid: {}", table_oid);
 
             // add the table to the copy queue
             copy_queue->push(std::make_shared<CopyRequest>(table_oid));

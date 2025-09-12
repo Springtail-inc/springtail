@@ -32,27 +32,33 @@ from sysutils import (
     check_daemons_running,
 )
 
-def insert_worker(db_name : str, props : Properties, stop_event : threading.Event):
+def insert_worker(db_name : str, props : Properties, stop_event : threading.Event, batch_size : int = 10):
     """Thread worker that connects to the primary DB and issues batches of inserts."""
     conn : Optional[psycopg2.extensions.connection] = None
     cursor : Optional[psycopg2.extensions.cursor] = None
 
+    print(f"Insert worker started for database: {db_name} with batch size: {batch_size}")
+
     itr = 0
+    count = 0
     while not stop_event.is_set():
         try:
-            if conn is None or conn.closed:
+            if cursor is None or conn is None or conn.closed:
                 conn = connect_db_instance(props, db_name)
                 cursor = conn.cursor()
-
+            cursor.execute("BEGIN")
             cursor.execute(
-                """INSERT INTO test_table (email, name, age)
+                f"""INSERT INTO test_table (count, email, name, age)
                     SELECT
+                        {count} + s,
                         md5(random()::text) || '@example.com',
                         md5(random()::text),
                         (random() * 52 + 18)::BIGINT
-                    FROM generate_series(1, 10) AS s;"""
+                    FROM generate_series(1, {batch_size}) AS s;"""
             )
+            cursor.execute("COMMIT")
             itr += 1
+            count += batch_size
             print(f"Inserted batch {itr} into test_table")
             time.sleep(0.2)
 
@@ -99,6 +105,7 @@ def parse_arguments() -> argparse.Namespace:
     # Add arguments -f for config file
     parser.add_argument('-f', '--config-file', type=str, required=False, help='Path to the configuration file')
     parser.add_argument('--repeat', type=int, default=1, help='Number of types log_mgr to be restarted')
+    parser.add_argument('-b', '--batch-size', type=int, default=10, help='Number of rows to insert in each batch')
 
     args = parser.parse_args()
     if not args.config_file:
@@ -156,14 +163,14 @@ def main():
     conn = connect_db_instance(props, db_name)
     cursor = conn.cursor()
     cursor.execute("""CREATE TABLE IF NOT EXISTS test_table
-                      (id SERIAL PRIMARY KEY, email TEXT, name TEXT, age BIGINT);""")
+                      (id SERIAL PRIMARY KEY, count BIGINT, email TEXT, name TEXT, age BIGINT);""")
     conn.commit()
     cursor.close()
     conn.close()
 
     # Start insert thread
     stop_event = threading.Event()
-    insert_thread = threading.Thread(target=insert_worker, args=(db_name, props, stop_event))
+    insert_thread = threading.Thread(target=insert_worker, args=(db_name, props, stop_event, args.batch_size))
     insert_thread.start()
 
     # Let the insert thread run for 5 seconds
@@ -190,6 +197,9 @@ def main():
             check_logs(system_json_path)
             raise Exception(f"Not all core daemons running: {not_running}")
         repeat_restarts -= 1;
+        check_logs(system_json_path)
+
+        time.sleep(5)
 
     stop_event.set()
     insert_thread.join(timeout=2)

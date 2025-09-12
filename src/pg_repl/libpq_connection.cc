@@ -255,7 +255,7 @@ namespace springtail {
             savepoint(savepoint_name);
         }
 
-        LOG_DEBUG(LOG_PG_REPL, "Executing query: {}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query: {}", cmd);
         _result = std::make_shared<LibPqResult>(PQexec(_connection, cmd));
 
         auto status = PQresultStatus(_result->result);
@@ -263,7 +263,7 @@ namespace springtail {
             if (!savepoint_name.empty()) {
                 auto old_result = _result; // keep the result for logging
                 // rollback to savepoint if in transaction
-                LOG_DEBUG(LOG_PG_REPL, "Rolling back to savepoint: {}, error on exec: {}", savepoint_name, result_error_message());
+                LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Rolling back to savepoint: {}, error on exec: {}", savepoint_name, result_error_message());
                 rollback_savepoint(savepoint_name);
                 _result = old_result; // restore the result for logging
             }
@@ -272,7 +272,7 @@ namespace springtail {
 
         // release savepoint if we created one
         if (!savepoint_name.empty()) {
-            LOG_DEBUG(LOG_PG_REPL, "Releasing savepoint: {}", savepoint_name);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Releasing savepoint: {}", savepoint_name);
             release_savepoint(savepoint_name);
         }
 
@@ -587,7 +587,7 @@ namespace springtail {
                 DNSResolver *resolver = DNSResolver::get_instance();
                 std::optional<std::string> ip = resolver->resolve(db_host);
                 if (!ip.has_value()) {
-                    LOG_DEBUG(LOG_PG_REPL, "Failed to resolve hostname: {}", db_host);
+                    LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Failed to resolve hostname: {}", db_host);
                     throw PgConnectionError();
                 }
 
@@ -613,7 +613,7 @@ namespace springtail {
                 hosttype, host, db_port, name, user, pass,
                 (replication ? "replication=database ": ""), encoding, options_str);
 
-            LOG_DEBUG(LOG_PG_REPL, "Attempting to connect: {}", conninfo);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Attempting to connect: {}", conninfo);
 
             // try connection
             connection = PQconnectdb(conninfo.c_str());
@@ -644,7 +644,7 @@ namespace springtail {
             throw PgConnectionError();
         }
 
-        LOG_DEBUG(LOG_PG_REPL, "PG connected, protocol version={}, server version={}",
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "PG connected, protocol version={}, server version={}",
                             PQprotocolVersion(connection), PQserverVersion(connection));
 
         // for safety set search path

@@ -22,8 +22,6 @@ namespace springtail::pg_log_mgr {
     */
     class PgLogWriter {
     public:
-
-
         /** FSYNC interval, don't fsync more frequently than this */
         static constexpr int PG_LOG_MIN_FSYNC_MS=50;
 
@@ -41,10 +39,11 @@ namespace springtail::pg_log_mgr {
          * @brief Add data to log; start of message starts with header.
          * Header contains: PG_LOG_MAGIC 4 B + Msg Length 4B + Starting msg LSN 8B
          * @param data data to add, may be a partial message
+         * @param current_msg_type current message type
          * @return true if full message received
          * @return false if partial message received
          */
-        bool log_data(const PgCopyData &data);
+        bool log_data(const PgCopyData &data, const char current_msg_type);
 
         /** Get current offset */
         uint64_t offset() const { return _current_offset; }
@@ -98,6 +97,14 @@ namespace springtail::pg_log_mgr {
         /** offset of end of current message */
         uint64_t _msg_end_offset = 0;
 
+        /** buffer holding commit record, if partial data received */
+        char _commit_buffer[32];
+
+        /** partial commit message */
+        bool _have_partial_commit = false;
+
+        LSN_t _last_commit_lsn = INVALID_LSN;
+
         /** shutdown flag for fsync thread */
         std::atomic<bool> _shutdown = false;
 
@@ -128,6 +135,9 @@ namespace springtail::pg_log_mgr {
             _shutdown = true;
             _fsync_thread.join(); // may take PG_LOG_MIN_FSYNC_MS time
         }
+
+        /** Extract commit LSN from commit record and return it */
+        LSN_t _get_commit_lsn(const char *buffer) const;
     };
     using PgLogWriterPtr = std::shared_ptr<PgLogWriter>;
 } // namespace springtail::pg_log_mgr

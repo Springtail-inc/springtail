@@ -79,7 +79,7 @@ namespace springtail::pg_fdw {
 
             // check for schema-namespace match
             if (table_ns_id != namespace_id) {
-                LOG_DEBUG(LOG_FDW, "Skipping row due to namespace mismatch {}, {}",
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Skipping row due to namespace mismatch {}, {}",
                                     table_ns_id, namespace_id);
                 continue;
             }
@@ -87,13 +87,13 @@ namespace springtail::pg_fdw {
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
-                LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", namespace_name, table_name);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Excluding table {}.{}", namespace_name, table_name);
                 continue;
             }
 
             // XXX should really stop after we have found all tables in limit
             if (limit && !table_set.contains(table_name)) {
-                LOG_DEBUG(LOG_FDW, "Limit, skipping table {}.{}", namespace_name, table_name);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Limit, skipping table {}.{}", namespace_name, table_name);
                 continue;
             }
 
@@ -101,7 +101,7 @@ namespace springtail::pg_fdw {
             uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
             if (xid > schema_xid) {
-                LOG_DEBUG(LOG_FDW, "Table xid exceeds schema xid table {}.{} tid={}, xid={}, schema_xid={}",
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Table xid exceeds schema xid table {}.{} tid={}, xid={}, schema_xid={}",
                                     namespace_name, table_name, tid, xid, schema_xid);
                 continue;
             }
@@ -114,12 +114,12 @@ namespace springtail::pg_fdw {
                     // remove this table entry
                     table_map.erase(entry);
                 }
-                LOG_DEBUG(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Removed non-existant table {}.{} tid={}, xid={}",
                                     namespace_name, table_name, tid, xid);
                 continue;
             }
 
-            LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
 
             // lookup table in map, if found the xid if it is newer
             auto [it, inserted] = table_map.try_emplace(table_name, tid, xid, table_ns_id);
@@ -144,7 +144,7 @@ namespace springtail::pg_fdw {
             );
 
             if (!inserted) {
-                LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Table {} already exists in schema {}", table_name, namespace_name);
                 // update if xid is newer
                 if (xid > it->second.xid) {
                     it->second = {tid, xid, table_ns_id};
