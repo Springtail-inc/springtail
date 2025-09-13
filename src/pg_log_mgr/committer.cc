@@ -3,6 +3,7 @@
 #include <common/logging.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
+#include <chrono>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
@@ -536,6 +537,43 @@ namespace springtail::committer {
                                MutableTablePtr table,
                                const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent)
     {
+        struct PipelineMetricFields
+        {
+            FieldPtr ts_msg_created_f;
+            FieldPtr ts_msg_pop_f;
+            FieldPtr msg_queue_size_f;
+            FieldPtr ts_log_entry_created_f;
+            FieldPtr ts_log_entry_pop_f;
+            FieldPtr log_queue_size_f;
+        };
+
+        struct PipelineMetric
+        {
+            // log entry is added to the first
+            std::chrono::steady_clock::time_point ts_log_entry_created;
+            // log entry is extracted from the queue
+            std::chrono::steady_clock::time_point ts_log_entry_pop;
+            // queue size when the entry is created and added to the queue
+            size_t log_queue_size;
+
+
+            // the log entry is parsed, created PgMsg and pushed
+            // into the next queue
+            std::chrono::steady_clock::time_point ts_msg_entry_created;
+            // the message is out of this queue and added to
+            // the write cache
+            std::chrono::steady_clock::time_point ts_msg_entry_pop;
+            // message queue size when the message was created
+            size_t msg_queue_size; 
+
+
+            // message commit start 
+            std::chrono::steady_clock::time_point ts_commit_start;
+            std::chrono::steady_clock::time_point ts_commit_end;
+            size_t commit_queue_size; 
+
+        };
+
         // get the schema at the given XID/LSN
         // note: we are guaranteed that the entire batch will utilize the same schema
         XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
@@ -565,6 +603,18 @@ namespace springtail::committer {
 
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
 
+        [[maybe_unused]] PipelineMetricFields pipeline_f;
+
+        INSTRUMENT_INGEST( {
+               pipeline_f.ts_msg_created_f = wc_schema->get_mutable_field("__springtail_ts_msg_created");
+               pipeline_f.ts_msg_pop_f = wc_schema->get_mutable_field("__springtail_ts_msg_pop");
+               pipeline_f.msg_queue_size_f = wc_schema->get_mutable_field("__springtail_msg_queue_size");
+
+               pipeline_f.ts_log_entry_created_f = wc_schema->get_mutable_field("__springtail_ts_log_entry_created");
+               pipeline_f.ts_log_entry_pop_f = wc_schema->get_mutable_field("__springtail_ts_log_entry_pop");
+               pipeline_f.log_queue_size_f = wc_schema->get_mutable_field("__springtail_log_queue_size");
+        })
+
         time_trace::Trace process_extent_trace;
         TIME_TRACE_START(process_extent_trace);
 
@@ -586,6 +636,26 @@ namespace springtail::committer {
         //     which must always appear first in a batch (although not necessarily first in
         //     the transaction).
         for (auto &row : extent) {
+            [[maybe_unused]] PipelineMetric pipeline_metric;
+
+            INSTRUMENT_INGEST( {
+                    pipeline_metric.ts_log_entry_created = numeric_to_time_point(
+                            pipeline_f.ts_log_entry_created_f->get_uint64(&row));
+                    pipeline_metric.ts_log_entry_pop = numeric_to_time_point(
+                            pipeline_f.ts_log_entry_pop_f->get_uint64(&row));
+                    pipeline_metric.log_queue_size = 
+                    pipeline_f.log_queue_size_f->get_uint64(&row);
+
+                    pipeline_metric.ts_msg_entry_created = numeric_to_time_point(
+                            pipeline_f.ts_msg_created_f->get_uint64(&row));
+                    pipeline_metric.ts_msg_entry_pop = numeric_to_time_point(
+                            pipeline_f.ts_msg_pop_f->get_uint64(&row));
+                    pipeline_metric.msg_queue_size = 
+                    pipeline_f.msg_queue_size_f->get_uint64(&row);
+
+                    pipeline_metric.ts_commit_start = std::chrono::steady_clock::now();
+                    } )
+
             time_trace::Trace process_row_trace;
             TIME_TRACE_START(process_row_trace);
             uint8_t op = op_f->get_uint8(&row);
@@ -634,6 +704,8 @@ namespace springtail::committer {
             }
             TIME_TRACE_STOP(process_row_trace);
             TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_row-xid_{}", xid.xid), process_row_trace);
+
+            pipeline_metric.ts_commit_end = std::chrono::steady_clock::now();
         }
     }
 
