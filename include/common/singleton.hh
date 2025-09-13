@@ -1,7 +1,5 @@
 #pragma once
 
-#include <iostream>
-
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -44,8 +42,9 @@ namespace springtail {
 
     template <typename T>
     std::string get_type_name() {
+        // __PRETTY_FUNCTION__ example string:
+        // std::string springtail::get_type_name() [with T = Coordinator; std::string = std::__cxx11::basic_string<char>]
         std::string func = __PRETTY_FUNCTION__;
-        std::cout << "---> " << func << std::endl;
         auto start = func.find("T = ") + 4;
         auto end = func.find(';', start);
         return func.substr(start, end - start);
