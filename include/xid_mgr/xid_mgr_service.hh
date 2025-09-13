@@ -108,7 +108,9 @@ namespace xid_mgr {
             explicit NotificationThread(GrpcXidMgrService& s) :
                 _service{s},
                 _t{[this](std::stop_token st) { task(st); }}
-            {}
+            {
+                pthread_setname_np(_t.native_handle(), "XidNotification");
+            }
 
             void notify(const proto::XidPushResponse& xid);
 

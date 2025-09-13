@@ -37,6 +37,7 @@ namespace springtail::pg_log_mgr {
 
         // start the message processing thread
         _msg_thread = std::thread(&PgLogReader::_msg_worker, this);
+        pthread_setname_np(_msg_thread.native_handle(), "ReaderMessage");
     }
 
     PgLogReader::~PgLogReader()

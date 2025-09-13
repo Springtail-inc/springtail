@@ -71,7 +71,7 @@ namespace springtail::pg_log_mgr {
         std::vector<std::string> path_parts;
         common::split_string("/", path, path_parts);
         CHECK_EQ(path_parts.size(), 2);
-        
+
         uint64_t db_id = stoull(path_parts[1]);
         CHECK_EQ(db_id, _db_id);
 
@@ -149,12 +149,15 @@ namespace springtail::pg_log_mgr {
 
             // initiate table copy thread; this will perform the initial copy of all tables
             _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+            pthread_setname_np(_table_copy_thread.native_handle(), "TableCopy");
 
             // start the index reconciliation thread
             _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
+            pthread_setname_np(_reconciliation_thread.native_handle(), "Reconciliation");
 
             // start the log reader thread since it is also required for processing table copy completions
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+            pthread_setname_np(_reader_thread.native_handle(), "Reader");
 
         } else {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Started in recovery state");
@@ -177,12 +180,15 @@ namespace springtail::pg_log_mgr {
             // initiate table copy thread; do this before we start replaying the log since it's needed
             // for table re-syncs that might have to be run
             _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+            pthread_setname_np(_table_copy_thread.native_handle(), "TableCopy");
 
             // start the index reconciliation thread
             _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
+            pthread_setname_np(_reconciliation_thread.native_handle(), "Reconciliation");
 
             // start the log reader thread since it is also used to process recovery messages
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+            pthread_setname_np(_reader_thread.native_handle(), "Reader");
 
             // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
@@ -511,8 +517,11 @@ namespace springtail::pg_log_mgr {
 
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
+        pthread_setname_np(_writer_thread.native_handle(), "Writer");
         // create the tracer thread
         _tracer_thread = std::thread(&PgLogMgr::_trace_thread, this);
+        pthread_setname_np(_tracer_thread.native_handle(), "Tracer");
+
 
         return true;
     }

@@ -18,6 +18,7 @@ PgXidSubscriberMgr::init(size_t cache_size, size_t worker_count)
     _worker_count = worker_count;
     LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr creating {}, {}", _cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
+    pthread_setname_np(_t->native_handle(), "PgXidSubscriber");
 }
 
 PgXidSubscriberMgr::~PgXidSubscriberMgr()
@@ -67,7 +68,9 @@ PgXidSubscriberMgr::task(std::stop_token st)
     // sys table data when the next xid is committed
     std::vector<std::jthread> workers;
     for (auto i = 0; i != _worker_count; ++i) {
+        std::string thread_name = fmt::format("XidSubWorker_{}", i);
         workers.emplace_back([this](std::stop_token wst) { _populate_worker(wst); });
+        pthread_setname_np(workers.back().native_handle(), thread_name.c_str());
     }
 
     // keep alive

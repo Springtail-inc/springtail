@@ -17,7 +17,9 @@ namespace springtail::committer {
     {
         CHECK_GT(worker_count, 0);
         for (auto i = 0; i != worker_count; ++i) {
+            std::string thread_name = fmt::format("IndexWorker_{}", i);
             _workers.emplace_back([this](std::stop_token st) { task(st); });
+            pthread_setname_np(_workers.back().native_handle(), thread_name.c_str());
         }
         LOG_INFO("Indexer created: {}", worker_count);
     }

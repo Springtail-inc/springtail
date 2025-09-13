@@ -1349,9 +1349,11 @@ namespace springtail
         std::vector<PgCopyResultPtr> table_results;
         for (int i = 0; i < std::min(static_cast<std::size_t>(WORKER_THREADS), table_oids.size()); i++) {
             PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>(target_xid);
+            std::string thread_name = fmt::format("PgCopyWorker_{}", i);
             table_results.push_back(copy_result);
-            workers.push_back(std::thread(&PgCopyTable::_worker,
-                              db_id, target_xid, copy_queue, copy_result));
+            workers.emplace_back(&PgCopyTable::_worker,
+                              db_id, target_xid, copy_queue, copy_result);
+            pthread_setname_np(workers.back().native_handle(), thread_name.c_str());
         }
 
         // iterate through the tables and copy them

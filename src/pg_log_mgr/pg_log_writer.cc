@@ -17,6 +17,7 @@ namespace springtail::pg_log_mgr {
         : _db_id(db_id), _writer(file), _file(file), _lsn_callback_fn(lsn_callback_fn)
     {
         _fsync_thread = std::thread(&PgLogWriter::_fsync_worker, this);
+        pthread_setname_np(_fsync_thread.native_handle(), "WriterSync");
     }
 
     void
