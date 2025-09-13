@@ -12,7 +12,6 @@
 #include <proxy/errors.hh>
 #include <proxy/exception.hh>
 #include <proxy/buffer_pool.hh>
-#include <proxy/logging.hh>
 #include <proxy/database.hh>
 #include <proxy/util.hh>
 
@@ -32,7 +31,7 @@ namespace springtail::pg_proxy {
         : Session(instance, connection, user, database, parameters, type), _db_prefix(prefix)
     {
         _state = STARTUP;
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
     }
 
     void
@@ -60,7 +59,7 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_release_session(bool deallocate)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Server type={}; releasing session", _id,
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Server type={}; releasing session", _id,
                     (_type == REPLICA ? "Replica" : "Primary"));
 
         if (_type == PRIMARY) {
@@ -84,7 +83,7 @@ namespace springtail::pg_proxy {
 
                 auto it = _parameters.find(param.first);
                 if (it == _parameters.end() || it->second != param.second) {
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server startup parameter mismatch: {}={}; expected={}",
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server startup parameter mismatch: {}={}; expected={}",
                                 _id, param.first, it->second, param.second);
                     return false;
                 }
@@ -155,7 +154,7 @@ namespace springtail::pg_proxy {
     {
         _wrap_error_handler([this, &msg_batch] {
             // queue the message batch
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server session queueing message batch: size={}, state={}",
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session queueing message batch: size={}, state={}",
                         _id, msg_batch.size(), (int8_t)_state);
 
             _batch_queue.push_batch(std::move(msg_batch));
@@ -174,12 +173,12 @@ namespace springtail::pg_proxy {
         // typically we'll just go through this once, however if the batch is just
         // a forward message, we'll just send it to the server and then be ready
         // for the next batch if there is one
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server session processing next batch", _id);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session processing next batch", _id);
 
         while (_pending_queue.empty() && _state == READY) {
             if (!_batch_queue.load_processing_batch()) {
                 // batch queue is empty
-                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server session batch queue is empty", _id);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session batch queue is empty", _id);
                 return;
             }
             while (!_batch_queue.processing_empty()) {
@@ -194,7 +193,7 @@ namespace springtail::pg_proxy {
     void
     ServerSession::process_msg(SessionMsgPtr msg)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server {}{}; message: type: {}, seq_id: {}", _id,
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server {}{}; message: type: {}, seq_id: {}", _id,
                     (_is_shadow ? "Shadow " : ""), (_type == REPLICA ? "Replica" : "Primary"),
                     msg->type_str(), msg->seq_id());
 
@@ -288,7 +287,7 @@ namespace springtail::pg_proxy {
     void
     ServerSession::process_connection(uint64_t seq_id)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={:d}", _id, (int8_t)_state);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={:d}", _id, (int8_t)_state);
 
         _wrap_error_handler([this, seq_id] {
             // entry point for connection message processing
@@ -369,7 +368,7 @@ namespace springtail::pg_proxy {
         // read just the header, the message length is the remaining bytes
         auto [code, msg_length] = read_hdr(_connection);
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}", _id, code, msg_length);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}", _id, code, msg_length);
         if (msg_length == 0) {
             // no message to read
             return;
@@ -384,7 +383,7 @@ namespace springtail::pg_proxy {
 
                 // I - Idle, T - Transaction, E - Error in transaction
                 char status = buffer->get();
-                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
 
                 if (status == 'E') {
                     // error in transaction, need to reset session
@@ -426,7 +425,7 @@ namespace springtail::pg_proxy {
             default:
                 // ignore all other messages
                 _read_and_drop_message(msg_length);
-                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Reset session, dropping message: code={}, length={}", _id, code, msg_length);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Reset session, dropping message: code={}, length={}", _id, code, msg_length);
                 break;
         }
     }
@@ -458,7 +457,7 @@ namespace springtail::pg_proxy {
         // read just the header, the message length is the remaining bytes
         auto [code, msg_length] = Session::read_hdr(_connection);
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}, state={}", _id, code, msg_length, (int8)_state);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}, state={}", _id, code, msg_length, (int8)_state);
 
         DCHECK_LE(msg_length, 1000000); // sanity check
 
@@ -533,7 +532,7 @@ namespace springtail::pg_proxy {
                 // parameter status: either during authentication or as a result of a SET
 
                 // Parameter status
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}",
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}",
                         _id, buffer->get_string(), buffer->get_string());
 
                 // this is a result of a SET operation
@@ -556,7 +555,7 @@ namespace springtail::pg_proxy {
                 // handle the error code, this determines if error is fatal
                 // it also sends the error response to the client
                 _decode_error_buffer(buffer, _seq_id);
-                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] error", _id);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] error", _id);
                 if (_state == ERROR) {
                     // TODO: possible this is a dependency error, which for now will be fatal
                     // fatal error, send error to client
@@ -566,7 +565,7 @@ namespace springtail::pg_proxy {
 
                 // non-fatal error -- check which state we are in
                 if (_state == QUERY) {
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] error in query state, forwarding", _id);
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] error in query state, forwarding", _id);
                     // error during query
                     _handle_query_error();
                     // forward to client
@@ -587,7 +586,7 @@ namespace springtail::pg_proxy {
                 char status = buffer->get();
                 uint64_t seq_id = _seq_id; // it may get reset in the handle functions
 
-                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
 
                 // handle the ready for query response
                 // regardless of state
@@ -608,7 +607,7 @@ namespace springtail::pg_proxy {
                 break;
         }
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Done msg handling", _id);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Done msg handling", _id);
     }
 
     void
@@ -668,7 +667,7 @@ namespace springtail::pg_proxy {
         query_status->dependency_complete_count++;
         assert (query_status->dependency_complete_count <= query_status->dependency_count);
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Query dependency complete, count: {:d}/{:d}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Query dependency complete, count: {:d}/{:d}",
                     _id, query_status->dependency_complete_count,
                     query_status->dependency_count);
 
@@ -798,7 +797,7 @@ namespace springtail::pg_proxy {
         QueryStatusPtr query_status = _pending_queue.front();
         query_status->query_complete_count++;
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Query complete, count: {:d}/{:d}, query_stmt: {}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Query complete, count: {:d}/{:d}, query_stmt: {}",
                     _id, query_status->query_complete_count,
                     query_status->query_count,
                     (int8_t)query_status->msg->data()->type);
@@ -833,7 +832,7 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] All queries complete for this msg, seq_id: {}", _id, query_status->msg->seq_id());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] All queries complete for this msg, seq_id: {}", _id, query_status->msg->seq_id());
 
         // this query is complete; send response to client session
         _pending_queue.pop();
@@ -884,7 +883,7 @@ namespace springtail::pg_proxy {
         }
 
         _pending_queue.push(query_status);
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: msg to server, msg: {}, seq_id: {}, query_count: {}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session: msg to server, msg: {}, seq_id: {}, query_count: {}",
                     _id, msg->type_str(), msg->seq_id(), query_status->query_count);
 
         // get dependencies and issue them to server
@@ -1002,7 +1001,7 @@ namespace springtail::pg_proxy {
 
                 // go through the options and set the valid ones
                 for (const auto& [opt_key, opt_value] : option_map) {
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[S:{}] Server options key: {}, value: {}", _id, opt_key, opt_value);
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "[S:{}] Server options key: {}, value: {}", _id, opt_key, opt_value);
                     if (util::is_valid_postgres_key(opt_key) &&
                         !EXCLUDED_STARTUP_PARAMS.contains(opt_key) &&
                         util::is_valid_postgres_value(opt_value)) {
@@ -1012,7 +1011,7 @@ namespace springtail::pg_proxy {
             } else {
                 // regular key value pair
                 std::string quoted_value = util::quote_postgres_value(value);
-                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[S:{}] Server key: {}, value: {}", _id, key, quoted_value);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "[S:{}] Server key: {}, value: {}", _id, key, quoted_value);
                 if (util::is_valid_postgres_value(quoted_value)) {
                     query << "SET " << key << "=" << quoted_value << ";";
                 }
@@ -1037,7 +1036,7 @@ namespace springtail::pg_proxy {
         buffer->put32(length - 1); // subtract 1 for the code byte
         buffer->put_string(query.str());
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[S:{}] Server session: encode status query: {}", _id, query_str);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "[S:{}] Server session: encode status query: {}", _id, query_str);
 
         _send_buffer(buffer, _seq_id);
 
@@ -1048,7 +1047,7 @@ namespace springtail::pg_proxy {
     ServerSession::shutdown_session()
     {
         // callback from Session::_handle_error()
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session is shutting down, socket={}", _id, _connection->get_socket());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session is shutting down, socket={}", _id, _connection->get_socket());
 
         // grab a shared pointer to self, to avoid losing the reference during cleanup
         ServerSessionPtr self = shared_from_this();
@@ -1091,7 +1090,7 @@ namespace springtail::pg_proxy {
         }
 
         ServerSessionPtr session = std::make_shared<ServerSession>(connection, user, database, prefix, instance, params, type);
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
 
         ProxyServer::get_instance()->log_connect(session);
 

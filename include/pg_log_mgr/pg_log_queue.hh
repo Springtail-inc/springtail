@@ -45,7 +45,6 @@ namespace springtail::pg_log_mgr {
                 PgLogQueueEntryPtr &entry = _queue.back();
                 if (entry->path == path && entry->end_offset == start_offset) {
                     entry->end_offset = end_offset;
-                    entry->num_messages++;
                     return;
                 }
             }
@@ -60,7 +59,6 @@ namespace springtail::pg_log_mgr {
             std::unique_lock<std::mutex> write_lock{_mutex};
             for (auto entry: entries) {
                 PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(entry.start_offset, entry.end_offset, entry.path);
-                new_entry->num_messages = entry.num_messages;
                 _internal_push(new_entry, write_lock);
             }
         }

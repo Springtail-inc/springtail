@@ -27,7 +27,7 @@ XidMgrServer::XidMgrServer() : Singleton<XidMgrServer>(ServiceId::XidMgrServerId
     Json::get_to<std::string>(json, "transaction_log_path", base_path);
     _base_path = Properties::make_absolute_path(base_path);
 
-    LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: base_path: {}", _base_path.string());
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrServer: base_path: {}", _base_path.string());
 
     if (!std::filesystem::exists(_base_path)) {
         std::filesystem::create_directories(_base_path);
@@ -119,7 +119,7 @@ XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
 void
 XidMgrServer::cleanup(uint64_t db_id, uint64_t min_timestamp)
 {
-    LOG_DEBUG(LOG_XID_MGR, "Cleaning up database {} with min_timestamp {}", db_id, min_timestamp);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Cleaning up database {} with min_timestamp {}", db_id, min_timestamp);
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.cleanup(min_timestamp, _archive_logs);
@@ -128,7 +128,7 @@ XidMgrServer::cleanup(uint64_t db_id, uint64_t min_timestamp)
 void
 XidMgrServer::rotate(uint64_t db_id, uint64_t timestamp)
 {
-    LOG_DEBUG(LOG_XID_MGR, "Rotate log for database {}, timestamp {}", db_id, timestamp);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Rotate log for database {}, timestamp {}", db_id, timestamp);
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.rotate(timestamp);
@@ -189,7 +189,7 @@ XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL &redis_ddl)
         // erase all smaller xids
         _xact_history.erase(_xact_history.begin(), it);
 
-        LOG_DEBUG(LOG_XID_MGR, "The history for db_id={} {}",
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "The history for db_id={} {}",
             _db_id, (_xact_history.empty())? "is now empty" : fmt::format("now starts with schema_xid={}, latest_xid={}",
             _xact_history.front().schema_xid, _xact_history.front().latest_real_commit_xid));
 
@@ -207,7 +207,7 @@ XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
     // if schema XID is zero or there is no history for this database,
     // then we always return the most recent committed XID
     if (schema_xid == 0 || _xact_history.empty()) {
-        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}", _db_id, last_xid);
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Get committed xid for db_id={}: {}", _db_id, last_xid);
         return last_xid;
     }
 
@@ -220,19 +220,18 @@ XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
 
     if (pos_i == _xact_history.end()) {
         // if the schema XID is ahead of the history, return the most recent commited XID
-        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}", _db_id, last_xid);
         return last_xid;
     }
 
     // if the history is ahead of the commit, return the committed xid
     auto target_xid = pos_i->latest_real_commit_xid;
     if (target_xid > last_xid) {
-        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}; ahead of history {}", _db_id, last_xid, target_xid);
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Get committed xid for db_id={}: {}; ahead of history {}", _db_id, last_xid, target_xid);
         return last_xid;
     }
 
     // if we found an entry in the history, return the XID directly before that
-    LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: xid limited by schema_xid: {} -> {}", _db_id, schema_xid, target_xid);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Get committed xid for db_id={}: xid limited by schema_xid: {} -> {}", _db_id, schema_xid, target_xid);
     return target_xid;
 }
 

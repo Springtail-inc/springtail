@@ -162,7 +162,7 @@ Service::_get_index_info(const proto::GetIndexInfoRequest& request)
     // read from disk
     auto info = _find_index(request.db_id(), request.index_id(), xid, tid);
     if (!info) {
-        LOG_DEBUG(LOG_SCHEMA, "Index not found: {}@{} - {}", request.db_id(),
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Index not found: {}@{} - {}", request.db_id(),
                             request.xid(), request.index_id());
         proto::IndexInfo dummy;
         dummy.set_id(0);
@@ -190,7 +190,7 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
         info->indexes(), [&](const auto& v) { return request.index_id() == v.id(); });
 
     if (index_i == info->mutable_indexes()->end()) {
-        LOG_DEBUG(LOG_SCHEMA, "Index not found for table {} -- {}", request.table_id(),
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Index not found for table {} -- {}", request.table_id(),
                             request.index_id());
         return false;
     }
@@ -442,7 +442,7 @@ Service::_find_index(uint64_t db_id,
             continue;
         }
         if (index_id != id) {
-            LOG_DEBUG(LOG_SCHEMA, "No data found for index {} -- {}", db_id, index_id);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No data found for index {} -- {}", db_id, index_id);
             break;
         }
 
@@ -456,7 +456,7 @@ Service::_find_index(uint64_t db_id,
         }
         auto found_tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
         if (tid && tid != found_tid) {
-            LOG_DEBUG(LOG_SCHEMA, "Found a dupoicate index id {} -- {}, {}/{}", db_id,
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found a dupoicate index id {} -- {}, {}/{}", db_id,
                                 index_id, tid, found_tid);
             break;
         }
@@ -520,14 +520,14 @@ Service::_drop_index(const XidLsn& xid,
     auto state = static_cast<sys_tbl::IndexNames::State>(index_info.state());
     if (state == sys_tbl::IndexNames::State::DELETED ||
         state == sys_tbl::IndexNames::State::BEING_DELETED) {
-        LOG_DEBUG(LOG_SCHEMA, "Index already deleted: {}@{} - {}", db_id, xid.xid, index_id);
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Index already deleted: {}@{} - {}", db_id, xid.xid, index_id);
         return;
     }
 
     // note: this might not be true during recovery
     // assert(xid > std::get<2>(*info));
 
-    LOG_DEBUG(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, index_info.table_id(),
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Drop index found {}:{} -- {}", db_id, index_info.table_id(),
                         index_id);
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : index_info.columns()) {
@@ -832,7 +832,7 @@ Service::AlterTable(grpc::ServerContext* context,
                     request->table().name(), request->table().namespace_name(), xid);
     }
 
-    LOG_DEBUG(LOG_SCHEMA, "Alter table {}@{}:{} action: {}", request->db_id(), request->xid(),
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Alter table {}@{}:{} action: {}", request->db_id(), request->xid(),
                             request->table().id(), ddl["action"].get<std::string>());
 
     response->set_statement(nlohmann::to_string(ddl));
@@ -1160,7 +1160,7 @@ Service::Finalize(grpc::ServerContext* context,
     // note: it is safe to pre-write data from later XIDs into the system tables during a finalize
     //       since if there is a failure they will simply be overwritten during recovery
     auto write_xid = _get_write_xid(request->db_id());
-    LOG_DEBUG(LOG_SCHEMA, "Finalize system tables: {}@{} >= {}", request->db_id(),
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize system tables: {}@{} >= {}", request->db_id(),
                         request->xid(), write_xid);
     CHECK_GE(request->xid(), write_xid);
 
@@ -1246,7 +1246,7 @@ Service::GetSchema(grpc::ServerContext* context,
     XidLsn xid(request->xid(), request->lsn());
     auto info = _get_schema_info(request->db_id(), request->table_id(), xid, xid);
 
-    LOG_DEBUG(LOG_SCHEMA, "Returning start_xid {}:{}, end_xid {}:{}",
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Returning start_xid {}:{}, end_xid {}:{}",
                         info->access_xid_start(), info->access_lsn_start(), info->access_xid_end(),
                         info->access_lsn_end());
 
@@ -1319,7 +1319,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     XidLsn ns_xid(namespace_req.xid(), namespace_req.lsn());
     auto ns_info = _get_namespace_info(namespace_req.db_id(), namespace_req.name(), ns_xid);
     if (!ns_info) {
-        LOG_DEBUG(LOG_SCHEMA, "Create namespace; db {}, name {}, id {}, xid {}:{}",
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Create namespace; db {}, name {}, id {}, xid {}:{}",
                             namespace_req.db_id(), namespace_req.name(),
                             namespace_req.namespace_id(), ns_xid.xid, ns_xid.lsn);
 
@@ -1327,10 +1327,10 @@ Service::SwapSyncTable(grpc::ServerContext* context,
                                           namespace_req.name(), ns_xid, true);
         ns_ddl["action"] = "ns_create";
         ddls.push_back(ns_ddl);
-        LOG_DEBUG(LOG_SCHEMA, "Create namespace name {}, id {}", namespace_req.name(),
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Create namespace name {}, id {}", namespace_req.name(),
                             namespace_req.namespace_id());
     } else {
-        LOG_DEBUG(LOG_SCHEMA, "Skip create namespace name {}, id {}",
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Skip create namespace name {}, id {}",
                             namespace_req.name(), namespace_req.namespace_id());
     }
 
@@ -1349,7 +1349,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         drop.set_namespace_name(create_req.table().namespace_name());
         drop.set_name(create_req.table().name());
 
-        LOG_DEBUG(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}", drop.db_id(), drop.table_id(),
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Drop table: {}:{} @ {}:{}", drop.db_id(), drop.table_id(),
                             drop.xid(), drop.lsn());
 
         is_resync = true;
@@ -1359,7 +1359,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     }
 
     // 5. perform a create table
-    LOG_DEBUG(LOG_SCHEMA, "Create table: {}:{} @ {}:{}", create_req.db_id(),
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Create table: {}:{} @ {}:{}", create_req.db_id(),
                         create_req.table().id(), create_req.xid(), create_req.lsn());
 
     assert(create_req.lsn() == constant::RESYNC_CREATE_LSN);
@@ -1368,7 +1368,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     ddls.push_back(create_ddl);
 
     for (const proto::IndexRequest& index : index_reqs) {
-        LOG_DEBUG(LOG_SCHEMA, "Create index: {}:{} @ {}:{}", index.db_id(),
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Create index: {}:{} @ {}:{}", index.db_id(),
                             index.index().id(), index.xid(), index.lsn());
 
         CHECK_EQ(index.lsn(), constant::RESYNC_CREATE_LSN);
@@ -1379,12 +1379,12 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     }
 
     // 6. update the metadata of the table
-    LOG_DEBUG(LOG_SCHEMA, "Update roots: {}:{} @ {}:{}", create_req.db_id(),
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Update roots: {}:{} @ {}:{}", create_req.db_id(),
                         create_req.table().id(), create_req.xid(), create_req.lsn());
     this->_update_roots(roots_req);
 
     // 7. serialize the ddl json and return
-    LOG_DEBUG(LOG_SCHEMA, "Response: {}", nlohmann::to_string(ddls));
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Response: {}", nlohmann::to_string(ddls));
     response->set_statement(nlohmann::to_string(ddls));
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
@@ -1503,14 +1503,14 @@ Service::GetUserType(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetUserType");
 
-    LOG_DEBUG(LOG_SCHEMA, "got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
               request->type_id(), request->xid(), request->lsn());
 
     boost::shared_lock lock(_read_mutex);
 
     XidLsn xid(request->xid(), constant::MAX_LSN);
     auto info = _get_usertype_info(request->db_id(), request->type_id(), xid);
-    LOG_DEBUG(LOG_SCHEMA, "info is null? {}", info == nullptr);
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2, "info is null? {}", info == nullptr);
 
     if (info != nullptr) {
         response->set_type_id(info->id);
@@ -1562,7 +1562,7 @@ Service::_get_modified_partition_details(uint64_t db_id,
             system_table_ids.erase(tid);
         }
         if (parent_table_id == table_id) {
-            LOG_DEBUG(LOG_SCHEMA, "Adding disk table {}:{} to system_table_ids", tid, fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Adding disk table {}:{} to system_table_ids", tid, fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
             system_table_ids.try_emplace(tid, table_xid);
         }
     }
@@ -1575,10 +1575,10 @@ Service::_get_modified_partition_details(uint64_t db_id,
         // Add the table id to the system_table_ids set if the parent table id matches the current table id
         // Remove the table id from the system_table_ids set if the cache doesn't have the table info
         if (latest_table_ptr->parent_table_id == table_id) {
-            LOG_DEBUG(LOG_SCHEMA, "Adding cached table {}:{} to system_table_ids", table_id_pair.first, latest_table_ptr->name);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Adding cached table {}:{} to system_table_ids", table_id_pair.first, latest_table_ptr->name);
             system_table_ids.try_emplace(table_id_pair.first, latest_table_ptr->xid);
         } else {
-            LOG_DEBUG(LOG_SCHEMA, "Removing table {}:{} from system_table_ids", table_id_pair.first, latest_table_ptr->name);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Removing table {}:{} from system_table_ids", table_id_pair.first, latest_table_ptr->name);
             system_table_ids.erase(table_id_pair.first);
         }
     }
@@ -1592,7 +1592,7 @@ Service::_get_modified_partition_details(uint64_t db_id,
                 part_data.parent_table_id(), table_id);
             continue;
         }
-        LOG_DEBUG(LOG_SCHEMA, "Adding partition table {}:{} to table_ids", part_data.table_id(), part_data.table_name());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Adding partition table {}:{} to table_ids", part_data.table_id(), part_data.table_name());
         table_ids.insert(part_data.table_id());
         if (partition_map != nullptr) {
             partition_map->insert(std::make_pair(
@@ -1649,7 +1649,7 @@ Service::AttachPartition(grpc::ServerContext* context,
     std::string partition_bound = "";
     std::string partition_schema = "";
     for (const auto& attached_table_id : attached_partitions) {
-        LOG_DEBUG(LOG_SCHEMA, "Attaching Partition for table ID: {}, to parent table ID: {}", attached_table_id, request->table_id());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attaching Partition for table ID: {}, to parent table ID: {}", attached_table_id, request->table_id());
         auto table_info = _get_table_info(request->db_id(), attached_table_id, xid);
 
         // note: table should always exist when calling alter_table()
@@ -1692,7 +1692,7 @@ Service::AttachPartition(grpc::ServerContext* context,
     ddl["schema"] = request->namespace_name();
     ddl["table"] = request->table_name();
 
-    LOG_DEBUG(LOG_SCHEMA, "Attach partition DDL: {}", ddl.dump());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attach partition DDL: {}", ddl.dump());
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -1721,7 +1721,7 @@ Service::DetachPartition(grpc::ServerContext* context,
     std::string partition_name = "";
     std::string partition_schema = "";
     for (const auto& detached_table_id : detached_partitions) {
-        LOG_DEBUG(LOG_SCHEMA, "Detaching Partition for table ID: {}, from parent table ID: {}", detached_table_id, request->table_id());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detaching Partition for table ID: {}, from parent table ID: {}", detached_table_id, request->table_id());
         auto table_info = _get_table_info(request->db_id(), detached_table_id, xid);
 
         // note: table should always exist when calling alter_table()
@@ -1756,7 +1756,7 @@ Service::DetachPartition(grpc::ServerContext* context,
     ddl["schema"] = request->namespace_name();
     ddl["table"] = request->table_name();
 
-    LOG_DEBUG(LOG_SCHEMA, "Detach partition DDL: {}", ddl.dump());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detach partition DDL: {}", ddl.dump());
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -1815,7 +1815,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
             // note: we keep XID/LSN in reverse order to allow use of lower_bound() for lookup
             auto info_i = user_type_i->second.lower_bound(xid);
             if (info_i != user_type_i->second.end()) {
-                LOG_DEBUG(LOG_SCHEMA, "Found user type {} in cache at exists {}", type_id, info_i->second->exists);
+                LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found user type {} in cache at exists {}", type_id, info_i->second->exists);
                 return info_i->second;
             }
         }
@@ -1827,7 +1827,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::UserTypes::Primary::key_tuple(type_id, xid.xid, xid.lsn);
-    LOG_DEBUG(LOG_SCHEMA, "Searching for user type {} at {}:{}", type_id, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2, "Searching for user type {} at {}:{}", type_id, xid.xid, xid.lsn);
 
     // find the row that matches the type_id at the given XID/LSN
     auto row_i = table->inverse_lower_bound(search_key);
@@ -1840,7 +1840,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
         return nullptr;
     }
 
-    LOG_DEBUG(LOG_SCHEMA, "Found user type id: {}", id_field->get_uint64(&row));
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2, "Found user type id: {}", id_field->get_uint64(&row));
     if (row_i == table->end() || id_field->get_uint64(&row) != type_id) {
         LOG_WARN("No user type info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
@@ -1872,7 +1872,7 @@ Service::Revert(grpc::ServerContext* context,
     // ensure that we don't have a partially committed XID currently in-memory
     CHECK(_write[request->db_id()].empty());
 
-    LOG_DEBUG(LOG_SCHEMA, "got Revert() -- db {} xid {}", request->db_id(),
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got Revert() -- db {} xid {}", request->db_id(),
                 request->xid());
 
     // get the base directory for table data
@@ -1915,7 +1915,7 @@ Service::Revert(grpc::ServerContext* context,
             }
         }
 
-        LOG_DEBUG(LOG_SCHEMA, "Found {} root files for system table {}",
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found {} root files for system table {}",
                   roots_files.size(), table_id);
 
         // find the largest valid XID
@@ -1925,13 +1925,13 @@ Service::Revert(grpc::ServerContext* context,
             auto root_i = std::make_reverse_iterator(del_i);
 
             if (root_i == roots_files.rend()) {
-                LOG_DEBUG(LOG_SCHEMA, "Clear system table {}", root_i->second, table_id);
+                LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Clear system table {}", root_i->second, table_id);
                 // there's no valid roots, clear *all* of the system table data
                 for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
                     std::filesystem::remove_all(entry.path());
                 }
             } else {
-                LOG_DEBUG(LOG_SCHEMA, "Picked root file {} for system table {}", root_i->second,
+                LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Picked root file {} for system table {}", root_i->second,
                           table_id);
 
                 std::filesystem::create_symlink(root_i->second,
@@ -1941,7 +1941,7 @@ Service::Revert(grpc::ServerContext* context,
 
                 // remove any roots files with larger XIDs
                 for (; del_i != roots_files.end(); ++del_i) {
-                    LOG_DEBUG(LOG_SCHEMA, "Delete root file {} for system table {}",
+                    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Delete root file {} for system table {}",
                               del_i->second, table_id);
                     std::filesystem::remove(del_i->second);
                 }
@@ -2256,7 +2256,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     for (const auto& idx: info->indexes()) {
         if (static_cast<sys_tbl::IndexNames::State>(idx.state()) != sys_tbl::IndexNames::State::READY &&
                 static_cast<sys_tbl::IndexNames::State>(idx.state()) != sys_tbl::IndexNames::State::BEING_DELETED) {
-            LOG_DEBUG(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Index deleted or not-ready, so skipping the root {} -- {}",
                       table_id, idx.id());
             continue;
         }
@@ -2270,7 +2270,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
                 ri.set_extent_id(*extent_id);
                 *roots_info->add_roots() = ri;
 
-                LOG_DEBUG(LOG_SCHEMA, "Found cached root: {} {}", idx.id(), extent_id);
+                LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found cached root: {} {}", idx.id(), extent_id);
                 continue; // use cached data and go to the next index
             }
         }
@@ -2280,23 +2280,23 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         auto row_i = roots_t->inverse_lower_bound(search_key);
 
         if (row_i == roots_t->end()) {
-            LOG_DEBUG(LOG_SCHEMA, "Couldn't find search key: {} {} {}", table_id, idx.id(), xid.xid);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Couldn't find search key: {} {} {}", table_id, idx.id(), xid.xid);
             continue;
         }
 
         auto &&row = *row_i;
         if (table_id_f->get_uint64(&row) != table_id) {
-            LOG_DEBUG(LOG_SCHEMA, "Wrong table ID: {} != {}", table_id_f->get_uint64(&row), table_id);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Wrong table ID: {} != {}", table_id_f->get_uint64(&row), table_id);
             continue;
         }
         if (index_id_f->get_uint64(&row) != idx.id()) {
-            LOG_DEBUG(LOG_SCHEMA, "Wrong index ID: {} != {}", index_id_f->get_uint64(&row), idx.id());
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Wrong index ID: {} != {}", index_id_f->get_uint64(&row), idx.id());
             continue;
         }
 
         auto record_xid = xid_f->get_uint64(&row);
         if (record_xid > xid.xid) {
-            LOG_DEBUG(LOG_SCHEMA, "Wrong XID: {} > {}", record_xid, xid.xid);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Wrong XID: {} > {}", record_xid, xid.xid);
             continue;
         }
 
@@ -2305,7 +2305,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         ri.set_extent_id(eid_f->get_uint64(&row));
         *roots_info->add_roots() = ri;
 
-        LOG_DEBUG(LOG_SCHEMA, "Found root in table: {} {}", idx.id(), eid_f->get_uint64(&row));
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2, "Found root in table: {} {}", idx.id(), eid_f->get_uint64(&row));
 
         // use snapshot_xid of the last row
         snapshot_xid = sxid_f->get_uint64(&row);
@@ -2366,7 +2366,7 @@ Service::_set_roots_info(uint64_t db_id,
                                                       r.extent_id(), roots_info->snapshot_xid());
         table_roots_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
-        LOG_DEBUG(LOG_SCHEMA, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
                             r.index_id(), r.extent_id());
     }
 
@@ -2377,7 +2377,7 @@ Service::_set_roots_info(uint64_t db_id,
         sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(), roots_info->stats().end_offset());
     table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
-    LOG_DEBUG(LOG_SCHEMA, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
                         roots_info->stats().row_count());
 }
 
@@ -2403,7 +2403,7 @@ Service::_get_schema_info(uint64_t db_id,
 
     // first read the columns from the schemas table
     XidLsn&& read_xid = _get_read_xid(db_id);
-    LOG_DEBUG(LOG_SCHEMA, "Read schema info {}@{}:{} for @{}:{}", table_id,
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Read schema info {}@{}:{} for @{}:{}", table_id,
                         access_xid.xid, access_xid.lsn, target_xid.xid, target_xid.lsn);
 
     // note: we always try to read data from disk up to the access_xid in case some of the data
@@ -2431,7 +2431,7 @@ Service::_get_schema_info(uint64_t db_id,
     //       on disk if the on-disk data is ahead of the read_xid
     _read_schema_history(info, db_id, table_id, access_xid, target_xid);
 
-    LOG_DEBUG(LOG_SCHEMA, "Tried to read history from disk: {}", info->history().size());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Tried to read history from disk: {}", info->history().size());
 
     // if the target is ahead of the guaranteed on-disk data then don't need to check the in-memory
     // data
@@ -2440,7 +2440,7 @@ Service::_get_schema_info(uint64_t db_id,
         // read any history from the cache
         _get_schema_cache_history(info, db_id, table_id, xid, target_xid);
 
-        LOG_DEBUG(LOG_SCHEMA, "Tried to read history from memory: {}",
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Tried to read history from memory: {}",
                             info->history().size());
     }
 
@@ -2464,7 +2464,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
         uint64_t tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
 
         if (tid != table_id) {
-            LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}", table_id, tid);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG3, "No more indexes for table {} -- {}", table_id, tid);
             break;
         }
 
@@ -2473,7 +2473,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
         if (access_xid < index_xid) {
             const XidLsn end_xid(schema_info->access_xid_end(), schema_info->access_lsn_end());
-            LOG_DEBUG(LOG_SCHEMA, "No more data for table indexes {}@{}:{}", tid,
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No more data for table indexes {}@{}:{}", tid,
                                 index_xid.xid, index_xid.lsn);
             if (index_xid < end_xid) {
                 schema_info->set_access_xid_end(index_xid.xid);
@@ -2495,7 +2495,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
         if (static_cast<sys_tbl::IndexNames::State>(info.state()) ==
             sys_tbl::IndexNames::State::DELETED) {
-            LOG_DEBUG(LOG_SCHEMA, "Found deleted index {}@{}:{} - {}", tid, index_xid.xid,
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found deleted index {}@{}:{} - {}", tid, index_xid.xid,
                                 index_xid.lsn, info.id());
             // make sure to delete it from the result vector
             // note: DELETED will always come after or at the same XID of other states
@@ -2509,7 +2509,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
         if (static_cast<sys_tbl::IndexNames::State>(info.state()) ==
             sys_tbl::IndexNames::State::NOT_READY) {
-            LOG_DEBUG(LOG_SCHEMA, "Found not-ready index {}@{}:{} - {}", tid,
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found not-ready index {}@{}:{} - {}", tid,
                                 index_xid.xid, index_xid.lsn, info.id());
         }
 
@@ -2556,7 +2556,7 @@ Service::_populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn 
             indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&row);
 
         if (tid != info.table_id() || index_id != info.id()) {
-            LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG3, "No more indexes for table {} -- {}, {} -- {}",
                     info.table_id(), tid, index_id, info.id());
             break;
         }
@@ -2602,7 +2602,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         // get the table_id from the entry
         uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
         if (tid != table_id) {
-            LOG_DEBUG(LOG_SCHEMA, "No more data for table {} -- {}", table_id, tid);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No more data for table {} -- {}", table_id, tid);
             // if we have read all of the entries for this table ID, stop processing
             // note: this means that the last schema column we've constructed so far is current
             break;
@@ -2614,7 +2614,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         const XidLsn row_xid(xid, lsn);
         if (access_xid < row_xid) {
             const XidLsn end_xid(info->access_xid_end(), info->access_lsn_end());
-            LOG_DEBUG(LOG_SCHEMA, "No more data for table column {}@{}:{}", tid, xid,
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No more data for table column {}@{}:{}", tid, xid,
                                 lsn);
             // note: this means the schema column is valid up to the found xid/lsn
             if (row_xid < end_xid) {
@@ -2680,7 +2680,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
 
     // if no schema (e.g., due to DROP TABLE) then return empty schema info
     if (info->columns().empty()) {
-        LOG_DEBUG(LOG_SCHEMA, "Found no columns for table {}@{}:{}", table_id,
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found no columns for table {}@{}:{}", table_id,
                             access_xid.xid, access_xid.lsn);
         return;
     }
@@ -2739,7 +2739,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         }
         CHECK(found) << "Failed to find matching column for primary key";
 
-        LOG_DEBUG(LOG_SCHEMA, "Found index row {} for table {}@{}:{}", column_id,
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found index row {} for table {}@{}:{}", column_id,
                             table_id, access_xid.xid, access_xid.lsn);
 
         done = (index_pos == 0);
@@ -2774,7 +2774,7 @@ Service::_apply_schema_cache_history(SchemaInfoPtr info,
                 const XidLsn end_xid(info->access_xid_end(), info->access_lsn_end());
 
                 // note: the schema's validity must end at least at this point
-                LOG_DEBUG(LOG_SCHEMA, "Checking end {}:{} < {}:{}", history.xid(),
+                LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Checking end {}:{} < {}:{}", history.xid(),
                                     history.lsn(), end_xid.xid, end_xid.lsn);
                 if (history_xid < end_xid) {
                     info->set_access_xid_end(history.xid());
@@ -2785,7 +2785,7 @@ Service::_apply_schema_cache_history(SchemaInfoPtr info,
 
             // note: the schema's validity must start at least at this point
             const XidLsn start_xid(info->access_xid_start(), info->access_lsn_start());
-            LOG_DEBUG(LOG_SCHEMA, "Checking start {}:{} < {}:{}", start_xid.xid,
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Checking start {}:{} < {}:{}", start_xid.xid,
                                 start_xid.lsn, history.xid(), history.lsn());
 
             if (start_xid < history_xid) {
@@ -2796,7 +2796,7 @@ Service::_apply_schema_cache_history(SchemaInfoPtr info,
             // Apply the recorded change, ensuring the columns remain sorted by column.position()
             auto* columns = info->mutable_columns();
             int target_position = history.column().position();
-            LOG_DEBUG(LOG_SCHEMA, "Applying schema change: {}",
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Applying schema change: {}",
                                 history.ShortDebugString());
 
             // Find index of column with position >= target_position
@@ -3237,7 +3237,7 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
         newMap[column.position()] = &column;
     }
 
-    LOG_DEBUG(LOG_SCHEMA, "Comparing schemas for update: old size = {}, new size = {}",
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Comparing schemas for update: old size = {}, new size = {}",
                             oldMap.size(), newMap.size());
 
     // Check for removals: any column in oldMap that's missing in newMap
@@ -3353,7 +3353,7 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     ddl["action"] = "no_change";
     update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NO_CHANGE));
 
-    LOG_DEBUG(LOG_SCHEMA, "No schema change detected for table @{}:{}",
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No schema change detected for table @{}:{}",
                             xid.xid, xid.lsn);
 
     return update;

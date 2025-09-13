@@ -159,7 +159,7 @@ namespace springtail::pg_fdw {
                                 PCHECK(::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, process_fd, &(process_data->event_data)) != -1)
                                     << "Failed to register process fd";
                                 pid_event_storage.insert(std::make_pair(cred->pid, process_data));
-                                LOG_DEBUG(LOG_FDW, "FDW process {} added, new process count {}", cred->pid, pid_event_storage.size());
+                                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "FDW process {} added, new process count {}", cred->pid, pid_event_storage.size());
                             }
 
                             // Process update from FDW
@@ -176,7 +176,7 @@ namespace springtail::pg_fdw {
                         PCHECK(::epoll_ctl(epoll_fd, EPOLL_CTL_DEL, process_fd, nullptr) != -1) << "Failed to remove process fd";
                         ::close(process_fd);
                         _on_fdw_death(pid);
-                        LOG_DEBUG(LOG_FDW, "FDW process {} died, remaining process count {}", pid, pid_event_storage.size());
+                        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "FDW process {} died, remaining process count {}", pid, pid_event_storage.size());
                     }
                 }
             } else {
@@ -220,7 +220,7 @@ namespace springtail::pg_fdw {
 
         // Decrement the xid count for the process
         --(xid_it->second);
-        LOG_DEBUG(LOG_FDW,
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1,
             "Removing process data: process {}, db_id {}, xid {}, remaining xid count {}",
             it->first, old_db_id, old_xid, xid_it->second);
 
@@ -232,7 +232,7 @@ namespace springtail::pg_fdw {
 
     void PgXidCollector::_on_update(pid_t process_id, uint64_t db_id, uint64_t xid) noexcept
     {
-        LOG_DEBUG(LOG_FDW, "Updating xid: process {}, db_id {}, xid {}", process_id, db_id, xid);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Updating xid: process {}, db_id {}, xid {}", process_id, db_id, xid);
         bool notify_thread = false;
         // Protect shared structures during update
         std::unique_lock lock(_data_mutex);
@@ -268,7 +268,7 @@ namespace springtail::pg_fdw {
 
     void PgXidCollector::_on_fdw_death(pid_t pid) noexcept
     {
-        LOG_DEBUG(LOG_FDW, "Process death: process {}", pid);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Process death: process {}", pid);
         // Safeguard against concurrent access
         std::unique_lock lock(_data_mutex);
 
@@ -300,7 +300,7 @@ namespace springtail::pg_fdw {
             std::vector<std::pair<std::string, std::string>> db_xid_list;
             std::vector<std::string> new_pid_list;
 
-            LOG_DEBUG(LOG_FDW, "Redis data refresh; process count {}",  _pid_to_db_id_xid.size());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Redis data refresh; process count {}",  _pid_to_db_id_xid.size());
 
             // we will try to spend as little time as possible in the critical section
             std::shared_lock data_lock(_data_mutex);
@@ -314,7 +314,7 @@ namespace springtail::pg_fdw {
                 std::string key = fmt::format("{}:{}", _fdw_id, db_id);
                 std::string value = std::to_string(xid);
                 db_xid_list.push_back(std::make_pair(key, value));
-                LOG_DEBUG( LOG_FDW,"Updating redis with key: {}, value: {}", key, value);
+                LOG_DEBUG( LOG_FDW, LOG_LEVEL_DEBUG1, "Updating redis with key: {}, value: {}", key, value);
             }
 
             // move everything to a temporary set

@@ -75,7 +75,8 @@ def get_database_info(conn) -> dict:
 
     # Query 7: Custom types
     cursor.execute("""
-        SELECT DISTINCT t.typname as type,
+        SELECT DISTINCT
+            quote_ident(n.nspname) || '.' || quote_ident(t.typname) as schema_type_name,
             CASE t.typcategory
                 WHEN 'A' THEN 'array'
                 WHEN 'B' THEN 'boolean'

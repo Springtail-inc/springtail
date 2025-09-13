@@ -40,13 +40,13 @@ namespace springtail {
             static void worker_fn(ThreadWorkerPtr worker,
                                   ConcurrentQueue<ThreadRequest> &queue)
             {
-                LOG_DEBUG(LOG_COMMON, "Thread starting: {}\n", std::this_thread::get_id());
+                LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG1, "Thread starting: {}\n", std::this_thread::get_id());
                 while (true) {
                     ThreadRequestPtr request = queue.pop();
                     // only get a nullptr if queue is empty, if so check for shutdown
                     if (request == nullptr) {
                         if (worker->is_shutdown()) {
-                            LOG_DEBUG(LOG_COMMON, "Thread exiting: {}\n", std::this_thread::get_id());
+                            LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG1, "Thread exiting: {}\n", std::this_thread::get_id());
                             return;
                         }
                         continue;

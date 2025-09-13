@@ -71,7 +71,7 @@ PgXactLogReader::_open_next_file()
         }
 
         // open file
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Opening xact log file: {}", _current_file->string());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Opening xact log file: {}", _current_file->string());
         _fd = ::open(_current_file.value().c_str(), O_RDWR, 0660);
         if (_fd == -1) {
             throw Error(fmt::format("Failed to open file {}; error {}: {}", _current_file.value().string(), errno, strerror(errno)));

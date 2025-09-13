@@ -1,4 +1,5 @@
 #include <common/json.hh>
+#include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/redis_types.hh>
 
@@ -26,6 +27,32 @@ namespace springtail {
                             + settings.dump() + "}";
                     res.set_content(json_response, "application/json");
                 });
+
+        _svr.Get("/logging",
+                 [this]([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
+                    _wrap_error_handler(res, []() {
+                        return logging::Logger::get_instance()->get_stats();
+                    });
+                });
+
+        _svr.Post("/logging",
+                  [this]([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
+                    _wrap_error_handler(res, [&req]() {
+                        nlohmann::json json_body = nlohmann::json::parse(req.body);
+                        if (json_body.contains("log_level")) {
+                            std::string log_level_str = json_body["log_level"];
+                            spdlog::level::level_enum level = logging::Logger::get_log_level_from_string(log_level_str);
+                            logging::Logger::get_instance()->set_log_level(level);
+                        }
+                        if (json_body.contains("debug_level")) {
+                            uint32_t level = json_body["debug_level"];
+                            logging::Logger::get_instance()->set_debug_level(level);
+                        }
+                        nlohmann::json result = {{ "status", "ok"}};
+                        return result;
+                    });
+                });
+
 
         // Hook dispatcher into all GET and POST requests
         _svr.Get(".*",
@@ -73,43 +100,45 @@ namespace springtail {
     void
     AdminServer::_dispatch_get(const httplib::Request& req, httplib::Response& res)
     {
-        GetHandler handler;
-        {
-            std::shared_lock lock(_mutex);
-            auto it = _get_routes.find(req.path);
-            if (it != _get_routes.end()) {
-                handler = it->second;
+        _wrap_error_handler(res, [this, &req]() {
+            GetHandler handler;
+            {
+                std::shared_lock lock(_mutex);
+                auto it = _get_routes.find(req.path);
+                if (it != _get_routes.end()) {
+                    handler = it->second;
+                }
             }
-        }
-        if (handler) {
-            nlohmann::json json_res;
-            handler(req.path, req.params, json_res);
-            res.set_content(json_res.dump(), "application/json");
-        } else {
-            res.status = 404;
-            res.set_content("{\"error\":\"not found\"}", "application/json");
-        }
+            if (handler) {
+                nlohmann::json json_res;
+                handler(req.path, req.params, json_res);
+                return json_res;
+            } else {
+                throw HttpError(fmt::format("No handler found for path: {}", req.path), 404);
+            }
+        });
     }
 
     void
     AdminServer::_dispatch_post(const httplib::Request& req, httplib::Response& res)
     {
-        PostHandler handler;
-        {
-            std::shared_lock lock(_mutex);
-            auto it = _post_routes.find(req.path);
-            if (it != _post_routes.end()) {
-                handler = it->second;
+        _wrap_error_handler(res, [this, &req]() {
+            PostHandler handler;
+            {
+                std::shared_lock lock(_mutex);
+                auto it = _post_routes.find(req.path);
+                if (it != _post_routes.end()) {
+                    handler = it->second;
+                }
             }
-        }
-        if (handler) {
-            nlohmann::json json_res;
-            handler(req.path, req.params, req.body, json_res);
-            res.set_content(json_res.dump(), "application/json");
-        } else {
-            res.status = 404;
-            res.set_content("{\"error\":\"not found\"}", "application/json");
-        }
+            if (handler) {
+                nlohmann::json json_res;
+                handler(req.path, req.params, req.body, json_res);
+                return json_res;
+            } else {
+                throw HttpError(fmt::format("No handler found for path: {}", req.path), 404);
+            }
+        });
     }
 
     std::string
@@ -128,12 +157,12 @@ namespace springtail {
                 sockaddr_in* s = (sockaddr_in*)&addr;
                 char ip[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &s->sin_addr, ip, sizeof(ip));
-                ip_port = fmt::format("{}:{}", ip, s->sin_port);
+                ip_port = fmt::format("{}:{}", ip, ntohs(s->sin_port));
             } else if (addr.ss_family == AF_INET6) {
                 sockaddr_in6* s = (sockaddr_in6*)&addr;
                 char ip[INET6_ADDRSTRLEN];
                 inet_ntop(AF_INET6, &s->sin6_addr, ip, sizeof(ip));
-                ip_port = fmt::format("{}:{}", ip, s->sin6_port);
+                ip_port = fmt::format("{}:{}", ip, ntohs(s->sin6_port));
             }
         }
         return ip_port;

@@ -31,22 +31,19 @@ namespace springtail {
 
     PgMsgStreamReader::PgMsgStreamReader(std::optional<uint64_t> db_id,
             const std::filesystem::path &start_file,
-            uint64_t start_offset,
-            uint64_t end_offset)
+            uint64_t start_offset)
         : _db_id(db_id),
         _current_path(start_file),
-        _current_offset(start_offset), _end_msg_offset(end_offset)
+        _current_offset(0)
     {
-        // for faster binary search
         _open_file(start_file, start_offset);
     }
 
     void
     PgMsgStreamReader::set_file(const std::filesystem::path &file,
-                                uint64_t start_offset,
-                                uint64_t end_offset)
+                                uint64_t start_offset)
     {
-        _end_msg_offset = end_offset;
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Setting file to: {}, offset: {}", file, start_offset);
 
         if (file != _current_path || !_stream.is_open()) {
             // file isn't currently open, so open it
@@ -61,8 +58,7 @@ namespace springtail {
 
         // file was already open, so just seek to the new offset
         if (_current_offset != start_offset) {
-            _current_offset = start_offset;
-            _seek_stream();
+            _seek_stream(start_offset);
         }
     }
 
@@ -78,13 +74,140 @@ namespace springtail {
             LOG_ERROR("Unable to open file: {}", file);
             throw PgIOError();
         }
-
         _current_path = file;
-        _current_offset = offset;
+        _current_offset = 0;
+        _header = PgMsgStreamHeader();
 
-        if (_current_offset != 0) {
-            _seek_stream();
+        if (offset > _current_offset) {
+            _seek_stream(offset);
         }
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Opened file: {}, offset: {}, xlog_msg_end_offset: {}",
+                  file, _current_offset, _xlog_msg_end_offset);
+    }
+
+    void
+    PgMsgStreamReader::_seek_stream(uint64_t file_offset)
+    {
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Seeking to offset: {}, current_offset: {}, xlog_msg_end_offset: {}",
+                  file_offset, _current_offset, _xlog_msg_end_offset);
+
+        // jumping to next message, read in xlog header
+        if (file_offset == _xlog_msg_end_offset) {
+            if (_current_offset != _xlog_msg_end_offset) {
+                // seeking to end of current xlog message, just seek to it
+                _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
+                _check_fail();
+                _current_offset = _xlog_msg_end_offset;
+            }
+
+            // no need to read the next header here, the next read_message will do that
+            // and we may be at the end of the file, which would complicate things
+            return;
+        }
+
+        // nothing to do if we are already at the desired offset
+        if (file_offset == _current_offset) {
+            return;
+        }
+
+        // check if we are seeking back to the start of prev header
+        // we don't support seeking back before the start of the current header
+        // we shouldn't encounter this.
+        if (file_offset < _current_offset) {
+            if (file_offset == _header.header_offset) {
+                // set the stream to just after the header
+                if (_current_offset != _header.header_offset + PgMsgStreamHeader::SIZE) {
+                    _stream.seekg(_header.header_offset + PgMsgStreamHeader::SIZE, std::fstream::beg);
+                    _check_fail();
+                    _current_offset = _header.header_offset + PgMsgStreamHeader::SIZE;
+                }
+                // otherwise current offset is already just after the header
+                return;
+            }
+            CHECK(false) << "Seeking backwards not supported: current_offset=" << _current_offset << ", seek_offset=" << file_offset;
+        }
+
+        // if new offset is after end of current xlog message
+        // we need to jump forward by reading messages until we get there
+        while (file_offset >= _xlog_msg_end_offset) {
+            // seek to the next xlog message header
+            if (_current_offset != _xlog_msg_end_offset) {
+                DCHECK_LT(_current_offset, _xlog_msg_end_offset);
+                _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
+                _check_fail();
+                _current_offset = _xlog_msg_end_offset;
+                _check_fail();
+            }
+
+            // read the header of the next message
+            auto rc = _read_header();
+            CHECK(rc) << "Hit EOF reading header when seeking, path="
+                << _current_path << ", offset=" << _current_offset;
+
+            if (file_offset <= _current_offset) {
+                // we've jumped to or just past the desired offset
+                // if we are past it is due to the header
+                // check that we aren't in the middle of a header
+                DCHECK(file_offset == _current_offset || file_offset == _current_offset - PgMsgStreamHeader::SIZE);
+                return;
+            }
+
+            // check if the desired offset is within this message
+            if (file_offset < _xlog_msg_end_offset) {
+                break;
+            }
+        }
+
+        DCHECK_LT(file_offset, _xlog_msg_end_offset);
+
+        // we've jumped past the desired offset, so seek back to it
+        _stream.seekg(file_offset, std::fstream::beg);
+        _check_fail();
+        _current_offset = file_offset;
+
+        return;
+    }
+
+    bool
+    PgMsgStreamReader::_read_header()
+    {
+        if (!_stream.is_open()) {
+            LOG_ERROR("Stream is not open, cannot read header");
+            throw PgIOError();
+        }
+
+        // read the header
+        char header_buffer[PgMsgStreamHeader::SIZE];
+        _stream.read(header_buffer, PgMsgStreamHeader::SIZE);
+        if (_stream.eof()) {
+            // hit eof
+            LOG_WARN("Hit EOF reading header, path={}, offset={}",
+                      _current_path, _current_offset);
+            return false;
+        }
+        DCHECK_EQ(_stream.gcount(), PgMsgStreamHeader::SIZE)
+            << "Failed to read full header, read " << _stream.gcount() << " bytes";
+
+        _check_fail();
+
+        _header = PgMsgStreamHeader(header_buffer);
+        _header.header_offset = _current_offset;
+        _current_offset += PgMsgStreamHeader::SIZE;
+
+        // check if the header is valid
+        if (_header.magic != PgMsgStreamHeader::MAGIC) {
+            LOG_ERROR("Invalid stream header magic: {:#X}", _header.magic);
+            throw PgMessageError();
+        }
+
+        // set the end message offset
+        _xlog_msg_end_offset = _header.msg_length + _current_offset;
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Read header: {}, current_offset: {}, xlog_msg_end_offset: {}",
+                  _header.to_string(),  _current_offset, _xlog_msg_end_offset);
+
+        return true;
     }
 
     PgMsgPtr
@@ -99,10 +222,19 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
-        LOG_DEBUG(LOG_PG_REPL, "Reading message, current_offset: {}\n", _current_offset);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Reading message, current_offset: {}, xlog_msg_end_offset: {}",
+                  _current_offset, _xlog_msg_end_offset);
+
         // check if we've already encountered the end of the file
         if (end_of_stream()) {
             return nullptr;
+        }
+
+        if (_current_offset == _xlog_msg_end_offset || _current_offset == 0) {
+            // we've reached the end of the current xlog message, so read the next header
+            if (!_read_header()) {
+                return nullptr;
+            }
         }
 
         // record the message offset
@@ -114,7 +246,7 @@ namespace springtail {
             bool skip_msg = !_is_message_filtered(msg_type, filter);
             PgMsgPtr msg = nullptr;
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Reading message type: {}, current_offset: {}, skip_msg: {}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Reading message type: {}, current_offset: {}, skip_msg: {}",
                       msg_type, _current_offset, skip_msg);
 
             if (skip_msg) {
@@ -133,7 +265,7 @@ namespace springtail {
 
             return msg;
         } catch (PgMessageEOFError &e) {
-            LOG_WARN("Unexpected EOF while reading message");
+            LOG_WARN("Unexpected EOF while reading message, path={}, eos={}", _current_path, end_of_stream());
             return nullptr;
         }
     }
@@ -172,6 +304,7 @@ namespace springtail {
                 return _decode_stream_abort();
             default:
                 LOG_WARN("Unknown message type: {}", msg_type);
+                DCHECK(false) << "Unknown message type";
                 throw PgMessageError();
         }
     }
@@ -231,13 +364,12 @@ namespace springtail {
         int num_cols = _recvint16();
 
         for (int i = 0; i < num_cols; i++) {
-            _seek_stream();
             char type = _recvint8();
             if (type == 'n' || type =='u') {
                 continue;
             }
             uint32_t data_len = _recvint32();
-            _current_offset += (data_len);
+            _seek_stream(_current_offset + data_len);
         }
     }
 
@@ -285,20 +417,20 @@ namespace springtail {
     {
         // 4 - transaction ID if streaming
         if (_streaming) {
-            _current_offset += 4;
+            _seek_stream(_current_offset + 4);
         }
 
         // 4 - oid
-        _current_offset += 4;
+        _seek_stream(_current_offset + 4);
         _skip_string(); // namespace str
         _skip_string(); // rel name str
-        _current_offset++;
+        _seek_stream(_current_offset + 1);
 
         int16_t num_columns = _recvint16();
         for (int i = 0; i < num_columns; i++) {
-            _current_offset++;
+            _seek_stream(_current_offset + 1);
             _skip_string();  // column name
-            _current_offset += (4 + 4); // oid, type modifier
+            _seek_stream(_current_offset + 4 + 4); // oid, type modifier
         }
     }
 
@@ -356,9 +488,9 @@ namespace springtail {
     PgMsgStreamReader::_skip_insert()
     {
         if (_streaming) {
-            _current_offset += 4; // xid
+            _seek_stream(_current_offset + 4); // xid
         }
-        _current_offset += (4 + 1); // rel id + new type flag
+        _seek_stream(_current_offset + (4 + 1)); // rel id + new type flag
         _skip_tuple();
     }
 
@@ -392,10 +524,10 @@ namespace springtail {
     PgMsgStreamReader::_skip_update()
     {
         if (_streaming) {
-            _current_offset += 4; // xid
+            _seek_stream(_current_offset + 4); // xid
         }
 
-        _current_offset += 4; // rel_id
+        _seek_stream(_current_offset + 4); // rel_id
 
         char type = _recvint8(); // old type
         if (type == 'K' || type == 'O') {
@@ -462,10 +594,10 @@ namespace springtail {
     PgMsgStreamReader::_skip_delete()
     {
         if (_streaming) {
-            _current_offset += 4; // xid
+            _seek_stream(_current_offset + 4); // xid
         }
 
-        _current_offset += 4; // rel_id
+        _seek_stream(_current_offset + 4); // rel_id
 
         char type = _recvint8(); // old type
         CHECK(type == 'K' || type == 'O') << "type: " << type;
@@ -512,12 +644,11 @@ namespace springtail {
     PgMsgStreamReader::_skip_truncate()
     {
         if (_streaming) {
-            _current_offset += 4; // xid
+            _seek_stream(_current_offset + 4); // xid
         }
 
         uint32_t num_rels = _recvint32();
-        _current_offset++; // options flag
-        _current_offset += (4 * num_rels); // rel ids
+        _seek_stream(_current_offset + 1 + (4 * num_rels)); //options flag + rel ids
     }
 
     PgMsgPtr
@@ -555,9 +686,9 @@ namespace springtail {
     PgMsgStreamReader::_skip_type()
     {
         if (_streaming) {
-            _current_offset += 4; // xid
+            _seek_stream(_current_offset + 4); // xid
         }
-        _current_offset += 4; // oid
+        _seek_stream(_current_offset + 4); // oid
 
         _skip_string(); // namespace
         _skip_string(); // data type
@@ -594,7 +725,7 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_origin()
     {
-        _current_offset += 8;
+        _seek_stream(_current_offset + 8);
         _skip_string();
     }
 
@@ -622,8 +753,7 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_begin()
     {
-        _current_offset += LEN_BEGIN;
-        _seek_stream();
+        _seek_stream(_current_offset + LEN_BEGIN);
     }
 
     PgMsgPtr
@@ -650,8 +780,7 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_commit()
     {
-        _current_offset += LEN_COMMIT;
-        _seek_stream();
+        _seek_stream(_current_offset + LEN_COMMIT);
     }
 
     PgMsgPtr
@@ -683,8 +812,7 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_stream_start()
     {
-        _current_offset += LEN_STREAM_START;
-        _seek_stream();
+        _seek_stream(_current_offset + LEN_STREAM_START);
 
         _streaming = true;
     }
@@ -714,8 +842,7 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_stream_stop()
     {
-        _current_offset += LEN_STREAM_STOP;
-        _seek_stream();
+        _seek_stream(_current_offset + LEN_STREAM_STOP);
 
         _streaming = false;
     }
@@ -734,8 +861,7 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_stream_commit()
     {
-        _current_offset += LEN_STREAM_COMMIT;
-        _seek_stream();
+        _seek_stream(_current_offset + LEN_STREAM_COMMIT);
     }
 
     PgMsgPtr
@@ -767,11 +893,11 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_stream_abort()
     {
-        _current_offset += 8; // xid + sub_xid
+        uint64_t new_offset = _current_offset += 8; // xid + sub_xid
         if (_proto_version >= 4) {
-            _current_offset += (8 + 8); // abort_lsn + abort_ts
+            new_offset += (8 + 8); // abort_lsn + abort_ts
         }
-        _seek_stream();
+        _seek_stream(new_offset);
     }
 
     PgMsgPtr
@@ -952,7 +1078,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create table: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded create table: json: {}", json.dump());
 
         // check object type, could be an index, default value or something other
         // than a table
@@ -1026,7 +1152,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop table: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded drop table: json: {}", json.dump());
 
         // check object type, could be an index, default value or something other
         // than a table; if so we skip decoding
@@ -1081,7 +1207,7 @@ namespace springtail {
         json["name"].get_to(ns_msg.name);
         json["oid"].get_to(ns_msg.oid);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter namespace: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded create/alter namespace: json: {}", json.dump());
 
         //check include schemas
         if (!_is_schema_included(ns_msg.name)) {
@@ -1132,7 +1258,7 @@ namespace springtail {
         json["oid"].get_to(ns_msg.oid);
         json["name"].get_to(ns_msg.name);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop namespace: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded drop namespace: json: {}", json.dump());
 
         //check include schemas
         if (!_is_schema_included(ns_msg.name)) {
@@ -1174,7 +1300,7 @@ namespace springtail {
             return {};
         }
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter usertype: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded create/alter usertype: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TYPE);
         msg->msg.emplace<PgMsgUserType>(usertype_msg);
@@ -1226,7 +1352,7 @@ namespace springtail {
             return {};
         }
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop usertype: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded drop usertype: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TYPE);
         msg->msg.emplace<PgMsgUserType>(usertype_msg);
@@ -1258,7 +1384,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded attach partition: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded attach partition: json: {}", json.dump());
 
         attach_partition_msg.xid = message.xid;
         attach_partition_msg.lsn = message.lsn;
@@ -1285,7 +1411,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded detach partition: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded detach partition: json: {}", json.dump());
 
         detach_partition_msg.xid = message.xid;
         detach_partition_msg.lsn = message.lsn;
@@ -1309,12 +1435,13 @@ namespace springtail {
     PgMsgStreamReader::_skip_message()
     {
         if (_streaming) {
-            _current_offset += 4; // xid
+            _seek_stream(_current_offset + 4); // xid
         }
 
-        _current_offset += (1 + 8); // flags + lsn
+        _seek_stream(_current_offset + (1 + 8)); // flags + lsn
         _skip_string(); // prefix
-        _current_offset += _recvint32(); // msg len + msg
+        auto len = _recvint32();
+        _seek_stream(_current_offset + len); // msg len + msg
     }
 
     PgMsgPtr
@@ -1385,55 +1512,162 @@ namespace springtail {
     uint64_t
     PgMsgStreamReader::scan_log(uint64_t db_id, const std::filesystem::path &file, bool truncate)
     {
-        // updated logic:
-        // 1) scan for BEGIN/COMMIT records
-        //    b) if we see a COMMIT, then can record the LSN associated with that as the most recent
-        //    c) once we see EOF, return the latest completed LSN
-        // 2) if no LSN completed in this file, then return INVALID_LSN
-        static std::vector<char> filter = { pg_msg::MSG_COMMIT,
-                                            pg_msg::MSG_STREAM_COMMIT };
-        uint64_t end_lsn = INVALID_LSN;
-        uint64_t offset = 0;
-
         PgMsgStreamReader reader(db_id, file);
-        do {
-            auto msg = reader.read_message(filter);
 
-            // nullptr if message skipped
-            if (msg == nullptr) {
-                continue;
-            }
+        auto end_lsn = reader._repair_log(file, truncate);
+        LOG_INFO("Scanned file {}, found end LSN: {}", file, end_lsn);
 
-            // store the lsn
-            switch (msg->msg_type) {
-            case (PgMsgEnum::COMMIT):
-                end_lsn = std::get<PgMsgCommit>(msg->msg).xact_lsn;
-                offset = reader.offset();
-                break;
-
-            case (PgMsgEnum::STREAM_COMMIT):
-                end_lsn = std::get<PgMsgStreamCommit>(msg->msg).xact_lsn;
-                offset = reader.offset();
-                break;
-
-            default:
-                LOG_ERROR("Invalid message type: {}", static_cast<uint8_t>(msg->msg_type));
-                throw PgUnexpectedDataError();
-            }
-        } while (!reader.end_of_stream());
-
-        // fast-exit if the file contains no commits
-        if (end_lsn == INVALID_LSN) {
-            return end_lsn;
-        }
-
-        // note: do we need to close the stream before doing this?
-        // truncate to the end of the last-seen commit
-        _truncate_file(file, offset);
         return end_lsn;
     }
 
-    bool PgMsgStreamReader::_is_schema_included(const std::string& schema)
+    LSN_t
+    PgMsgStreamReader::get_commit_lsn(const char *buffer)
+    {
+        DCHECK(buffer[0] == pg_msg::MSG_COMMIT ||
+               buffer[0] == pg_msg::MSG_STREAM_COMMIT);
+
+        if (buffer[0] == pg_msg::MSG_COMMIT) {
+            // commit record is:
+            // COMMIT 'C'  1 byte
+            // flags       1 byte
+            // lsn         8 bytes
+            // timestamp   8 bytes
+            // xid         4 bytes
+            return recvint64(buffer + 2);
+        }
+
+        if (buffer[0] == pg_msg::MSG_STREAM_COMMIT) {
+            // stream commit record is:
+            // STREAM_COMMIT 'c'  1 byte
+            // xid                4 bytes
+            // flags              1 byte
+            // lsn                8 bytes
+            // end_lsn            8 bytes
+            // timestamp          8 bytes
+            return recvint64(buffer + 6);
+        }
+
+        return INVALID_LSN;
+    }
+
+    LSN_t
+    PgMsgStreamReader::_repair_log(const std::filesystem::path &file, bool truncate)
+    {
+        // this replicates some login in _open_file and _seek_stream
+        // but we need to handle reading the header separately
+
+        // open file and position at start
+        if (_stream.is_open()) {
+            _stream.close();
+        }
+
+        _stream.open(file, std::fstream::in | std::fstream::binary);
+        if (!_stream.is_open()) {
+            LOG_ERROR("Unable to open file: {}", file);
+            throw PgIOError();
+        }
+
+        _current_path = file;
+        _current_offset = 0;
+        _xlog_msg_end_offset = 0;
+
+        LOG_INFO("Repairing file: {}", file);
+
+        // get file size
+        auto file_end_offset = std::filesystem::file_size(file);
+
+        // check if file too small to contain a valid header
+        if (file_end_offset < PgMsgStreamHeader::SIZE) {
+            LOG_INFO("File too small to contain valid header, size: {}", file_end_offset);
+            return INVALID_LSN;
+        }
+
+        char current_msg_type = 0;
+        uint64_t truncate_offset = 0;
+        LSN_t restart_lsn = INVALID_LSN;
+
+        // Make sure we have room for at least a header + type
+        while (_current_offset + PgMsgStreamHeader::SIZE <= file_end_offset) {
+
+            // read header at current offset and get next header offset
+            // after reading the header, _current_offset is set to just after the header
+            CHECK(_read_header());
+            current_msg_type = _stream.peek();
+
+            // header stores LSN of last commit record (even if this is a commit)
+            restart_lsn = _header.last_commit_lsn + 1;
+
+            LOG_INFO("Got header at offset {}, last commit LSN: {}, next msg type: '{}'",
+                     _current_offset - PgMsgStreamHeader::SIZE,
+                     _header.last_commit_lsn,
+                     current_msg_type);
+
+            // try and peek at the current message type
+            current_msg_type = _stream.peek();
+            if (current_msg_type == EOF) {
+                // end of file
+                break;
+            }
+
+            if (_xlog_msg_end_offset > file_end_offset) {
+                // partial message at end of file
+                break;
+            }
+
+            // the current message fits in the file
+
+            // check for commit message
+            if (current_msg_type == pg_msg::MSG_COMMIT ||
+                current_msg_type == pg_msg::MSG_STREAM_COMMIT) {
+
+                // extract commit LSN for this commit message
+                char buffer[16]; // enough for commit/stream_commit message
+                _stream.read(buffer, sizeof(buffer));
+
+                auto commit_lsn = PgMsgStreamReader::get_commit_lsn(buffer);
+                LOG_INFO("Got commit LSN: {}", commit_lsn);
+
+                DCHECK_NE(commit_lsn, INVALID_LSN);
+                DCHECK_GT(commit_lsn, restart_lsn-1);
+
+                restart_lsn = commit_lsn + 1;
+                truncate_offset = _xlog_msg_end_offset;
+            }
+
+            if (_xlog_msg_end_offset == file_end_offset) {
+                // last full message of the file
+                break;
+            }
+
+            // move to next message header
+            _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
+            _current_offset = _xlog_msg_end_offset;
+        }
+
+        if (truncate_offset == 0) {
+            // we may have a partial message or header, but easier to
+            // return INVALID_LSN and caller will remove file
+            // although we should technically know the restart LSN,
+            // but have no way to indicate that this file should be removed
+            LOG_INFO("No complete commit record found in file");
+            return INVALID_LSN;
+        }
+
+        // partial message detected; _xlog_msg_end_offset > file_end_offset
+        // truncate to truncation offset
+        if (truncate && truncate_offset != file_end_offset) {
+            _truncate_file(file, truncate_offset);
+        }
+
+        LOG_INFO("Repair complete, truncation offset: {}, restart LSN: {}",
+                 truncate_offset, restart_lsn);
+
+        // replay this message (LSN)
+        return restart_lsn;
+    }
+
+    bool
+    PgMsgStreamReader::_is_schema_included(const std::string& schema)
     {
         if (!_db_id.has_value()) {
             return true;
@@ -1484,6 +1718,18 @@ namespace springtail {
         // write out message
         CHECK_EQ(::write(_fd, data.buffer, data.length), data.length);
         _current_offset += data.length;
+
+        return _current_offset;
+    }
+
+    uint64_t
+    PgMsgStreamWriter::write_header(const PgMsgStreamHeader &header)
+    {
+        // write out header
+        char buffer[PgMsgStreamHeader::SIZE];
+        header.encode_header(buffer);
+        CHECK_EQ(::write(_fd, buffer, sizeof(buffer)), sizeof(buffer));
+        _current_offset += sizeof(buffer);
 
         return _current_offset;
     }

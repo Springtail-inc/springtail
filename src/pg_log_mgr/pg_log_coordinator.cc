@@ -22,7 +22,7 @@ namespace springtail::pg_log_mgr {
 
         // shut down all log managers
         std::unique_lock lock(_mutex);
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Shutting down {} log mgrs", _log_mgrs.size());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Shutting down {} log mgrs", _log_mgrs.size());
         for (auto &lm: _log_mgrs) {
             lm.second->shutdown();
             lm.second->join();
@@ -38,7 +38,7 @@ namespace springtail::pg_log_mgr {
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Replicated databases: {}", new_value.dump(4));
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
                 CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
                 // get a vector of old database ids from _log_mgrs
                 std::unique_lock<std::mutex> lock(_mutex);
@@ -112,7 +112,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogCoordinator::_add_database(uint64_t db_id)
     {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Adding database {}", db_id);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding database {}", db_id);
 
         if (_log_mgrs.contains(db_id)) {
             return;
@@ -148,7 +148,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogCoordinator::_remove_database(uint64_t db_id)
     {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Removing database {}", db_id);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Removing database {}", db_id);
         std::unique_lock lock(_mutex);
 
         auto itr = _log_mgrs.find(db_id);

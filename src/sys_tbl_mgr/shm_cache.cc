@@ -16,7 +16,7 @@ ShmCache::ShmCache(std::string name, size_t size)
     _string_alloc{_shm.get_segment_manager()}
 {
 
-    LOG_DEBUG(LOG_CACHE, "ShmCache open: {} - {}", _name, size);
+    LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {} - {}", _name, size);
     auto free_size = _shm.get_free_memory();
     CHECK(free_size <=  size);
     _init();
@@ -30,20 +30,20 @@ ShmCache::ShmCache(std::string name)
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
 {
-    LOG_DEBUG(LOG_CACHE, "ShmCache open: {}", _name);
+    LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {}", _name);
     _init();
 }
 
-ShmCache::~ShmCache() 
+ShmCache::~ShmCache()
 {
-    LOG_DEBUG(LOG_CACHE, "ShmCache deleted: {} - {}", _name, _created);
+    LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache deleted: {} - {}", _name, _created);
     if (_created) {
         remove(_name);
     }
 }
 
-void 
-ShmCache::_init() 
+void
+ShmCache::_init()
 {
     CHECK(_shm.check_sanity());
 
@@ -64,15 +64,15 @@ ShmCache::_init()
 }
 
 
-void 
+void
 ShmCache::remove(const std::string& name)
 {
     ipc::shared_memory_object::remove(name.c_str());
     Mutex::remove((name + std::string(".mutex")).c_str());
 }
-    
-void 
-ShmCache::update_committed_xid(DbId db, Xid xid) 
+
+void
+ShmCache::update_committed_xid(DbId db, Xid xid)
 {
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
@@ -83,8 +83,8 @@ ShmCache::update_committed_xid(DbId db, Xid xid)
     (*_committed_xid_map)[db] = xid;
 }
 
-void 
-ShmCache::keep_alive() 
+void
+ShmCache::keep_alive()
 {
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
@@ -94,7 +94,7 @@ ShmCache::keep_alive()
     *_xid_commit_time = std::chrono::high_resolution_clock::now();
 }
 
-bool 
+bool
 ShmCache::is_alive()
 {
     ipc::sharable_lock<Mutex> lock(_mutex,
@@ -107,7 +107,7 @@ ShmCache::is_alive()
     return true;
 }
 
-std::optional<Xid> 
+std::optional<Xid>
 ShmCache::get_committed_xid(DbId db)
 {
     ipc::sharable_lock<Mutex> lock(_mutex,
@@ -142,7 +142,7 @@ ShmCache::size() const
     return _lru->size();
 }
 
-std::vector<TableId> 
+std::vector<TableId>
 ShmCache::get_db_tables(DbId db, bool exclude_dropped)
 {
     std::vector<TableId> r;
@@ -179,7 +179,7 @@ ShmCache::get_db_tables(DbId db, bool exclude_dropped)
     return r;
 }
 
-bool 
+bool
 ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg, bool drop_table)
 {
     Key k{db, tid};
@@ -296,7 +296,7 @@ ShmCache::find(DbId db, TableId tid, Xid xid)
         size_t top_cnt = static_cast<double>(_lru->size())*0.1; //in the top 10%
         //Note: if the number of items in LRU "too small" (<10 elements) then
         //top_cnt=0 and we'll move to the top. It should be fine actually.
-        
+
         auto& seq_idx = _lru->get<0>();
         size_t i = 0;
         for (auto it=seq_idx.begin(); i != top_cnt && it != seq_idx.end(); ++it, ++i)
@@ -306,7 +306,7 @@ ShmCache::find(DbId db, TableId tid, Xid xid)
             }
         }
     }
-    
+
     // this will move the element to the LRU front
     // preserving the insertion sequence.
     {
@@ -343,7 +343,7 @@ ShmCache::check_free_space_locked()
     }
 }
 
-void 
+void
 ShmCache::evict_locked()
 {
     auto key = _lru->back();

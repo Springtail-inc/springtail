@@ -22,8 +22,8 @@ namespace {
         static constexpr char const * const LOG_FILE = "/tmp/test_log_reader.log";
         static void SetUpTestSuite()
         {
-            // Add two fake databeses with custom include.schemas config
-            std::string js = 
+            // Add two fake databases with custom include.schemas config
+            std::string js =
             "{ "
             "\"db_instances\": {"
                 "\"1234\": {"
@@ -114,7 +114,7 @@ namespace {
         // read next message
         PgMsgPtr msg = reader.read_message({}, eos);
         EXPECT_EQ(msg, nullptr);
-        EXPECT_EQ(reader.message_offset(), 0);
+        EXPECT_EQ(reader.message_offset(), PgMsgStreamHeader::SIZE);
     }
 
     TEST_F(MsgStreamReader_Test, SkipStream)
