@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <storage/field.hh>
 
 /** Wraps code blocks that would allow some layout-altering schema changes to be handled without a
@@ -24,6 +25,7 @@ namespace springtail::sys_tbl {
 class TableNames {
 public:
     static constexpr uint32_t ID = 1;
+    static constexpr char NAME[] = "TableNames";
 
     struct Data {
         static constexpr uint32_t NAMESPACE_ID = 0;
@@ -118,6 +120,7 @@ public:
 class TableRoots {
 public:
     static constexpr uint32_t ID = 2;
+    static constexpr char NAME[] = "TableRoots";
 
     struct Data {
         static constexpr uint32_t TABLE_ID = 0;
@@ -169,6 +172,7 @@ public:
 class Indexes {
 public:
     static constexpr uint32_t ID = 3;
+    static constexpr char NAME[] = "Indexes";
 
     struct Data {
         static constexpr uint32_t TABLE_ID = 0;
@@ -226,6 +230,7 @@ public:
 class Schemas {
 public:
     static constexpr uint32_t ID = 4;
+    static constexpr char NAME[] = "Schemas";
 
     struct Data {
         static constexpr uint32_t TABLE_ID = 0;
@@ -304,6 +309,8 @@ public:
 class TableStats {
 public:
     static constexpr uint32_t ID = 5;
+    static constexpr char NAME[] = "TableStats";
+
 
     struct Data {
         static constexpr uint32_t TABLE_ID = 0;
@@ -348,6 +355,7 @@ class IndexNames {
 public:
     enum class State { NOT_READY, READY, DELETED, BEING_DELETED };
     static constexpr uint32_t ID = 6;
+    static constexpr char NAME[] = "IndexNames";
 
     struct Data {
         static constexpr uint32_t TABLE_ID = 0;
@@ -412,6 +420,7 @@ public:
 class NamespaceNames {
 public:
     static constexpr uint32_t ID = 7;
+    static constexpr char NAME[] = "NamespaceNames";
 
     struct Data {
         static constexpr uint32_t NAMESPACE_ID = 0;
@@ -481,6 +490,7 @@ public:
 class UserTypes {
 public:
     static constexpr uint32_t ID = 8;
+    static constexpr char NAME[] = "UserTypes";
 
     struct Data {
         static constexpr uint32_t TYPE_ID = 0;
@@ -545,6 +555,17 @@ static constexpr std::array<uint32_t, 8> TABLE_IDS = {
     IndexNames::ID,
     NamespaceNames::ID,
     UserTypes::ID
+};
+
+inline const std::map<uint32_t, std::string> SYSTEM_TABLE_NAMES = {
+    {TableNames::ID, TableNames::NAME},
+    {TableRoots::ID, TableRoots::NAME},
+    {Indexes::ID, Indexes::NAME},
+    {Schemas::ID, Schemas::NAME},
+    {TableStats::ID, TableStats::NAME},
+    {IndexNames::ID, IndexNames::NAME},
+    {NamespaceNames::ID, NamespaceNames::NAME},
+    {UserTypes::ID, UserTypes::NAME}
 };
 
 }  // namespace springtail::sys_tbl

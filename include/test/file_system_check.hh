@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <map>
+#include <optional>
 
 #include <sys_tbl_mgr/system_table.hh>
 
@@ -10,7 +11,7 @@ namespace springtail::test {
     class FSCheck
     {
     public:
-        explicit FSCheck(uint64_t max_xid = constant::LATEST_XID, bool all_xids = false);
+        explicit FSCheck(std::optional<uint64_t> db_id, uint64_t max_xid = constant::LATEST_XID, bool all_xids = false);
         ~FSCheck() = default;
 
         /**
@@ -45,6 +46,7 @@ namespace springtail::test {
         uint64_t _max_xid;                              ///< maximum xid
         uint64_t _max_recorded_xid{0};                  ///< maximum xid found in system tables
         bool _all_xids;                                 ///< iterate over all xids
+        std::optional<uint64_t> _db_id;                 ///< optional database id to check
 
         /**
          * @brief Storage for namespace data

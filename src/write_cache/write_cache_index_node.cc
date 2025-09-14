@@ -65,7 +65,7 @@ namespace springtail {
     void
     WriteCacheIndexNode::add(WriteCacheIndexNodePtr entry)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Adding child node: {} to parent: {}\n", entry->dump(), dump());
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Adding child node: {} to parent: {}\n", entry->dump(), dump());
         std::unique_lock<std::shared_mutex> write_lock{mutex};
         children.insert(entry);
     }

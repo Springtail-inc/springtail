@@ -28,6 +28,7 @@ namespace springtail::committer {
         // Set counter for XID for ddls
         _xid_ddl_counter_map[xid].store(index_requests.size());
         for (auto const& index_request: index_requests) {
+            LOG_INFO("Process index request {} for XID: {}@{}, table_id: {}", index_request.action(), db_id, xid, index_request.index().table_id());
             auto &action = index_request.action();
             if (action == "create_index") {
                 build({db_id, xid, index_request});
@@ -277,7 +278,7 @@ namespace springtail::committer {
     {
         constexpr int DROP_CHECK_PERIOD = 1000;
 
-        LOG_DEBUG(LOG_COMMITTER, "Build index: {}:{} - {}", key.first, key.second, idx._index_request.index().id());
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Build index: {}:{} - {}", key.first, key.second, idx._index_request.index().id());
 
         auto [db_id, index_id] = key;
         auto tid = static_cast<uint64_t>(idx._index_request.index().table_id());
@@ -303,7 +304,7 @@ namespace springtail::committer {
         uint64_t current_extent_id = 0;
         uint32_t current_row_id = 0;
 
-        LOG_DEBUG(LOG_COMMITTER, "Indexing build in progress: {}:{}", db_id, index_id);
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexing build in progress: {}:{}", db_id, index_id);
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
@@ -335,7 +336,7 @@ namespace springtail::committer {
             ++current_row_id;
             ++row_cnt;
         }
-        LOG_DEBUG(LOG_COMMITTER, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
         return {root, key, idx, tid};
     }
 
@@ -516,7 +517,7 @@ namespace springtail::committer {
             // truncate and flush again
             _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid);
         } else {
-            LOG_DEBUG(LOG_COMMITTER, "Index reconciliation in progress: {}:{}", db_id, index_id);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index reconciliation in progress: {}:{}", db_id, index_id);
 
             // index column positions
             auto idx_cols = _get_index_cols(idx_state._idx._index_request.index());
@@ -570,7 +571,7 @@ namespace springtail::committer {
             // Clear invalidated extents list
             invalidated_eids.clear();
 
-            LOG_DEBUG(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Initiating Index commit: {}:{}", db_id, index_id);
             _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid);
         }
 

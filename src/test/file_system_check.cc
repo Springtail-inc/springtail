@@ -8,7 +8,7 @@
 using namespace springtail;
 using namespace springtail::test;
 
-FSCheck::FSCheck(uint64_t max_xid, bool all_xids) : _max_xid(max_xid), _all_xids(all_xids)
+FSCheck::FSCheck( std::optional<uint64_t> db_id, uint64_t max_xid, bool all_xids) : _max_xid(max_xid), _all_xids(all_xids), _db_id(db_id)
 {
     // get all database ids
     _databases = Properties::get_databases();
@@ -21,6 +21,10 @@ FSCheck::FSCheck(uint64_t max_xid, bool all_xids) : _max_xid(max_xid), _all_xids
 
     bool vacuumer_enabled = Vacuumer::get_instance()->is_enabled();
     for (const auto &[db_id, db_name]: _databases) {
+        if (_db_id && _db_id != db_id) {
+            continue;
+        }
+
         uint64_t cutoff_xid = 0;
         if (vacuumer_enabled) {
             cutoff_xid = Vacuumer::get_instance()->get_last_seen_cutoff_xid(db_id);

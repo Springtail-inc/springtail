@@ -21,7 +21,7 @@ public:
           _repl_reader(_db_id),
           _pg_log_reader(log_reader)
     {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Starting recovery with last committed xid = {}", _committed_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Starting recovery with last committed xid = {}", _committed_xid);
     }
 
     /**

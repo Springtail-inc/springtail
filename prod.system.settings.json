@@ -1,6 +1,7 @@
 {
   "logging": {
     "log_level": "debug",
+    "log_level_debug" : 1,
     "log_path": "/opt/springtail/logs",
     "log_file_size": 104857600,
     "log_file_count": 10,
@@ -98,7 +99,6 @@
     "key_path": "/opt/springtail/certs/server_key.pem",
     "mode": "primary",
     "shadow_log_path": "/shadow_logs/proxy_shadow.log",
-    "log_level": 2,
     "keep_alive_port": 10080,
     "pool_size_limit": 10,
     "pool_timeout_limit": 5,

@@ -148,10 +148,10 @@ namespace springtail {
          * @return true
          * @return false
          */
-         static bool _has_instance()
-         {
-             return _instance != nullptr;
-         }
+        static bool _has_instance()
+        {
+            return _instance != nullptr;
+        }
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance

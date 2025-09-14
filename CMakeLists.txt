@@ -52,10 +52,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wno-sign-compare -Wuninitialized -fPIC")
 set(CMAKE_CXX_FLAGS_DEBUG "-g3 -gz=zlib-gnu")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_SKIP_TEST_ALL_DEPENDENCY FALSE)
 
+## NOTE: we build release with -DCMAKE_BUILD_TYPE=RelWithDebInfo which overrides this flag
+## and sets -02 -g
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+
 ## add checks for thread data races: https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual
+## NOTE: this increases run time dramatically
 #set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=thread -O2")
 #set(LINK_FLAGS_DEBUG "${LINK_FLAGS_DEBUG} -fsanitize=thread")
 
@@ -108,6 +112,7 @@ endif()
 
 ## source modules
 set(MODULES
+  admin_http
   benchmarks
   common
   grpc

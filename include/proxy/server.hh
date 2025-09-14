@@ -105,9 +105,6 @@ namespace springtail::pg_proxy {
             return _mode;
         }
 
-        /** Set the global log level */
-        void set_log_level(int loglevel);
-
         /** Log new connection */
         void log_connect(SessionPtr session);
 

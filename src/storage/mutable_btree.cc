@@ -465,7 +465,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         for (auto &&i = new_pages.rbegin(); i != new_pages.rend(); i++) {
             auto &page = *i;
 
-            LOG_DEBUG(LOG_BTREE, "Adding branch entry to child extent_id: {}", page->extent_id);
+            LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Adding branch entry to child extent_id: {}", page->extent_id);
 
             // XXX need a better way to create a combined tuple
             auto value = std::make_shared<FieldArray>();
@@ -580,7 +580,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
                     auto page = std::make_shared<Page>(_btree, id, std::move(value_key), std::move(cache_page), _schema);
 
-                    LOG_DEBUG(LOG_BTREE, "Creating MutableBTree Page: {} {}", id, page->extent_id);
+                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Creating MutableBTree Page: {} {}", id, page->extent_id);
 
                     new_pages.push_back(std::move(page));
                 }
@@ -1104,7 +1104,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
                 Extent::Row child_row = *child_itr;
                 auto key = std::make_shared<MutableTuple>(child_keys, &child_row);
 
-                LOG_DEBUG(LOG_BTREE, "Adding root entry to child extent_id: {}", child->extent_id);
+                LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Adding root entry to child extent_id: {}", child->extent_id);
 
                 // XXX need a better way to populate this data
                 auto value = std::make_shared<FieldArray>();

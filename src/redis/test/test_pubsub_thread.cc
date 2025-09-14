@@ -39,13 +39,13 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
 
         pubsub_thread.add_subscriber(channel,
             [this, &received_msg, &channel, &initial_msg]() {
-                LOG_DEBUG(LOG_ALL, "Initialization for channel: {}", channel);
+                LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG1, "Initialization for channel: {}", channel);
                 std::unique_lock data_lock(_data_mutex);
                 received_msg = initial_msg;
                 data_lock.unlock();
             },
             [this, &received_msg, &channel, &initial_msg](const std::string &msg) {
-                LOG_DEBUG(LOG_ALL, "Received message : {}, on channel: {}", msg, channel);
+                LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG1, "Received message : {}, on channel: {}", msg, channel);
                 std::unique_lock data_lock(_data_mutex);
                 ASSERT_EQ(received_msg, initial_msg);
                 received_msg = msg;
@@ -99,10 +99,10 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
         for(std::string *channel = channels; *channel != ""; channel++) {
             pubsub_thread.add_subscriber(*channel,
                 [channel]() {
-                    LOG_DEBUG(LOG_ALL, "Initialization for channel: {}", *channel);
+                    LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG1, "Initialization for channel: {}", *channel);
                 },
                 [this, &received_msg, channel, &initial_msg](const std::string &msg) {
-                    LOG_DEBUG(LOG_ALL, "Received message : {}, on channel: {}", msg, *channel);
+                    LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG1, "Received message : {}, on channel: {}", msg, *channel);
                     std::unique_lock data_lock(_data_mutex);
                     ASSERT_EQ(received_msg, initial_msg);
                     received_msg = msg;
