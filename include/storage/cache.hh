@@ -144,6 +144,12 @@ namespace springtail {
             }
 
         private:
+            /** Holds the details of an async waiter. */
+            struct Waiter {
+                std::promise<void> promise;
+                std::function<void()> callback;
+            };
+
             std::filesystem::path _file; ///< The file containing this extent.
             uint64_t _extent_id; ///< The extent_id of this extent.
             uint32_t _extent_size; ///< The original size of the extent on-disk.  Used for vacuuming.
@@ -154,7 +160,8 @@ namespace springtail {
             std::list<std::shared_ptr<CacheExtent>>::iterator _pos; ///< The position of this entry on it's global LRU list.  Invalid if use count is non-zero.
 
             State _state; ///< The current state of this extent.
-            std::shared_ptr<boost::condition_variable> _flush_cv; ///< A condition variable used to notify waiters when the extent is no longer FLUSHING.
+
+            std::vector<Waiter> _flush_waiters; ///< The list of waiters to notify upon flush completion.
 
             uint64_t _cache_id; ///< A unique ID provided from the DataCache when the CacheExtent is MUTABLE / DIRTY and shouldn't be referenced by extent_id.
         };
@@ -429,7 +436,7 @@ namespace springtail {
              * @brief Returns a future which writes the provided DIRTY extent to disk.  Extent is returned to the MUTABLE state
              * after the flush() is complete.
              */
-            void async_flush(CacheExtentPtr extent, std::function<void()> callback);
+            std::future<void> async_flush(CacheExtentPtr extent, std::function<void()> callback);
 
             /**
              * Invalidates the provided DIRTY extent, ensuring that it is released without being
@@ -470,6 +477,12 @@ namespace springtail {
              *         to be copied to allow for mutations.
              */
             CacheExtentPtr _use_direct(const CacheExtentPtr& extent, bool mark_dirty);
+
+            /**
+             * Helper that takes in an extent that is marked as FLUSHING and blocks until it is no
+             * longer FLUSHING.
+             */
+            void _wait_for_flush(const CacheExtentPtr& extent);
 
             /**
              * Removes an extent from the read cache for use by the write cache.  If the extent is
@@ -514,7 +527,7 @@ namespace springtail {
              *
              * @returns optional future which is nullopt if flush is not needed (not dirty)
              */
-            void _async_flush(CacheExtentPtr extent, std::function<void()> callback);
+            std::future<void> _async_flush(CacheExtentPtr extent, std::function<void()> callback = nullptr);
 
             /**
              * @brief Helper that writes the provided DIRTY extent to disk, updates cache and extent
@@ -989,14 +1002,6 @@ namespace springtail {
              * @return future that returns ordered list of extent IDs that represent the data of the Page.
              */
             std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header, std::function<void(std::vector<uint64_t>)> callback = {});
-
-            /**
-             * @brief Helper that returns extent IDs, ideally called as a continuation of async_flush
-             *
-             * @return vector of extent IDs
-             */
-            std::vector<uint64_t> _get_extent_ids_post_flush();
-
 
         private:
             /** A count of the number of users of this page. */
