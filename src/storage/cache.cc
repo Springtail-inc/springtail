@@ -1247,10 +1247,10 @@ StorageCache::PageCache::background_cleaner()
 
                     // if this was the last outstanding, complete the promise
                     if (!*counter) {
-                        promise->set_value(std::move(*result));
                         if (callback) {
                             callback(*result);
                         }
+                        promise->set_value(std::move(*result));
                     }
                 });
             }
@@ -1264,10 +1264,10 @@ StorageCache::PageCache::background_cleaner()
             lock.unlock();
 
             // if there was no IO to perform, complete immediately
-            promise->set_value(std::move(*result));
             if (callback) {
                 callback(*result);
             }
+            promise->set_value(std::move(*result));
 
             // reacquire the lock
             lock.lock();
