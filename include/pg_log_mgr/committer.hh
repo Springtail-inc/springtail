@@ -13,6 +13,7 @@
 #include <common/redis_types.hh>
 #include <common/properties.hh>
 #include <common/time_trace.hh>
+#include <common/event_frequency.hh>
 
 #include <redis/redis_ddl.hh>
 #include <redis/redis_containers.hh>
@@ -41,6 +42,9 @@ namespace springtail::committer {
      * on-disk copy of the WAL.
      */
     class Committer {
+        INSTRUMENT_INGEST_DATA(EventFrequency<256>, _in_event_freq);
+        INSTRUMENT_INGEST_DATA(EventFrequency<256>, _out_event_freq);
+
     public:
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
                 std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr,

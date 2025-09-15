@@ -549,7 +549,7 @@ namespace springtail::committer {
 
         struct PipelineMetric
         {
-            // log entry is added to the first
+            // log entry is added to the first queue
             std::chrono::steady_clock::time_point ts_log_entry_created;
             // log entry is extracted from the queue
             std::chrono::steady_clock::time_point ts_log_entry_pop;
@@ -565,7 +565,6 @@ namespace springtail::committer {
             std::chrono::steady_clock::time_point ts_msg_entry_pop;
             // message queue size when the message was created
             size_t msg_queue_size; 
-
 
             // message commit start 
             std::chrono::steady_clock::time_point ts_commit_start;
@@ -654,6 +653,14 @@ namespace springtail::committer {
                     pipeline_f.msg_queue_size_f->get_uint64(&row);
 
                     pipeline_metric.ts_commit_start = std::chrono::steady_clock::now();
+
+                    pipeline_metric.commit_queue_size = _worker_queue.size();
+
+                    _in_event_freq.event();
+                    double f = _in_event_freq.frequency();
+                    if (f > std::numeric_limits<double>::min()) {
+                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_IN_EVENT_FREQ, f);
+                    }
                     } )
 
             time_trace::Trace process_row_trace;
@@ -705,7 +712,43 @@ namespace springtail::committer {
             TIME_TRACE_STOP(process_row_trace);
             TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_row-xid_{}", xid.xid), process_row_trace);
 
-            pipeline_metric.ts_commit_end = std::chrono::steady_clock::now();
+            INSTRUMENT_INGEST( {
+                    auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({
+                            {"db_id", std::to_string(db_id)},
+                            {"xid", std::to_string(xid.xid)}
+                            });
+                    pipeline_metric.ts_commit_end = std::chrono::steady_clock::now();
+                    _out_event_freq.event();
+                    double f = _out_event_freq.frequency();
+                    if (f > std::numeric_limits<double>::min()) {
+                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_OUT_EVENT_FREQ, f);
+                    }
+
+                    // Record pipeline latencies 
+                    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        pipeline_metric.ts_commit_end - pipeline_metric.ts_log_entry_created);
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(INGEST_PIPELINE_LATENCIES, duration.count());
+
+                    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        pipeline_metric.ts_log_entry_pop - pipeline_metric.ts_log_entry_created);
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_LATENCIES, duration.count());
+
+                    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        pipeline_metric.ts_msg_entry_pop - pipeline_metric.ts_msg_entry_created
+                        );
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(INGEST_MSG_QUEUE_LATENCIES, duration.count());
+
+                    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        pipeline_metric.ts_commit_start - pipeline_metric.ts_commit_end
+                        );
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_PROC_LATENCIES, duration.count());
+
+
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, pipeline_metric.log_queue_size);
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(INGEST_MSG_QUEUE_SIZE, pipeline_metric.msg_queue_size);
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_QUEUE_SIZE, pipeline_metric.commit_queue_size);
+
+                    } )
         }
     }
 

@@ -18,7 +18,21 @@ namespace springtail {
     // storage cache histogram metrics
     constexpr std::string_view STORAGE_CACHE_FLUSH_LATENCIES = "storage_cache_flush_latencies";
     constexpr std::string_view STORAGE_CACHE_DROP_LATENCIES = "storage_cache_drop_latencies";
-    constexpr std::string_view LOG_READER_EVENT_FREQ = "log_reader_push_freq";
+
+    // ingest histogram metrics
+    constexpr std::string_view LOG_READER_EVENT_FREQ = "log_reader_event_freq";
+    constexpr std::string_view COMMITTER_IN_EVENT_FREQ = "committer_in_event_freq";
+    constexpr std::string_view COMMITTER_OUT_EVENT_FREQ = "committer_out_event_freq";
+
+    constexpr std::string_view LOG_READER_QUEUE_LATENCIES = "log_reader_latencies";
+    constexpr std::string_view INGEST_MSG_QUEUE_LATENCIES = "ingest_msg_queue_latencies";
+    constexpr std::string_view COMMITTER_PROC_LATENCIES = "committer_proc_latencies";
+    constexpr std::string_view INGEST_PIPELINE_LATENCIES = "ingest_pipeline_latencies";
+
+    constexpr std::string_view LOG_READER_QUEUE_SIZE = "log_reader_queue_size";
+    constexpr std::string_view INGEST_MSG_QUEUE_SIZE = "ingest_msg_queue_size";
+    constexpr std::string_view COMMITTER_QUEUE_SIZE = "committer_queue_size";
+
 
     // sys_tbl_mgr counter metrics
     constexpr std::string_view SYS_TBL_MGR_CREATE_INDEX_CALLS = "sys_tbl_mgr_create_index_calls";
@@ -42,6 +56,7 @@ namespace springtail {
     // log manager histogram metrics
     constexpr std::string_view PG_LOG_MGR_LOG_READER_LATENCIES = "pg_log_mgr_log_reader_latencies";
     constexpr std::string_view PG_LOG_MGR_BTREE_LATENCIES = "pg_log_mgr_btree_write_latencies";
+
 
     namespace metrics {
         inline const std::vector<std::pair<std::string_view, std::string_view>> _counter_metrics = {
@@ -86,10 +101,22 @@ namespace springtail {
 
             // log reader metrics
             {LOG_READER_EVENT_FREQ, "Frequency of incoming log reader events"},
+            {COMMITTER_IN_EVENT_FREQ, "Frequency of incoming committer events such as INSERT"},
+            {COMMITTER_OUT_EVENT_FREQ, "Frequency of outgoing/processed committer events."},
+
+            {LOG_READER_QUEUE_LATENCIES, "Time a log entry spends in the log reader queue."},
+            {INGEST_MSG_QUEUE_LATENCIES, "Time PgMsg spends in the next queue."},
+            {COMMITTER_PROC_LATENCIES, "Time takes for the committer to process the message."},
+            {INGEST_PIPELINE_LATENCIES, "Total latency of the ingest pipeline."},
+
+            {LOG_READER_QUEUE_SIZE, "log_reader_queue_size"},
+            {INGEST_MSG_QUEUE_SIZE, "ingest_msg_queue_size"},
+            {COMMITTER_QUEUE_SIZE, "committer_queue_size"},
 
             // log manager histogram metrics
             {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"},
             {PG_LOG_MGR_BTREE_LATENCIES, "Latency between postgres commit and btree write completion"}
+
         };
 
 
