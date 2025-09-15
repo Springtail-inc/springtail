@@ -766,7 +766,7 @@ namespace springtail::committer {
                     open_telemetry::OpenTelemetry::get_instance()->record_histogram(INGEST_MSG_QUEUE_SIZE, pipeline_metric.msg_queue_size);
                     open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_QUEUE_SIZE, pipeline_metric.commit_queue_size);
 
-                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Pipeline metrics (db={}, xid={}): Committer mutation frequency: {}Hz {}", db_id, xid.xid, 
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Pipeline metrics: Committer mutation frequency: {}Hz {}", db_id, xid.xid, 
                             _in_event_freq.frequency(),
                             pipeline_metric.to_string());
                     } )
