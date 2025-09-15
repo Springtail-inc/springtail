@@ -901,6 +901,14 @@ namespace springtail {
             // MUTATIONS
             // note: all mutations will invalidate an Iterator on the page
 
+            enum State {
+                CLEAN = 0,
+                DIRTY = 1,
+                MUTABLE = 2,
+                FLUSHING = 3,
+                INVALID = 4
+            };
+
             /**
              * Inserts the provided tuple into the Page using the provided ExtentSchema.
              */
@@ -943,6 +951,11 @@ namespace springtail {
              * @param target_xid The XID at which the conversion is being performed.
              */
             void convert(VirtualSchemaPtr schema, ExtentSchemaPtr target_schema, uint64_t target_xid);
+
+            State state() const {
+                return _state;
+            }
+
 
         private:
             // HELPER FUNCTIONS
@@ -1006,6 +1019,10 @@ namespace springtail {
         private:
             /** A count of the number of users of this page. */
             std::atomic<uint16_t> _use_count;
+
+            std::shared_ptr<boost::condition_variable_any> _flush_cv; ///< A condition variable used to notify waiters when the page is no longer FLUSHING.
+
+            State _state; ///< The current state of this page
 
             /** A mutex to protect access. */
             mutable boost::shared_mutex _mutex;

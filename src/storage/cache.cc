@@ -678,6 +678,10 @@ StorageCache::PageCache::background_cleaner()
         // note: if the page is empty, we should be calling flush_empty()
         CHECK(!_extents.empty());
 
+        // mark the page as FLUSHING so that mutations will block until flush complete
+        this->_state = Page::State::FLUSHING;
+        this->_flush_cv = std::make_shared<boost::condition_variable_any>();
+
         return _async_flush(std::move(header), std::move(callback));
     }
 
@@ -814,6 +818,10 @@ StorageCache::PageCache::background_cleaner()
                                ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
+
+        auto cv = this->_flush_cv;
+        cv->wait(lock, [this](){ return this->_state != Page::State::FLUSHING; });
+
         _is_dirty = true;
 
         // if the page is empty, do an _append() which handles the empty extent case
@@ -866,6 +874,8 @@ StorageCache::PageCache::background_cleaner()
                                ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
+        auto cv = this->_flush_cv;
+        cv->wait(lock, [this](){ return this->_state != Page::State::FLUSHING; });
         _is_dirty = true;
 
         // perform the internal append
@@ -909,6 +919,8 @@ StorageCache::PageCache::background_cleaner()
                                ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
+        auto cv = this->_flush_cv;
+        cv->wait(lock, [this](){ return this->_state != Page::State::FLUSHING; });
         _is_dirty = true;
 
         // if the page is empty, create an empty extent to back it
@@ -976,6 +988,8 @@ StorageCache::PageCache::background_cleaner()
                                ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
+        auto cv = this->_flush_cv;
+        cv->wait(lock, [this](){ return this->_state != Page::State::FLUSHING; });
         _is_dirty = true;
 
         // extract the key to find the insert position
@@ -1020,6 +1034,8 @@ StorageCache::PageCache::background_cleaner()
                                ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
+        auto cv = this->_flush_cv;
+        cv->wait(lock, [this](){ return this->_state != Page::State::FLUSHING; });
         _is_dirty = true;
 
         // find the extent to modify via lower_bound
@@ -1064,6 +1080,8 @@ StorageCache::PageCache::background_cleaner()
         bool found = false;
 
         boost::unique_lock lock(_mutex);
+        auto cv = this->_flush_cv;
+        cv->wait(lock, [this](){ return this->_state != Page::State::FLUSHING; });
         auto fields = schema->get_fields();
 
         auto extent_i = _extents.begin();
@@ -1108,6 +1126,8 @@ StorageCache::PageCache::background_cleaner()
                                 uint64_t target_xid)
     {
         boost::unique_lock lock(_mutex);
+        auto cv = this->_flush_cv;
+        cv->wait(lock, [this](){ return this->_state != Page::State::FLUSHING; });
         _is_dirty = true;
 
         auto cache = StorageCache::get_instance();
@@ -1208,6 +1228,17 @@ StorageCache::PageCache::background_cleaner()
                     ++(*counter);
                     tasks.push_back({ e, i });
                 } else {
+                    // bring MUTABLE extents to CLEAN
+                    if ((*e)->state() == CacheExtent::State::MUTABLE) {
+                        // return the now MUTABLE extent back to the read cache
+                        cache->_data_cache->reinsert(*e);
+                    }
+
+                    // update the reference with the details of the new extent
+                    ref = e.get_ref();
+                    LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "Flushing extent {} -- new extent {}", _extent_id, ref.id());
+
+                    CHECK(ref.is_clean());
                     result->at(i) = ref.id();
                 }
             }
@@ -1240,7 +1271,9 @@ StorageCache::PageCache::background_cleaner()
 
                     // update the reference with the details of the new extent
                     _extents[task.pos] = task.e.get_ref();
+                    LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "Flushing extent {} -- new extent {}", _extent_id, _extents[task.pos].id());
 
+                    CHECK(_extents[task.pos].is_clean());
                     // store the new extent location
                     result->at(task.pos) = _extents[task.pos].id();
 
@@ -1255,6 +1288,13 @@ StorageCache::PageCache::background_cleaner()
                             callback(*result);
                         }
                         promise->set_value(std::move(*result));
+
+                        // Update the page state to clean
+                        this->_state = Page::State::CLEAN;
+
+                        // notify anyone waiting
+                        this->_flush_cv->notify_all();
+                        this->_flush_cv = nullptr;
                     }
                 });
             }
@@ -1275,6 +1315,14 @@ StorageCache::PageCache::background_cleaner()
 
             // reacquire the lock
             lock.lock();
+
+            // Update the page state to clean
+            this->_state = Page::State::CLEAN;
+
+            // notify anyone waiting
+            this->_flush_cv->notify_all();
+            this->_flush_cv = nullptr;
+
             lock.release();
         }
 
