@@ -540,15 +540,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
     }
 
     std::future<std::vector<std::shared_ptr<MutableBTree::Page>>>
-    MutableBTree::Page::async_flush(uint64_t xid)
-    {
-        return std::async(std::launch::async,
-                &MutableBTree::Page::_get_new_pages_post_flush,
-                this, xid);
-    }
-
-    std::vector<std::shared_ptr<MutableBTree::Page>>
-    MutableBTree::Page::_get_new_pages_post_flush(uint64_t xid)
+    MutableBTree::Page::async_flush(uint64_t xid, std::function<void(std::vector<std::shared_ptr<MutableBTree::Page>>&&)> callback)
     {
         // if the root was split, then remove the root flag from the type
         ExtentType type = (_cache_page->extent_count() > 1)
@@ -561,7 +553,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         auto promise = std::make_shared<std::promise<std::vector<std::shared_ptr<MutableBTree::Page>>>>();
         auto future = promise->get_future();
         LOG_INFO("ABOUT TO FLUSH EXTENTS");
-        _cache_page->async_flush(std::move(header), [p = std::move(promise), this](std::vector<uint64_t> ids){
+        _cache_page->async_flush(std::move(header), [p = std::move(promise), callback = std::move(callback), this](std::vector<uint64_t> ids){
                 std::vector<std::shared_ptr<MutableBTree::Page>> new_pages;
 
                 LOG_INFO("GOT THE NEW EXTENT IDS");
@@ -586,9 +578,12 @@ MutableBTree::lower_bound(TuplePtr search_key,
                 }
 
                 p->set_value(new_pages);
+                if (callback) {
+                    callback(std::move(new_pages));
+                }
         });
 
-        return future.get();
+        return future;
     }
 
     void
@@ -961,40 +956,40 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
     std::future<std::vector<MutableBTree::PagePtr>>
     MutableBTree::_async_flush_page_internal(PagePtr page,
-                                       PagePtr parent)
+                                       PagePtr parent, std::function<void(std::vector<PagePtr>&&)> callback)
     {
-        return std::async(std::launch::async,
-                &MutableBTree::_flush_and_update_branch,
-                this, std::move(page), std::move(parent));
-    }
+        auto promise = std::make_shared<std::promise<std::vector<PagePtr>>>();
+        auto future = promise->get_future();
 
-    std::vector<MutableBTree::PagePtr>
-    MutableBTree::_flush_and_update_branch(PagePtr page,
-                                           PagePtr parent)
-    {
-        auto flush_future = page->async_flush(_xid);
+        page->async_flush(_xid, [page = std::move(page), parent = std::move(parent),
+                p = std::move(promise), callback = std::move(callback), this](std::vector<PagePtr> &&new_pages) {
+            // flush the page's extent(s) to disk
+            // note: it would be nice if we could perform the disk writes without holding the parent
+            //       mutex, but then there is a potential race condition between updating the
+            //       parent's pointers and flushing the parent.  It might be possible with more
+            //       complex logic.
 
-        // flush the page's extent(s) to disk
-        // note: it would be nice if we could perform the disk writes without holding the parent
-        //       mutex, but then there is a potential race condition between updating the
-        //       parent's pointers and flushing the parent.  It might be possible with more
-        //       complex logic.
-        std::vector<PagePtr> &&new_pages = flush_future.get();
+            // lock the parent for exclusive access
+            boost::unique_lock parent_lock(parent->mutex);
 
-        // lock the parent for exclusive access
-        boost::unique_lock parent_lock(parent->mutex);
+            // update the parent's pointers
+            parent->update_branch(page, new_pages, _branch_child_f);
 
-        // update the parent's pointers
-        parent->update_branch(page, new_pages, _branch_child_f);
+            // remove the page from the parent's children
+            parent->remove_child(page->extent_id);
 
-        // remove the page from the parent's children
-        parent->remove_child(page->extent_id);
+            // mark the page as flushed
+            page->flushed = true;
 
-        // mark the page as flushed
-        page->flushed = true;
+            p->set_value(new_pages);
 
-        return std::move(new_pages);
+            if (callback) {
+                callback(std::move(new_pages));
+            }
 
+        });
+
+        return future;
     }
 
     std::vector<MutableBTree::PagePtr>
@@ -1038,27 +1033,33 @@ MutableBTree::lower_bound(TuplePtr search_key,
             _cache_evict(page->extent_id);
             return std::nullopt;
         } else {
-            return std::async(std::launch::async,
-                    &MutableBTree::_flush_and_update_cache,
-                    this, std::move(page), std::move(parent), std::move(data_lock));
+            return _flush_and_update_cache(std::move(page), std::move(parent), std::move(data_lock));
         }
     }
 
-    void
+    std::future<void>
     MutableBTree::_flush_and_update_cache(PagePtr page, PagePtr parent,
         boost::unique_lock<boost::shared_mutex> data_lock)
     {
-        auto flush_future = _async_flush_page_internal(page, parent);
-        // perform the actual page flush
-        std::vector<PagePtr> &&new_pages = flush_future.get();
+        auto promise = std::make_shared<std::promise<void>>();
+        auto future = promise->get_future();
 
-        // evict the page from the cache and add the new pages
-        boost::unique_lock cache_lock(_cache->mutex);
+        auto flush_future = _async_flush_page_internal(page, parent,
+            [page = std::move(page),
+            p = std::move(promise), data_lock_ref = &data_lock, this](std::vector<PagePtr> &&new_pages) {
 
-        _cache_evict(page->extent_id);
-        for (auto &&new_page : new_pages) {
-            _cache_insert(new_page, cache_lock);
-        }
+            // evict the page from the cache and add the new pages
+            boost::unique_lock cache_lock(_cache->mutex);
+
+            _cache_evict(page->extent_id);
+            for (auto &&new_page : new_pages) {
+                _cache_insert(new_page, cache_lock);
+            }
+
+            p->set_value();
+        });
+
+        return future;
     }
 
     MutableBTree::PagePtr

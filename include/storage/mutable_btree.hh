@@ -287,7 +287,8 @@ namespace springtail {
              *
              * @returns future which in turn returns vector of PagePtr
              */
-            std::future<std::vector<std::shared_ptr<Page>>> async_flush(uint64_t xid);
+            std::future<std::vector<std::shared_ptr<Page>>> async_flush(uint64_t xid,
+                    std::function<void(std::vector<std::shared_ptr<MutableBTree::Page>>&&)> callback = {});
 
             /**
              * Specialized case for flushing an empty root page.  Assumes that the caller is holding
@@ -671,7 +672,8 @@ namespace springtail {
          * @param parent The parent of the page being flushed.
          * @returns future which in turn returns vector of PagePtr
          */
-        std::future<std::vector<PagePtr>> _async_flush_page_internal(PagePtr page, PagePtr parent);
+        std::future<std::vector<PagePtr>> _async_flush_page_internal(PagePtr page, PagePtr parent,
+                    std::function<void(std::vector<std::shared_ptr<MutableBTree::Page>>&&)> callback = {});
 
         /**
          * Flushes the provided Page to disk.  Also ensures that any children of the page are
@@ -773,7 +775,7 @@ namespace springtail {
          * @param parent    The parent of the page being flushed.
          * @param data_lock exclusive lock on the page's disk mutex
          */
-        void _flush_and_update_cache(PagePtr page, PagePtr parent, boost::unique_lock<boost::shared_mutex> data_lock);
+        std::future<void> _flush_and_update_cache(PagePtr page, PagePtr parent, boost::unique_lock<boost::shared_mutex> data_lock);
 
         //// ITERATOR SUPPORT
     public:
