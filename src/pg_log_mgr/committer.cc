@@ -571,6 +571,24 @@ namespace springtail::committer {
             std::chrono::steady_clock::time_point ts_commit_end;
             size_t commit_queue_size; 
 
+            std::string to_string() const {
+                return std::format("Total time: {} "
+                        "Logger queue time: {} "
+                        "Msg queue time {} "
+                        "Commit time {} "
+                        "Msg exit to Commit enter time {} "
+                        "Logger queue size {} "
+                        "Msg queue size {} "
+                        "Committer queue size {} ",
+                        ts_commit_end - ts_log_entry_created,
+                        ts_log_entry_pop - ts_log_entry_pop,
+                        ts_msg_entry_pop - ts_msg_entry_created,
+                        ts_commit_end - ts_commit_start,
+                        ts_commit_start - ts_msg_entry_pop,
+                        log_queue_size, msg_queue_size, commit_queue_size
+                        );
+            }
+
         };
 
         // get the schema at the given XID/LSN
@@ -748,6 +766,9 @@ namespace springtail::committer {
                     open_telemetry::OpenTelemetry::get_instance()->record_histogram(INGEST_MSG_QUEUE_SIZE, pipeline_metric.msg_queue_size);
                     open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_QUEUE_SIZE, pipeline_metric.commit_queue_size);
 
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Pipeline metrics (db={}, xid={}): Committer mutation frequency: {}Hz {}", db_id, xid.xid, 
+                            _in_event_freq.frequency(),
+                            pipeline_metric.to_string());
                     } )
         }
     }

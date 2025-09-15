@@ -1,5 +1,7 @@
 #pragma once
 
+#define PROFILE_INGEST
+
 #ifdef PROFILE_INGEST
 #define PROFILE_INGEST_ENABLED
 #define INSTRUMENT_INGEST_DATA(type, name) type name;

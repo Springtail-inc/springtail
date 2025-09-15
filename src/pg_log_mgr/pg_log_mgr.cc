@@ -794,10 +794,6 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            INSTRUMENT_INGEST( {
-                        log_entry->ts_pop = std::chrono::steady_clock::now();
-                    } )
-
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Got log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
@@ -818,7 +814,7 @@ namespace springtail::pg_log_mgr {
 
                 _internal_state.set(STATE_RUNNING);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Sync to complete");
-
+                
                 continue;
             }
 
@@ -832,6 +828,10 @@ namespace springtail::pg_log_mgr {
                 last_timestamp = *file_timestamp;
                 last_path = log_entry->path;
             }
+
+            INSTRUMENT_INGEST( {
+                    log_entry->ts_pop = std::chrono::steady_clock::now();
+                    } )
 
             _pg_log_reader->process_log(log_entry->path, last_timestamp,
                                         log_entry->start_offset, log_entry->end_offset, log_entry);

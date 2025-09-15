@@ -317,8 +317,10 @@ namespace springtail::pg_log_mgr {
         entry.op_f->set_uint8(&row, T);
         entry.lsn_f->set_uint64(&row, _lsn++);
 
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
         INSTRUMENT_INGEST( {
+                msg->ts_pop = std::chrono::steady_clock::now();
                 entry.ts_msg_created_f->set_uint64(&row, time_point_to_numeric(msg->ts_created));
                 entry.ts_msg_pop_f->set_uint64(&row, time_point_to_numeric(msg->ts_pop));
                 entry.msg_queue_size_f->set_uint64(&row, msg->msg_queue_size);
@@ -326,8 +328,6 @@ namespace springtail::pg_log_mgr {
                 entry.ts_log_entry_pop_f->set_uint64(&row, time_point_to_numeric(msg->ts_log_entry_pop));
                 entry.log_queue_size_f->set_uint64(&row, msg->log_queue_size);
                 } )
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
         // XXX we need some way to limit the total memory used by a batch across all extents
 
@@ -935,11 +935,6 @@ namespace springtail::pg_log_mgr {
             if (msg == nullptr) {
                 continue; // timeout, check for shutdown
             }
-
-            INSTRUMENT_INGEST(
-                    {
-                        msg->ts_pop = std::chrono::steady_clock::now();
-                    })
 
             _process_msg(msg);
         }

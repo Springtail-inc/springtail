@@ -101,7 +101,7 @@ namespace springtail {
 
             // log reader metrics
             {LOG_READER_EVENT_FREQ, "Frequency of incoming log reader events"},
-            {COMMITTER_IN_EVENT_FREQ, "Frequency of incoming committer events such as INSERT"},
+            {COMMITTER_IN_EVENT_FREQ, "Frequency of mutation events in committer"},
             {COMMITTER_OUT_EVENT_FREQ, "Frequency of outgoing/processed committer events."},
 
             {LOG_READER_QUEUE_LATENCIES, "Time a log entry spends in the log reader queue."},

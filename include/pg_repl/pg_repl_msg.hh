@@ -4,11 +4,9 @@
 #include <variant>
 #include <chrono>
 
-#define PROFILE_INGEST
 #include <pg_repl/pg_repl_instrument.hh>
-
 #if defined(PROFILE_INGEST) && !defined(PROFILE_INGEST_ENABLED)
-static_assert(false, "This error means that <logging.hh> was included before PROFILE_INGEST is set.");
+static_assert(false, "This error means that <pg_repl_instrument.hh> was included before PROFILE_INGEST is set.");
 #endif
 
 #include <pg_repl/pg_types.hh>
