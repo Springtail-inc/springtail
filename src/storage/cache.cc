@@ -1201,6 +1201,10 @@ StorageCache::PageCache::background_cleaner()
                 //     actually need to read it in again here, we just need to get the extent ID
                 auto &&e = ref.make_safe_extent(_file);
                 if ((*e)->state() == CacheExtent::State::DIRTY) {
+                    // update the extent header
+                    (*e)->header() = header;
+
+                    // increment the counter of dirty pages and add it to the task list
                     ++(*counter);
                     tasks.push_back({ e, i });
                 } else {
