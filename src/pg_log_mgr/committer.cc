@@ -572,14 +572,14 @@ namespace springtail::committer {
             size_t commit_queue_size; 
 
             std::string to_string() const {
-                return std::format("Total time: {} "
-                        "Logger queue time: {} "
-                        "Msg queue time {} "
-                        "Commit time {} "
-                        "Msg exit to Commit enter time {} "
-                        "Logger queue size {} "
-                        "Msg queue size {} "
-                        "Committer queue size {} ",
+                return std::format("Total latency: {}, "
+                        "Logger queue latency: {}, "
+                        "Msg queue latency: {}, "
+                        "Commit latency: {}, "
+                        "Msg exit to Commit enter latency: {}, "
+                        "Logger queue size: {}, "
+                        "Msg queue size: {}, "
+                        "Committer queue size: {} ",
                         ts_commit_end - ts_log_entry_created,
                         ts_log_entry_pop - ts_log_entry_pop,
                         ts_msg_entry_pop - ts_msg_entry_created,
