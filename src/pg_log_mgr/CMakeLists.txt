@@ -39,6 +39,15 @@ target_link_libraries(pg_log_mgr_daemon
 )
 add_dsymutil_command(pg_log_mgr_daemon)
 
+add_executable(test_reconnect test/test_reconnect.cc)
+target_include_directories(test_reconnect
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_reconnect
+    PUBLIC springtail_pglog
+    PRIVATE Boost::program_options
+)
+
 ## unit tests
 springtail_unit_test(test_xact_log
   SOURCES test/test_xact_log.cc
@@ -56,6 +65,12 @@ springtail_unit_test(test_pg_log_indexer
   SOURCES test/test_indexer.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_pglog springtail_test GTest::gtest_main
+)
+
+springtail_unit_test(test_log_repair
+  SOURCES test/test_log_repair.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_pglog GTest::gtest_main
 )
 
 # dump_repl_log

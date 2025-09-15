@@ -41,6 +41,7 @@ int main(int argc, char* argv[])
     desc.add_options()("outfile,o", po::value<std::filesystem::path>(&outfile)->default_value(std::filesystem::path("wal.log")), "WAL output file");
     desc.add_options()("publication,b", po::value<std::string>(&pub_name)->default_value("springtail"), "Publication name");
     desc.add_options()("slot,s", po::value<std::string>(&slot_name)->default_value("springtail"), "Slot name; if none specified slot will be created");
+    desc.add_options()("lsn,l", po::value<LSN_t>(&lsn)->default_value(INVALID_LSN), "LSN to start streaming from; if none specified will use current LSN on server");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -68,14 +69,22 @@ int main(int argc, char* argv[])
     LOG_INFO("Connecting to postgres server: host={}\n", host);
 
     // create slot if need be; retrieve restart LSN and last flushed lsn
-    create_slot = !pg_conn.check_slot_exists(restart_lsn, lsn);
+    LSN_t flushed_lsn;
+    create_slot = !pg_conn.check_slot_exists(restart_lsn, flushed_lsn);
+
+    LOG_INFO("Restart LSN: {}, Last Flushed LSN: {}\n", restart_lsn, flushed_lsn);
 
     if (create_slot) {
         LOG_INFO("Creating replication slot: name={}\n", slot_name);
         pg_conn.create_replication_slot();
     }
 
+    if (lsn == INVALID_LSN) {
+        lsn = flushed_lsn;
+    }
+
     // start steaming
+    LOG_INFO("Starting streaming: lsn={}\n", lsn);
     pg_conn.start_streaming(lsn, true);
 
     // open output file

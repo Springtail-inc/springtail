@@ -1,5 +1,3 @@
-#include "pg_repl/pg_repl_msg.hh"
-
 #include <iostream>
 #include <stdlib.h>
 #include <stdio.h>
@@ -10,6 +8,7 @@
 #include <common/common.hh>
 #include <common/exception.hh>
 
+#include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_msg_stream.hh>
 
@@ -33,11 +32,49 @@ namespace springtail {
     }
 
     void
-    PgMsgLogGen::_write(const char *data, size_t size)
+    PgMsgLogGen::finalize_message()
     {
-        if (::fwrite(data, size, 1, _fp) < 0) {
+        if (_buffer_offset == 0) {
+            return;
+        }
+
+        // encode and write the header
+        PgMsgStreamHeader header{_buffer_offset, _last_commit_lsn};
+        char header_buf[PgMsgStreamHeader::SIZE];
+        header.encode_header(header_buf);
+        if (::fwrite(header_buf, sizeof(header_buf), 1, _fp) != 1) {
             throw Error("Failed to write to file: " + _file_name.string());
         }
+
+        // write the buffer
+        if (::fwrite(_buffer, _buffer_offset, 1, _fp) != 1) {
+            throw Error("Failed to write to file: " + _file_name.string());
+        }
+
+        // rotate the LSN
+        _log_written += _buffer_offset;
+        if (_log_written > 500 || (_buffer[0] == pg_msg::MSG_COMMIT ||
+                                   _buffer[0] == pg_msg::MSG_STREAM_COMMIT)) {
+
+            if (_buffer[0] == pg_msg::MSG_COMMIT ||
+                _buffer[0] == pg_msg::MSG_STREAM_COMMIT) {
+                _last_commit_lsn = _begin_lsn;
+            }
+
+            _lsn++;
+            _log_written = 0;
+        }
+
+        _buffer_offset = 0;
+    }
+
+    void
+    PgMsgLogGen::_write(const char *data, size_t size)
+    {
+        CHECK(size + _buffer_offset < sizeof(_buffer))
+            << "Buffer overflow in PgMsgLogGen::_write";
+        std::memcpy(_buffer + _buffer_offset, data, size);
+        _buffer_offset += size;
     }
 
     void
@@ -66,8 +103,6 @@ namespace springtail {
         _write_uint32(json_string.size());
 
         _write(json_string.c_str(), json_string.size());
-
-        _lsn++;
     }
 
     nlohmann::json
@@ -332,8 +367,6 @@ namespace springtail {
         _write_uint64(_commit_ts);
         _write_uint32(_xid);
 
-        _lsn++;
-
         return _xid;
     }
 
@@ -353,8 +386,6 @@ namespace springtail {
 
         // increment xid
         _xid++;
-
-        _lsn++;
     }
 
     void
@@ -367,8 +398,6 @@ namespace springtail {
         _write_uint32(1); // number of tables
         _write_uint8(1);  // options for truncate=1
         _write_uint32(table_id);
-
-        _lsn++;
     }
 
     void
@@ -381,8 +410,6 @@ namespace springtail {
         _write_uint32(table_id);
         _write_uint8('N'); // new tuple
         _write_tuple(table_id, _schema_map[table_id], row_columns);
-
-        _lsn++;
     }
 
     void
@@ -404,8 +431,6 @@ namespace springtail {
         _write_tuple(table_id, _pkey_map[table_id], key_columns);
         _write_uint8('N'); // new tuple
         _write_tuple(table_id, _schema_map[table_id], row_columns);
-
-        _lsn++;
     }
 
     void
@@ -424,8 +449,6 @@ namespace springtail {
             _write_uint8('O'); // old tuple
         }
         _write_tuple(table_id, _pkey_map[table_id], key_columns);
-
-        _lsn++;
     }
 
     void
@@ -446,8 +469,6 @@ namespace springtail {
         _write_uint8(stream_flag);
 
         _is_streaming = true;
-
-        _lsn++;
     }
 
     void
@@ -457,8 +478,6 @@ namespace springtail {
         _write_uint8(pg_msg::MSG_STREAM_STOP);
 
         _is_streaming = false;
-
-        _lsn++;
     }
 
     void
@@ -470,7 +489,8 @@ namespace springtail {
         _write_uint8(pg_msg::MSG_STREAM_COMMIT);
         _write_uint32(_stream_xid);
         _write_uint8(0); // unused flags
-        _write_uint64(_begin_lsn); // consistent with commit
+        // XXX using begin_lsn isn't exactly right, but it works for now
+        _write_uint64(++_begin_lsn); // consistent with commit
         _write_uint64(commit_lsn);
         _write_uint64(get_pgtime_in_millis());
 
@@ -479,8 +499,6 @@ namespace springtail {
         std::cout << "stream commit end offset=" << ::ftell(_fp) << std::endl;
 
         _in_stream_xact = false;
-
-        _lsn++;
     }
 
     void
@@ -495,8 +513,6 @@ namespace springtail {
         _write_uint32(_stream_xid); // sub-transaction
 
         _in_stream_xact = false;
-
-        _lsn++;
     }
 
     void
@@ -516,8 +532,6 @@ namespace springtail {
         msg["table"] = table_name;
 
         _write_message(pg_msg::MSG_PREFIX_ATTACH_PARTITION, msg);
-
-        _lsn++;
     }
 
     void
@@ -537,8 +551,6 @@ namespace springtail {
         msg["table"] = table_name;
 
         _write_message(pg_msg::MSG_PREFIX_DETACH_PARTITION, msg);
-
-        _lsn++;
     }
 
     void
@@ -583,7 +595,10 @@ namespace springtail {
             if (line[0] == '{') {
                 // Convert each line to a json object using the nlohmann::json library
                 nlohmann::json json = nlohmann::json::parse(line);
+                // parse the command, and generate the appropriate log message
                 _parse_command(json);
+                // sync the message to disk
+                _log_gen.finalize_message();
             }
             free(line);
             line = nullptr;

@@ -75,7 +75,6 @@ namespace springtail::pg_log_mgr {
                 PgLogQueueEntryPtr &entry = _queue.back();
                 if (entry->path == path && entry->end_offset == start_offset) {
                     entry->end_offset = end_offset;
-                    entry->num_messages++;
                     return;
                 }
             }

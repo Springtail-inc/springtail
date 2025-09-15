@@ -65,7 +65,7 @@ namespace springtail
      * @param i value to copy into buffer
      * @param buffer pointer to preallocated buffer
      */
-    static inline void sendint64(int64_t i, char *buffer)
+    static inline void sendint64(int64_t i, char * const buffer)
     {
          int64_t n64 = pg_hton64(i);
          std::memcpy(buffer, &n64, 8);
@@ -77,7 +77,7 @@ namespace springtail
      * @param i value to copy into buffer
      * @param buffer pointer to preallocated buffer
      */
-    static inline void sendint32(int32_t i, char *buffer)
+    static inline void sendint32(int32_t i, char * const buffer)
     {
          int32_t n32 = pg_hton32(i);
          std::memcpy(buffer, &n32, 4);
@@ -89,7 +89,7 @@ namespace springtail
      * @param i value to copy into buffer
      * @param buffer pointer to preallocated buffer
      */
-    static inline void sendint16(int16_t i, char *buffer)
+    static inline void sendint16(int16_t i, char * const buffer)
     {
          int16_t n16 = pg_hton16(i);
          std::memcpy(buffer, &n16, 2);
@@ -100,7 +100,7 @@ namespace springtail
      * @param i value to copy into buffer
      * @param buffer pointer to preallocated buffer
      */
-    static inline void sendint8(int8_t i, char *buffer)
+    static inline void sendint8(int8_t i, char * const buffer)
     {
         *buffer = i;
     }

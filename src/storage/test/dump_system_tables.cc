@@ -39,7 +39,7 @@ main(int argc,
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 
-        std::cout << fmt::format("TABLE: {}", table_id) << std::endl;
+        std::cout << fmt::format("\nTABLE: {} ({})\n", sys_tbl::SYSTEM_TABLE_NAMES.at(table_id), table_id);
 
         for (const auto &name : schema->column_order()) {
             std::cout << name << ":";
