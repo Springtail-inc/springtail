@@ -62,7 +62,8 @@ namespace springtail {
                                 return {{ "status", "Invalid module name"}};
                             }
                         }
-                        return {{ "status", "ok"}};;
+                        return {{ "status", "ok"},
+                                {"result", logging::Logger::get_instance()->get_stats()}};;
                     });
                 });
 
