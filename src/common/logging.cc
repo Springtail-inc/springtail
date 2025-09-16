@@ -172,8 +172,9 @@ namespace springtail::logging {
             {"debug_level", _debug_log_level.load(std::memory_order_relaxed)},
             {"module_mask", {}}
         };
+        uint32_t current_mask = _log_mask.load();
         for (auto &[name, mask]: _log_module_map) {
-            if ((mask & _log_mask.load()) == mask) {
+            if ((mask & current_mask) == mask) {
                 stats["module_mask"][name] = true;
             } else {
                 stats["module_mask"][name] = false;
