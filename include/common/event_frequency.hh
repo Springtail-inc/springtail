@@ -14,7 +14,7 @@ namespace springtail {
 
         using clock = std::chrono::steady_clock;
 
-        EventFrequency() : _time_intervals(WindowSize)
+        EventFrequency() : _time_intervals{WindowSize}
         {}
 
         /** New event */

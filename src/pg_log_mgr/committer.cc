@@ -583,7 +583,7 @@ namespace springtail::committer {
                         "Msg queue size: {}, "
                         "Committer queue size: {} ",
                         ts_commit_end - ts_log_entry_created,
-                        ts_log_entry_pop - ts_log_entry_pop,
+                        ts_log_entry_pop - ts_log_entry_created,
                         ts_msg_entry_pop - ts_msg_entry_created,
                         ts_commit_end - ts_commit_start,
                         ts_commit_start - ts_msg_entry_pop,
