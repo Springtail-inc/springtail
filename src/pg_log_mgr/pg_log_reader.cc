@@ -970,7 +970,7 @@ namespace springtail::pg_log_mgr {
 
         // consume messages from log; end offset of -1 means go until eos
         bool eos = false; // end of stream
-        while ((entry->end_offset == -1 || _reader.offset() < entry->end_offset) && !eos) {
+        while ((entry->end_offset == static_cast<uint64_t>(-1) || _reader.offset() < entry->end_offset) && !eos) {
             // read next message
             PgMsgPtr msg = _reader.read_message(filter, eos);
 
