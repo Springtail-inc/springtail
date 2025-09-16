@@ -80,20 +80,6 @@ namespace springtail {
             _process_request();
         }
 
-    protected:
-        /**
-         * @brief Compress data helper function
-         * @param data vector of data vectors to compress
-         * @param compressor compressor object to use
-         * @param compressed_data output vector for compressed data
-         * @param is_compressed flag indicating if compressed data should be used
-         * @return int32_t size or error code
-         */
-        int32_t _compress_data(const std::vector<std::shared_ptr<std::vector<char>>> &data,
-                               std::shared_ptr<Compressor> compressor,
-                               std::vector<char>* compressed_data,
-                               bool &is_compressed);
-
     private:
         /**
          * @brief Entry from worker thread for processing io request

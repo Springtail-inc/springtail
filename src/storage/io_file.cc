@@ -235,7 +235,7 @@ namespace springtail {
         }
     }
 
-#if 1
+#if 0
     /**
      * Debugging dump header in readable format
      */
@@ -315,7 +315,7 @@ namespace springtail {
             request->complete(response, errno);
             return;
         }
-        DCHECK_GE(hdr_read, 12);
+        DCHECK_GE(hdr_read, IOFile::EXT_HDR_SIZE);
 
         // verify header and determine if block is compressed
         bool is_compressed = false;
@@ -348,7 +348,7 @@ namespace springtail {
         uint64_t hash;
         std::copy_n(&hdr[4], sizeof(uint64_t), reinterpret_cast<char *>(&hash));
 
-        dump_hdr(hdr, IOFile::EXT_HDR_SIZE + IOFile::VEC_HDR_SIZE * count);
+        // dump_hdr(hdr, IOFile::EXT_HDR_SIZE + IOFile::VEC_HDR_SIZE * count); // keep for debugging
 
         int hdr_off = IOFile::EXT_HDR_SIZE;
 
@@ -488,23 +488,71 @@ namespace springtail {
             DCHECK_LE(hdr_off, (IOFile::EXT_HDR_SIZE + IOFile::VEC_HDR_SIZE * count));
         }
 
-        dump_hdr(hdr, hdr_off);
+        // dump_hdr(hdr, hdr_off); // keep for debugging
 
         // do the write
         int bytes_written = ::pwritev(_fd, iov, count+1, offset);
         if (bytes_written > 0) {
             CHECK_EQ(bytes_written, total_size);
         } else if (bytes_written < 0) {
-            LOG_ERROR("Received write error: errno={}", errno);
+            return bytes_written;
         }
 
-        return bytes_written;  // either > 0 on success, or -1 on error with errno set
+        return bytes_written;  // either > 0 on success, or -1 on error
+    }
+
+    int32_t
+    IOSysFH::_compress_data(const std::vector<std::shared_ptr<std::vector<char>>> &data,
+                            std::vector<char>* compressed_data,
+                            bool &is_compressed)
+    {
+        uint8_t count = data.size();
+        DCHECK(count <= IOHandle::MAX_VECTORS);
+
+        // compress data and compute total uncompressed size
+        uint32_t compressed_size = 0;
+        uint32_t size = 0;
+
+        auto io_mgr = IOMgr::get_instance();
+        auto compressor = io_mgr->get_compressor();
+        try {
+            // iterate through vectors and compress them
+            for (int i = 0; i < count; i++) {
+                compressor->compress_raw(data[i], compressed_data[i]);
+                compressed_size += compressed_data[i].size();
+                size += data[i]->size();
+            }
+
+            io_mgr->put_compressor(compressor);
+
+        } catch (ValidationError &exc) {
+            LOG_ERROR("Exception while compressing data");
+            LOG_ERROR("Exception: {}", exc.what());
+
+            io_mgr->put_compressor(compressor);
+
+            return -2; // decode error
+        }
+
+        // if compression isn't helping then don't compress
+        if (size <= compressed_size) {
+            // don't compress
+            is_compressed = false;
+
+            LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "Not compressing data, compressed size too big: {} vs {}",
+                            compressed_size, size);
+
+            return size;
+        }
+
+        is_compressed = true;
+
+        return compressed_size;
     }
 
     void
     IOSysFH::append(IORequestAppend * const request,
-                    const struct iovec *data_ptrs,
-                    bool is_compressed)
+                    bool is_compressable)
     {
         // default error response
         std::shared_ptr<IOResponseAppend> response = std::make_shared<IOResponseAppend>(request);
@@ -518,21 +566,55 @@ namespace springtail {
             return;
         }
 
-        // reserve space for append; iterate through iovec to get total size
-        uint64_t total_size = IOFile::EXT_HDR_SIZE + IOFile::VEC_HDR_SIZE * data_count;
-        for (size_t i = 0; i < data_count; i++) {
-            total_size += data_ptrs[i].iov_len;
+        // compress data if file is compressable
+        std::vector<char> compressed_data[IOHandle::MAX_VECTORS];
+        bool is_data_compressed = is_compressable;
+        if (is_compressable) {
+            // compress the data, this may change is_data_compressed flag to false if it
+            // isn't worth compressing
+            // data is compressed into a std::vector<char> array which will deallocate
+            // automatically at the end of this function
+            if (_compress_data(request->data, compressed_data, is_data_compressed) < 0) {
+                // compression error
+                request->complete(response, IOStatus::ERR_DECODE);
+                return;
+            }
         }
+
+        // unfortunately the uncompressed data and compressed data are in different vector
+        // formats, so we need to normalize them to an iovec of raw pointers
+        struct iovec data_ptrs[IOHandle::MAX_VECTORS];
+        uint64_t total_size = IOFile::EXT_HDR_SIZE + IOFile::VEC_HDR_SIZE * data_count;
+        if (is_data_compressed) {
+            for (size_t i = 0; i < request->data.size(); i++) {
+                data_ptrs[i].iov_base = compressed_data[i].data();
+                data_ptrs[i].iov_len = compressed_data[i].size();
+                total_size += data_ptrs[i].iov_len;
+            }
+        } else {
+            for (size_t i = 0; i < request->data.size(); i++) {
+                data_ptrs[i].iov_base = request->data[i].get()->data();
+                data_ptrs[i].iov_len = request->data[i]->size();
+                total_size += data_ptrs[i].iov_len;
+            }
+        }
+
+        // reserve space for this length and seek to offset after reserving space
         auto offset = _io_file->reserve_offset(total_size);
         response->offset = offset;
+        if (::lseek(_fd, response->offset, SEEK_SET) == (off_t)-1) {
+            request->complete(response, errno);
+            return;
+        }
 
         // issue write
-        int bytes_written = _internal_write(request->data, data_ptrs, offset, is_compressed);
+        int bytes_written = _internal_write(request->data, data_ptrs, offset, is_data_compressed);
         if (bytes_written < 0) {
             if (bytes_written == -1) {
-                request->complete(response, errno);
-            } else if (bytes_written == -2) {
-                request->complete(response, IOStatus::ERR_DECODE);
+                auto err = errno;
+                // make sure no logs come before we copy errno...
+                LOG_ERROR("Received write error: errno={}", err);
+                request->complete(response, err);
             }
             return;
         }
@@ -569,7 +651,7 @@ namespace springtail {
         size_t count = request->data.size();
         DCHECK_LE(count, IOHandle::MAX_VECTORS);
         for (size_t i = 0; i < count; i++) {
-            data_ptrs[i].iov_base = request->data[i].get();
+            data_ptrs[i].iov_base = request->data[i].get()->data();
             data_ptrs[i].iov_len = request->data[i]->size();
         }
 

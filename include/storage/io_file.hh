@@ -52,6 +52,17 @@ namespace springtail {
          */
         uint64_t _compute_hash(const std::vector<std::shared_ptr<std::vector<char>>> &data) const;
 
+        /**
+         * @brief Compress data helper function
+         * @param data vector of data vectors to compress
+         * @param compressed_data output vector for compressed data
+         * @param is_compressed flag indicating if compressed data should be used
+         * @return int32_t compressed size or error code
+         */
+        int32_t _compress_data(const std::vector<std::shared_ptr<std::vector<char>>> &data,
+                               std::vector<char>* compressed_data,
+                               bool &is_compressed);
+
     public:
         std::atomic<bool> is_busy;  ///< indicates fh is busy with io for a worker
 
@@ -85,12 +96,9 @@ namespace springtail {
         /**
          * @brief Append data to end of file, file may be compressed or not
          * @param data       vector of data vectors to write out
-         * @param data_ptrs  array of iovec structures describing the data to write;
-         *                   may be compressed or uncompressed data
          * @param is_compressed should compression be attempted
          */
         void append(IORequestAppend *const request,
-                    const struct iovec *data_ptrs,
                     bool is_compressed);
 
         /**

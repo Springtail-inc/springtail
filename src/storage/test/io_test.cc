@@ -77,6 +77,16 @@ sync_append(std::shared_ptr<springtail::IOHandle> fh_write,
     for (int i = 0; i < count; i++) {
         std::shared_ptr<std::vector<char>> data = gen_data(len);
         datavec[i] = data;
+
+        if (len <= 16) {
+            // dump the data as hex
+            char dump[36];
+            for (size_t j=0; j < data->size(); j++) {
+                sprintf(&dump[j*2], "%02x", (0xFF & (*data)[j]));
+            }
+            dump[data->size()*2] = 0;
+            std::cout << "  - vec[" << i << "] len=" << data->size() << " data=" << dump << std::endl;
+        }
     }
 
     std::shared_ptr<springtail::IOResponseAppend> write_response = fh_write->append(datavec);
@@ -156,7 +166,6 @@ public:
                 std::filesystem::remove(path);
             }
         }
-
         springtail::springtail_shutdown();
     }
 };
@@ -201,13 +210,11 @@ TEST_F(IOTest, FHTests)
         std::string path = fo.first;
         std::filesystem::remove(path);
     }
-
-    IOMgr->shutdown(); // don't use IOMgr past this point
 }
 
 TEST_F(IOTest, IOTests)
 {
-    const char *FILE1 = "/tmp/testfile";
+    const char *FILE1 = "/tmp/testfile1";
     const char *FILE2 = "/tmp/testfile2";
 
     std::filesystem::remove(FILE1);
@@ -254,6 +261,50 @@ TEST_F(IOTest, IOTests)
     // cleanup
     std::filesystem::remove(FILE1);
     std::filesystem::remove(FILE2);
+}
 
-    IOMgr->shutdown(); // don't use IOMgr past this point
+TEST_F(IOTest, AsyncAppendTest)
+{
+    const char *FILE = "/tmp/testfile3";
+    std::filesystem::remove(FILE);
+
+    springtail::IOMgr *IOMgr = springtail::IOMgr::get_instance();
+
+    // open file for append and read
+    std::shared_ptr<springtail::IOHandle> fh_append = IOMgr->open(FILE, springtail::IOMgr::IO_MODE::APPEND, true);
+    std::shared_ptr<springtail::IOHandle> fh_read = IOMgr->open(FILE, springtail::IOMgr::IO_MODE::READ, true);
+
+    const int num_appends = 10;
+    std::vector<std::shared_ptr<std::vector<char>>> datavec(num_appends);
+    std::vector<std::future<std::shared_ptr<springtail::IOResponseAppend>>> futures(num_appends);
+    std::vector<uint64_t> offsets(num_appends);
+
+    // Generate data and start async appends
+    for (int i = 0; i < num_appends; i++) {
+        // generate a random data length between 15 and 400 bytes
+        int random_data_len = rand() % (400 - 15 + 1) + 15;
+        datavec[i] = gen_data(random_data_len);
+        futures[i] = fh_append->async_append(datavec[i], {});
+    }
+
+    // Wait for all futures and collect offsets
+    for (int i = 0; i < num_appends; i++) {
+        auto response = futures[i].get();
+        ASSERT_TRUE(response->is_success());
+        offsets[i] = response->offset;
+    }
+
+    // Sync to disk
+    auto sync_response = fh_append->sync();
+    ASSERT_TRUE(sync_response->is_success());
+
+    // Read back and verify each append
+    for (int i = 0; i < num_appends; i++) {
+        auto read_response = fh_read->read(offsets[i]);
+        ASSERT_TRUE(read_response->is_success());
+        ASSERT_EQ(read_response->data.size(), 1);
+        ASSERT_TRUE(compare_data(datavec[i], read_response->data[0]));
+    }
+
+    std::filesystem::remove(FILE);
 }
