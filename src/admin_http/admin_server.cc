@@ -9,6 +9,11 @@ namespace springtail {
 
     AdminServer::AdminServer() : Singleton<AdminServer>()
     {
+        // change thread pool to only use 1 thread
+        _svr.new_task_queue = [] {
+            return new httplib::ThreadPool(1);
+        };
+
         // Default dispatch routes
         _svr.Get("/health",
                  []([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {

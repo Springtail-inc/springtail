@@ -139,6 +139,9 @@ namespace springtail::logging {
 
         spdlog::set_default_logger(logger);
         spdlog::flush_every(std::chrono::seconds(3));
+        pthread_setname_np(
+            spdlog::details::registry::instance().get_flusher()->get_thread().native_handle(),
+            "SpdLog");
 
         absl::AddLogSink(&_spdlog_sink);
         _inited_flag = true;
