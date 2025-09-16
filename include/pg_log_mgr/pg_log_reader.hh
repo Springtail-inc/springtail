@@ -55,12 +55,12 @@ namespace springtail::pg_log_mgr {
          * @param path file path
          * @param timestamp log file timestamp
          * @param start_offset starting file offset
-         * @param num_messages number of messages to process (-1 read until end of file)
+         * @param end_offset ending file offset (-1 = read until eos)
          */
         void process_log(const std::filesystem::path &path,
                          uint64_t timestamp,
                          uint64_t start_offset,
-                         int num_messages);
+                         uint64_t end_offset);
 
         /**
          * Set the starting point for XID assignment.

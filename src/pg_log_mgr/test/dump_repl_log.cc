@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
 
     while (start_file && std::filesystem::exists(*start_file)) {
 
-        PgMsgStreamReader reader({}, *start_file, start_offset, -1);
+        PgMsgStreamReader reader({}, *start_file, start_offset);
         if (start_offset == 0 &&
                     fs::timestamp_file_exists(*start_file,
                                               pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
@@ -50,19 +50,46 @@ int main(int argc, char *argv[])
             reader.set_streaming();
         }
 
+        int fsize = std::filesystem::file_size(*start_file);
+
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
+        uint64_t last_hdr_offset = 0;
+        LSN_t last_lsn = INVALID_LSN;
+
         while (!eos) {
             // read next message
+            auto current_offset = reader.offset();
+            std::cout << "Offset: " << current_offset << std::endl;
+
             PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos);
             if (msg == nullptr) {
+                std::cout << "No more messages or message skipped, eos: " << eos << std::endl;
                 continue;
+            }
+
+            // get the current xlog header
+            auto header = reader.current_header();
+            if (header.header_offset != last_hdr_offset) {
+                std::cout << std::format("Xlog {}, xlog_end_offset: {}\n",
+                                         header.to_string(),
+                                         header.msg_length + header.header_offset + PgMsgStreamHeader::SIZE);
+
+                auto hdr_lsn = header.last_commit_lsn;
+
+                if (last_lsn != INVALID_LSN && hdr_lsn != last_lsn) {
+                    std::cout << std::format("LSN jump from {} to {}\n", last_lsn, hdr_lsn);
+                }
+
+                CHECK_GE(hdr_lsn, last_lsn);
+
+                last_lsn = hdr_lsn;
             }
 
             // dump the message
             std::string msg_str = pg_msg::dump_msg(*msg);
             std::cout << msg_str;
-            std::cout << "Msg Offset: " << reader.offset() << std::endl;
+            std::cout << "Msg End Offset: " << reader.offset() << std::endl << std::endl;
 
             if (msg->msg_type == PgMsgEnum::BEGIN) {
                 // extract xid
@@ -73,6 +100,16 @@ int main(int argc, char *argv[])
                 }
                 xids.insert(begin_msg.xid);
             }
+
+            // eos is often only set when we actually try to read past the end of the file
+            if (reader.offset() == fsize) {
+                eos = true;
+            }
+        }
+
+        if (reader.offset() != fsize) {
+            std::cout << std::format("Warning: did not reach end of file, offset: {}, file size: {}\n",
+                                     reader.offset(), fsize);
         }
 
         if (scan_all_files) {

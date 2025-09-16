@@ -110,7 +110,7 @@ namespace springtail::pg_proxy {
         void operator()();
 
         /** Destruct a connection. */
-        virtual ~Session() { LOG_DEBUG(LOG_PROXY, "Session destructor"); };
+        virtual ~Session() { LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Session destructor"); };
 
         /** Virtual run to be overriden by child class */
         virtual void run(std::set<int> &fds) = 0;
@@ -168,13 +168,13 @@ namespace springtail::pg_proxy {
         void set_associated_session(std::shared_ptr<Session> remote_session) {
             assert(remote_session != nullptr);
             _associated_session = remote_session;
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Setting associated session", (_type == CLIENT ? 'C': 'S'), _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Setting associated session", (_type == CLIENT ? 'C': 'S'), _id);
         }
 
         /** Clear associated session from this session, leaves any association on remote session */
         void clear_associated_session() {
             assert(_associated_session != nullptr);
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == CLIENT ? 'C': 'S'), _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == CLIENT ? 'C': 'S'), _id);
             _associated_session = nullptr;
         }
 

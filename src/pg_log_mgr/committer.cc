@@ -67,9 +67,9 @@ namespace springtail::committer {
             // Process index recovery first as this message doesnt require xid
             // or timestamp processing for xact_log
             if (result->type() == XidReady::Type::INDEX_RECOVERY_TRIGGER) {
-                LOG_DEBUG(LOG_COMMITTER, "Initiate indexes recovery: {}", db_id);
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Initiate indexes recovery: {}", db_id);
                 _indexer->recover_indexes(db_id);
-                LOG_DEBUG(LOG_COMMITTER, "Indexes recovery initiated: {}", db_id);
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexes recovery initiated: {}", db_id);
                 continue;
             }
 
@@ -89,7 +89,7 @@ namespace springtail::committer {
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
-                LOG_DEBUG(LOG_COMMITTER, "Stop committing due to table sync: {}", db_id);
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Stop committing due to table sync: {}", db_id);
                 // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
 
@@ -113,7 +113,7 @@ namespace springtail::committer {
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                 result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
                 LOG_DEBUG(
-                    LOG_COMMITTER,
+                    LOG_COMMITTER, LOG_LEVEL_DEBUG1,
                     "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}, request xid @{}",
                     static_cast<char>(result->type()), db_id, completed_xid, result->swap().xid());
                 CHECK_GT(result->swap().xid(), completed_xid);
@@ -136,7 +136,7 @@ namespace springtail::committer {
                     // perform a commit to the XidMgr
                     xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true);
 
-                    LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, completed_xid);
                     // notify the FDW of the schema changes
                     if (_has_ddl_precommit) {
                         _redis_ddl.commit_ddl(db_id, completed_xid);
@@ -151,7 +151,7 @@ namespace springtail::committer {
                         Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir, completed_xid);
                     }
                 } else {
-                    LOG_DEBUG(LOG_COMMITTER, "Record DDL changes db {} xid {}", db_id, completed_xid);
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Record DDL changes db {} xid {}", db_id, completed_xid);
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true);
                 }
                 _completed_xids[db_id] = completed_xid;
@@ -198,7 +198,7 @@ namespace springtail::committer {
                 // query the write cache for the tables modified through this XID
                 auto table_list = WriteCacheFuncImpl::list_tables(db_id, xid, 100, table_cursor);
 
-                LOG_DEBUG(LOG_COMMITTER, "Got {} tables from the write cache", table_list.size());
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Got {} tables from the write cache", table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -207,7 +207,7 @@ namespace springtail::committer {
                 }
 
                 for (auto tid : table_list) {
-                    LOG_DEBUG(LOG_COMMITTER, "Pass table {} to a worker", tid);
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Pass table {} to a worker", tid);
                     // mark this table as in-flight
                     {
                         boost::unique_lock lock(_mutex);
@@ -226,7 +226,7 @@ namespace springtail::committer {
             // wait for tables to complete their processing
             // XXX ideally we could start working on the next XID while the finalize() operations
             //     are being completed.
-            LOG_DEBUG(LOG_COMMITTER, "Wait for {} tables to complete", _tid_set.size());
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Wait for {} tables to complete", _tid_set.size());
             {
                 boost::unique_lock lock(_mutex);
                 while (!_cv.wait_for(lock, boost::chrono::seconds(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT),
@@ -234,7 +234,7 @@ namespace springtail::committer {
                     Coordinator::mark_alive(keep_alive); // update the coordinator
                 }
             }
-            LOG_DEBUG(LOG_COMMITTER, "All table processing complete for XID {}", xid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "All table processing complete for XID {}", xid);
 
             auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
 
@@ -278,7 +278,7 @@ namespace springtail::committer {
 
                 // push completed DDL changes to the FDWs
                 if (_has_ddl_precommit) {
-                    LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, xid);
                     _redis_ddl.commit_ddl(db_id, xid);
                     _has_ddl_precommit = false;
                 }
@@ -293,7 +293,7 @@ namespace springtail::committer {
                 result->notify_tracker(xid);
             }
 
-            LOG_DEBUG(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
         }
 
         // join all of the worker threads
@@ -305,7 +305,7 @@ namespace springtail::committer {
         coordinator->unregister_thread(daemon_type, "committer");
 
         _indexer.reset();
-        LOG_DEBUG(LOG_COMMITTER, "Committer shutdown");
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committer shutdown");
     }
 
     void
@@ -470,7 +470,7 @@ namespace springtail::committer {
             // TODO: another way to handle the case would be to drop the table mutation
             // records from the Batch object in the log reader. Marking this as TODO
             // just to keep the question open for now.
-            LOG_DEBUG(LOG_COMMITTER, "The table doesn't exists: {}", tid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exists: {}", tid);
             return;
         }
 
@@ -545,7 +545,7 @@ namespace springtail::committer {
         sort_keys.push_back("__springtail_lsn");
 
         auto columns = schema->column_order();
-        LOG_DEBUG(LOG_COMMITTER, "xid={}:{}, columns={}",
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "xid={}:{}, columns={}",
                             xid.xid, xid.lsn,
                             common::join_string(",", columns.begin(), columns.end()));
 
@@ -560,7 +560,7 @@ namespace springtail::committer {
 
         // Get the extent from the write cache index
         Extent extent(*wc_extent->data);
-        LOG_DEBUG(LOG_COMMITTER, "xid={} rows={}", xid.xid, extent.row_count());
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "xid={} rows={}", xid.xid, extent.row_count());
 
         // process the rows
         auto op_f = wc_schema->get_field("__springtail_op");
@@ -583,14 +583,14 @@ namespace springtail::committer {
             case INSERT:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
-                    LOG_DEBUG(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case UPDATE:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
-                    LOG_DEBUG(LOG_COMMITTER, "UPDATE value={}", tuple->to_string());
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "UPDATE value={}", tuple->to_string());
                     table->update(tuple, constant::UNKNOWN_EXTENT);
                     break;
                 }
@@ -599,11 +599,11 @@ namespace springtail::committer {
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
                         auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
-                        LOG_DEBUG(LOG_COMMITTER, "DELETE value={}", tuple->to_string());
+                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     } else {
                         auto tuple = std::make_shared<FieldTuple>(wc_key_fields, &row);
-                        LOG_DEBUG(LOG_COMMITTER, "DELETE value={}", tuple->to_string());
+                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     }
                     break;
@@ -611,7 +611,7 @@ namespace springtail::committer {
 
             case TRUNCATE:
                 {
-                    LOG_DEBUG(LOG_COMMITTER, "TRUNCATE");
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "TRUNCATE");
                     // note: this should always be the first operation within an extent
                     table->truncate();
                     break;

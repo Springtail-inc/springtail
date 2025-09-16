@@ -9,6 +9,7 @@
 #include <sw/redis++/redis++.h>
 
 #include <common/common.hh>
+#include <common/logging.hh>
 #include <common/prefix_tree.hh>
 #include <common/redis.hh>
 
@@ -97,7 +98,7 @@ namespace springtail {
              * @param new_value - new json value
              */
             void change_callback(const std::string &path, const nlohmann::json &new_value) override {
-                LOG_DEBUG(LOG_ALL, "!!! Received notification; path: \"{}\"; new value: {}", path, new_value.dump(4));
+                LOG_DEBUG(LOG_ALL, LOG_LEVEL_DEBUG1, "!!! Received notification; path: \"{}\"; new value: {}", path, new_value.dump(4));
                 _cb(path, new_value);
             }
 
@@ -289,7 +290,7 @@ namespace springtail {
         _get_value(const nlohmann::json::json_pointer &json_ptr, const nlohmann::json &json_object)
         {
             try {
-                return json_object.at(json_ptr);
+                return std::cref(json_object.at(json_ptr));
             } catch (const nlohmann::json::out_of_range& e) {
                 return {};
             } catch (const nlohmann::json::parse_error& e) {

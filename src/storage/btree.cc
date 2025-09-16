@@ -39,12 +39,12 @@ namespace springtail {
         }
 
         // read the root
-        LOG_DEBUG(LOG_BTREE, "Get root page: {}", _root_offset);
+        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Get root page: {}", _root_offset);
         auto root = StorageCache::get_instance()->get(_file, _root_offset, _xid, constant::LATEST_XID, _max_extent_size);
 
         // check if the root is empty
         if (root->empty()) {
-            LOG_DEBUG(LOG_BTREE, "Return empty root");
+            LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Return empty root");
             return end();
         }
 
@@ -57,7 +57,7 @@ namespace springtail {
             uint64_t child_id = _branch_child_f->get_uint64(&*(node->row_i));
 
             // read the extent
-            LOG_DEBUG(LOG_BTREE, "Get child page: {}", child_id);
+            LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Get child page: {}", child_id);
             auto child = StorageCache::get_instance()->get(_file, child_id, _xid, constant::LATEST_XID, _max_extent_size);
 
             // create a node for the child an move to it
@@ -65,7 +65,7 @@ namespace springtail {
             node = std::make_shared<Node>(std::move(child), begin, node);
         }
 
-        LOG_DEBUG(LOG_BTREE, "Return begin");
+        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Return begin");
         return Iterator(this, node);
     }
 

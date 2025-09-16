@@ -7,7 +7,7 @@ void
 SyncTracker::block_commits(uint64_t db_id,
                            CommitterQueuePtr committer_queue)
 {
-    LOG_DEBUG(LOG_PG_LOG_MGR, "db {}", db_id);
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {}", db_id);
     std::unique_lock lock(_mutex);
 
     _block_commits(db_id, committer_queue);
@@ -18,7 +18,7 @@ SyncTracker::_block_commits(uint64_t db_id, CommitterQueuePtr committer_queue)
 {
     // Caller should have acquired lock
     if (!_resync_map.contains(db_id) && !_inflight_map.contains(db_id) && !_sync_map.contains(db_id)) {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Stop committing XIDs for db: {}", db_id);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Stop committing XIDs for db: {}", db_id);
         committer_queue->push(std::make_shared<committer::XidReady>(db_id));
     }
 }
@@ -29,7 +29,7 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
                                    const XidLsn &xid,
                                    CommitterQueuePtr committer_queue)
 {
-    LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {} table {} xid {}:{}",
               db_id, table_id, xid.xid, xid.lsn);
     std::unique_lock lock(_mutex);
 
@@ -52,7 +52,7 @@ SyncTracker::pick_table_for_sync(uint64_t db_id,
                                  uint64_t table_id,
                                  const XidLsn &xid)
 {
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Pick for Sync: db {} table {} xid {}:{}",
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Pick for Sync: db {} table {} xid {}:{}",
               db_id, table_id, xid.xid, xid.lsn);
     std::unique_lock lock(_mutex);
 
@@ -66,7 +66,7 @@ SyncTracker::mark_inflight(uint64_t db_id,
                            const PgCopyResultPtr &copy,
                            ExtentSchemaPtr schema)
 {
-    LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {} table {} xid {}:{}",
               db_id, table_id, xid.xid, xid.lsn);
     std::unique_lock lock(_mutex);
 
@@ -114,7 +114,7 @@ SyncTracker::mark_inflight(uint64_t db_id,
 void
 SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
 {
-    LOG_DEBUG(LOG_PG_LOG_MGR, "db {} xid {}", sync_msg.db_id, sync_msg.target_xid);
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {} xid {}", sync_msg.db_id, sync_msg.target_xid);
     std::unique_lock lock(_mutex);
 
     // clear the inflight map for the provided tables in the db
@@ -136,7 +136,7 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
 
     // make a record of the table mapping(s)
     auto record = std::make_shared<XidRecord>(sync_msg);
-    LOG_DEBUG(LOG_PG_LOG_MGR, "XidRecord: pg_xid={} xmax={} xmin={}", sync_msg.pg_xid,
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "XidRecord: pg_xid={} xmax={} xmin={}", sync_msg.pg_xid,
               sync_msg.xmax, sync_msg.xmin);
 
     // make sure that the database has entries in the maps
@@ -167,13 +167,13 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
     SyncTracker::check_commit(uint64_t db_id,
                               uint32_t pg_xid)
     {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} pg_xid {}", db_id, pg_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {} pg_xid {}", db_id, pg_xid);
         std::unique_lock lock(_mutex);
 
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
         if (db_i == _sync_map.end()) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "didn't find db {} pg_xid {}", db_id, pg_xid);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "didn't find db {} pg_xid {}", db_id, pg_xid);
             return {}; // no ongoing sync
         }
 
@@ -196,7 +196,7 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
 
         // if nothing is completed, then we have to wait to swap/commit
         if (completed.empty()) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "no completed db {} pg_xid {}", db_id, pg_xid);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "no completed db {} pg_xid {}", db_id, pg_xid);
             return {};
         }
 
@@ -212,16 +212,16 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
         for (auto record : completed) {
             tids.insert(tids.end(), record->tids().begin(), record->tids().end());
         }
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} tables", tids.size());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found {} tables", tids.size());
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Creating commit_queue message for committer queue db: {}, type: {}", db_id, std::string(1,type));
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Creating commit_queue message for committer queue db: {}, type: {}", db_id, std::string(1,type));
         return std::make_shared<SwapRequest>(type, db_id, std::move(tids));
     }
 
     void
     SyncTracker::clear_tables(std::shared_ptr<SwapRequest> swap)
     {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "db {}", swap->db());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {}", swap->db());
         std::unique_lock lock(_mutex);
 
         // get the table map for this database
@@ -241,7 +241,7 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
     {
         std::unique_lock lock(_mutex);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
 
         // first check the resync map
         auto resync_i = _resync_map.find(db_id);

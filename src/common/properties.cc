@@ -574,7 +574,7 @@ namespace springtail {
         }
         CHECK(fdw_ids_json.type() == nlohmann::json::value_t::array);
         std::vector<std::string> fdw_ids;
-        for (auto fdw_id_json: fdw_ids_json) {
+        for (auto &fdw_id_json: fdw_ids_json) {
             CHECK(fdw_id_json.type() == nlohmann::json::value_t::string);
             fdw_ids.push_back(fdw_id_json.get<std::string>());
         }

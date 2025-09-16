@@ -16,6 +16,7 @@ set(PG_FDW_SOURCES
     pg_fdw_mgr.cc
     pg_fdw_mgr_wrap.cc
     pg_fdw_ddl_common.cc
+    pg_fdw_plan_state.cc
 )
 
 set(PG_DDL_SOURCES
@@ -28,6 +29,7 @@ set(PG_FDW_TEST_SOURCES
     test/mock_pg.c
     pg_fdw_mgr.cc
     pg_fdw_ddl_common.cc
+    pg_fdw_plan_state.cc
 )
 
 set(PG_XID_COLLECTOR_CLIENT_SOURCES

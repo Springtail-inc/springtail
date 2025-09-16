@@ -1,11 +1,11 @@
 #pragma once
 
-#include <cassert>
 #include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
 
+#include <absl/log/absl_check.h>
 #include <nlohmann/json.hpp>
 
 #include <common/aws.hh>
@@ -89,10 +89,26 @@ namespace springtail {
          */
         void init_cache() { _cache = std::make_shared<RedisCache>(true); }
 
+        /**
+         * @brief Get the all configuration settings from redis
+         */
+        static inline nlohmann::json get_all_settings() {
+            _assert_instance();
+            return  get_instance()->_json;
+        }
+
         /** Helper to get db instance id */
         static inline uint64_t get_db_instance_id() {
             _assert_instance();
             return  get_instance()->_get_db_instance_id();
+        }
+
+        /**
+         * @brief Get the instance key of the process
+         */
+        static inline std::string get_instance_key() {
+            _assert_instance();
+            return  get_instance()->_get_instance_key();
         }
 
         /** Helper to get organization id */
@@ -274,8 +290,8 @@ namespace springtail {
          * @return uint64_t
          */
         uint64_t _get_db_instance_id() {
-            assert (_json.contains(ORG_CONFIG));
-            assert (_json[ORG_CONFIG].contains("db_instance_id"));
+            DCHECK (_json.contains(ORG_CONFIG));
+            DCHECK (_json[ORG_CONFIG].contains("db_instance_id"));
             return _json[ORG_CONFIG]["db_instance_id"];
         }
 
@@ -284,8 +300,8 @@ namespace springtail {
          * @return std::string
          */
         std::string _get_organization_id() {
-            assert (_json.contains(ORG_CONFIG));
-            assert (_json[ORG_CONFIG].contains("organization_id"));
+            DCHECK (_json.contains(ORG_CONFIG));
+            DCHECK (_json[ORG_CONFIG].contains("organization_id"));
             return _json[ORG_CONFIG]["organization_id"];
         }
 
@@ -295,8 +311,8 @@ namespace springtail {
          * @return std::string
          */
         std::string _get_account_id() {
-            assert (_json.contains(ORG_CONFIG));
-            assert (_json[ORG_CONFIG].contains("account_id"));
+            DCHECK (_json.contains(ORG_CONFIG));
+            DCHECK (_json[ORG_CONFIG].contains("account_id"));
             return _json[ORG_CONFIG]["account_id"];
         }
 
@@ -306,8 +322,8 @@ namespace springtail {
          * @return std::string
          */
         std::string _get_mount_point() {
-            assert (_json.contains(FS_CONFIG));
-            assert (_json[FS_CONFIG].contains("mount_point"));
+            DCHECK (_json.contains(FS_CONFIG));
+            DCHECK (_json[FS_CONFIG].contains("mount_point"));
             return _json[FS_CONFIG]["mount_point"];
         }
 
@@ -319,8 +335,20 @@ namespace springtail {
          */
         std::filesystem::path
         _make_absolute_path(const std::string &path) {
-            assert (!_get_mount_point().empty());
+            DCHECK (!_get_mount_point().empty());
             return std::filesystem::path(_get_mount_point()) / path;
+        }
+
+        /**
+         * @brief Get instance key of the process
+         *
+         * @return std::string - a string representing instance key
+         */
+        std::string
+        _get_instance_key() {
+            DCHECK (_json.contains(ORG_CONFIG));
+            DCHECK (_json[ORG_CONFIG].contains("instance_key"));
+            return _json[ORG_CONFIG]["instance_key"];
         }
 
         /**
@@ -329,8 +357,8 @@ namespace springtail {
          * @return std::string
          */
         std::string _get_fdw_id() {
-            assert (_json.contains(ORG_CONFIG));
-            assert (_json[ORG_CONFIG].contains("fdw_id"));
+            DCHECK (_json.contains(ORG_CONFIG));
+            DCHECK (_json[ORG_CONFIG].contains("fdw_id"));
             return _json[ORG_CONFIG]["fdw_id"];
         }
 

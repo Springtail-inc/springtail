@@ -34,6 +34,14 @@ namespace springtail::redis {
      */
     static constexpr char DB_INSTANCE_STATE[] = "{}:instance_state";
 
+    /**
+     * Admin console hash
+     * args: db_instance_id
+     * key: <instance key>:<daemon name>
+     * value: <ip>:<port>
+     */
+    static constexpr char ADMIN_CONSOLE[] = "{}:admin_console";
+
     //// Data DB (1) accessed via RedisClient::
 
     //// Postgres redis key prefixes.  Value defs in: pg_log_mgr/pg_redis_xact.hh

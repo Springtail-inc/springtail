@@ -132,7 +132,7 @@ namespace springtail::pg_fdw {
     void PgDDLMgr::_on_database_ids_changed(const std::string &path,
                                             const nlohmann::json &new_value)
     {
-        LOG_DEBUG(LOG_FDW, "Replicated databases: {}", new_value.dump(4));
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
         CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
 
         // get a vector of old database ids from _log_mgrs
@@ -191,7 +191,7 @@ namespace springtail::pg_fdw {
         // start the ddl main thread
         std::string fdw_id = props->get_fdw_id();
 
-        LOG_DEBUG(LOG_FDW, "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
                     fdw_id, username, password, hostname.value_or(""));
         PgDDLMgr::get_instance()->init(fdw_id, username, password, proxy_password, hostname);
         PgDDLMgr::get_instance()->_pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
@@ -237,7 +237,7 @@ namespace springtail::pg_fdw {
             _db_prefix = fdw_config.at("db_prefix").get<std::string>();
         }
 
-        LOG_DEBUG(LOG_FDW, "FDW ID: {}, Host: {}, Port: {}, FDW Username: {}",
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "FDW ID: {}, Host: {}, Port: {}, FDW Username: {}",
                      _fdw_id, _hostname, _port, _username);
 
         // add subscribers to pubsub threads
@@ -410,7 +410,7 @@ namespace springtail::pg_fdw {
             std::string role = conn->get_string(i, 1);
             if (role == _username) {
                 // skip the fdw user, they are not replicated from primary
-                LOG_DEBUG(LOG_FDW, "Skipping role {} as it is the fdw or ddl mgr user", role);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Skipping role {} as it is the fdw or ddl mgr user", role);
                 continue;
             }
             std::string role_name = conn->escape_identifier(conn->get_string(i, 1));
@@ -434,7 +434,7 @@ namespace springtail::pg_fdw {
                     auto sql_state = fdw_conn->get_sql_state();
                     if (sql_state.has_value() && sql_state.value() == LibPqConnection::SQL_DUPLICATE_OBJECT) {
                         // user already exists, we can skip this
-                        LOG_DEBUG(LOG_FDW, "Role {} already exists, skipping creation", role_name);
+                        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Role {} already exists, skipping creation", role_name);
                     } else {
                         // some other error, log it
                         LOG_ERROR("Failed to create role {}: {}", role_name, fdw_conn->result_error_message());
@@ -684,7 +684,7 @@ namespace springtail::pg_fdw {
             DCHECK(type == constant::USER_TYPE_ENUM || type == constant::USER_TYPE_EXTENSION);
 
             // insert into map by namespace_id
-            LOG_DEBUG(LOG_FDW, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
             usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
         }
 
@@ -792,7 +792,7 @@ namespace springtail::pg_fdw {
 
 
             // execute the SQL command to enable RLS
-            LOG_DEBUG(LOG_FDW, "Applying RLS SQL command: {}", sql);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Applying RLS SQL command: {}", sql);
             conn->exec(sql);
             conn->clear();
         }
@@ -818,7 +818,7 @@ namespace springtail::pg_fdw {
         }
         conn->clear();
         conn->disconnect();
-        LOG_DEBUG(LOG_FDW, "Populated system defined types: {}", _type_cache.size());
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Populated system defined types: {}", _type_cache.size());
 
         // go through each db and drop/create the database on the fdw
         for (const auto &[db_id, db_name] : dbs) {
@@ -1047,18 +1047,18 @@ namespace springtail::pg_fdw {
                     uint64_t schema_xid = entry.at("xid").get<uint64_t>();
                     auto ddls = entry.at("ddls");
 
-                    LOG_DEBUG(LOG_FDW, "Original DDLS: {}", ddls.dump(4));
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Original DDLS: {}", ddls.dump(4));
 
                     // Sort the DDLs based on their hierarchy
                     auto sorted_ddls = sort_ddls_by_hierarchy(ddls);
 
-                    LOG_DEBUG(LOG_FDW, "Sorted DDLS: {}", sorted_ddls.dump(4));
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Sorted DDLS: {}", sorted_ddls.dump(4));
 
                     if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                     } else {
-                        LOG_DEBUG(LOG_FDW, "New schema XID will be applied: db_id={}, current={}, new={}",
+                        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "New schema XID will be applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                         db_map[db_id][schema_xid] = sorted_ddls;
                     }
@@ -1078,7 +1078,7 @@ namespace springtail::pg_fdw {
                             try {
                                 uint64_t schema_xid = xid_map.rbegin()->first;
                                 LOG_DEBUG(
-                                    LOG_FDW, "Updating redis ddl @ through schema XID: {}, db_id: {}",
+                                    LOG_FDW, LOG_LEVEL_DEBUG1, "Updating redis ddl @ through schema XID: {}, db_id: {}",
                                     schema_xid, db_id);
 
                                     // apply the DDL statements
@@ -1148,7 +1148,7 @@ namespace springtail::pg_fdw {
         // check if the connection is still valid
         if (conn != nullptr) {
             if (conn->is_connected()) {
-                LOG_DEBUG(LOG_FDW, "Reusing connection for db_id: {}, db_name: {}", db_id, db_name);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Reusing connection for db_id: {}, db_name: {}", db_id, db_name);
                 // evict the connection from the cache with no callback
                 // this is so that it can be used and no-one else will try to use it
                 _fdw_conn_cache.evict(db_id, true);
@@ -1157,7 +1157,7 @@ namespace springtail::pg_fdw {
             _fdw_conn_cache.evict(db_id);
         }
 
-        LOG_DEBUG(LOG_FDW, "Establishing connection for db_id: {}, db_name: {}", db_id, db_name);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Establishing connection for db_id: {}, db_name: {}", db_id, db_name);
 
         // use libpq to connect to the database
         std::vector<std::pair<std::string, std::string>> options = {{"springtail_fdw.ddl_connection", "on"}};
@@ -1179,12 +1179,12 @@ namespace springtail::pg_fdw {
         // insert the connection into the cache
         std::unique_lock<std::mutex> lock(_fdw_conn_cache_mutex);
         if (_fdw_conn_cache.peek(db_id) == nullptr) {
-            LOG_DEBUG(LOG_FDW, "Releasing connection for db_id: {}", db_id);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Releasing connection for db_id: {}", db_id);
             _fdw_conn_cache.insert(db_id, conn);
             return;
         }
 
-        LOG_DEBUG(LOG_FDW, "Releasing existing connection for db_id: {}", db_id);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Releasing existing connection for db_id: {}", db_id);
         conn->disconnect();
     }
 
@@ -1240,7 +1240,7 @@ namespace springtail::pg_fdw {
 
         // exectute each DDL statement
         for (const auto &sql : txn) {
-            LOG_DEBUG(LOG_FDW, "Executing DDL: {}", sql);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Executing DDL: {}", sql);
             conn->exec(sql);
             conn->clear();
         }
@@ -1293,7 +1293,7 @@ namespace springtail::pg_fdw {
         assert(ddl.is_object());
         assert(ddl.contains("action"));
 
-        LOG_DEBUG(LOG_FDW, "DDL JSON: {}", ddl.dump(4));
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "DDL JSON: {}", ddl.dump(4));
 
         PartitionInfo partition_info = _get_partition_info(ddl);
 
@@ -1421,24 +1421,24 @@ namespace springtail::pg_fdw {
             return "";
         }
         else if (action == "ns_create") {
-            LOG_DEBUG(LOG_FDW, "Creating schema with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating schema with JSON: {}", ddl.dump());
             const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
             return _get_create_schema_with_grants_query(escaped_schema);
         }
         else if (action == "ns_alter") {
-            LOG_DEBUG(LOG_FDW, "Altering schema with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Altering schema with JSON: {}", ddl.dump());
             const auto old_schema = conn->escape_identifier(ddl.at("old_name").get<std::string>());
             const auto new_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
 
             return _get_alter_schema_with_grants_query(old_schema, new_schema);
         }
         else if (action == "ns_drop") {
-            LOG_DEBUG(LOG_FDW, "Dropping schema with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Dropping schema with JSON: {}", ddl.dump());
             const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
             return fmt::format("DROP SCHEMA IF EXISTS {} CASCADE", escaped_schema);
         }
         else if (action == "set_namespace") {
-            LOG_DEBUG(LOG_FDW, "Set namespace with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Set namespace with JSON: {}", ddl.dump());
             const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
             const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
@@ -1448,7 +1448,7 @@ namespace springtail::pg_fdw {
                                old_schema, table, schema);
         }
         else if (action == "ut_create") {
-            LOG_DEBUG(LOG_FDW, "Creating user type with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating user type with JSON: {}", ddl.dump());
             const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
             const auto value_json_str = ddl.at("value").get<std::string>();
@@ -1460,13 +1460,13 @@ namespace springtail::pg_fdw {
             return _get_create_type_query(escaped_schema, escaped_name, value_json_str, conn);
         }
         else if (action == "ut_drop") {
-            LOG_DEBUG(LOG_FDW, "Dropping user type with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Dropping user type with JSON: {}", ddl.dump());
             const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
 
             return fmt::format("DROP TYPE IF EXISTS {}.{} CASCADE", escaped_schema, escaped_name);
         } else if (action == "ut_alter") {
-            LOG_DEBUG(LOG_FDW, "Altering user type with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Altering user type with JSON: {}", ddl.dump());
 
             // need to check if it is renamed
             const auto old_name = conn->escape_identifier(ddl.at("old_name").get<std::string>());
@@ -1515,7 +1515,7 @@ namespace springtail::pg_fdw {
 
             return alter;
         } else if (action == "set_rls_enabled") {
-            LOG_DEBUG(LOG_FDW, "Setting RLS enabled with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting RLS enabled with JSON: {}", ddl.dump());
             const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
             bool rls_enabled = ddl.at("rls_enabled").get<bool>();
@@ -1525,7 +1525,7 @@ namespace springtail::pg_fdw {
                                schema, table,
                                rls_enabled ? "ENABLE" : "DISABLE");
         } else if (action == "set_rls_forced") {
-            LOG_DEBUG(LOG_FDW, "Setting RLS forced with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting RLS forced with JSON: {}", ddl.dump());
             const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
             bool rls_forced = ddl.at("rls_forced").get<bool>();
@@ -1549,7 +1549,7 @@ namespace springtail::pg_fdw {
                                const std::string &db_name)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        LOG_DEBUG(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
 
         // drop and create database on fdw
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
@@ -1675,7 +1675,8 @@ namespace springtail::pg_fdw {
                     const std::string &type_name = entry.second.first;
                     const std::string &value_json_str = entry.second.second;
                     std::string escaped_type = conn->escape_identifier(type_name);
-                    LOG_DEBUG(LOG_FDW, "Creating user type: {}.{} = {}", escaped_schema, escaped_type, value_json_str);
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating user type: {}.{} = {}",
+                              escaped_schema, escaped_type, value_json_str);
                     // If its an Extension type, the JSON would be empty, skip the create type
                     if (value_json_str.empty() || value_json_str == "{}") {
                         LOG_ERROR("Empty value for user type: {}.{}", escaped_schema, escaped_type);
@@ -1828,7 +1829,7 @@ namespace springtail::pg_fdw {
             {
                 std::shared_lock shared_lock(_db_mutex);
                 if (_db_xid_map.contains(db_id)) {
-                    LOG_DEBUG(LOG_FDW, "Database {} already exists in the fdw", db_name);
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Database {} already exists in the fdw", db_name);
                     return;
                 }
             }
@@ -1904,18 +1905,18 @@ namespace springtail::pg_fdw {
         CHECK(from.is_array());
         CHECK(to.is_array());
 
-        LOG_DEBUG(LOG_FDW, "Comparing enum types: {}.{} from: {} to: {}", schema, type_name, from.dump(), to.dump());
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Comparing enum types: {}.{} from: {} to: {}", schema, type_name, from.dump(), to.dump());
 
         while (i < from.size() && j < to.size()) {
 
-            LOG_DEBUG(LOG_FDW, "i={}, j={}", i, j);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "i={}, j={}", i, j);
 
-            LOG_DEBUG(LOG_FDW, "got from vals");
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "got from vals");
 
             std::string from_key = from[i].begin().key();
             std::string to_key = to[j].begin().key();
 
-            LOG_DEBUG(LOG_FDW, "From key: {}, From val: {}, To key: {}, To val: {}", from_key,
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "From key: {}, From val: {}, To key: {}, To val: {}", from_key,
                     (float)from[i].begin().value(), to_key, (float)to[j].begin().value());
 
             if (from_key == to_key) {

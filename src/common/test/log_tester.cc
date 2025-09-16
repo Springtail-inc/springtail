@@ -12,16 +12,14 @@ void
 log_stuff()
 {
     // basic functionality
-    LOG_TRACE(LOG_ALL, "My trace log");
-    LOG_DEBUG(LOG_ALL, "My debug log");
+    LOG_DEBUG(LOG_ALL, LOG_LEVEL_DEBUG1, "My debug log");
     LOG_INFO("My info log");
     LOG_WARN("My warning log");
     LOG_ERROR("My error log");
     LOG_CRITICAL("My critical log");
 
     // basic functionality with thread id
-    LOG_TRACE(LOG_COMMON, "Current: {}\n", std::this_thread::get_id());
-    LOG_DEBUG(LOG_COMMON, "Current: {}\n", std::this_thread::get_id());
+    LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG1, "Current: {}\n", std::this_thread::get_id());
     LOG_INFO("Current: {}\n", std::this_thread::get_id());
     LOG_WARN("Current: {}\n", std::this_thread::get_id());
     LOG_ERROR("Current: {}\n", std::this_thread::get_id());
@@ -30,8 +28,7 @@ log_stuff()
     spdlog::set_level(spdlog::level::trace);
 
     // basic functionality with thread id
-    LOG_TRACE(LOG_COMMON, "One more time current: {}\n", std::this_thread::get_id());
-    LOG_DEBUG(LOG_COMMON, "One more time current: {}\n", std::this_thread::get_id());
+    LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG1, "One more time current: {}\n", std::this_thread::get_id());
     LOG_INFO("One more time current: {}\n", std::this_thread::get_id());
     LOG_WARN("One more time current: {}\n", std::this_thread::get_id());
     LOG_ERROR("One more time current: {}\n", std::this_thread::get_id());

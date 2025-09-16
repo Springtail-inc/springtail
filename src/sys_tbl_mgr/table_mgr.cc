@@ -95,7 +95,7 @@ namespace springtail {
         auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
-        LOG_DEBUG(LOG_BTREE, "Get mutable table: table {}, access_xid {}", table_id, access_xid);
+        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Get mutable table: table {}, access_xid {}", table_id, access_xid);
 
 #ifdef DEBUG
         for (auto &root : tbl_meta->roots) {

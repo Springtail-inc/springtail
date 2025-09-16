@@ -272,7 +272,7 @@ namespace springtail
         static void _worker(uint64_t db_id,
                             uint64_t target_xid,
                             CopyQueuePtr copy_queue,
-                            PgCopyResultPtr result);
+                            std::vector<PgCopyResultPtr> &result);
 
         /** Get where clause condition for inclusion of schemas */
        static std::string _get_schema_condition(LibPqConnection &connection, uint64_t db_id);
@@ -374,6 +374,11 @@ namespace springtail
          * @brief Disconnect connection; should be done after copy is finished
          */
         void disconnect();
+
+        /**
+         * @brief Lock the given table in ACCESS SHARE MODE
+         */
+        void lock_table(uint32_t table_oid);
 
         /**
          * @brief Copy all tables from remote system

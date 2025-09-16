@@ -22,6 +22,7 @@
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <pg_fdw/pg_fdw_ddl_common.hh>
+#include <pg_fdw/pg_fdw_plan_state.hh>
 #include <pg_fdw/pg_xid_collector_client.hh>
 
 extern "C" {
@@ -152,24 +153,24 @@ namespace springtail::pg_fdw {
          * @param tid Table ID
          * @param pg_xid Postgres XID of current transaction
          * @param schema_xid Schema XID optained from the foreign table import option
+         * @return List* that can be used to create SpringtailPlanState
          */
-        PgFdwState *fdw_create_state(uint64_t db_id,
-                                     uint64_t tid,
-                                     uint64_t pg_xid,
-                                     uint64_t schema_xid);
+        List* fdw_create_state(uint64_t db_id,
+                uint64_t tid,
+                uint64_t pg_xid,
+                uint64_t schema_xid);
 
         /** Begin scan
-         * @param state PgFdwState
+         * @param planstate plan state
          * @param num_attrs Number of attributes
          * @param attrs Array of pg attributes
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
          */
-        void fdw_begin_scan(PgFdwState *state,
-                            int num_attrs,
-                            const Form_pg_attribute* attrs,
-                            List *target_list,
-                            List *qual_list);
+        PgFdwState* fdw_begin_scan(const SpringtailPlanState *planstate,
+                int num_attrs,
+                const Form_pg_attribute* attrs,
+                const List *quals);
 
         /** Iterate scan -- get next row
          * @param state PgFdwState
@@ -187,7 +188,7 @@ namespace springtail::pg_fdw {
         void fdw_end_scan(PgFdwState *state);
 
         /** Reset scan -- set iterator to beginning */
-        void fdw_reset_scan(PgFdwState *state, List *qual_list);
+        void fdw_reset_scan(PgFdwState *state, const List *qual_list);
 
         /** Import foreign schema -- scan through system table generating sql for create foreign table */
         List *fdw_import_foreign_schema(const std::string &server,
@@ -206,21 +207,25 @@ namespace springtail::pg_fdw {
          * @param use_secondary Make use the secondary indexes to match the sortgroup
          * @return List or sublist of path keys based on sort group
          */
-        List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup, bool use_secondary = false);
+        List* fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, const List* quals, bool use_secondary = false);
 
         /** Get list of path keys -- indexes
-         * @param state Planstate
+         * @param planstate Planstate
+         * @param state Scan state
          * @return List of a List of path keys (key attnum, num rows)
          */
-        List *fdw_get_path_keys(SpringtailPlanState *state);
+        List *fdw_get_path_keys(const SpringtailPlanState *planstate, PgFdwState* state);
+
+        /**
+         */
+        PgFdwState* create_scan_state(const SpringtailPlanState *state, const List* qual_indexes, const List* join_quals);
 
         /** Get estimate of row width/number of rows
          * @param planstate Plan state
-         * @param target_list List of target columns (String or Value)
          * @param qual_list List of predicate clauses (BaseQual)
          * @param join_quals List of predicate clauses (BaseQual) that are part of join clauses
          */
-        void fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width);
+        void fdw_get_rel_size(SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows, int *width);
 
         /** Commit or rollback a transaction, remove the XID mappings
          * @param pg_xid Postgres XID
@@ -289,7 +294,7 @@ namespace springtail::pg_fdw {
         PgXidCollectorClient _xid_collector_client;    ///< xid collector client
         std::string _fdw_id;                           ///< fdw id
         std::mutex _xid_update_mutex;                  ///< mutex for updating xid
-        uint64_t _db_id;                               ///< database id
+        uint64_t _db_id{0};                            ///< database id
         uint64_t _schema_xid{0};        ///< The most recently seen schema XID
         uint64_t _last_xid{0};          ///< last known xid
         uint64_t _trans_xid{0};         ///< current transaction XID
@@ -364,7 +369,7 @@ namespace springtail::pg_fdw {
                                     int32_t atttypmod);
 
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
-        void _init_quals(PgFdwState *state, List *qual_list);
+        void _init_quals(PgFdwState *state, const List *qual_list);
 
         /** Helper to create constant field from qual and add to field array */
         void _make_const_field(const PgFdwState *state, const SchemaColumn &column, int idx, const ConstQual *qual);

@@ -63,7 +63,7 @@ PgXactLogWriter::rotate(uint64_t timestamp)
     }
     _file = file;
 
-    LOG_DEBUG(LOG_XID_MGR, "Next Xact file: {}", _file.string());
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Next Xact file: {}", _file.string());
 
     // if the file already exists, we are in recovery mode
     if (std::filesystem::exists(_file) && _first_file) {
@@ -89,7 +89,7 @@ PgXactLogWriter::rotate(uint64_t timestamp)
 void
 PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
 {
-    LOG_DEBUG(LOG_XID_MGR, "Recording xid in log: file: {}, pg_xid: {}, xid: {}, real_commit: {}, offset: {}",
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Recording xid in log: file: {}, pg_xid: {}, xid: {}, real_commit: {}, offset: {}",
               _file.string(), pg_xid, xid, real_commit, _offset);
 
     DCHECK(_offset + XidElement::PACKED_SIZE <= PG_XLOG_PAGE_SIZE)
@@ -160,7 +160,7 @@ PgXactLogWriter::_extract_last_xid()
         }
     }
 
-    LOG_DEBUG(LOG_XID_MGR, "Extracted last XID, file: {}, last xid: {}",
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Extracted last XID, file: {}, last xid: {}",
               _file.string(), _last_stored_xid);
 }
 
@@ -205,7 +205,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
     auto current_file = fs::find_earliest_modified_file(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX);
     while (!xid_found && current_file.has_value())
     {
-        LOG_DEBUG(LOG_XID_MGR, "Processing file: {}", current_file->string());
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Processing file: {}", current_file->string());
         bool done = false;
 
         int fd = ::open(current_file.value().c_str(), O_RDWR, 0660);
@@ -235,7 +235,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
                 XidElement current_xid;
                 current_offset += XidElement::unpack(&read_buffer[current_offset], current_xid);
 
-                LOG_DEBUG(LOG_XID_MGR, "Current entry: pg_xid = {}; xid = {}; real_commit = {}", current_xid.pg_xid, current_xid.xid, current_xid.real_commit);
+                LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Current entry: pg_xid = {}; xid = {}; real_commit = {}", current_xid.pg_xid, current_xid.xid, current_xid.real_commit);
                 if (current_xid.xid == 0) {
                     done = true;
                     break;
@@ -246,7 +246,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
 
                 // check if the current xid is greater than the last xid, if so we can stop processing
                 if (current_xid.xid > last_xid) {
-                    LOG_DEBUG(LOG_XID_MGR, "Current xid {} is greater than last_xid {}", current_xid.xid, last_xid);
+                    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Current xid {} is greater than last_xid {}", current_xid.xid, last_xid);
                     xid_found = true;
                     break;
                 }
@@ -267,7 +267,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
     }
 
     if (last_committed_xid == 0) {
-        LOG_DEBUG(LOG_XID_MGR, "No committed XID found in the log files");
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "No committed XID found in the log files");
         // no committed XID found, cleanup all files
         fs::cleanup_files_from_dir<std::greater<uint64_t>>(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX, 0, archive);
         return;
@@ -280,7 +280,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
         throw Error(fmt::format("Failed to open file {}; error {}: {}", last_committed_xid_file.string(), errno, strerror(errno)));
     }
 
-    LOG_DEBUG(LOG_XID_MGR, "Truncating file: {}, last committed xid: {}, offset: {}, page count: {}",
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Truncating file: {}, last committed xid: {}, offset: {}, page count: {}",
         last_committed_xid_file.string(), last_committed_xid, last_committed_xid_offset, last_committed_xid_page_count);
 
     size_t file_size = PG_XLOG_PAGE_SIZE * (last_committed_xid_page_count - 1) + last_committed_xid_offset;

@@ -75,7 +75,7 @@ namespace indexer_helpers {
             ++row_id;
         }
 
-        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows",
+        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "{} {} secondary rows",
             (op == IndexOperation::Insert) ? "Populated"
             : "Invalidated",
             row_id);
@@ -656,10 +656,10 @@ namespace indexer_helpers {
 
         // initialize the primary index
         if (it->extent_id != constant::UNKNOWN_EXTENT) {
-            LOG_DEBUG(LOG_BTREE, "Primary init with root: {}", it->extent_id);
+            LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Primary init with root: {}", it->extent_id);
             _primary_index->init(it->extent_id);
         } else {
-            LOG_DEBUG(LOG_BTREE, "Primary init empty");
+            LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Primary init empty");
             _primary_index->init_empty();
         }
         _use_empty = _primary_index->empty();
@@ -685,10 +685,10 @@ namespace indexer_helpers {
                 assert(it != roots.end());
 
                 if (it->extent_id != constant::UNKNOWN_EXTENT) {
-                    LOG_DEBUG(LOG_BTREE, "Secondary {} init with root: {}", idx.id, it->extent_id);
+                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init with root: {}", idx.id, it->extent_id);
                     btree->init(it->extent_id);
                 } else {
-                    LOG_DEBUG(LOG_BTREE, "Secondary {} init empty", idx.id);
+                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init empty", idx.id);
                     btree->init_empty();
                 }
                 assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());

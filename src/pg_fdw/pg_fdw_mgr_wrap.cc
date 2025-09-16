@@ -1,4 +1,6 @@
+#include <sstream>
 #include <pg_fdw/pg_fdw_mgr.hh>
+#include <pg_fdw/pg_fdw_plan_state.hh>
 
 /** Wrapper around PgFdwMgr class for use in C code */
 
@@ -43,12 +45,11 @@ extern "C" {
     }
 
     /** Begin scan wrapper */
-    void
-    fdw_begin_scan(void *state, int num_attrs, Form_pg_attribute* attrs, List *target_list, List *qual_list)
+    void*
+    fdw_begin_scan(List* state, int num_attrs, Form_pg_attribute* attrs,  List *quals)
     {
-        if (state) {
-            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state), num_attrs, attrs, target_list, qual_list);
-        }
+        SpringtailPlanState ps{state};
+        return get_fdw_mgr()->fdw_begin_scan(&ps, num_attrs, attrs, quals);
     }
 
     /** Iterate scan wrapper */
@@ -92,22 +93,18 @@ extern "C" {
 
     /** Helper return true if table is sortable by sort group */
     List *
-    fdw_can_sort(SpringtailPlanState *planstate, List *sortgroup)
+    fdw_can_sort(List* planstate, void* state, List *sortgroup, List* quals)
     {
-        return get_fdw_mgr()->fdw_can_sort(planstate, sortgroup);
+        SpringtailPlanState ps{planstate};
+        return get_fdw_mgr()->fdw_can_sort(&ps, (PgFdwState*)state, sortgroup, quals);
     }
 
     /** Get list of path keys (key name, num rows) */
-    List *
-    fdw_get_path_keys(SpringtailPlanState *planstate)
+    List* 
+    fdw_get_path_keys(List* planstate, void *scan_state)
     {
-        return get_fdw_mgr()->fdw_get_path_keys(planstate);
-    }
-
-    void
-    fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width)
-    {
-        get_fdw_mgr()->fdw_get_rel_size(planstate, target_list, qual_list, join_quals, rows, width);
+        SpringtailPlanState ps{planstate};
+        return get_fdw_mgr()->fdw_get_path_keys(&ps, (PgFdwState*)scan_state);
     }
 
     void
@@ -125,6 +122,54 @@ extern "C" {
         for (auto const& [name, value]: v) {
             ExplainPropertyText(name.c_str(), value.c_str(), es);
         }
+    }
+
+    uint64_t
+    fdw_get_rel_width(void* state)
+    {
+        SpringtailPlanState ps{(List*)state};
+        return ps.get_rel_width();
+    }
+
+    void
+    fdw_add_target(void* state, char* name, int16 attr)
+    {
+        SpringtailPlanState ps{(List*)state};
+        ps.add_target_column(std::string(name), attr); 
+    }
+
+    void
+    fdw_get_rel_size(List *state, List *qual_list, List* join_quals, double *rows, int *width)
+    {
+        SpringtailPlanState ps{state};
+        get_fdw_mgr()->fdw_get_rel_size(&ps, qual_list, join_quals, rows, width);
+    }
+
+    void 
+    fdw_set_qual_state(List* state, int i, bool ignore)
+    {
+        SpringtailPlanState ps{state};
+        ps.set_qual_state(i, ignore);
+    }
+
+    bool
+    fdw_is_qual_ignored(List* state, int i)
+    {
+        SpringtailPlanState ps{state};
+        return ps.get_qual_state(i) == 0?true:false;
+    }
+
+    void* 
+    fdw_create_scan_state(List* planstate, List *qual_list, List* join_quals)
+    {
+        SpringtailPlanState ps{planstate};
+        return get_fdw_mgr()->create_scan_state(&ps, qual_list, join_quals);
+    }
+
+    void 
+    fdw_delete_scan_state(void *state)
+    {
+        delete static_cast<PgFdwState*>(state);
     }
 }
 

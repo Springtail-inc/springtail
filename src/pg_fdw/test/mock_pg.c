@@ -42,6 +42,13 @@ Integer *makeInteger(int i) {
      return v;
  }
 
+String *makeString(char* s) {
+     String    *v = makeNode_mock(String);
+
+     v->sval = s;
+     return v;
+ }
+
 /** Dummy function so that we can link with pg_fdw_mgr.cc */
 const char *quote_identifier(const char *ident) {
     return ident;
