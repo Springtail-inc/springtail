@@ -149,6 +149,14 @@ public:
     }
 
     static void TearDownTestSuite() {
+        // cleanup temp files
+        for (int i = 0; i < springtail::IOMgr::MAX_FILE_OBJECTS * 2; i++) {
+            std::string path = "/tmp/testfile" + std::to_string(i);
+            if (std::filesystem::exists(path)) {
+                std::filesystem::remove(path);
+            }
+        }
+
         springtail::springtail_shutdown();
     }
 };
