@@ -1615,7 +1615,8 @@ namespace springtail::pg_fdw {
 
         for (auto& ext : db_extensions.items()) {
             auto extension_name = ext.key();
-            LOG_DEBUG(LOG_FDW, "Creating extension: {} for db_id: {}", extension_name, db_id);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG2, "Creating extension: {} for db_id: {}",
+                      extension_name, db_id);
             conn->exec(fmt::format("CREATE EXTENSION IF NOT EXISTS {} WITH SCHEMA PUBLIC", extension_name));
             conn->clear();
         }

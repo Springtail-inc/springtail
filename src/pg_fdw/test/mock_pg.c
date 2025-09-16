@@ -296,14 +296,6 @@ extern struct varlena *pg_detoast_datum(struct varlena *datum)
     return 0;
 }
 
-String *
-makeString(char *str)
-{
-	String *v = makeNode_mock(String);
-	v->sval = str;
-	return v;
-}
-
 List* list_make1_impl(NodeTag t, ListCell datum1) {
     List* list = (List*)palloc(sizeof(List));
     list->type = t;

@@ -96,7 +96,7 @@ PgExtnRegistry::init_libraries(uint64_t db_id,
                                const std::string& extension,
                                const std::string& extension_lib_path)
 {
-    LOG_DEBUG(LOG_FDW, "Creating extension: {} from lib_path: {} for db_id: {}", extension, extension_lib_path, db_id);
+    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG2, "Creating extension: {} from lib_path: {} for db_id: {}", extension, extension_lib_path, db_id);
 
     auto library = _load_library(extension_lib_path);
 
@@ -124,7 +124,8 @@ PgExtnRegistry::comparator_func(uint64_t type_oid,
     auto rightDatumString = extn_registry->datum_to_string(rightDatum, type_oid);
     bool comparatorResult = pgext::DatumGetBool(result);
 
-    LOG_DEBUG(LOG_COMMON, "Operator = Result: {} {} {} = {}", leftDatumString, op_str, rightDatumString, comparatorResult);
+    LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG3, "Operator = Result: {} {} {} = {}", leftDatumString,
+              op_str, rightDatumString, comparatorResult);
 
     return comparatorResult;
 }

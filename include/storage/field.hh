@@ -831,7 +831,6 @@ namespace springtail {
                           const std::span<const char> &rhval) const override
         {
             if (!_comparator_func){
-                LOG_DEBUG(LOG_STORAGE,"ExtentField -- Comparator function not set for: {}", op_str);
                 return false;
             }
 
@@ -1058,7 +1057,6 @@ namespace springtail {
                                const std::span<const char> &rhval) const override
         {
             if (!_comparator_func){
-                LOG_DEBUG(LOG_STORAGE,"ConstTypeField -- Comparator function not set for: {}", op_str);
                 return false;
             }
 

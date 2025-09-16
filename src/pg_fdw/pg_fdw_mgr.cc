@@ -706,7 +706,7 @@ namespace springtail::pg_fdw {
         // TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid, comparator_func);
         // PgFdwState *state = new PgFdwState{table, db_id, tid, xid};
 
-        return state;
+        // return state;
         // This c'tor uses PG memory API's to allocate List
         // and adds db_id, tid and xid to it. SpringtailPlanState
         // never deletes the PG List object. It's safe because
@@ -1576,7 +1576,7 @@ namespace springtail::pg_fdw {
         UserTypePtr utp = _enum_cache_lookup(db_id, type_oid, xid);
         CHECK_NE(utp, nullptr);
 
-        LOG_DEBUG(LOG_FDW, "Enum cache lookup for oid: {}, name: {}", type_oid, utp->name);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG3, "Enum cache lookup for oid: {}, name: {}", type_oid, utp->name);
         // Get the oid for the type using type name and type namespace
         Oid oid = TypenameGetTypid(utp->name.c_str());
         if (!OidIsValid(oid)) {
@@ -1638,7 +1638,8 @@ namespace springtail::pg_fdw {
         std::string stringRightDatum = datum_to_string(rightDatum, oid);
 
         Datum result = FunctionCall2(&flinfo, leftDatum, rightDatum);
-        LOG_DEBUG(LOG_FDW, "Operator = Result: {} {} {} = {}", stringLeftDatum, op_name, stringRightDatum, DatumGetBool(result));
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG3, "Operator = Result: {} {} {} = {}", stringLeftDatum,
+                  op_name, stringRightDatum, DatumGetBool(result));
         return DatumGetBool(result);
     }
 

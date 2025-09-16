@@ -10,10 +10,8 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
-extern "C" {
-    #include <postgres.h>
-    #include <catalog/pg_type.h>
-}
+#define BITOID 1560
+#define VARBITOID 1562
 
 /* See: https://www.postgresql.org/docs/current/datatype.html for postgres types */
 
@@ -933,7 +931,7 @@ namespace springtail
             case (SchemaType::EXTENSION): {
                 std::string_view tmp(row.data() + pos, length);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting extension type '{}' into EXTENSION", pg_type);
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Converting extension type '{}' into EXTENSION", pg_type);
                 std::vector<char> data(tmp.begin(), tmp.end());
                 fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data, true));
                 pos += length;
@@ -1358,7 +1356,7 @@ namespace springtail
             udt_req.set_value_json("{}"); // set an empty JSON
             udt_req.set_type(constant::USER_TYPE_EXTENSION); // only support enum types
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Creating extension type: {}", extn_type_name);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Creating extension type: {}", extn_type_name);
 
             client->create_usertype(udt_req);
         }
@@ -1385,7 +1383,7 @@ namespace springtail
             std::string type_receive = copy_table._connection.get_string(i, 3);
             std::string type_send = copy_table._connection.get_string(i, 4);
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Adding type: {}, input: {}, output: {}, receive: {}, send: {} for extension: {}", type_oid, type_input, type_output, type_receive, type_send, extension);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Adding type: {}, input: {}, output: {}, receive: {}, send: {} for extension: {}", type_oid, type_input, type_output, type_receive, type_send, extension);
             extn_registry->add_type(extension, type_oid, type_input, type_output, type_receive, type_send);
         }
 
@@ -1409,7 +1407,7 @@ namespace springtail
             std::string oper_proc = copy_table._connection.get_string(i, 2);
             std::string proc_name = copy_table._connection.get_string(i, 3);
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Adding operator: {}, name: {}, proc: {} for extension: {}", oper_oid, oper_name, proc_name, extension);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding operator: {}, name: {}, proc: {} for extension: {}", oper_oid, oper_name, proc_name, extension);
             extn_registry->add_operator(extension, oper_oid, oper_name, proc_name);
         }
 
@@ -1439,7 +1437,8 @@ namespace springtail
             auto extension_name = ext.key();
             std::string extension_lib_path = fmt::format("{}{}.so", lib_path, extension_name);
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Initializing library for extension: {} for db_id: {}", extension_name, db_id);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Initializing library for extension: {} for db_id: {}",
+                      extension_name, db_id);
             PgExtnRegistry::get_instance()->init_libraries(db_id, extension_name, extension_lib_path);
             _load_extn_types(db_id, extension_name);
             _load_extn_operators(db_id, extension_name);
