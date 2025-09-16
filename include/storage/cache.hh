@@ -1105,6 +1105,7 @@ namespace springtail {
 
                 // start the background cleaner
                 _cleaner_thread = std::thread(&PageCache::background_cleaner, this);
+                pthread_setname_np(_cleaner_thread.native_handle(), "StorageCleaner");
             }
 
             ~PageCache()
