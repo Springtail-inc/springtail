@@ -169,8 +169,33 @@ namespace springtail::logging {
             {"name", log_name},
             {"log_level", std::string(str_log_level.data(), str_log_level.size())},
             {"flush_level", std::string(str_flush_level.data(), str_flush_level.size())},
-            {"debug_level", _debug_log_level.load(std::memory_order_relaxed)}
+            {"debug_level", _debug_log_level.load(std::memory_order_relaxed)},
+            {"module_mask", {}}
         };
+        uint32_t current_mask = _log_mask.load();
+        for (auto &[name, mask]: _log_module_map) {
+            if ((mask & current_mask) == mask) {
+                stats["module_mask"][name] = true;
+            } else {
+                stats["module_mask"][name] = false;
+            }
+        }
         return stats;
+    }
+
+    bool
+    Logger::set_log_mask(const std::string &mask_name, bool value)
+    {
+        auto it = _log_module_map.find(mask_name);
+        if (it == _log_module_map.end()) {
+            return true;
+        }
+        uint32_t mask = it->second;
+        if (value) {
+            _log_mask |= mask;
+        } else {
+            _log_mask &= (~mask);
+        }
+        return true;
     }
 } // namespace springtail::logging
