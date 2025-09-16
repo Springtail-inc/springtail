@@ -38,6 +38,8 @@ RedisCache::RedisCache(bool config_db)
     _init_storage();
 
     _subscriber_thread = std::thread(&RedisCache::_run, this);
+    pthread_setname_np(_subscriber_thread.native_handle(), "RedisCache");
+
     _init_finished.wait(false);
 }
 
@@ -271,7 +273,7 @@ RedisCache::_read_key_value(const std::string &key)
             do {
                 std::map<std::string, std::string> hash_data;
                 cursor = _client->hscan(key, cursor, std::inserter(hash_data, hash_data.begin()));
-                for (auto [hash_key, hash_value]: hash_data) {
+                for (auto &[hash_key, hash_value]: hash_data) {
                     key_value[hash_key] = _string_to_json(hash_value);
                 }
             } while (cursor != 0);
@@ -283,7 +285,7 @@ RedisCache::_read_key_value(const std::string &key)
             do {
                 std::vector<std::string> set_data;
                 cursor = _client->sscan(key, cursor, std::inserter(set_data, set_data.begin()));
-                for (auto set_value: set_data) {
+                for (auto &set_value: set_data) {
                     key_value.push_back(_string_to_json(set_value));
                 }
             } while (cursor != 0);
@@ -309,7 +311,7 @@ RedisCache::_init_storage()
         cursor = _client->scan(cursor, key_pattern, std::inserter(keys, keys.begin()));
 
         // fill the storage
-        for (auto key: keys) {
+        for (auto &key: keys) {
             nlohmann::json key_value;
             RedisType key_type;
             tie(key_value, key_type) = _read_key_value(key);
@@ -441,11 +443,11 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
                 const nlohmann::json &json_object_old = json_optional_object_old.value().get();
 
                 auto [old_vector, new_vector] = _array_diff(json_object_old, json_object_new);
-                for (auto old_element: old_vector) {
+                for (auto &old_element: old_vector) {
                     _client->srem(redis_key, old_element);
                     ret = true;
                 }
-                for (auto new_element: new_vector) {
+                for (auto &new_element: new_vector) {
                     _client->sadd(redis_key, new_element);
                     ret = true;
                 }

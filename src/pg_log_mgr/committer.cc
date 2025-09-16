@@ -42,7 +42,9 @@ namespace springtail::committer {
 
         // initiate the worker threads
         for (int i = 0; i < _worker_count; i++) {
-            _worker_threads.push_back(std::thread(&Committer::_run_worker, this, i));
+            std::string thread_name = fmt::format("CommitterW_{}", i);
+            _worker_threads.emplace_back(&Committer::_run_worker, this, i);
+            pthread_setname_np(_worker_threads.back().native_handle(), thread_name.c_str());
         }
 
         // XXX we are currently processing XIDs one at a time, but we should eventually bundle
