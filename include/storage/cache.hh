@@ -420,7 +420,7 @@ namespace springtail {
             /**
              * Re-inserts a write cache extent back into the read cache.  Should be called once a
              * Page holding the Extent has been flush()'d to disk and no longer refereces the Extent
-             * object's cache_id.  Returns the page to a CLEAN state from a MUTABLE state.
+             * object's cache_id.  Returns the extent to a CLEAN state from a MUTABLE state.
              *
              * @param extent The extent that should be returned to the clean cache.
              */
