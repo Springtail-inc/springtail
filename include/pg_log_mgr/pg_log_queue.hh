@@ -18,15 +18,22 @@ namespace springtail::pg_log_mgr {
     struct PgLogQueueEntry {
         using clock = std::chrono::steady_clock;
 
+        struct Metrics {
+            // time when it was created
+            clock::time_point ts_created;
+            // time when it was popped
+            clock::time_point ts_pop;
+            // logger_queue size when the entry was created
+            size_t queue_size;
+        };
+
         uint64_t start_offset;
         uint64_t end_offset;
         std::filesystem::path path;
         int num_messages;
         bool is_stall_message;
 
-        INSTRUMENT_INGEST_DATA(clock::time_point, ts_created)
-        INSTRUMENT_INGEST_DATA(clock::time_point, ts_pop)
-        INSTRUMENT_INGEST_DATA(size_t, queue_size)
+        INSTRUMENT_INGEST_DATA(Metrics, metrics)
 
         PgLogQueueEntry() = delete;
 
@@ -34,15 +41,15 @@ namespace springtail::pg_log_mgr {
             : start_offset(start_offset), end_offset(end_offset),
               path(path), num_messages(1), is_stall_message(false)
         {
-            INSTRUMENT_INGEST( { ts_created = clock::now();
-                    queue_size = 0;
+            INSTRUMENT_INGEST( { metrics.ts_created = clock::now();
+                    metrics.queue_size = 0;
                     } )
         }
 
         explicit PgLogQueueEntry(bool stall) : is_stall_message(stall)
         {
-            INSTRUMENT_INGEST( { ts_created = clock::now();
-                    queue_size = 0;
+            INSTRUMENT_INGEST( { metrics.ts_created = clock::now();
+                    metrics.queue_size = 0;
                     } )
         }
 
@@ -87,7 +94,7 @@ namespace springtail::pg_log_mgr {
             for (const auto& entry: entries) {
                 PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(entry.start_offset, entry.end_offset, entry.path);
                 new_entry->num_messages = entry.num_messages;
-                INSTRUMENT_INGEST( {new_entry->queue_size = queue_size++;})
+                INSTRUMENT_INGEST( {new_entry->metrics.queue_size = queue_size++;})
                 _internal_push(std::move(new_entry), write_lock);
             }
         }
@@ -98,7 +105,7 @@ namespace springtail::pg_log_mgr {
         void push_stall()
         {
             auto v = std::make_shared<PgLogQueueEntry>(true);
-            INSTRUMENT_INGEST( {v->queue_size = size();})
+            INSTRUMENT_INGEST( {v->metrics.queue_size = size();})
 
             std::unique_lock<std::mutex> write_lock{_mutex};
             _internal_push(std::move(v), write_lock);

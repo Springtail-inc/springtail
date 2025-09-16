@@ -55,14 +55,11 @@ namespace springtail::pg_log_mgr {
          * @brief Process next set of messages from log file
          * @param path file path
          * @param timestamp log file timestamp
-         * @param start_offset starting file offset
-         * @param end_offset ending file offset (-1 = read until eos)
+         * @param entry log entry
          */
         void process_log(const std::filesystem::path &path,
                          uint64_t timestamp,
-                         uint64_t start_offset,
-                         uint64_t end_offset,
-                         std::optional<PgLogQueueEntryPtr> entry = {});
+                         const PgLogQueueEntryPtr& entry);
                          
         /**
          * Set the starting point for XID assignment.

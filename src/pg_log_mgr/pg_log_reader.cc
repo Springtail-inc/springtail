@@ -947,12 +947,10 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::process_log(const std::filesystem::path &path,
                              uint64_t timestamp,
-                             uint64_t start_offset,
-                             uint64_t end_offset,
-                             std::optional<PgLogQueueEntryPtr> entry)
+                             const PgLogQueueEntryPtr& entry)
     {
         // init stream reader
-        _reader.set_file(path, start_offset);
+        _reader.set_file(path, entry->start_offset);
 
         static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
@@ -972,7 +970,7 @@ namespace springtail::pg_log_mgr {
 
         // consume messages from log; end offset of -1 means go until eos
         bool eos = false; // end of stream
-        while ((end_offset == -1 || _reader.offset() < end_offset) && !eos) {
+        while ((entry->end_offset == -1 || _reader.offset() < entry->end_offset) && !eos) {
             // read next message
             PgMsgPtr msg = _reader.read_message(filter, eos);
 
@@ -980,11 +978,10 @@ namespace springtail::pg_log_mgr {
                 msg->pg_log_timestamp = timestamp;
 
                 INSTRUMENT_INGEST( {
-                        if (entry.has_value()) {
-                            msg->ts_log_entry_created = (*entry)->ts_created;
-                            msg->ts_log_entry_pop = (*entry)->ts_pop;
-                            msg->log_queue_size = (*entry)->queue_size;
-                        }});
+                        msg->ts_log_entry_created = entry->metrics.ts_created;
+                        msg->ts_log_entry_pop = entry->metrics.ts_pop;
+                        msg->log_queue_size = entry->metrics.queue_size;
+                        });
 
                 // process the message
                 this->enqueue_msg(msg);

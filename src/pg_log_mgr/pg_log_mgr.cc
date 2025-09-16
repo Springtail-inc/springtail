@@ -839,11 +839,10 @@ namespace springtail::pg_log_mgr {
             }
 
             INSTRUMENT_INGEST( {
-                    log_entry->ts_pop = std::chrono::steady_clock::now();
+                    log_entry->metrics.ts_pop = std::chrono::steady_clock::now();
                     } )
 
-            _pg_log_reader->process_log(log_entry->path, last_timestamp,
-                                        log_entry->start_offset, log_entry->end_offset, log_entry);
+            _pg_log_reader->process_log(log_entry->path, last_timestamp, log_entry);
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Exiting log reader thread");
 
