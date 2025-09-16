@@ -26,7 +26,7 @@ namespace {
             _thread_manager.notify_shutdown();
             _thread_manager.shutdown();
         }
-        MultiQueueThreadManager _thread_manager{4};
+        MultiQueueThreadManager _thread_manager{4, "TestMQThrMgr"};
 
         void _multi_queue_test(size_t iter_count, size_t queue_count) {
             std::shared_ptr<std::queue<size_t>[]> in_queues(new std::queue<size_t>[queue_count]);

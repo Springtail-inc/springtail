@@ -77,6 +77,7 @@ namespace springtail {
          */
         void start() {
             _subscriber_thread = std::thread(&PubSubThread::_run, this);
+            pthread_setname_np(_subscriber_thread.native_handle(), "RedisPubSub");
             _is_up.wait(false);
         }
 

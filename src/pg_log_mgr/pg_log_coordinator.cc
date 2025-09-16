@@ -94,6 +94,7 @@ namespace springtail::pg_log_mgr {
         // Start the committer thread
         _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue, _index_reconciliation_queue_mgr, _index_requests_mgr, indexer_worker_threads);
         _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
+        pthread_setname_np(_committer_thread.native_handle(), "LogMgrCommitter");
 
         // get instance id
         _db_instance_id = Properties::get_db_instance_id();

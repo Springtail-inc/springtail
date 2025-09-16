@@ -257,6 +257,8 @@ private:
             _freq_sec{freq_sec}
         {
             _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
+            pthread_setname_np(_t->native_handle(), "OTelCounters");
+
         }
         OTelCounters(OTelCounters&&) = delete;
 
