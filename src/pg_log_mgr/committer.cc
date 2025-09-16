@@ -14,6 +14,63 @@
 #include <pg_log_mgr/committer.hh>
 #include <storage/vacuumer.hh>
 
+namespace springtail {
+        struct PipelineMetricFields
+        {
+            FieldPtr ts_msg_created_f;
+            FieldPtr ts_msg_pop_f;
+            FieldPtr msg_queue_size_f;
+            FieldPtr ts_log_entry_created_f;
+            FieldPtr ts_log_entry_pop_f;
+            FieldPtr log_queue_size_f;
+        };
+
+        struct PipelineMetric
+        {
+            // log entry is added to the first queue
+            std::chrono::steady_clock::time_point ts_log_entry_created;
+            // log entry is extracted from the queue
+            std::chrono::steady_clock::time_point ts_log_entry_pop;
+            // queue size when the entry is created and added to the queue
+            size_t log_queue_size;
+
+
+            // the log entry is parsed, created PgMsg and pushed
+            // into the next queue
+            std::chrono::steady_clock::time_point ts_msg_entry_created;
+            // the message is out of this queue and added to
+            // the write cache
+            std::chrono::steady_clock::time_point ts_msg_entry_pop;
+            // message queue size when the message was created
+            size_t msg_queue_size; 
+
+            // message commit start 
+            std::chrono::steady_clock::time_point ts_commit_start;
+            std::chrono::steady_clock::time_point ts_commit_end;
+            size_t commit_queue_size; 
+
+            std::string to_string() const {
+                return std::format("Total latency: {}, "
+                        "Logger queue latency: {}, "
+                        "Msg queue latency: {}, "
+                        "Commit latency: {}, "
+                        "Msg exit to Commit enter latency: {}, "
+                        "Logger queue size: {}, "
+                        "Msg queue size: {}, "
+                        "Committer queue size: {} ",
+                        ts_commit_end - ts_log_entry_created,
+                        ts_log_entry_pop - ts_log_entry_created,
+                        ts_msg_entry_pop - ts_msg_entry_created,
+                        ts_commit_end - ts_commit_start,
+                        ts_commit_start - ts_msg_entry_pop,
+                        log_queue_size, msg_queue_size, commit_queue_size
+                        );
+            }
+
+        };
+
+}
+
 namespace springtail::committer {
 
     bool
@@ -539,60 +596,6 @@ namespace springtail::committer {
                                MutableTablePtr table,
                                const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent)
     {
-        struct PipelineMetricFields
-        {
-            FieldPtr ts_msg_created_f;
-            FieldPtr ts_msg_pop_f;
-            FieldPtr msg_queue_size_f;
-            FieldPtr ts_log_entry_created_f;
-            FieldPtr ts_log_entry_pop_f;
-            FieldPtr log_queue_size_f;
-        };
-
-        struct PipelineMetric
-        {
-            // log entry is added to the first queue
-            std::chrono::steady_clock::time_point ts_log_entry_created;
-            // log entry is extracted from the queue
-            std::chrono::steady_clock::time_point ts_log_entry_pop;
-            // queue size when the entry is created and added to the queue
-            size_t log_queue_size;
-
-
-            // the log entry is parsed, created PgMsg and pushed
-            // into the next queue
-            std::chrono::steady_clock::time_point ts_msg_entry_created;
-            // the message is out of this queue and added to
-            // the write cache
-            std::chrono::steady_clock::time_point ts_msg_entry_pop;
-            // message queue size when the message was created
-            size_t msg_queue_size; 
-
-            // message commit start 
-            std::chrono::steady_clock::time_point ts_commit_start;
-            std::chrono::steady_clock::time_point ts_commit_end;
-            size_t commit_queue_size; 
-
-            std::string to_string() const {
-                return std::format("Total latency: {}, "
-                        "Logger queue latency: {}, "
-                        "Msg queue latency: {}, "
-                        "Commit latency: {}, "
-                        "Msg exit to Commit enter latency: {}, "
-                        "Logger queue size: {}, "
-                        "Msg queue size: {}, "
-                        "Committer queue size: {} ",
-                        ts_commit_end - ts_log_entry_created,
-                        ts_log_entry_pop - ts_log_entry_created,
-                        ts_msg_entry_pop - ts_msg_entry_created,
-                        ts_commit_end - ts_commit_start,
-                        ts_commit_start - ts_msg_entry_pop,
-                        log_queue_size, msg_queue_size, commit_queue_size
-                        );
-            }
-
-        };
-
         // get the schema at the given XID/LSN
         // note: we are guaranteed that the entire batch will utilize the same schema
         XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
