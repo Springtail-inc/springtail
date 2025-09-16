@@ -20,8 +20,8 @@ extern "C" PGEXT_API void *AllocSetContextCreateInternal(void *parent,
                                                          size_t minContextSize,
                                                          size_t initBlockSize,
                                                          size_t maxBlockSize);
-// extern "C" PGEXT_API void *MemoryContextAlloc(void *context, size_t size);
-// extern "C" PGEXT_API void *MemoryContextAllocZero(void *context, size_t size);
+extern "C" PGEXT_API void *MemoryContextAlloc(void *context, size_t size);
+extern "C" PGEXT_API void *MemoryContextAllocZero(void *context, size_t size);
 extern "C" PGEXT_API void MemoryContextDelete(void *context);
 
 // Memory management

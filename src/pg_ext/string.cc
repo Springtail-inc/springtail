@@ -16,6 +16,9 @@
 
 #include <common/logging.hh>
 
+#define HIGHBIT (0x80)
+#define IS_HIGHBIT_SET(ch) ((unsigned char)(ch) & HIGHBIT)
+
 char *lowerstr(const char *str) {
     return lowerstr_with_len(str, std::strlen(str));
 }
@@ -282,6 +285,55 @@ enlargeStringInfo(StringInfo str, int needed)
     str->maxlen = newlen;
 }
 
+int
+appendStringInfoVA(StringInfo str, const char *fmt, va_list args)
+{
+    int avail;
+    size_t nprinted;
+
+    assert(str != NULL);
+
+    avail = str->maxlen - str->len;
+    if (avail < 16) {
+        return 32;
+    }
+
+    nprinted = vsnprintf(str->data + str->len, (size_t)avail, fmt, args);
+
+    if (nprinted < (size_t)avail) {
+        str->len += (int)nprinted;
+        return 0;
+    }
+
+    str->data[str->len] = '\0';
+
+    return (int)nprinted;
+}
+
+void
+appendStringInfo(StringInfo str, const char *fmt, ...)
+{
+    int save_errno = errno;
+
+    for (;;) {
+        va_list args;
+        int needed;
+
+        /* Try to format the data. */
+        errno = save_errno;
+        va_start(args, fmt);
+        needed = appendStringInfoVA(str, fmt, args);
+        va_end(args);
+
+        if (needed == 0) {
+            break; /* success */
+        }
+
+        /* Increase the buffer size and try again. */
+        enlargeStringInfo(str, needed);
+    }
+}
+
 void
 appendBinaryStringInfo(StringInfo str, const void *data, int datalen)
 {
@@ -450,4 +502,45 @@ scanner_isspace(char ch)
         return true;
     }
     return false;
+}
+
+text
+*cstring_to_text_with_len(const char *s, int len){
+    text *result = (text *)palloc(len + VARHDRSZ);
+
+    SET_VARSIZE(result, len + VARHDRSZ);
+    memcpy(VARDATA(result), s, len);
+
+    return result;
+}
+
+int
+pg_strcasecmp(const char *s1, const char *s2)
+{
+    for (;;) {
+        unsigned char ch1 = (unsigned char)*s1++;
+        unsigned char ch2 = (unsigned char)*s2++;
+
+        if (ch1 != ch2) {
+            if (ch1 >= 'A' && ch1 <= 'Z') {
+                ch1 += 'a' - 'A';
+            } else if (IS_HIGHBIT_SET(ch1) && isupper(ch1)) {
+                ch1 = tolower(ch1);
+            }
+
+            if (ch2 >= 'A' && ch2 <= 'Z') {
+                ch2 += 'a' - 'A';
+            } else if (IS_HIGHBIT_SET(ch2) && isupper(ch2)) {
+                ch2 = tolower(ch2);
+            }
+
+            if (ch1 != ch2) {
+                return (int)ch1 - (int)ch2;
+            }
+        }
+        if (ch1 == 0) {
+            break;
+        }
+    }
+    return 0;
 }

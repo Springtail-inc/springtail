@@ -3,6 +3,7 @@
 #include <pg_ext/common.hh>
 #include <pg_ext/export.hh>
 #include <pg_ext/memory.hh>
+#include <pg_ext/type.hh>
 
 #define PG_FUNCTION_ARGS pgext::FunctionCallInfo fcinfo
 
@@ -210,6 +211,7 @@ extern "C" PGEXT_API Datum get_fn_opclass_options(pgext::FmgrInfo *fcinfo);
 extern "C" PGEXT_API bool has_fn_opclass_options(pgext::FmgrInfo *fcinfo);
 extern "C" PGEXT_API pgext::PGFunction lookup_pgfunction_by_oid(Oid oid);
 extern "C" PGEXT_API char *OidOutputFunctionCall(Oid function_oid, Datum value);
+extern "C" PGEXT_API char *OutputFunctionCall(pgext::FmgrInfo *flinfo, Datum val);
 extern "C" PGEXT_API void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena);
 extern "C" PGEXT_API void getTypeInputInfo(Oid type, Oid *typInput, Oid *typIOParam);
 extern "C" PGEXT_API pgext::TypeFuncClass get_call_result_type(pgext::FunctionCallInfo fcinfo,
@@ -224,5 +226,34 @@ extern "C" PGEXT_API void fmgr_info_cxt(Oid functionId, pgext::FmgrInfo *finfo, 
 extern "C" PGEXT_API pgext::TupleDesc lookup_rowtype_tupdesc_domain(Oid type_id,
                                                                     int32_t typmod,
                                                                     bool noError);
+extern "C" PGEXT_API void end_MultiFuncCall(PG_FUNCTION_ARGS, pgext::FuncCallContext *funcctx);
+extern "C" PGEXT_API pgext::FuncCallContext *init_MultiFuncCall(PG_FUNCTION_ARGS);
+
+struct HeapTupleHeaderData {};
+typedef struct HeapTupleHeaderData *HeapTupleHeader;
+
+struct BlockIdData {
+    uint16_t bi_hi;
+    uint16_t bi_lo;
+};
+
+struct ItemPointerData {
+    BlockIdData ip_blkid;
+    uint16_t ip_posid;
+};
+typedef ItemPointerData *ItemPointer;
+
+struct HeapTupleData {
+    uint32_t t_len;         /* length of *t_data */
+    ItemPointerData t_self; /* SelfItemPointer */
+    Oid t_tableOid;         /* table the tuple came from */
+#define FIELDNO_HEAPTUPLEDATA_DATA 3
+    HeapTupleHeader t_data; /* -> tuple header and data */
+};
+typedef struct HeapTupleData *HeapTuple;
 
 extern "C" PGEXT_API void DecrTupleDescRefCount(pgext::TupleDesc tupdesc);
+extern "C" PGEXT_API pgext::TupleDesc BlessTupleDesc(pgext::TupleDesc tupdesc);
+extern "C" PGEXT_API Datum HeapTupleHeaderGetDatum(HeapTupleHeader tuple);
+extern "C" PGEXT_API HeapTuple heap_form_tuple(pgext::TupleDesc tupleDescriptor, Datum *values, bool *isnull);
+extern "C" PGEXT_API void heap_deform_tuple(HeapTuple tuple, pgext::TupleDesc tupleDesc, Datum *values, bool *isnull);

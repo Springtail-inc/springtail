@@ -22,6 +22,9 @@ set(LIB_PGEXT_SOURCES
     node.cc
     jsonb.cc
     toast.cc
+    parser.cc
+    domains.cc
+    type.cc
     extn_registry.cc
 )
 

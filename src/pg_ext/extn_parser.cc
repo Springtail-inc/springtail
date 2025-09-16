@@ -6,7 +6,7 @@
 
 #include <common/logging.hh>
 
-std::vector<std::string> WHITELIST_EXTNS = {"cube", "hstore"};
+std::vector<std::string> WHITELIST_EXTNS = {"pg_trgm","cube", "hstore"};
 
 int
 main()

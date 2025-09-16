@@ -3,6 +3,7 @@
 #include <pg_ext/common.hh>
 #include <pg_ext/export.hh>
 #include <pg_ext/numeric.hh>
+#include <pg_ext/string.hh>
 
 /* Forward declarations */
 typedef struct JsonbPair JsonbPair;
@@ -87,3 +88,5 @@ struct JsonbValue {
 
 extern "C" PGEXT_API JsonbValue *pushJsonbValue(JsonbValue *val);
 extern "C" PGEXT_API bool IsValidJsonNumber(const char *str, int len);
+extern "C" PGEXT_API JsonbValue *JsonbValueToJsonb(JsonbValue *val);
+extern "C" PGEXT_API void escape_json(StringInfo buf, const char *str);

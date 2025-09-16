@@ -81,3 +81,11 @@ long hash_get_num_entries(HTAB *htab) {
 uint32_t hash_bytes(const unsigned char *k, int keylen) {
     return default_hash_func(k, keylen);
 }
+
+uint64_t hash_bytes_extended(const unsigned char *k,
+                                                  int keylen,
+                                                  uint64_t seed)
+{
+    // XXX Stubbed for now
+    return default_hash_func(k, keylen);
+}

@@ -2,6 +2,7 @@
 
 #include <pg_ext/common.hh>
 #include <pg_ext/export.hh>
+#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
 
@@ -12,6 +13,7 @@
 #undef pg_strerror_r
 #endif
 
+typedef struct varlena text;
 typedef struct StringInfoData
 {
 	char	   *data;
@@ -27,12 +29,19 @@ typedef struct ParseState {
     const char *p_sourcetext;
 } ParseState;
 
+#define appendStringInfoCharMacro(str, ch) \
+    (((str)->len + 1 >= (str)->maxlen)     \
+         ? appendStringInfoChar(str, ch)   \
+         : (void)((str)->data[(str)->len] = (ch), (str)->data[++(str)->len] = '\0'))
+
 //// EXPORTED INTERFACES
 extern "C" PGEXT_API void initStringInfo(StringInfo str);
 extern "C" PGEXT_API void appendBinaryStringInfo(StringInfo str, const void *data, int datalen);
 extern "C" PGEXT_API void appendBinaryStringInfoNT(StringInfo str, const void *data, int datalen);
 extern "C" PGEXT_API void appendStringInfoString(StringInfo str, const char *s);
 extern "C" PGEXT_API void appendStringInfoChar(StringInfo str, char ch);
+extern "C" PGEXT_API void appendStringInfo(StringInfo str, const char *fmt, ...);
+extern "C" PGEXT_API int appendStringInfoVA(StringInfo str, const char *fmt, va_list args);
 extern "C" PGEXT_API void enlargeStringInfo(StringInfo str, int needed);
 extern "C" PGEXT_API void resetStringInfo(StringInfo str);
 
@@ -48,6 +57,8 @@ extern "C" PGEXT_API void pq_begintypsend(StringInfo str);
 extern "C" PGEXT_API void pq_sendfloat8(StringInfo str, double value);
 extern "C" PGEXT_API bytea *pq_endtypsend(StringInfo buf);
 extern "C" PGEXT_API void pq_sendtext(StringInfo buf, const char *str, int slen);
+
+extern "C" PGEXT_API text *cstring_to_text_with_len(const char *s, int len);
 
 extern "C" PGEXT_API char *lowerstr(const char *str);
 extern "C" PGEXT_API char *lowerstr_with_len(const char *str, int len);
@@ -66,3 +77,5 @@ extern "C" PGEXT_API int t_isalpha(const char *p);
 extern "C" PGEXT_API char *str_tolower(const char *buff, size_t nbytes, Oid collid);
 extern "C" PGEXT_API char *str_toupper(const char *buff, size_t nbytes, Oid collid);
 extern "C" PGEXT_API char *pstrdup(const char *in);
+
+extern "C" PGEXT_API int pg_strcasecmp(const char *s1, const char *s2);

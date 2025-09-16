@@ -4,6 +4,7 @@
 #include <common/logging.hh>
 #include <pg_ext/fmgr.hh>
 #include <pg_ext/node.hh>
+#include <pg_ext/type.hh>
 
 Datum
 DirectFunctionCall1(pgext::PGFunction func, Datum arg1)
@@ -229,6 +230,19 @@ per_MultiFuncCall(PG_FUNCTION_ARGS)
 }
 
 void
+end_MultiFuncCall(PG_FUNCTION_ARGS, pgext::FuncCallContext *funcctx)
+{
+    // XXX Stubbed for now
+}
+
+pgext::FuncCallContext *
+init_MultiFuncCall(PG_FUNCTION_ARGS)
+{
+    // XXX Stubbed for now
+    return nullptr;
+}
+
+void
 fmgr_info_cxt(Oid functionId, pgext::FmgrInfo *finfo, pgext::MemoryContext mcxt)
 {
     // XXX Stubbed for now
@@ -243,6 +257,46 @@ lookup_rowtype_tupdesc_domain(Oid type_id, int32_t typmod, bool noError)
 
 void
 DecrTupleDescRefCount(pgext::TupleDesc tupdesc)
+{
+    // XXX Stubbed for now
+}
+
+void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena)
+{
+    // XXX Stubbed for now
+}
+
+void
+assign_record_type_typmod(pgext::TupleDesc tupdesc)
+{
+
+}
+
+pgext::TupleDesc BlessTupleDesc(pgext::TupleDesc tupdesc)
+{
+    // RECORDOID XXX Stubbed for now
+    if (tupdesc->tdtypeid == -1 && tupdesc->tdtypmod < 0) {
+        assign_record_type_typmod(tupdesc);
+    }
+
+    return tupdesc;
+}
+
+Datum
+HeapTupleHeaderGetDatum(HeapTupleHeader tuple)
+{
+    // XXX Stubbed for now
+    return InvalidOid;
+}
+
+HeapTuple heap_form_tuple(pgext::TupleDesc tupleDescriptor, Datum *values, bool *isnull)
+{
+    // XXX Stubbed for now
+    return nullptr;
+}
+
+void
+heap_deform_tuple(HeapTuple tuple, pgext::TupleDesc tupleDesc, Datum *values, bool *isnull)
 {
     // XXX Stubbed for now
 }
