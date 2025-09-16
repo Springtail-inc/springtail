@@ -251,7 +251,7 @@ namespace springtail::pg_fdw {
 
         _init_fdw();
 
-        _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
+        _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE, "DDL_MQThrMgr");
         _thread_manager->start();
 
         // create a new thread to run the policy and role sync

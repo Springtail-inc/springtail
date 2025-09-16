@@ -77,7 +77,7 @@ Vacuumer::_init()
     if (_vacuum_start_enabled) {
         // Core thread of the vacuumer
         _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
-        pthread_setname_np(_vacuumer_thread.native_handle(), "Vacuuumer");
+        pthread_setname_np(_vacuumer_thread.native_handle(), "Vacuumer");
         LOG_INFO("Vacuumer thread started");
     } else {
         _extents_tracking_enabled = false;
