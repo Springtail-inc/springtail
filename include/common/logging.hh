@@ -173,6 +173,16 @@ namespace springtail {
                 }
             }
 
+            /**
+             * @brief Set a new log mask
+             *
+             * @param mask_name - name of the mask
+             * @param value - turn on or off
+             * @return true - log mask was changed
+             * @return false - log mask was not changed due to some failure
+             */
+            bool set_log_mask(const std::string &mask_name, bool value);
+
         protected:
             /** Helper class for forwarding failed CHECKs and DCHECKs to the log */
             class SpdlogSink : public absl::LogSink {
