@@ -348,30 +348,33 @@ namespace springtail
          PgMsgAttachPartition,
          PgMsgDetachPartition
         > msg;                 ///< message data
-
+                               ///
         /** timestamp id of the current Postgres log file -- will be zero for internal messages */
         uint64_t pg_log_timestamp{0};
         PgMsgEnum msg_type;    ///< type defining union member
         int proto_version;     ///< which protocol version
         bool is_streaming;     ///< is this a streaming message
 
+
         using clock = std::chrono::steady_clock;
+        struct Metrics {
+            clock::time_point ts_created;
+            clock::time_point ts_pop;
+            size_t msg_queue_size;
 
-        INSTRUMENT_INGEST_DATA(clock::time_point, ts_created)
-        INSTRUMENT_INGEST_DATA(clock::time_point, ts_pop)
-        INSTRUMENT_INGEST_DATA(size_t, msg_queue_size)
-
-        INSTRUMENT_INGEST_DATA(clock::time_point, ts_log_entry_created)
-        INSTRUMENT_INGEST_DATA(clock::time_point, ts_log_entry_pop)
-        INSTRUMENT_INGEST_DATA(size_t, log_queue_size)
+            clock::time_point ts_log_entry_created;
+            clock::time_point ts_log_entry_pop;
+            size_t log_queue_size;
+        };
+        INSTRUMENT_INGEST_DATA(Metrics, metrics)
 
         explicit PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
             : msg_type(type)
         {
             INSTRUMENT_INGEST( { 
-                    ts_created = clock::now();
-                    log_queue_size = 0;
-                    msg_queue_size = 0;
+                    metrics.ts_created = clock::now();
+                    metrics.log_queue_size = 0;
+                    metrics.msg_queue_size = 0;
                     } )
         }
 

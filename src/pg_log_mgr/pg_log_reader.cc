@@ -321,13 +321,13 @@ namespace springtail::pg_log_mgr {
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
         INSTRUMENT_INGEST( {
-                msg->ts_pop = std::chrono::steady_clock::now();
-                entry.ts_msg_created_f->set_uint64(&row, time_point_to_numeric(msg->ts_created));
-                entry.ts_msg_pop_f->set_uint64(&row, time_point_to_numeric(msg->ts_pop));
-                entry.msg_queue_size_f->set_uint64(&row, msg->msg_queue_size);
-                entry.ts_log_entry_created_f->set_uint64(&row, time_point_to_numeric(msg->ts_log_entry_created));
-                entry.ts_log_entry_pop_f->set_uint64(&row, time_point_to_numeric(msg->ts_log_entry_pop));
-                entry.log_queue_size_f->set_uint64(&row, msg->log_queue_size);
+                msg->metrics.ts_pop = std::chrono::steady_clock::now();
+                entry.ts_msg_created_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_created));
+                entry.ts_msg_pop_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_pop));
+                entry.msg_queue_size_f->set_uint64(&row, msg->metrics.msg_queue_size);
+                entry.ts_log_entry_created_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_log_entry_created));
+                entry.ts_log_entry_pop_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_log_entry_pop));
+                entry.log_queue_size_f->set_uint64(&row, msg->metrics.log_queue_size);
                 } )
 
         // XXX we need some way to limit the total memory used by a batch across all extents
@@ -914,7 +914,7 @@ namespace springtail::pg_log_mgr {
     {
         INSTRUMENT_INGEST(
                 {
-                    msg->msg_queue_size = _msg_queue.size();
+                    msg->metrics.msg_queue_size = _msg_queue.size();
                 })
 
         _msg_queue.push(msg);
@@ -978,9 +978,9 @@ namespace springtail::pg_log_mgr {
                 msg->pg_log_timestamp = timestamp;
 
                 INSTRUMENT_INGEST( {
-                        msg->ts_log_entry_created = entry->metrics.ts_created;
-                        msg->ts_log_entry_pop = entry->metrics.ts_pop;
-                        msg->log_queue_size = entry->metrics.queue_size;
+                        msg->metrics.ts_log_entry_created = entry->metrics.ts_created;
+                        msg->metrics.ts_log_entry_pop = entry->metrics.ts_pop;
+                        msg->metrics.log_queue_size = entry->metrics.queue_size;
                         });
 
                 // process the message
