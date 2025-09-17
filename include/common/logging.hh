@@ -74,6 +74,14 @@ namespace springtail {
         LOG_LEVEL_DEBUG4 = 4  // lowest level, least priority
     };
 
+
+    /** Observability levels  */
+    enum LogObservabilityLevel : uint32_t {
+        LOG_LEVEL_OBSERVABILITY_1 = 1, // highest level, most priority
+        LOG_LEVEL_OBSERVABILITY_2 = 2,
+        LOG_LEVEL_OBSERVABILITY_MAX = 2
+    };
+
     namespace logging {
         /**
          * @brief Logger singleton class
@@ -174,6 +182,23 @@ namespace springtail {
             }
 
             /**
+             * @brief Change observability level to the specified value
+             *
+             * @param lvl - level
+             */
+            void set_observability_level(uint32_t lvl) {
+                if (lvl >= LOG_LEVEL_OBSERVABILITY_1 && lvl <= LOG_LEVEL_OBSERVABILITY_MAX)
+                    _log_level_observability = static_cast<LogObservabilityLevel>(lvl);
+            }
+
+            /**
+             * @brief Get the observability level 
+             */
+            static LogObservabilityLevel observability_level() {
+                return _log_level_observability;
+            }
+
+            /**
              * @brief Set a new log mask
              *
              * @param mask_name - name of the mask
@@ -218,6 +243,7 @@ namespace springtail {
 
             static std::map<std::string, uint32_t> _log_module_map;    ///< mapping from log id name to value
             static inline std::atomic<LogDebugLevel> _debug_log_level{LOG_LEVEL_DEBUG1};  ///< log level for debugging
+            static inline std::atomic<LogObservabilityLevel> _log_level_observability{LOG_LEVEL_OBSERVABILITY_1};  ///< log level for observability
 
             /**
              * @brief flag that indicates if logging was fully initialized, as it determins behavior of

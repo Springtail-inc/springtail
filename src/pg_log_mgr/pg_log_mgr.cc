@@ -728,7 +728,7 @@ namespace springtail::pg_log_mgr {
             // once recovery is done, move all the entries to the _logger_queue
             if (!done && !_shutdown) {
                 // copy queue from
-                INSTRUMENT_INGEST( {
+                INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
                     _queue_insert_freq.event();
                     double f = _queue_insert_freq.frequency();
                     if (f > std::numeric_limits<double>::min()) {
@@ -753,7 +753,7 @@ namespace springtail::pg_log_mgr {
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Queueing log entry: start_offset={}, end_offset={}, file_path={}",
                                   start_offset, end_offset, file_path);
 
-                        INSTRUMENT_INGEST( {
+                        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
                                     _queue_insert_freq.event();
                                     double f = _queue_insert_freq.frequency();
                                     if (f > std::numeric_limits<double>::min()) {
@@ -838,9 +838,9 @@ namespace springtail::pg_log_mgr {
                 last_path = log_entry->path;
             }
 
-            INSTRUMENT_INGEST( {
+            INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
                     log_entry->metrics.ts_pop = std::chrono::steady_clock::now();
-                    } )
+                    })
 
             _pg_log_reader->process_log(log_entry->path, last_timestamp, log_entry);
         }

@@ -20,6 +20,35 @@ namespace springtail {
     constexpr std::string_view STORAGE_CACHE_DROP_LATENCIES = "storage_cache_drop_latencies";
 
     // ingest histogram metrics
+    /**
+     * We collect the following time points.
+     *
+     * - The replication log is parsed, a log entry is created and pushed into the logger queue: ts_log_entry_created
+     * - The logger queue consumer reads the entry: ts_log_entry_pop
+     * - The logger queue consumer process the entry, creates PgMsg and pushes it into the next queue: ts_msg_created
+     * - The message queue consumer reads the message: ts_msg_pop
+     * - If needed a new write cache extent is created: ts_extent_created
+     * - The message is added to a write cache extent
+     * - When the extent is full or there is COMMIT, the extent is pushed to the committer: ts_cache_index_created
+     * - The committer reads each row: ts_commit_start
+     * - The committer mutates the row: ts_commit_end
+     * - The committer finalizes the table: ts_finalized
+     *
+     * From these time points, we record the following latencies.
+     *
+     * Per message: 
+     *
+     * INGEST_PIPELINE_LATENCIES = ts_commit_end - ts_log_entry_created (total pipeline latency)
+     * LOG_READER_QUEUE_LATENCIES = ts_log_entry_pop - ts_log_entry_created (time spend in logger queue)
+     * INGEST_MSG_QUEUE_LATENCIES = ts_msg_pop - ts_msg_created (time spent in msg queue)
+     * COMMITTER_PROC_LATENCIES = ts_commit_end - ts_commit_start (committer time)
+     * WRITE_CACHE_ROW_LATENCIES = ts_commit_end - ts_extent_created (time spent in write cache extent)
+     *
+     * Per transaction (sort of):
+     *
+     * WRITE_CACHE_FINALIZE_LATENCIES = ts_finalized - ts_cache_index_created
+     *
+    */
     constexpr std::string_view LOG_READER_EVENT_FREQ = "log_reader_event_freq";
     constexpr std::string_view COMMITTER_IN_EVENT_FREQ = "committer_in_event_freq";
     constexpr std::string_view COMMITTER_OUT_EVENT_FREQ = "committer_out_event_freq";
@@ -28,6 +57,8 @@ namespace springtail {
     constexpr std::string_view INGEST_MSG_QUEUE_LATENCIES = "ingest_msg_queue_latencies";
     constexpr std::string_view COMMITTER_PROC_LATENCIES = "committer_proc_latencies";
     constexpr std::string_view INGEST_PIPELINE_LATENCIES = "ingest_pipeline_latencies";
+    constexpr std::string_view WRITE_CACHE_ROW_LATENCIES = "write_cache_row_latencies";
+    constexpr std::string_view WRITE_CACHE_FINALIZE_LATENCIES = "write_cache_finalize_latencies";
 
     constexpr std::string_view LOG_READER_QUEUE_SIZE = "log_reader_queue_size";
     constexpr std::string_view INGEST_MSG_QUEUE_SIZE = "ingest_msg_queue_size";
@@ -108,6 +139,8 @@ namespace springtail {
             {INGEST_MSG_QUEUE_LATENCIES, "Time PgMsg spends in the next queue."},
             {COMMITTER_PROC_LATENCIES, "Time takes for the committer to process the message."},
             {INGEST_PIPELINE_LATENCIES, "Total latency of the ingest pipeline."},
+            {WRITE_CACHE_ROW_LATENCIES, "Time takes for a write cache row to be picked by the committer."},
+            {WRITE_CACHE_FINALIZE_LATENCIES, "Time takes for cache extents to be finalized."},
 
             {LOG_READER_QUEUE_SIZE, "log_reader_queue_size"},
             {INGEST_MSG_QUEUE_SIZE, "ingest_msg_queue_size"},

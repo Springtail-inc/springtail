@@ -1,3 +1,4 @@
+#include <any>
 #include <memory>
 #include <thread>
 
@@ -160,30 +161,18 @@ namespace springtail::pg_log_mgr {
 
         std::vector<SchemaColumn> new_columns{op, lsn};
 
-        INSTRUMENT_INGEST( {
-            new_columns.emplace_back("__springtail_ts_msg_created", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_ts_msg_pop", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_msg_queue_size", 0, SchemaType::UINT64, 0, false);
-
-            new_columns.emplace_back("__springtail_ts_log_entry_created", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_ts_log_entry_pop", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_log_queue_size", 0, SchemaType::UINT64, 0, false);
-        } );
-
+        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
+            ts_extent_created = clock::now(); 
+            MetricFields::add_metric_fields(new_columns);
+        });
 
         schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
 
-        INSTRUMENT_INGEST( {
-                ts_msg_created_f = schema->get_mutable_field("__springtail_ts_msg_created");
-                ts_msg_pop_f = schema->get_mutable_field("__springtail_ts_msg_pop");
-                msg_queue_size_f = schema->get_mutable_field("__springtail_msg_queue_size");
-
-                ts_log_entry_created_f = schema->get_mutable_field("__springtail_ts_log_entry_created");
-                ts_log_entry_pop_f = schema->get_mutable_field("__springtail_ts_log_entry_pop");
-                log_queue_size_f = schema->get_mutable_field("__springtail_log_queue_size");
-                } )
+        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
+                metric_f = std::make_shared<MetricFields>(schema);
+                })
 
         // reset fields; forces a resync of fields during add_mutation()
         fields = nullptr;
@@ -320,14 +309,16 @@ namespace springtail::pg_log_mgr {
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
-        INSTRUMENT_INGEST( {
+        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
                 msg->metrics.ts_pop = std::chrono::steady_clock::now();
-                entry.ts_msg_created_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_created));
-                entry.ts_msg_pop_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_pop));
-                entry.msg_queue_size_f->set_uint64(&row, msg->metrics.msg_queue_size);
-                entry.ts_log_entry_created_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_log_entry_created));
-                entry.ts_log_entry_pop_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_log_entry_pop));
-                entry.log_queue_size_f->set_uint64(&row, msg->metrics.log_queue_size);
+
+                entry.metric_f->ts_extent_created_f->set_uint64(&row, time_point_to_numeric(entry.ts_extent_created));
+                entry.metric_f->ts_msg_created_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_created));
+                entry.metric_f->ts_msg_pop_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_pop));
+                entry.metric_f->msg_queue_size_f->set_uint64(&row, msg->metrics.msg_queue_size);
+                entry.metric_f->ts_log_entry_created_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_log_entry_created));
+                entry.metric_f->ts_log_entry_pop_f->set_uint64(&row, time_point_to_numeric(msg->metrics.ts_log_entry_pop));
+                entry.metric_f->log_queue_size_f->set_uint64(&row, msg->metrics.log_queue_size);
                 } )
 
         // XXX we need some way to limit the total memory used by a batch across all extents
@@ -912,9 +903,10 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::enqueue_msg(PgMsgPtr msg)
     {
-        INSTRUMENT_INGEST(
+        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1,
                 {
                     msg->metrics.msg_queue_size = _msg_queue.size();
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, msg->metrics.msg_queue_size);
                 })
 
         _msg_queue.push(msg);
@@ -977,7 +969,7 @@ namespace springtail::pg_log_mgr {
             if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
 
-                INSTRUMENT_INGEST( {
+                INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
                         msg->metrics.ts_log_entry_created = entry->metrics.ts_created;
                         msg->metrics.ts_log_entry_pop = entry->metrics.ts_pop;
                         msg->metrics.log_queue_size = entry->metrics.queue_size;

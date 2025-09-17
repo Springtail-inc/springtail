@@ -50,6 +50,7 @@ namespace springtail::logging {
         int max_files = Json::get_or<int>(props, "log_file_count", 5);
         std::string log_level = Json::get_or<std::string>(props, "log_level", "trace");
         set_debug_level(Json::get_or<uint32_t>(props, "log_level_debug", 1));
+        set_observability_level(Json::get_or<uint32_t>(props, "log_level_observability", 1));
         std::string pattern = Json::get_or<std::string>(props, "log_pattern", "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
         bool log_rotation_enabled = Json::get_or<bool>(props, "log_rotation_enabled", true);
         spdlog::level::level_enum log_level_value = get_log_level_from_string(log_level);

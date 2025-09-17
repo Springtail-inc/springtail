@@ -371,7 +371,7 @@ namespace springtail
         explicit PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
             : msg_type(type)
         {
-            INSTRUMENT_INGEST( { 
+            INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, { 
                     metrics.ts_created = clock::now();
                     metrics.log_queue_size = 0;
                     metrics.msg_queue_size = 0;

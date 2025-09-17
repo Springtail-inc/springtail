@@ -4,6 +4,7 @@
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <chrono>
+#include <memory>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
@@ -13,20 +14,16 @@
 
 #include <pg_log_mgr/committer.hh>
 #include <storage/vacuumer.hh>
+#include "pg_log_mgr/pg_log_reader.hh"
 
 namespace springtail {
-        struct PipelineMetricFields
-        {
-            FieldPtr ts_msg_created_f;
-            FieldPtr ts_msg_pop_f;
-            FieldPtr msg_queue_size_f;
-            FieldPtr ts_log_entry_created_f;
-            FieldPtr ts_log_entry_pop_f;
-            FieldPtr log_queue_size_f;
-        };
+        using PipelineMetricFields = pg_log_mgr::MetricFields;
 
         struct PipelineMetric
         {
+            // write cache extent is created
+            std::chrono::steady_clock::time_point ts_extent_created;
+
             // log entry is added to the first queue
             std::chrono::steady_clock::time_point ts_log_entry_created;
             // log entry is extracted from the queue
@@ -55,6 +52,7 @@ namespace springtail {
                         "Msg queue latency: {}, "
                         "Commit latency: {}, "
                         "Msg exit to Commit enter latency: {}, "
+                        "Write cache latency: {} "
                         "Logger queue size: {}, "
                         "Msg queue size: {}, "
                         "Committer queue size: {} ",
@@ -63,6 +61,7 @@ namespace springtail {
                         ts_msg_entry_pop - ts_msg_entry_created,
                         ts_commit_end - ts_commit_start,
                         ts_commit_start - ts_msg_entry_pop,
+                        ts_commit_end - ts_extent_created,
                         log_queue_size, msg_queue_size, commit_queue_size
                         );
             }
@@ -588,6 +587,25 @@ namespace springtail::committer {
         }
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
+
+        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
+            using clock = std::chrono::steady_clock;
+            clock::time_point now = clock::now();
+            extent_cursor = 0;
+            while (true) {
+                PostgresTimestamp commit_ts;
+                auto &&extent_list = WriteCacheFuncImpl::get_extents(db_id, tid, xid, 1, extent_cursor, commit_ts);
+                if (extent_list.empty()) {
+                    break;
+                }
+                for (auto &wc_extent : extent_list) {
+                    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            now - wc_extent->ts_created);
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration.count());
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Extent finalize latency: xid={}, latency={}", xid, duration);
+                }
+            }
+        })
     }
 
     void
@@ -613,28 +631,16 @@ namespace springtail::committer {
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
         std::vector<SchemaColumn> new_columns{op, lsn};
 
-        INSTRUMENT_INGEST( {
-            new_columns.emplace_back("__springtail_ts_msg_created", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_ts_msg_pop", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_msg_queue_size", 0, SchemaType::UINT64, 0, false);
-
-            new_columns.emplace_back("__springtail_ts_log_entry_created", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_ts_log_entry_pop", 0, SchemaType::UINT64, 0, false);
-            new_columns.emplace_back("__springtail_log_queue_size", 0, SchemaType::UINT64, 0, false);
-        } );
+        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
+            PipelineMetricFields::add_metric_fields(new_columns);
+        })
 
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
 
-        [[maybe_unused]] PipelineMetricFields pipeline_f;
+        [[maybe_unused]] std::unique_ptr<PipelineMetricFields> pipeline_f;
 
-        INSTRUMENT_INGEST( {
-               pipeline_f.ts_msg_created_f = wc_schema->get_mutable_field("__springtail_ts_msg_created");
-               pipeline_f.ts_msg_pop_f = wc_schema->get_mutable_field("__springtail_ts_msg_pop");
-               pipeline_f.msg_queue_size_f = wc_schema->get_mutable_field("__springtail_msg_queue_size");
-
-               pipeline_f.ts_log_entry_created_f = wc_schema->get_mutable_field("__springtail_ts_log_entry_created");
-               pipeline_f.ts_log_entry_pop_f = wc_schema->get_mutable_field("__springtail_ts_log_entry_pop");
-               pipeline_f.log_queue_size_f = wc_schema->get_mutable_field("__springtail_log_queue_size");
+        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
+               pipeline_f = std::make_unique<PipelineMetricFields>(wc_schema);
         })
 
         time_trace::Trace process_extent_trace;
@@ -660,30 +666,35 @@ namespace springtail::committer {
         for (auto &row : extent) {
             [[maybe_unused]] PipelineMetric pipeline_metric;
 
-            INSTRUMENT_INGEST( {
-                    pipeline_metric.ts_log_entry_created = numeric_to_time_point(
-                            pipeline_f.ts_log_entry_created_f->get_uint64(&row));
-                    pipeline_metric.ts_log_entry_pop = numeric_to_time_point(
-                            pipeline_f.ts_log_entry_pop_f->get_uint64(&row));
-                    pipeline_metric.log_queue_size = 
-                    pipeline_f.log_queue_size_f->get_uint64(&row);
-
-                    pipeline_metric.ts_msg_entry_created = numeric_to_time_point(
-                            pipeline_f.ts_msg_created_f->get_uint64(&row));
-                    pipeline_metric.ts_msg_entry_pop = numeric_to_time_point(
-                            pipeline_f.ts_msg_pop_f->get_uint64(&row));
-                    pipeline_metric.msg_queue_size = 
-                    pipeline_f.msg_queue_size_f->get_uint64(&row);
-
-                    pipeline_metric.ts_commit_start = std::chrono::steady_clock::now();
-
-                    pipeline_metric.commit_queue_size = _worker_queue.size();
-
+            INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
                     _in_event_freq.event();
                     double f = _in_event_freq.frequency();
                     if (f > std::numeric_limits<double>::min()) {
                         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_IN_EVENT_FREQ, f);
                     }
+                    pipeline_metric.commit_queue_size = _worker_queue.size();
+
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_QUEUE_SIZE, pipeline_metric.commit_queue_size);
+                    })
+
+            INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
+                    pipeline_metric.ts_extent_created = numeric_to_time_point(
+                            pipeline_f->ts_extent_created_f->get_uint64(&row));
+                    pipeline_metric.ts_log_entry_created = numeric_to_time_point(
+                            pipeline_f->ts_log_entry_created_f->get_uint64(&row));
+                    pipeline_metric.ts_log_entry_pop = numeric_to_time_point(
+                            pipeline_f->ts_log_entry_pop_f->get_uint64(&row));
+                    pipeline_metric.log_queue_size = 
+                    pipeline_f->log_queue_size_f->get_uint64(&row);
+
+                    pipeline_metric.ts_msg_entry_created = numeric_to_time_point(
+                            pipeline_f->ts_msg_created_f->get_uint64(&row));
+                    pipeline_metric.ts_msg_entry_pop = numeric_to_time_point(
+                            pipeline_f->ts_msg_pop_f->get_uint64(&row));
+                    pipeline_metric.msg_queue_size = 
+                    pipeline_f->msg_queue_size_f->get_uint64(&row);
+
+                    pipeline_metric.ts_commit_start = std::chrono::steady_clock::now();
                     } )
 
             time_trace::Trace process_row_trace;
@@ -735,7 +746,7 @@ namespace springtail::committer {
             TIME_TRACE_STOP(process_row_trace);
             TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_row-xid_{}", xid.xid), process_row_trace);
 
-            INSTRUMENT_INGEST( {
+            INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
                     auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({
                             {"db_id", std::to_string(db_id)},
                             {"xid", std::to_string(xid.xid)}
@@ -766,10 +777,9 @@ namespace springtail::committer {
                         );
                     open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_PROC_LATENCIES, duration.count());
 
-
-                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, pipeline_metric.log_queue_size);
-                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(INGEST_MSG_QUEUE_SIZE, pipeline_metric.msg_queue_size);
-                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_QUEUE_SIZE, pipeline_metric.commit_queue_size);
+                    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        pipeline_metric.ts_commit_end - pipeline_metric.ts_extent_created);
+                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_ROW_LATENCIES, duration.count());
 
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Pipeline metrics: Committer mutation frequency: {}Hz {}", 
                             _in_event_freq.frequency(),
