@@ -334,6 +334,7 @@ namespace springtail::pg_log_mgr {
                 std::tie(next_table_ids, next_xid_lsn) = _get_copy_table_ids();
             } while (!next_table_ids.empty());
 
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Doing table copies for tables {} @{}:{}", fmt::join(table_ids, ","), next_xid_lsn.value().xid, next_xid_lsn.value().lsn);
             CHECK(!table_ids.empty());
 
             auto token_commit_worker = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}});
@@ -407,6 +408,8 @@ namespace springtail::pg_log_mgr {
                 if (copy_task_pending) {
                     auto [next_table_ids, next_xid_lsn] = _get_copy_table_ids();
                     if (!next_table_ids.empty()) {
+                        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Fetching tables {} @{}:{}; target xid = {} ", fmt::join(next_table_ids, ","),
+                            next_xid_lsn.value().xid, next_xid_lsn.value().lsn, xid);
                         xid = _pg_log_reader->get_next_xid();
                         for (auto table_id : next_table_ids) {
                             SyncTracker::get_instance()->pick_table_for_sync(_db_id, table_id, next_xid_lsn.value());
