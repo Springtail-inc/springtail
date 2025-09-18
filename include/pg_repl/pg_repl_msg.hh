@@ -48,6 +48,7 @@ namespace springtail
         LSN_t commit_lsn;
         LSN_t xact_lsn;
         int64_t commit_ts;
+        std::chrono::steady_clock::time_point local_commit_ts;
     };
 
     /** Origin message */
@@ -148,6 +149,7 @@ namespace springtail
         LSN_t xact_lsn;
         int64_t commit_ts;
         int32_t xid;
+        std::chrono::steady_clock::time_point local_commit_ts;
     };
 
     /** Stream abort message -- in proto vers 2+ only --

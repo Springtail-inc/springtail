@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <common/timestamp.hh>
 
 #include <pg_repl/pg_msg_stream.hh>
@@ -8,12 +9,13 @@
 #include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
+#include <write_cache/write_cache_table_set.hh>
 
 #include <storage/field.hh>
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
-#include "pg_log_mgr/pg_log_queue.hh"
+#include <pg_log_mgr/pg_log_queue.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -200,9 +202,9 @@ namespace springtail::pg_log_mgr {
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
              * provided xid.
              * @param xid springtail xid
-             * @param commit_ts Postgres commit ts
+             * @param md Metadata 
              */
-            void commit(uint64_t xid, PostgresTimestamp commit_ts);
+            void commit(uint64_t xid, WriteCacheTableSet::Metadata md);
 
             /**
              * Abort the entire transaction.  Drop all related batches from the WriteCache.

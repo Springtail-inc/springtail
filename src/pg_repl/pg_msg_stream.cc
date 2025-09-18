@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <vector>
 #include <memory>
 
@@ -802,6 +803,7 @@ namespace springtail {
         commit.commit_lsn = _recvint64();
         commit.xact_lsn = _recvint64();
         commit.commit_ts = _recvint64();
+        commit.local_commit_ts = std::chrono::steady_clock::now();
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COMMIT);
         msg->msg.emplace<PgMsgCommit>(commit);
@@ -883,6 +885,7 @@ namespace springtail {
         commit.commit_lsn = _recvint64();
         commit.xact_lsn = _recvint64();
         commit.commit_ts = _recvint64();
+        commit.local_commit_ts = std::chrono::steady_clock::now();
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_COMMIT);
         msg->msg.emplace<PgMsgStreamCommit>(commit);

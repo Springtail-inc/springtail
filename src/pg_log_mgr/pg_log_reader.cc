@@ -1,4 +1,6 @@
 #include <any>
+#include <chrono>
+#include <codecvt>
 #include <memory>
 #include <thread>
 
@@ -48,12 +50,12 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
+    PgLogReader::Batch::commit(uint64_t xid, WriteCacheTableSet::Metadata md)
     {
         time_trace::Trace commit_trace;
         TIME_TRACE_START(commit_trace);
         auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-        _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
+        _span->AddEvent("commit", {{"pg_commit_time", md.pg_commit_ts.to_unix_ns()}});
 
         // update any changes in the table invalidation state
         for (const auto &entry : _table_validations) {
@@ -94,7 +96,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // assign an XID to the committed transaction and update the mappings in the write cache
-        WriteCacheFuncImpl::commit(_db, xid, pg_xids, commit_ts);
+        WriteCacheFuncImpl::commit(_db, xid, pg_xids, std::move(md));
 
         // stop timing for this transaction
         if (_span->IsRecording()) {
@@ -1341,15 +1343,17 @@ namespace springtail::pg_log_mgr {
         // transaction.  This can occur in the unlikely case that we are performing a log recovery
         // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
         // the most recently written PGXID -> Springtail XID mapping.
-        auto postgres_timestamp = PostgresTimestamp(commit_msg.commit_ts);
+        WriteCacheTableSet::Metadata md;
+        md.local_commit_ts = commit_msg.local_commit_ts;
+        md.pg_commit_ts = PostgresTimestamp(commit_msg.commit_ts);
         if (xid <= _committed_xid) {
             // we abort this batch since it was already processed
-            _current_batch->abort(postgres_timestamp);
+            _current_batch->abort(md.pg_commit_ts);
             _xid_ts_tracker->remove_pg_xid(_current_xact->xid);
         } else {
             // update the write cache and system tables as needed
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Commit db_id: {}, xid={}, pg_xid={}", _db_id, xid, _current_xact->xid);
-            _current_batch->commit(xid, postgres_timestamp);
+            _current_batch->commit(xid, md);
             _xid_ts_tracker->add_xid(_current_xact->xid, xid);
         }
 
@@ -1361,7 +1365,7 @@ namespace springtail::pg_log_mgr {
         if (xid > _committed_xid) {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
+                std::chrono::system_clock::now() - md.pg_commit_ts.to_system_time());
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Commit processed {} milliseconds after postgres commit",
                       duration.count());
@@ -1442,7 +1446,10 @@ namespace springtail::pg_log_mgr {
             _xid_ts_tracker->remove_pg_xid(commit_msg.xid);
         } else {
             // update the write cache and system tables as needed
-            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
+            WriteCacheTableSet::Metadata md;
+            md.local_commit_ts = commit_msg.local_commit_ts;
+            md.pg_commit_ts = PostgresTimestamp(commit_msg.commit_ts);
+            _current_batch->commit(xid, std::move(md));
             _xid_ts_tracker->add_xid(commit_msg.xid, xid);
         }
 

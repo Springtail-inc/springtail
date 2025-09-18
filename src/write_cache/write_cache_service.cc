@@ -30,9 +30,9 @@ grpc::Status WriteCacheService::GetExtents(grpc::ServerContext* context,
     WriteCacheIndexPtr index = server->get_index(request->db_id());
 
     uint64_t cursor = request->cursor();
-    PostgresTimestamp commit_ts;
+    WriteCacheTableSet::Metadata md;
     std::vector<WriteCacheIndexExtentPtr> extents = index->get_extents(
-        request->table_id(), request->xid(), request->count(), cursor, commit_ts);
+        request->table_id(), request->xid(), request->count(), cursor, md);
 
     for (const auto& e : extents) {
         auto* extent = response->add_extents();
@@ -43,7 +43,7 @@ grpc::Status WriteCacheService::GetExtents(grpc::ServerContext* context,
 
     response->set_cursor(cursor);
     response->set_table_id(request->table_id());
-    response->set_commit_ts(commit_ts.micros());
+    response->set_commit_ts(md.pg_commit_ts.micros());
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;

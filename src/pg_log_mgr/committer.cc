@@ -4,6 +4,7 @@
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <chrono>
+#include <codecvt>
 #include <memory>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
@@ -31,7 +32,6 @@ namespace springtail {
             // queue size when the entry is created and added to the queue
             size_t log_queue_size;
 
-
             // the log entry is parsed, created PgMsg and pushed
             // into the next queue
             std::chrono::steady_clock::time_point ts_msg_entry_created;
@@ -42,6 +42,7 @@ namespace springtail {
             size_t msg_queue_size; 
 
             // message commit start 
+            std::chrono::steady_clock::time_point ts_commit_process_start;
             std::chrono::steady_clock::time_point ts_commit_start;
             std::chrono::steady_clock::time_point ts_commit_end;
             size_t commit_queue_size; 
@@ -50,8 +51,8 @@ namespace springtail {
                 return std::format("Total latency: {}, "
                         "Logger queue latency: {}, "
                         "Msg queue latency: {}, "
-                        "Commit latency: {}, "
-                        "Msg exit to Commit enter latency: {}, "
+                        "Commit row latency: {}, "
+                        "Message queue pop to commit start: {}, "
                         "Write cache latency: {} "
                         "Logger queue size: {}, "
                         "Msg queue size: {}, "
@@ -61,7 +62,7 @@ namespace springtail {
                         ts_msg_entry_pop - ts_msg_entry_created,
                         ts_commit_end - ts_commit_start,
                         ts_commit_start - ts_msg_entry_pop,
-                        ts_commit_end - ts_extent_created,
+                        ts_commit_process_start - ts_extent_created,
                         log_queue_size, msg_queue_size, commit_queue_size
                         );
             }
@@ -535,15 +536,15 @@ namespace springtail::committer {
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
-        std::optional<PostgresTimestamp> min_commit_ts;
+        std::optional<WriteCacheTableSet::Metadata> min_md;
         time_trace::Trace process_extents_trace;
         TIME_TRACE_START(process_extents_trace);
         while (true) {
             // XXX would be better if we could perform an async prefetch to reduce IO latency
-            PostgresTimestamp commit_ts;
-            auto &&extent_list = WriteCacheFuncImpl::get_extents(db_id, tid, xid, 1, extent_cursor, commit_ts);
-            if (!min_commit_ts || commit_ts < *min_commit_ts) {
-                min_commit_ts = commit_ts;
+            WriteCacheTableSet::Metadata md;
+            auto &&extent_list = WriteCacheFuncImpl::get_extents(db_id, tid, xid, 1, extent_cursor, md);
+            if (!min_md || md.pg_commit_ts < min_md->pg_commit_ts) {
+                min_md = md;
             }
 
             // if we didn't receive any extents then we're done
@@ -578,34 +579,26 @@ namespace springtail::committer {
         // XXX see above comment, need to change this
         Coordinator::get_instance()->register_thread(daemon_type, thread_name);
 
-        if (min_commit_ts) {
-            // log how long it took to process this table
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now() - min_commit_ts->to_system_time());
-            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
-            LOG_INFO("Processed table {} in {} milliseconds", tid, duration.count());
-        }
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
 
-        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
-            using clock = std::chrono::steady_clock;
-            clock::time_point now = clock::now();
-            extent_cursor = 0;
-            while (true) {
-                PostgresTimestamp commit_ts;
-                auto &&extent_list = WriteCacheFuncImpl::get_extents(db_id, tid, xid, 1, extent_cursor, commit_ts);
-                if (extent_list.empty()) {
-                    break;
-                }
-                for (auto &wc_extent : extent_list) {
-                    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            now - wc_extent->ts_created);
-                    open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration.count());
-                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Extent finalize latency: xid={}, latency={}", xid, duration);
-                }
-            }
-        })
+        if (min_md) {
+            // log how long it took to process this table
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - min_md->pg_commit_ts.to_system_time());
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processed table {} in {} milliseconds", tid, duration.count());
+
+            INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
+                using clock = std::chrono::steady_clock;
+                clock::time_point now = clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        now - min_md->local_commit_ts);
+                open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration.count());
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Table finalize latency: xid={}, latency={}", xid, duration);
+            })
+        }
+
     }
 
     void
@@ -614,6 +607,11 @@ namespace springtail::committer {
                                MutableTablePtr table,
                                const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent)
     {
+        [[maybe_unused]] std::chrono::steady_clock::time_point ts_process_start;
+        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
+               ts_process_start = std::chrono::steady_clock::now();
+        })
+
         // get the schema at the given XID/LSN
         // note: we are guaranteed that the entire batch will utilize the same schema
         XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
@@ -695,6 +693,7 @@ namespace springtail::committer {
                     pipeline_f->msg_queue_size_f->get_uint64(&row);
 
                     pipeline_metric.ts_commit_start = std::chrono::steady_clock::now();
+                    pipeline_metric.ts_commit_process_start = ts_process_start;
                     } )
 
             time_trace::Trace process_row_trace;
@@ -781,8 +780,9 @@ namespace springtail::committer {
                         pipeline_metric.ts_commit_end - pipeline_metric.ts_extent_created);
                     open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_ROW_LATENCIES, duration.count());
 
-                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Pipeline metrics: Committer mutation frequency: {}Hz {}", 
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Pipeline metrics: Committer mutation frequency: {}Hz, Commit total: {}, {}", 
                             _in_event_freq.frequency(),
+                            pipeline_metric.ts_commit_end - ts_process_start,
                             pipeline_metric.to_string());
                     } )
         }

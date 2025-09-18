@@ -14,18 +14,18 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::commit(uint64_t pg_xid, uint64_t xid, PostgresTimestamp commit_ts)
+    WriteCacheIndex::commit(uint64_t pg_xid, uint64_t xid, WriteCacheTableSet::Metadata md)
     {
         for (auto &p: _partitions) {
-            p->commit(pg_xid, xid, commit_ts);
+            p->commit(pg_xid, xid, std::move(md));
         }
     }
 
     void
-    WriteCacheIndex::commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts)
+    WriteCacheIndex::commit(std::vector<uint64_t> pg_xids, uint64_t xid, WriteCacheTableSet::Metadata md)
     {
         for (auto &p: _partitions) {
-            p->commit(pg_xids, xid, commit_ts);
+            p->commit(pg_xids, xid, std::move(md));
         }
     }
 
@@ -90,12 +90,12 @@ namespace springtail
 
     std::vector<WriteCacheIndexExtentPtr>
     WriteCacheIndex::get_extents(uint64_t tid, uint64_t xid,
-                                 uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
+                                 uint32_t count, uint64_t &cursor, WriteCacheTableSet::Metadata &md)
     {
         WriteCacheTableSetPtr partition = _get_partition(tid);
         std::vector<WriteCacheIndexExtentPtr> extents;
         uint64_t start_offset = cursor;
-        partition->get_extents(tid, xid, count, start_offset, cursor, extents, commit_ts);
+        partition->get_extents(tid, xid, count, start_offset, cursor, extents, md);
         return extents;
     }
 
