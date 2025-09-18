@@ -334,7 +334,8 @@ namespace springtail::pg_log_mgr {
                 std::tie(next_table_ids, next_xid_lsn) = _get_copy_table_ids();
             } while (!next_table_ids.empty());
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Doing table copies for tables {} @{}:{}", fmt::join(table_ids, ","), next_xid_lsn.value().xid, next_xid_lsn.value().lsn);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Doing table copies for tables {} @{}:{}", fmt::join(table_ids, ","),
+                next_xid_lsn.has_value() ? next_xid_lsn.value().xid : 0, next_xid_lsn.has_value() ? next_xid_lsn.value().lsn : 0);
             CHECK(!table_ids.empty());
 
             auto token_commit_worker = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}});
