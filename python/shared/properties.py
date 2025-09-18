@@ -67,7 +67,6 @@ class Properties:
                 self.fdw_id = system_json['org']['fdw_id']
 
                 # not in config file, but will be set in production env
-                # self.instance_key = None
                 self.service_name = None
 
                 # set the environment variables
@@ -602,6 +601,7 @@ def main():
         'ACCOUNT_ID',
         'FDW_ID',
         'DATABASE_INSTANCE_ID',
+        'INSTANCE_KEY',
         'REDIS_HOSTNAME',
         'REDIS_PORT',
         'REDIS_USER',
