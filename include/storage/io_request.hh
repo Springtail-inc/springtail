@@ -86,6 +86,7 @@ namespace springtail {
          */
         void _process_request();
 
+
         /**
          * @brief Worker thread internal issue_request call; must handle failure internally
          * @param io_mgr  IO Mgr pointer
