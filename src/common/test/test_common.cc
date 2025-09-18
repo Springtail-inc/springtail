@@ -128,8 +128,7 @@ TEST(CommonTest, CircularBuffer) {
 
 TEST(CommonTest, EventFrequency) {
     {
-        EventFrequency<100> ef;
-
+        EventFrequency<20> ef;
 
         for (size_t i = 0; i != 15; ++i) {
             ef.event();

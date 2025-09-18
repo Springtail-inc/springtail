@@ -30,7 +30,7 @@ namespace springtail {
          *  space available or the behavior is undefined. 
          */
         void put( T v ) {
-            DCHECK(_cnt <= _b.size());
+            DCHECK(_cnt < _b.size());
             DCHECK(_read_pnt < _b.size());
             auto i = ( _read_pnt + _cnt ) % _b.size();
             _b[i] = v;
