@@ -681,25 +681,35 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::_mark_table_resync(uint64_t table_oid,
+    PgLogReader::Batch::_mark_table_resync(const std::set<uint32_t> &table_oids,
                                            const XidLsn &xidlsn,
                                            const std::vector<uint64_t> &pg_xids)
     {
-        // block until we have the snapshot details
-        SyncTracker::get_instance()->issue_resync_and_wait(_db, table_oid, xidlsn, _committer_queue);
+        SyncTracker::get_instance()->issue_resync_and_wait(_db, table_oids, xidlsn,
+                                                           _committer_queue);
 
-        // drop any mutations that are in the WriteCache for this TID at this XID
-        for (auto pg_xid : pg_xids) {
-            WriteCacheFuncImpl::drop_table(_db, table_oid, pg_xid);
+        for ( auto table_oid : table_oids ) {
+            // drop any mutations that are in the WriteCache for this TID at this XID
+            for (auto pg_xid : pg_xids) {
+                WriteCacheFuncImpl::drop_table(_db, table_oid, pg_xid);
+            }
+
+            // Add a message to skip indexes for this table
+            // for the currently building indexes and the ones
+            // belonging to this transaction
+            proto::IndexProcessRequest index_request;
+            index_request.set_action("abort_index");
+            index_request.mutable_index()->set_table_id(table_oid);
+            _index_requests_mgr->add_index_request(_db, xidlsn.xid, index_request);
         }
+    }
 
-        // Add a message to skip indexes for this table
-        // for the currently building indexes and the ones
-        // belonging to this transaction
-        proto::IndexProcessRequest index_request;
-        index_request.set_action("abort_index");
-        index_request.mutable_index()->set_table_id(table_oid);
-        _index_requests_mgr->add_index_request(_db, xidlsn.xid, index_request);
+    void
+    PgLogReader::Batch::_mark_table_resync(uint32_t table_oid,
+                                           const XidLsn &xidlsn,
+                                           const std::vector<uint64_t> &pg_xids)
+    {
+        _mark_table_resync(std::set<uint32_t>{ table_oid }, xidlsn, pg_xids);
     }
 
     void
@@ -747,13 +757,14 @@ namespace springtail::pg_log_mgr {
                 if (action.get<std::string>() == "resync") {
                     _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
                 } else if (action.get<std::string>() == "resync_partitions") {
-                    nlohmann::json table_ids = nlohmann::json::parse(ddl_stmt).at("table_ids");
-                    // Mark the parent table for resync
-                    _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
-                    for (auto table_id : table_ids.get<std::vector<uint64_t>>()) {
-                        // Mark the partition table for resync
-                        _mark_table_resync(table_id, xidlsn, pg_xids);
+                    std::set<uint32_t> table_ids;
+                    table_ids.insert(table_msg.oid);
+                    nlohmann::json table_ids_json = nlohmann::json::parse(ddl_stmt).at("table_ids");
+                    for (auto table_id : table_ids_json.get<std::vector<uint32_t>>()) {
+                        table_ids.insert(table_id);
                     }
+                    // Mark the parent table for resync
+                    _mark_table_resync(table_ids, xidlsn, pg_xids);
                 } else if (action.get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }

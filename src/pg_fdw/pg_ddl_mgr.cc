@@ -1048,12 +1048,12 @@ namespace springtail::pg_fdw {
                     uint64_t schema_xid = entry.at("xid").get<uint64_t>();
                     auto ddls = entry.at("ddls");
 
-                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Original DDLS: {}", ddls.dump(4));
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG2, "Original DDLS: {}", ddls.dump(4));
 
                     // Sort the DDLs based on their hierarchy
                     auto sorted_ddls = sort_ddls_by_hierarchy(ddls);
 
-                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Sorted DDLS: {}", sorted_ddls.dump(4));
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG2, "Sorted DDLS: {}", sorted_ddls.dump(4));
 
                     if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",

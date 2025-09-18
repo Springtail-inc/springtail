@@ -319,19 +319,20 @@ namespace springtail::pg_log_mgr {
             std::set<uint32_t> table_ids;
 
             // _get_copy_table_ids block on redis table sync queue w/timeout for shutdown
-            auto [next_table_id, next_xid_lsn] = _get_copy_table_ids(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (next_table_id == -1) {
+            auto [next_table_ids, next_xid_lsn] = _get_copy_table_ids(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (next_table_ids.empty()) {
                 continue; // check for shutdown
             }
             do {
                 // populate the tables to copy; check for more work
-                table_ids.insert(next_table_id);
+                table_ids.insert(next_table_ids.begin(), next_table_ids.end());
 
-                // Mark table's XID to be processed for resync
-                SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+                for (auto table_id : next_table_ids) {
+                    SyncTracker::get_instance()->pick_table_for_sync(_db_id, table_id, next_xid_lsn.value());
+                }
 
-                std::tie(next_table_id, next_xid_lsn) = _get_copy_table_ids();
-            } while (next_table_id != -1);
+                std::tie(next_table_ids, next_xid_lsn) = _get_copy_table_ids();
+            } while (!next_table_ids.empty());
 
             CHECK(!table_ids.empty());
 
@@ -351,9 +352,9 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    std::pair<uint32_t, std::optional<XidLsn>>
+    std::pair<std::set<uint32_t>, std::optional<XidLsn>>
     PgLogMgr::_get_copy_table_ids(uint32_t timeout) {
-        uint32_t table_id = -1;
+        std::set<uint32_t> table_ids;
         std::shared_ptr<TableSyncRequest> request;
         if (timeout > 0) {
             request = _redis_sync_queue.pop(REDIS_WORKER_ID, timeout);
@@ -362,11 +363,11 @@ namespace springtail::pg_log_mgr {
         }
         if (request != nullptr) {
             // populate the tables to copy; check for more work
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Table sync queue: {}@{}:{}", request->table_id(),
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Table sync queue: {}@{}:{}", fmt::join(request->table_ids(), ","),
                     request->xid().xid, request->xid().lsn);
-            return std::make_pair(request->table_id(), request->xid());
+            return std::make_pair(request->table_ids(), request->xid());
         }
-        return std::make_pair(table_id, std::nullopt);
+        return std::make_pair(table_ids, std::nullopt);
     }
 
     void
@@ -404,12 +405,14 @@ namespace springtail::pg_log_mgr {
                 // process copy results
                 copy_task_pending = _process_copy_results(res);
                 if (copy_task_pending) {
-                    auto [next_table_id, next_xid_lsn] = _get_copy_table_ids();
-                    if (next_table_id != -1) {
+                    auto [next_table_ids, next_xid_lsn] = _get_copy_table_ids();
+                    if (!next_table_ids.empty()) {
                         xid = _pg_log_reader->get_next_xid();
-                        SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+                        for (auto table_id : next_table_ids) {
+                            SyncTracker::get_instance()->pick_table_for_sync(_db_id, table_id, next_xid_lsn.value());
+                        }
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying more tables; target xid={}", xid);
-                        res = PgCopyTable::copy_tables(_db_id, xid, std::set<uint32_t>{next_table_id});
+                        res = PgCopyTable::copy_tables(_db_id, xid, next_table_ids);
                     } else {
                         // Not able to fetch next table, so exit copy
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Couldn't fetch more tables; setting state=running");

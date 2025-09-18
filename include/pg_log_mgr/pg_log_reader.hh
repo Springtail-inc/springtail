@@ -287,12 +287,25 @@ namespace springtail::pg_log_mgr {
             void _apply_schema_change(PgMsgPtr change, const XidLsn &xidlsn, const std::vector<uint64_t> &pg_xids);
 
             /**
-             * @brief Helper method to mark the table for resync. Internally calls sync_tracker->mark_resync
+             * @brief Helper method to mark the table for resync. Internally calls
+             * sync_tracker->issue_resync_and_wait
+             *
+             * @param table_oids Table OIDs
+             * @param xidlsn XID LSN
+             * @param pg_xids PG XIDs
+             */
+            void _mark_table_resync(const std::set<uint32_t> &table_oids,
+                                    const XidLsn &xidlsn,
+                                    const std::vector<uint64_t> &pg_xids);
+
+            /**
+             * Helper to mark the table for resync. Internally calls sync_tracker->issue_resync_and_wait
              *
              * @param table_oid Table OID
              * @param xidlsn XID LSN
+             * @param pg_xids PG XIDs
              */
-            void _mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn, const std::vector<uint64_t> &pg_xids);
+            void _mark_table_resync(uint32_t table_oid, const XidLsn &xidlsn, const std::vector<uint64_t> &pg_xids);
 
             /**
              * Helper to check if a given table is invalid as visible within this Batch.

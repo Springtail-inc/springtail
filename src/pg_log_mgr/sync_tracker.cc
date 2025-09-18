@@ -25,26 +25,26 @@ SyncTracker::_block_commits(uint64_t db_id, CommitterQueuePtr committer_queue)
 
 void
 SyncTracker::issue_resync_and_wait(uint64_t db_id,
-                                   uint64_t table_id,
+                                   const std::set<uint32_t> &table_ids,
                                    const XidLsn &xid,
                                    CommitterQueuePtr committer_queue)
 {
-    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {} table {} xid {}:{}",
-              db_id, table_id, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "db {} table_ids {} xid {}:{}", db_id, fmt::join(table_ids, ","),
+              xid.xid, xid.lsn);
     std::unique_lock lock(_mutex);
-
     // notify the copy thread to resync the table
-    auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
-                           Properties::get_db_instance_id(), db_id);
+    auto key = fmt::format(redis::QUEUE_SYNC_TABLES, Properties::get_db_instance_id(), db_id);
     RedisQueue<TableSyncRequest> table_sync_queue(key);
-    TableSyncRequest request(table_id, xid);
+    TableSyncRequest request(table_ids, xid);
     table_sync_queue.push(request);
 
     // ensure we've stopped committing
     _block_commits(db_id, committer_queue);
 
     // add the table to the resync map; will get removed when mark_inflight() is called
-    _resync_map[db_id][table_id].insert(xid);
+    for (auto table_id : table_ids) {
+        _resync_map[db_id][table_id].insert(xid);
+    }
 }
 
 void
