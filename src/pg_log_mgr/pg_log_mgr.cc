@@ -394,8 +394,10 @@ namespace springtail::pg_log_mgr {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying tables with table_ids: {}, xid={}", fmt::join(table_ids.value(), ","), xid);
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
         } else {
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying all tables for db={}; xid={}", _db_id, xid);
             res = PgCopyTable::copy_db(_db_id, xid);
         }
 
