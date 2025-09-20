@@ -3,15 +3,7 @@
 // springtail includes
 #include <common/init.hh>
 
-#include <pg_log_mgr/committer.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
-#include <pg_log_mgr/sync_tracker.hh>
-#include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
-#include <write_cache/write_cache_server.hh>
-#include <xid_mgr/xid_mgr_server.hh>
-#include <storage/vacuumer.hh>
 
 using namespace springtail;
 

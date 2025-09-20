@@ -8,8 +8,9 @@
 
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/indexer.hh>
-#include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/table.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <sys_tbl_mgr/system_tables.hh>
@@ -46,7 +47,7 @@ namespace {
             PgMsgNamespace ns_msg;
             ns_msg.oid = 900;
             ns_msg.name = "public";
-            sys_tbl_mgr::Client::get_instance()->create_namespace(_db_id, { access_xid, 0 }, ns_msg);
+            sys_tbl_mgr::Server::get_instance()->create_namespace(_db_id, { access_xid, 0 }, ns_msg);
             access_xid++;
             target_xid++;
 
@@ -115,7 +116,7 @@ namespace {
 
             // finalize the table and update roots
             auto &&metadata = mtable->finalize();
-            TableMgr::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
+            sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
         }
 
         void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name,
@@ -127,14 +128,14 @@ namespace {
             index_requests.push_back(std::move(create_idx_request));
 
             // Validate index as NOT_READY
-            auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {index_xid, constant::MAX_LSN});
+            auto index_info = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id, {index_xid, constant::MAX_LSN});
             ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::NOT_READY);
 
             // Process Index requests
             if (process_requests_in_indexer) {
                 _indexer->process_requests(_db_id, index_xid, index_requests);
             }
-            sys_tbl_mgr::Client::get_instance()->finalize(_db_id, index_xid);
+            sys_tbl_mgr::Server::get_instance()->finalize(_db_id, index_xid);
         }
 
         void _process_index_and_validate(uint64_t index_id, uint64_t index_xid, uint64_t reconcile_xid) {
@@ -156,7 +157,7 @@ namespace {
 
             // Trigger index reconcilation at reconcile_xid
             _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
-            auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {reconcile_xid, constant::MAX_LSN});
+            auto index_info = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id, {reconcile_xid, constant::MAX_LSN});
 
             // Validate index as READY at reconcile_xid
             ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::READY);
@@ -296,7 +297,7 @@ namespace {
         // Create index
         _create_index(table_id, index_id1, index_xid1, "idx_test_indexer_5", false);
 
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
+        auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
         auto it = std::ranges::find_if(meta->indexes,
                 [&](auto const& v) { return index_id1 == v.id; });
         ASSERT_TRUE(it != meta->indexes.end());
@@ -308,7 +309,7 @@ namespace {
         // Trigger index reconcilation at reconcile_xid
         _process_index_and_validate(index_id1, index_xid1, reconcile_xid1);
 
-        meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
+        meta = sys_tbl_mgr::Server::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
         it = std::ranges::find_if(meta->indexes,
                 [&](auto const& v) { return index_id1 == v.id; });
         ASSERT_TRUE(it != meta->indexes.end());

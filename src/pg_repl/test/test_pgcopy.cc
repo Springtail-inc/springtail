@@ -10,6 +10,7 @@
 #include <proto/pg_copy_table.pb.h>
 #include <redis/redis_containers.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <test/services.hh>
@@ -29,7 +30,7 @@ namespace {
             test::start_services(true, true, true);
 
             // create the public namespace
-            auto client = sys_tbl_mgr::Client::get_instance();
+            auto server = sys_tbl_mgr::Server::get_instance();
             auto xid_client = XidMgrClient::get_instance();
             auto xid_server = xid_mgr::XidMgrServer::get_instance();
             uint64_t target_xid = xid_client->get_committed_xid(1, 0) + 1;
@@ -38,7 +39,7 @@ namespace {
             PgMsgNamespace ns_msg;
             ns_msg.oid = 90000;
             ns_msg.name = "public";
-            client->create_namespace(1, XidLsn(target_xid, 0), ns_msg);
+            server->create_namespace(1, XidLsn(target_xid, 0), ns_msg);
 
             xid_server->commit_xid(1, 1, target_xid, false);
         }
@@ -83,7 +84,7 @@ namespace {
         xid = res[0]->target_xid;
 
         // apply the system table changes
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
 
         for (auto &entry : res[0]->tids) {
             auto copy_info = entry->info;
@@ -110,11 +111,11 @@ namespace {
             roots_req->set_xid(xid);
 
             // Perform the table swap using the updated copy_info
-            client->swap_sync_table(*namespace_req, *create_req, index_reqs, *roots_req);
+            server->swap_sync_table(*namespace_req, *create_req, index_reqs, *roots_req);
         }
 
         // finalize the system metadata
-        client->finalize(db_id, xid);
+        server->finalize(db_id, xid);
 
         // commit the xid
         LOG_DEBUG(LOG_ALL, LOG_LEVEL_DEBUG1, "Committing xid: {}", xid);
@@ -126,7 +127,7 @@ namespace {
         auto fields = schema->get_fields();
 
         // verify stats
-        auto &&metadata = client->get_roots(db_id, oid, xid);
+        auto &&metadata = server->get_roots(db_id, oid, xid);
         ASSERT_EQ(metadata->stats.row_count, 5000);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index

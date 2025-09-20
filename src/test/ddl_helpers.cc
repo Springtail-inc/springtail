@@ -1,6 +1,6 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/server.hh>
 
 namespace springtail::test::ddl_helpers {
     void create_table(uint64_t db_id, uint64_t table_id, uint64_t xid, std::string table_name, std::vector<PgMsgSchemaColumn> columns)
@@ -14,7 +14,7 @@ namespace springtail::test::ddl_helpers {
         create_msg.table = table_name;
         create_msg.columns = columns;
 
-        TableMgr::get_instance()->create_table(db_id, { xid, 0 }, create_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, { xid, 0 }, create_msg);
     }
 
     proto::IndexProcessRequest create_index(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t index_id,
@@ -38,7 +38,7 @@ namespace springtail::test::ddl_helpers {
 
         XidLsn xid_lsn{xid};
 
-        return sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_lsn, msg, idx_state);
+        return sys_tbl_mgr::Server::get_instance()->create_index(db_id, xid_lsn, msg, idx_state);
 
     }
 
@@ -53,9 +53,9 @@ namespace springtail::test::ddl_helpers {
 
         XidLsn xid_lsn{xid};
 
-        sys_tbl_mgr::Client::get_instance()->drop_index(db_id, xid_lsn, msg);
+        sys_tbl_mgr::Server::get_instance()->drop_index(db_id, xid_lsn, msg);
 
-        sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
     }
 
     std::shared_ptr<Tuple>
