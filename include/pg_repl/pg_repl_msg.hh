@@ -41,6 +41,7 @@ namespace springtail
         int32_t xid;
         LSN_t xact_lsn;
         int64_t commit_ts;
+        std::chrono::steady_clock::time_point local_begin_ts;
     };
 
     /** Commit message not streaming */
@@ -136,6 +137,7 @@ namespace springtail
     struct PgMsgStreamStart {
         int32_t xid;
         bool first;
+        std::chrono::steady_clock::time_point local_ts;
     };
 
     /** Stream stop -- in proto vers 2+ only */
@@ -160,6 +162,7 @@ namespace springtail
         int64_t abort_ts;   // proto vers 4+
         int32_t xid;
         int32_t sub_xid;
+        std::chrono::steady_clock::time_point local_abort_ts;
     };
 
     /** Column schema for a single column used by Create table and Alter table */

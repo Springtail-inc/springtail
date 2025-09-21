@@ -50,9 +50,18 @@ namespace springtail {
      *
     */
     constexpr std::string_view LOG_READER_EVENT_FREQ = "log_reader_event_freq";
+
+    constexpr std::string_view LOG_READER_BEGIN_TXN_FREQ = "log_reader_begin_txn_freq";
+    constexpr std::string_view LOG_READER_COMMIT_TXN_FREQ = "log_reader_commit_txn_freq";
+    constexpr std::string_view LOG_READER_STREAM_START_FREQ = "log_reader_stream_start_freq";
+    constexpr std::string_view LOG_READER_STREAM_STOP_FREQ = "log_reader_stream_stop_freq";
+    constexpr std::string_view LOG_READER_STREAM_ABORT_FREQ = "log_reader_stream_abort_freq";
+    constexpr std::string_view LOG_READER_STREAM_COMMIT_FREQ = "log_reader_stream_commit_freq";
+
     constexpr std::string_view COMMITTER_IN_EVENT_FREQ = "committer_in_event_freq";
     constexpr std::string_view COMMITTER_OUT_EVENT_FREQ = "committer_out_event_freq";
 
+    constexpr std::string_view TRANSACTION_LATENCIES = "transaction_latencies";
     constexpr std::string_view LOG_READER_QUEUE_LATENCIES = "log_reader_latencies";
     constexpr std::string_view INGEST_MSG_QUEUE_LATENCIES = "ingest_msg_queue_latencies";
     constexpr std::string_view COMMITTER_PROC_LATENCIES = "committer_proc_latencies";
@@ -134,7 +143,14 @@ namespace springtail {
             {LOG_READER_EVENT_FREQ, "Frequency of incoming log reader events"},
             {COMMITTER_IN_EVENT_FREQ, "Frequency of mutation events in committer"},
             {COMMITTER_OUT_EVENT_FREQ, "Frequency of outgoing/processed committer events."},
+            {LOG_READER_BEGIN_TXN_FREQ, "BEGIN frequency."},
+            {LOG_READER_COMMIT_TXN_FREQ, "COMMIT frequency"},
+            {LOG_READER_STREAM_START_FREQ, "Stream start frequency."},
+            {LOG_READER_STREAM_STOP_FREQ, "Stream stop frequency"},
+            {LOG_READER_STREAM_ABORT_FREQ, "Stream abort frequency"},
+            {LOG_READER_STREAM_COMMIT_FREQ, "Stream commit frequency"},
 
+            {TRANSACTION_LATENCIES, "From BEGIN to finalized tables."},
             {LOG_READER_QUEUE_LATENCIES, "Time a log entry spends in the log reader queue."},
             {INGEST_MSG_QUEUE_LATENCIES, "Time PgMsg spends in the next queue."},
             {COMMITTER_PROC_LATENCIES, "Time takes for the committer to process the message."},

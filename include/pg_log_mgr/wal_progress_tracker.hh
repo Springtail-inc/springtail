@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -15,6 +16,9 @@ namespace springtail::pg_log_mgr {
     */
     class WalProgressTracker {
     public:
+        using clock=std::chrono::steady_clock;
+        using Timestamps = std::pair<uint64_t, clock::time_point>;  ///< first is postgres timestamp, second is local timestamp
+
         /**
          * @brief Default constructor
          *
@@ -34,7 +38,7 @@ namespace springtail::pg_log_mgr {
          * @param ts     - timestamp id
          */
         void
-        add_pg_xid(int32_t pg_xid, uint64_t ts)
+        add_pg_xid(int32_t pg_xid, uint64_t ts_postgres, clock::time_point ts_local)
         {
             std::unique_lock<std::shared_mutex> lock(_mt);
 
@@ -42,13 +46,28 @@ namespace springtail::pg_log_mgr {
             DCHECK(!_pg_xid_to_ts.contains(pg_xid));
 
             // insert into pg_xid -> ts map
-            _pg_xid_to_ts.emplace(pg_xid, ts);
+            _pg_xid_to_ts.emplace(pg_xid, Timestamps{ts_postgres, ts_local});
 
             // increment count in ts -> pg_xid count map
-            if (!_ts_to_pg_xid_count.contains(ts)) {
-                _ts_to_pg_xid_count.emplace(ts, 0);
+            if (!_ts_to_pg_xid_count.contains(ts_postgres)) {
+                _ts_to_pg_xid_count.emplace(ts_postgres, 0);
             }
-            _ts_to_pg_xid_count[ts]++;
+            _ts_to_pg_xid_count[ts_postgres]++;
+        }
+
+        /**
+         * Find Timestamps associated with the PG XID.
+         *
+         * @param pg_xid - Postgres Xid
+         */
+
+        std::optional<Timestamps> find_ts(int32_t pg_xid) const
+        {
+            auto it = _pg_xid_to_ts.find(pg_xid);
+            if (it == _pg_xid_to_ts.end()) {
+                return {};
+            }
+            return it->second;
         }
 
         /**
@@ -67,7 +86,7 @@ namespace springtail::pg_log_mgr {
             }
 
             // Get Postgres XID timestamp
-            uint64_t ts = _pg_xid_to_ts[pg_xid];
+            uint64_t ts = _pg_xid_to_ts[pg_xid].first;
 
             // Erase Postgres XID from pg_xid -> ts map
             _pg_xid_to_ts.erase(pg_xid);
@@ -99,7 +118,7 @@ namespace springtail::pg_log_mgr {
             }
 
             // Get Postgres XID timestamp
-            uint64_t ts = _pg_xid_to_ts[pg_xid];
+            uint64_t ts = _pg_xid_to_ts[pg_xid].first;
 
             // Erase Postgres XID from pg_xid -> ts map
             _pg_xid_to_ts.erase(pg_xid);
@@ -183,7 +202,7 @@ namespace springtail::pg_log_mgr {
         }
 
     private:
-        std::map<int32_t, uint64_t> _pg_xid_to_ts;          ///< map Postgres Xid to timestamp id
+        std::map<int32_t, Timestamps> _pg_xid_to_ts;          ///< map Postgres Xid to timestamps
         std::map<uint64_t, uint32_t> _ts_to_pg_xid_count;   ///< map to keep the number of times that timestamp ids are used for Postgres Xid
         std::map<uint64_t, uint64_t> _xid_to_ts;            ///< map Springtail Xid to timestamp id
         std::map<uint64_t, uint32_t> _ts_to_xid_count;      ///< map to keep the number of times that timestamp ids are used for Springtail Xid

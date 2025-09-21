@@ -592,10 +592,16 @@ namespace springtail::committer {
             INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
                 using clock = std::chrono::steady_clock;
                 clock::time_point now = clock::now();
-                auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                auto duration1 = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         now - min_md->local_commit_ts);
-                open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration.count());
-                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Table finalize latency: xid={}, latency={}", xid, duration);
+                auto duration2 = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        now - min_md->local_begin_ts);
+
+                open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration1.count());
+                open_telemetry::OpenTelemetry::get_instance()->record_histogram(TRANSACTION_LATENCIES, duration2.count());
+
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Transaction latency: xid={}, transaction_latency={}, finalize_latency={}", 
+                        xid, duration2, duration1);
             })
         }
 

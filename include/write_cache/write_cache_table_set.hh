@@ -21,6 +21,7 @@ namespace springtail {
         struct Metadata
         {
             PostgresTimestamp pg_commit_ts; // postgres-reported commit ts of xid
+            std::chrono::steady_clock::time_point local_begin_ts; //local begin transaction ts
             std::chrono::steady_clock::time_point local_commit_ts; //local commit ts
         };
 

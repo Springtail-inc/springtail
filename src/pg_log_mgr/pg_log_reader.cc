@@ -1316,7 +1316,7 @@ namespace springtail::pg_log_mgr {
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue, _exists_cache, _index_requests_mgr);
         _batch_map.try_emplace(begin_msg.xid, _current_batch);
-        _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp);
+        _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp, begin_msg.local_begin_ts);
     }
 
     void
@@ -1353,6 +1353,10 @@ namespace springtail::pg_log_mgr {
         } else {
             // update the write cache and system tables as needed
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Commit db_id: {}, xid={}, pg_xid={}", _db_id, xid, _current_xact->xid);
+            auto ts = _xid_ts_tracker->find_ts(_current_xact->xid);
+            if (ts.has_value()) {
+                md.local_begin_ts = ts->second;
+            }
             _current_batch->commit(xid, md);
             _xid_ts_tracker->add_xid(_current_xact->xid, xid);
         }
@@ -1363,6 +1367,7 @@ namespace springtail::pg_log_mgr {
 
         // note: this check should only be false when re-processing records during recovery
         if (xid > _committed_xid) {
+
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - md.pg_commit_ts.to_system_time());
@@ -1401,7 +1406,7 @@ namespace springtail::pg_log_mgr {
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue, _exists_cache, _index_requests_mgr);
         _batch_map.try_emplace(start_msg.xid, _current_batch);
-        _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp);
+        _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp, start_msg.local_ts);
     }
 
     void
@@ -1449,6 +1454,10 @@ namespace springtail::pg_log_mgr {
             WriteCacheTableSet::Metadata md;
             md.local_commit_ts = commit_msg.local_commit_ts;
             md.pg_commit_ts = PostgresTimestamp(commit_msg.commit_ts);
+            auto ts = _xid_ts_tracker->find_ts(commit_msg.xid);
+            if (ts.has_value()) {
+                md.local_begin_ts = ts->second;
+            }
             _current_batch->commit(xid, std::move(md));
             _xid_ts_tracker->add_xid(commit_msg.xid, xid);
         }
