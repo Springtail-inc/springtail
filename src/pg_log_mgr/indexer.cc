@@ -246,6 +246,7 @@ namespace springtail::committer {
         }
 
         auto meta = server->get_roots(db_id, info.table_id(), end_xid);
+        DCHECK(meta != nullptr);
         auto it = std::ranges::find_if(meta->roots,
                 [&](auto const& v) { return index_id == v.index_id; });
         // Erase roots if present, roots wont be there if index drop came in before processing build,

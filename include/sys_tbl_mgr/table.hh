@@ -433,7 +433,7 @@ namespace indexer_helpers {
               const std::filesystem::path &table_base,
               const std::vector<std::string> &primary_key,
               const std::vector<Index> &secondary,
-              const TableMetadata &metadata,
+              const TableMetadataPtr metadata,
               ExtentSchemaPtr schema);
 
         /** Returns true if the table has a primary key.  False otherwise. */
@@ -623,7 +623,7 @@ namespace indexer_helpers {
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
         FieldPtr _roots_index_id_f; ///< The field accessor to read the root index ID from each row in the "roots" file.
 
-        TableStats _stats; ///< The statistics for this table.
+        TableStats _stats{}; ///< The statistics for this table.
     };
     typedef std::shared_ptr<Table> TablePtr;
 
@@ -642,7 +642,7 @@ namespace indexer_helpers {
                      const std::filesystem::path &table_base,
                      const std::vector<std::string> &primary_key,
                      const std::vector<Index> &secondary,
-                     const TableMetadata &metadata,
+                     const TableMetadataPtr metadata,
                      ExtentSchemaPtr schema,
                      bool for_gc = false);
 
@@ -891,7 +891,7 @@ namespace indexer_helpers {
 
         uint64_t _access_xid; ///< The access XID for this set of mutations.
         uint64_t _target_xid; ///< The final target XID for this set of mutations.
-        uint64_t _snapshot_xid; ///< The XID of the snapshot that this version of the table started from.
+        uint64_t _snapshot_xid{0}; ///< The XID of the snapshot that this version of the table started from.
         std::filesystem::path _table_dir; ///< The directory containing the table data.
         std::filesystem::path _data_file; ///< The file containing the table data extents.
 
@@ -916,7 +916,7 @@ namespace indexer_helpers {
         MutableFieldPtr _roots_index_id_f; ///< The field accessor for the tree roots index ids stored within each row of the "roots" file.
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
-        TableStats _stats; ///< The stats for the table.
+        TableStats _stats{}; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
                       ///

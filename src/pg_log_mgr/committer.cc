@@ -18,6 +18,7 @@ namespace springtail::committer {
     _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     {
         auto meta = sys_tbl_mgr::Server::get_instance()->get_roots(db_id, tid, xid);
+        DCHECK(meta != nullptr);
         auto it =
             std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
         return it != meta->roots.end();
@@ -149,7 +150,9 @@ namespace springtail::committer {
                         // Send completed_xid - 1 to get the previous old snapshot dir
                         // and then expire that at the completed_xid
                         auto swapped_table_old_dir = TableMgr::get_instance()->get_table_data_dir(db_id, swapped_tid, completed_xid - 1);
-                        Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir, completed_xid);
+                        if (swapped_table_old_dir.has_value()) {
+                            Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir.value(), completed_xid);
+                        }
                     }
                 } else {
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Record DDL changes db {} xid {}", db_id, completed_xid);
@@ -370,8 +373,10 @@ namespace springtail::committer {
                 auto tid = index_request.index().table_id();
                 auto index_id = index_request.index().id();
                 auto _dropped_index_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
-                auto index_file_path = _dropped_index_table_dir / fmt::format(constant::INDEX_FILE, index_id);
-                Vacuumer::get_instance()->expire_snapshot(db_id, index_file_path, committed_xid);
+                if (_dropped_index_table_dir.has_value()) {
+                    auto index_file_path = _dropped_index_table_dir.value() / fmt::format(constant::INDEX_FILE, index_id);
+                    Vacuumer::get_instance()->expire_snapshot(db_id, index_file_path, committed_xid);
+                }
             }
         }
     }
@@ -385,7 +390,9 @@ namespace springtail::committer {
                 auto action = ddl["action"].get<std::string>();
                 if (action == "drop") {
                     auto dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
-                    Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir, committed_xid);
+                    if (dropped_table_dir.has_value()) {
+                        Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir.value(), committed_xid);
+                    }
                 }
             }
         }
@@ -463,8 +470,6 @@ namespace springtail::committer {
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
         auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, thread_name);
 
-        // construct the mutable table object
-        auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
         if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid})) {
             // This could happen if the table is dropped in the same transaction
             // BEGIN/INSERT/DROP/COMMIT
@@ -474,6 +479,9 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exists: {}", tid);
             return;
         }
+
+        // construct the mutable table object
+        auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;

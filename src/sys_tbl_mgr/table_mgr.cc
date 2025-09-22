@@ -29,13 +29,16 @@ namespace springtail {
 
         return std::make_shared<UserTable>(db_id, table_id, xid, _table_base,
                                            schema->get_sort_keys(), secondary_indexes,
-                                           *tbl_meta, schema);
+                                           tbl_meta, schema);
     }
 
-    std::filesystem::path
+    std::optional<std::filesystem::path>
     TableMgr::get_table_data_dir(uint64_t db_id, uint64_t table_id, uint64_t xid)
     {
         auto&& table_meta = sys_tbl_mgr::Server::get_instance()->get_roots(db_id, table_id, xid);
+        if (table_meta == nullptr) {
+            return std::nullopt;
+        }
         return table_helpers::get_table_dir(_table_base, db_id, table_id, table_meta->snapshot_xid);
     }
 
@@ -74,7 +77,7 @@ namespace springtail {
 
         return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_indexes,
-                                                  *tbl_meta, schema, for_gc);
+                                                  tbl_meta, schema, for_gc);
     }
 
     MutableTablePtr
@@ -86,6 +89,9 @@ namespace springtail {
     {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
+        std::shared_ptr<TableMetadata> tbl_meta_ptr(&tbl_meta, [](TableMetadata*) {
+            // no-op deleter: do nothing
+        });
 
         // NOTE: in the case of a failure, there may be a partially copied table already present in
         //       the directory structure, so we need to make sure to delete it before we try to
@@ -98,7 +104,7 @@ namespace springtail {
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema, false);
+                                                  tbl_meta_ptr, schema, false);
     }
 
     std::map<uint32_t, SchemaColumn>

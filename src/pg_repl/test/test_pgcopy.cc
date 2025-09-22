@@ -128,6 +128,7 @@ namespace {
 
         // verify stats
         auto &&metadata = server->get_roots(db_id, oid, xid);
+        ASSERT_NE(metadata, nullptr);
         ASSERT_EQ(metadata->stats.row_count, 5000);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index

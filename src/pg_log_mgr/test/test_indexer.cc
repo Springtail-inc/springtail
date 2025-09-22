@@ -342,6 +342,7 @@ namespace {
 
         // Get the table file paths
         auto table_dir = TableMgr::get_instance()->get_table_data_dir(_db_id, table_id, access_xid);
+        EXPECT_TRUE(table_dir.has_value());
 
         auto next_data_xid = access_xid;
         for (int i=0; i < 20; i++) {
@@ -354,7 +355,7 @@ namespace {
         xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, next_data_xid, true);
 
         // Get the blocks count pre-vacuum
-        auto index_file = table_dir / fmt::format(constant::INDEX_FILE, index_id);
+        auto index_file = table_dir.value() / fmt::format(constant::INDEX_FILE, index_id);
         auto size_pre_vacuum = fs::get_block_count(index_file);
 
         // Set global threshold as small and run vacuum
