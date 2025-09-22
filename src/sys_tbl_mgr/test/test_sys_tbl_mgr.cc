@@ -123,7 +123,7 @@ namespace {
     {
         auto xid = _next_lsn();
 
-        PgMsgDropIndex msg;
+        PgMsgDropIndex msg{};
 
         msg.lsn = xid.lsn;
         msg.xid = xid.xid;
@@ -140,7 +140,7 @@ namespace {
         auto xid = _next_lsn();
 
         std::vector<PgMsgSchemaIndexColumn> columns;
-        PgMsgIndex msg;
+        PgMsgIndex msg{};
 
         msg.lsn = xid.lsn;
         msg.xid = xid.xid;
@@ -165,7 +165,7 @@ namespace {
     {
         auto xid = _next_lsn();
 
-        PgMsgTable create_msg;
+        PgMsgTable create_msg{};
         create_msg.oid = tid;
         create_msg.namespace_name = "public";
         create_msg.table = name;
@@ -202,7 +202,7 @@ namespace {
         auto xid = _next_lsn();
 
         // drop the table
-        PgMsgDropTable drop_msg;
+        PgMsgDropTable drop_msg{};
         drop_msg.oid = tid;
         drop_msg.namespace_name = "public";
         drop_msg.table = name;

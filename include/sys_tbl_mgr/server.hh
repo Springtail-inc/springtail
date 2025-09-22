@@ -106,7 +106,6 @@ public:
      */
     void invalidate_db(uint64_t db_id, const XidLsn &xid);
 
-
 private:
     Server();
     ~Server() override = default;

@@ -52,6 +52,7 @@ namespace {
         }
 
         sys_tbl_mgr::Server *_server = sys_tbl_mgr::Server::get_instance();
+        sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
         static XidLsn _xid;
     };
 
@@ -91,7 +92,7 @@ namespace {
         create_msg.columns.emplace_back("col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true);
         create_msg.columns.emplace_back("col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false);
         _server->create_table(db, _xid, create_msg);
-        auto &&metadata = _server->get_roots(db, tid, _xid.xid);
+        auto &&metadata = _client->get_roots(db, tid, _xid.xid);
 
         // this
         xid_mgr_server->commit_xid(db, 1, _xid.xid, true);

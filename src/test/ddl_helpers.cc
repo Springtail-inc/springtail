@@ -6,7 +6,7 @@ namespace springtail::test::ddl_helpers {
     void create_table(uint64_t db_id, uint64_t table_id, uint64_t xid, std::string table_name, std::vector<PgMsgSchemaColumn> columns)
     {
         // create a table
-        PgMsgTable create_msg;
+        PgMsgTable create_msg{};
         create_msg.lsn = 0;
         create_msg.oid = table_id;
         create_msg.xid = xid;
@@ -21,7 +21,7 @@ namespace springtail::test::ddl_helpers {
             std::string idx_name, std::vector<PgMsgSchemaColumn> columns, sys_tbl::IndexNames::State idx_state, bool is_unique)
     {
 
-        PgMsgIndex msg;
+        PgMsgIndex msg{};
 
         msg.lsn = 0;
         msg.xid = xid;
@@ -44,7 +44,7 @@ namespace springtail::test::ddl_helpers {
 
     void drop_index(uint64_t db_id, uint32_t index_id, uint64_t xid)
     {
-        PgMsgDropIndex msg;
+        PgMsgDropIndex msg{};
 
         msg.lsn = 0;
         msg.xid = xid;
@@ -70,6 +70,7 @@ namespace springtail::test::ddl_helpers {
         _create_value(const std::vector<int32_t> &data)
         {
             std::vector<ConstFieldPtr> v;
+            v.reserve(data.size());
 
             for (auto &d : data) {
                 v.push_back(std::make_shared<ConstTypeField<int32_t>>(d));
