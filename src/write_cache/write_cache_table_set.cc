@@ -198,7 +198,7 @@ namespace springtail
     }
 
     void
-    WriteCacheTableSet::commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts)
+    WriteCacheTableSet::commit(const std::vector<uint64_t>& pg_xids, uint64_t xid, PostgresTimestamp commit_ts)
     {
         // insert xid into xid map
         // XXX should we check if there is an existing pg_xid with data and skip if not?
