@@ -75,7 +75,7 @@ namespace springtail {
          * @brief Drop all data for a given XID
          * @param pg_xids Postgres XIDs
          */
-        void abort(std::vector<uint64_t> pg_xids);
+        void abort(const std::vector<uint64_t>& pg_xids);
 
         //// RPC interface
 

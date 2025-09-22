@@ -45,7 +45,7 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::abort(std::vector<uint64_t> pg_xids)
+    WriteCacheIndex::abort(const std::vector<uint64_t>& pg_xids)
     {
         for (auto &p: _partitions) {
             for (auto &pg_xid: pg_xids) {
