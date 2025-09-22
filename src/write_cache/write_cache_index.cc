@@ -22,7 +22,7 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts)
+    WriteCacheIndex::commit(const std::vector<uint64_t>& pg_xids, uint64_t xid, PostgresTimestamp commit_ts)
     {
         for (auto &p: _partitions) {
             p->commit(pg_xids, xid, commit_ts);
@@ -45,7 +45,7 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::abort(std::vector<uint64_t> pg_xids)
+    WriteCacheIndex::abort(const std::vector<uint64_t>& pg_xids)
     {
         for (auto &p: _partitions) {
             for (auto &pg_xid: pg_xids) {
