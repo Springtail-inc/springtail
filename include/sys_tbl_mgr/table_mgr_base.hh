@@ -8,9 +8,21 @@
 namespace springtail {
     class TableMgrBase {
     public:
+        /**
+         * @brief Construct a new Table Mgr Base object
+         *
+         */
         TableMgrBase();
         virtual ~TableMgrBase() = default;
 
+        /**
+         * @brief Read the table metadata for the requested table ID.
+         *
+         * @param db_id - database id
+         * @param table_id - table id
+         * @param xid - transaction id
+         * @return TablePtr - pointer to the table object
+         */
         virtual TablePtr
         get_table(uint64_t db_id, uint64_t table_id, uint64_t xid) = 0;
 

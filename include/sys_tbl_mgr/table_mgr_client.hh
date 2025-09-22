@@ -36,10 +36,20 @@ namespace springtail {
                           const XidLsn &xid, bool allow_undefined = false) override;
 
     private:
+        /**
+         * @brief Construct a new Table Mgr Client singleton object
+         *
+         */
         TableMgrClient() : Singleton<TableMgrClient>(ServiceId::TableMgrClientId) {}
         ~TableMgrClient() override = default;
     };
 
+    /**
+     * @brief This class is for representing user tables on the client side. It will use TableMgrClient
+     *      to get schema and extent schema. In turn TblMgrClient will use system table manager client calls
+     *      to obtain information for constructing the table.
+     *
+     */
     class UserClientTable : public Table, public std::enable_shared_from_this<UserClientTable> {
     public:
         using Table::schema;

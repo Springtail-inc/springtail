@@ -18,81 +18,156 @@ class Server final : public Singleton<Server>
 public:
     // static void start();
 
+    /**
+     * @brief Create table API cal
+     */
     std::string
     create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
+    /**
+     * @brief Alter table API cal
+     */
     std::string
     alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
+    /**
+     * @brief Drop table API cal
+     */
     std::string
     drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
+    /**
+     * @brief Create namespace API cal
+     */
     std::string
     create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
+    /**
+     * @brief Alter namespace API cal
+     */
     std::string
     alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
+    /**
+     * @brief Drop namespace API cal
+     */
     std::string
     drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
+    /**
+     * @brief Create user type API cal
+     */
     std::string
     create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
+    /**
+     * @brief Alter user type API cal
+     */
     std::string
     alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
+    /**
+     * @brief Drop user type API cal
+     */
     std::string
     drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
+    /**
+     * @brief Attach partition API cal
+     */
     std::string
     attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg);
 
+    /**
+     * @brief Detach partition API cal
+     */
     std::string
     detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg);
 
+    /**
+     * @brief Create index API cal
+     */
     proto::IndexProcessRequest
     create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state);
 
+    /**
+     * @brief Set index state API cal
+     */
     void
     set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
 
+    /**
+     * @brief Get index info API cal
+     */
     proto::IndexInfo
     get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid = std::nullopt);
 
+    /**
+     * @brief Get unfinished indexes info API cal
+     */
     proto::IndexesInfo
     get_unfinished_indexes_info(uint64_t db_id);
 
+    /**
+     * @brief Drop index API cal
+     */
     proto::IndexProcessRequest
     drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg);
 
+    /**
+     * @brief Update roots API cal
+     */
     void
     update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata);
 
+    /**
+     * @brief Finalize API cal
+     */
     void
     finalize(uint64_t db_id, uint64_t xid);
 
+    /**
+     * @brief Revert API cal
+     */
     void
     revert(uint64_t db_id, uint64_t xid);
 
+    /**
+     * @brief Get roots API cal
+     */
     TableMetadataPtr
     get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
+    /**
+     * @brief Get schema API cal
+     */
     std::shared_ptr<const SchemaMetadata>
     get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
+    /**
+     * @brief Get target schema API cal
+     */
     SchemaMetadataPtr
     get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
+    /**
+     * @brief Table exists API cal
+     */
     bool
     exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
+    /**
+     * @brief Swap and sync table  API cal
+     */
     std::string
     swap_sync_table(const proto::NamespaceRequest &namespace_req,
                     const proto::TableRequest &create_req,
                     const std::vector<proto::IndexRequest> &index_reqs,
                     const proto::UpdateRootsRequest &roots_req);
 
+    /**
+     * @brief Get user type API cal
+     */
     std::shared_ptr<UserType>
     get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid);
 
@@ -110,9 +185,13 @@ private:
     Server();
     ~Server() override = default;
 
-    std::unique_ptr<Service> _service;
-    GrpcServerManager _grpc_server_manager;
+    std::unique_ptr<Service> _service;              ///< service object that can receive and process client API calls
+    GrpcServerManager _grpc_server_manager;         ///< GRPC manager
 
+    /**
+     * @brief Shutdown function called by the singleton pattern
+     *
+     */
     void _internal_shutdown() override;
 
     // CACHE FOR NAMES

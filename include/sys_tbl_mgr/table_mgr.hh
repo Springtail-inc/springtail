@@ -79,6 +79,11 @@ namespace springtail {
         ~TableMgr() override = default;
     };
 
+    /**
+     * @brief This class is for user non-mutable table access on the server side. It uses table manager functions
+     *      to get schema and extended schema, that access the server directly, bypassing client API calls.
+     *
+     */
     class UserTable : public Table, public std::enable_shared_from_this<UserTable> {
     public:
         using Table::schema;
@@ -114,6 +119,10 @@ namespace springtail {
 
     };
 
+    /**
+     * @brief This class is for user mutable table access on the server side.
+     *
+     */
     class UserMutableTable: public MutableTable,
                             public std::enable_shared_from_this<UserMutableTable> {
 

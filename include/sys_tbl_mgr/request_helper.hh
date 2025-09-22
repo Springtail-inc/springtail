@@ -8,6 +8,15 @@
 namespace springtail::sys_tbl_mgr {
     class RequestHelper {
     public:
+
+        /**
+         * @brief Set common information. These data are a part of any request.
+         *
+         * @tparam Req
+         * @param r - request
+         * @param db_id - database id
+         * @param xid - transaction id
+         */
         template <typename Req>
         static void
         set_request_common(Req &r, uint64_t db_id, const XidLsn &xid)
@@ -17,6 +26,12 @@ namespace springtail::sys_tbl_mgr {
             r.set_lsn(xid.lsn);
         }
 
+        /**
+         * @brief Set the partition information inside request
+         *
+         * @param info - partition data request
+         * @param partition_data - partition information
+         */
         static void
         set_partition_data(proto::PartitionData *info, const PartitionData &partition_data)
         {
@@ -29,6 +44,14 @@ namespace springtail::sys_tbl_mgr {
             info->set_parent_table_id(partition_data.parent_table_id);
         }
 
+        /**
+         * @brief Generate table request.
+         *
+         * @param db_id - database id
+         * @param xid - transaction id
+         * @param msg - table message
+         * @return proto::TableRequest - table request object
+         */
         static proto::TableRequest
         gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         {
@@ -71,6 +94,14 @@ namespace springtail::sys_tbl_mgr {
             return request;
         }
 
+        /**
+         * @brief Generate index request.
+         *
+         * @param db_id - database id
+         * @param xid - transaction id
+         * @param msg - index message
+         * @return proto::IndexRequest - index request object
+         */
         static proto::IndexRequest
         gen_index_request(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg)
         {
@@ -92,6 +123,12 @@ namespace springtail::sys_tbl_mgr {
             return request;
         }
 
+        /**
+         * @brief Convert API call result into schema metadata object
+         *
+         * @param result - result of an API call
+         * @return SchemaMetadataPtr - schema metadata object
+         */
         static SchemaMetadataPtr
         pack_metadata(const proto::GetSchemaResponse &result)
         {
