@@ -23,6 +23,7 @@ namespace springtail {
     /**
      * We collect the following time points.
      *
+     * - Transaction BEGIN: ts_begin
      * - The replication log is parsed, a log entry is created and pushed into the logger queue: ts_log_entry_created
      * - The logger queue consumer reads the entry: ts_log_entry_pop
      * - The logger queue consumer process the entry, creates PgMsg and pushes it into the next queue: ts_msg_created
@@ -36,6 +37,12 @@ namespace springtail {
      *
      * From these time points, we record the following latencies.
      *
+     * Per transaction (sort of):
+     *
+     * TRANSACTION_LATENCIES = ts_finalized - ts_begin
+     * WRITE_CACHE_FINALIZE_LATENCIES = ts_finalized - ts_cache_index_created
+     *
+     *
      * Per message: 
      *
      * INGEST_PIPELINE_LATENCIES = ts_commit_end - ts_log_entry_created (total pipeline latency)
@@ -43,10 +50,6 @@ namespace springtail {
      * INGEST_MSG_QUEUE_LATENCIES = ts_msg_pop - ts_msg_created (time spent in msg queue)
      * COMMITTER_PROC_LATENCIES = ts_commit_end - ts_commit_start (committer time)
      * WRITE_CACHE_ROW_LATENCIES = ts_commit_end - ts_extent_created (time spent in write cache extent)
-     *
-     * Per transaction (sort of):
-     *
-     * WRITE_CACHE_FINALIZE_LATENCIES = ts_finalized - ts_cache_index_created
      *
     */
     constexpr std::string_view LOG_READER_EVENT_FREQ = "log_reader_event_freq";
