@@ -257,7 +257,7 @@ namespace {
         _create_index(table_id, index_id2, index_xid2, "idx_test_indexer_5");
 
         // Check if are still seeing the first index in the schema
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
+        auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
         auto it = std::ranges::find_if(meta->indexes,
                 [&](auto const& v) { return index_id1 == v.id; });
         ASSERT_TRUE(it != meta->indexes.end());
@@ -270,7 +270,7 @@ namespace {
         // Trigger index reconcilation at reconcile_xid
         _process_index_and_validate(index_id2, index_xid2, reconcile_xid2);
 
-        meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{reconcile_xid2});
+        meta = sys_tbl_mgr::Server::get_instance()->get_schema(_db_id, table_id, XidLsn{reconcile_xid2});
         it = std::ranges::find_if(meta->indexes,
                 [&](auto const& v) { return index_id1 == v.id; });
         ASSERT_TRUE(it != meta->indexes.end());

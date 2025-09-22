@@ -608,7 +608,8 @@ Server::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, ui
     request.set_index_id(index_id);
     request.set_state(static_cast<int32_t>(state));
 
-    LOG_INFO("got set_index_state()");
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got set_index_state() -- db {}, xid {}:{}, table_id {}, index_id {}, state {}",
+                db_id, xid.xid, xid.lsn, table_id, index_id, (uint32_t)(state));
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
@@ -629,6 +630,9 @@ Server::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std
         request.set_table_id(*tid);
     }
     proto::IndexInfo response;
+
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_index_info() -- db {}, xid {}:{}, table_id {}, index_id {}",
+                db_id, xid.xid, xid.lsn, (tid.has_value()? tid.value() : 0), index_id);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_read_mutex);
