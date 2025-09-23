@@ -728,16 +728,9 @@ namespace springtail::pg_log_mgr {
             // once recovery is done, move all the entries to the _logger_queue
             if (!done && !_shutdown) {
                 // copy queue from
-                INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
-                    _queue_insert_freq.event();
-                    double f = _queue_insert_freq.frequency();
-                    if (f > std::numeric_limits<double>::min()) {
-                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_EVENT_FREQ, f);
-                    }
-                } )
-
                 LOG_INFO("Moving data to _logger_queue, recovery is done");
                 _logger_queue.push(post_recovery_queue);
+                open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
             }
         }
 
@@ -753,15 +746,8 @@ namespace springtail::pg_log_mgr {
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Queueing log entry: start_offset={}, end_offset={}, file_path={}",
                                   start_offset, end_offset, file_path);
 
-                        INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_1, {
-                                    _queue_insert_freq.event();
-                                    double f = _queue_insert_freq.frequency();
-                                    if (f > std::numeric_limits<double>::min()) {
-                                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_EVENT_FREQ, f);
-                                    }
-                                } )
-
                         _logger_queue.push(start_offset, end_offset, file_path);
+                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
                     }
                 )) {
                     break;
@@ -837,10 +823,6 @@ namespace springtail::pg_log_mgr {
                 last_timestamp = *file_timestamp;
                 last_path = log_entry->path;
             }
-
-            INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {
-                    log_entry->metrics.ts_pop = std::chrono::steady_clock::now();
-                    })
 
             _pg_log_reader->process_log(log_entry->path, last_timestamp, log_entry);
         }

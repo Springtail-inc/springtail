@@ -247,14 +247,11 @@ namespace springtail {
 
 
         struct Metrics {
-            EventFrequency<256> _begin_txn_freq;
             EventFrequency<256> _commit_txn_freq;
-            EventFrequency<256> _stream_start_freq;
-            EventFrequency<256> _stream_stop_freq;
             EventFrequency<256> _stream_abort_freq;
             EventFrequency<256> _stream_commit_freq;
         };
-        INSTRUMENT_INGEST_DATA(Metrics, _metrics);
+        Metrics _metrics;
 
         /** Helper to check for eof errors in reading stream */
         void _check_fail() {

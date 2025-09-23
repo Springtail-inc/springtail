@@ -24,58 +24,29 @@ namespace springtail {
      * We collect the following time points.
      *
      * - Transaction BEGIN: ts_begin
-     * - The replication log is parsed, a log entry is created and pushed into the logger queue: ts_log_entry_created
-     * - The logger queue consumer reads the entry: ts_log_entry_pop
-     * - The logger queue consumer process the entry, creates PgMsg and pushes it into the next queue: ts_msg_created
-     * - The message queue consumer reads the message: ts_msg_pop
-     * - If needed a new write cache extent is created: ts_extent_created
-     * - The message is added to a write cache extent
-     * - When the extent is full or there is COMMIT, the extent is pushed to the committer: ts_cache_index_created
-     * - The committer reads each row: ts_commit_start
-     * - The committer mutates the row: ts_commit_end
      * - The committer finalizes the table: ts_finalized
      *
      * From these time points, we record the following latencies.
      *
-     * Per transaction (sort of):
-     *
      * TRANSACTION_LATENCIES = ts_finalized - ts_begin
-     * WRITE_CACHE_FINALIZE_LATENCIES = ts_finalized - ts_cache_index_created
-     *
-     *
-     * Per message: 
-     *
-     * INGEST_PIPELINE_LATENCIES = ts_commit_end - ts_log_entry_created (total pipeline latency)
-     * LOG_READER_QUEUE_LATENCIES = ts_log_entry_pop - ts_log_entry_created (time spend in logger queue)
-     * INGEST_MSG_QUEUE_LATENCIES = ts_msg_pop - ts_msg_created (time spent in msg queue)
-     * COMMITTER_PROC_LATENCIES = ts_commit_end - ts_commit_start (committer time)
-     * WRITE_CACHE_ROW_LATENCIES = ts_commit_end - ts_extent_created (time spent in write cache extent)
      *
     */
-    constexpr std::string_view LOG_READER_EVENT_FREQ = "log_reader_event_freq";
-
-    constexpr std::string_view LOG_READER_BEGIN_TXN_FREQ = "log_reader_begin_txn_freq";
     constexpr std::string_view LOG_READER_COMMIT_TXN_FREQ = "log_reader_commit_txn_freq";
-    constexpr std::string_view LOG_READER_STREAM_START_FREQ = "log_reader_stream_start_freq";
-    constexpr std::string_view LOG_READER_STREAM_STOP_FREQ = "log_reader_stream_stop_freq";
     constexpr std::string_view LOG_READER_STREAM_ABORT_FREQ = "log_reader_stream_abort_freq";
     constexpr std::string_view LOG_READER_STREAM_COMMIT_FREQ = "log_reader_stream_commit_freq";
 
-    constexpr std::string_view COMMITTER_IN_EVENT_FREQ = "committer_in_event_freq";
-    constexpr std::string_view COMMITTER_OUT_EVENT_FREQ = "committer_out_event_freq";
-
     constexpr std::string_view TRANSACTION_LATENCIES = "transaction_latencies";
-    constexpr std::string_view LOG_READER_QUEUE_LATENCIES = "log_reader_latencies";
-    constexpr std::string_view INGEST_MSG_QUEUE_LATENCIES = "ingest_msg_queue_latencies";
-    constexpr std::string_view COMMITTER_PROC_LATENCIES = "committer_proc_latencies";
-    constexpr std::string_view INGEST_PIPELINE_LATENCIES = "ingest_pipeline_latencies";
-    constexpr std::string_view WRITE_CACHE_ROW_LATENCIES = "write_cache_row_latencies";
     constexpr std::string_view WRITE_CACHE_FINALIZE_LATENCIES = "write_cache_finalize_latencies";
 
     constexpr std::string_view LOG_READER_QUEUE_SIZE = "log_reader_queue_size";
     constexpr std::string_view INGEST_MSG_QUEUE_SIZE = "ingest_msg_queue_size";
     constexpr std::string_view COMMITTER_QUEUE_SIZE = "committer_queue_size";
 
+    constexpr std::string_view COMMITTER_TXN_MESSAGES = "committer_messages_per_txn";
+    constexpr std::string_view COMMITTER_TXN_INSERTS = "committer_inserts";
+    constexpr std::string_view COMMITTER_TXN_DELETES = "committer_deletes";
+    constexpr std::string_view COMMITTER_TXN_UPDATES = "committer_updates";
+    constexpr std::string_view COMMITTER_TXN_TRANCATES = "committer_trancates";
 
     // sys_tbl_mgr counter metrics
     constexpr std::string_view SYS_TBL_MGR_CREATE_INDEX_CALLS = "sys_tbl_mgr_create_index_calls";
@@ -143,27 +114,22 @@ namespace springtail {
             {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"},
 
             // log reader metrics
-            {LOG_READER_EVENT_FREQ, "Frequency of incoming log reader events"},
-            {COMMITTER_IN_EVENT_FREQ, "Frequency of mutation events in committer"},
-            {COMMITTER_OUT_EVENT_FREQ, "Frequency of outgoing/processed committer events."},
-            {LOG_READER_BEGIN_TXN_FREQ, "BEGIN frequency."},
             {LOG_READER_COMMIT_TXN_FREQ, "COMMIT frequency"},
-            {LOG_READER_STREAM_START_FREQ, "Stream start frequency."},
-            {LOG_READER_STREAM_STOP_FREQ, "Stream stop frequency"},
             {LOG_READER_STREAM_ABORT_FREQ, "Stream abort frequency"},
             {LOG_READER_STREAM_COMMIT_FREQ, "Stream commit frequency"},
 
-            {TRANSACTION_LATENCIES, "From BEGIN to finalized tables."},
-            {LOG_READER_QUEUE_LATENCIES, "Time a log entry spends in the log reader queue."},
-            {INGEST_MSG_QUEUE_LATENCIES, "Time PgMsg spends in the next queue."},
-            {COMMITTER_PROC_LATENCIES, "Time takes for the committer to process the message."},
-            {INGEST_PIPELINE_LATENCIES, "Total latency of the ingest pipeline."},
-            {WRITE_CACHE_ROW_LATENCIES, "Time takes for a write cache row to be picked by the committer."},
-            {WRITE_CACHE_FINALIZE_LATENCIES, "Time takes for cache extents to be finalized."},
+            {TRANSACTION_LATENCIES, "From BEGIN to finalized tables"},
+            {WRITE_CACHE_FINALIZE_LATENCIES, "Time takes for cache extents to be finalized"},
 
-            {LOG_READER_QUEUE_SIZE, "log_reader_queue_size"},
-            {INGEST_MSG_QUEUE_SIZE, "ingest_msg_queue_size"},
-            {COMMITTER_QUEUE_SIZE, "committer_queue_size"},
+            {LOG_READER_QUEUE_SIZE, "Log reader queue size"},
+            {INGEST_MSG_QUEUE_SIZE, "Message queue size"},
+            {COMMITTER_QUEUE_SIZE, "Committer work queue size"},
+
+            {COMMITTER_TXN_MESSAGES, "Messages per transaction"},
+            {COMMITTER_TXN_INSERTS, "INSERT counter"},
+            {COMMITTER_TXN_DELETES, "DELETE counter"},
+            {COMMITTER_TXN_UPDATES, "UPDATE counter"},
+            {COMMITTER_TXN_TRANCATES, "TRANCATE counter"},
 
             // log manager histogram metrics
             {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"},

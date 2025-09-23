@@ -294,8 +294,6 @@ namespace springtail::pg_log_mgr {
          */
         void _trace_thread();
 
-        INSTRUMENT_INGEST_DATA(EventFrequency<256>, _queue_insert_freq);
-
         /**
          * Function for writer thread to read data from connection and store it
          * @param data data read from connection

@@ -42,10 +42,24 @@ namespace springtail::committer {
      * on-disk copy of the WAL.
      */
     class Committer {
-        INSTRUMENT_INGEST_DATA(EventFrequency<256>, _in_event_freq);
-        INSTRUMENT_INGEST_DATA(EventFrequency<256>, _out_event_freq);
-
     public:
+        struct TxCounters {
+            size_t inserts = 0;
+            size_t updates = 0;
+            size_t deletes = 0;
+            size_t trancates = 0;
+            size_t messages = 0;
+
+            TxCounters& operator+=(const TxCounters& rhs) {
+                inserts += rhs.inserts;
+                updates += rhs.updates;
+                deletes += rhs.deletes;
+                trancates += rhs.trancates;
+                messages += rhs.messages;
+                return *this;
+            }
+        };
+
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
                 std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
                 const std::shared_ptr<pg_log_mgr::IndexRequestsManager> &index_requests_mgr, uint32_t indexer_worker_count)
@@ -54,7 +68,7 @@ namespace springtail::committer {
               _committer_queue(committer_queue),
               _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
               _index_requests_mgr(index_requests_mgr)
-        { }
+        {}
 
         /** Initiate the committer loop. */
         void run();
@@ -127,7 +141,7 @@ namespace springtail::committer {
          * @param table The MutableTable being mutated
          * @param wc_extent The WriteCacheExtent containing the mutations
          */
-        void _process_extent(uint64_t db_id, uint64_t tid, MutableTablePtr table,
+        TxCounters _process_extent(uint64_t db_id, uint64_t tid, MutableTablePtr table,
                              const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent);
 
         /**

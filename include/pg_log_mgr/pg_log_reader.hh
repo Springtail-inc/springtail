@@ -19,40 +19,6 @@
 
 namespace springtail::pg_log_mgr {
 
-    struct MetricFields
-    {
-        MutableFieldPtr ts_extent_created_f;
-        MutableFieldPtr ts_msg_created_f;
-        MutableFieldPtr ts_msg_pop_f;
-        MutableFieldPtr msg_queue_size_f;
-        MutableFieldPtr ts_log_entry_created_f;
-        MutableFieldPtr ts_log_entry_pop_f;
-        MutableFieldPtr log_queue_size_f;
-
-        explicit MetricFields(ExtentSchemaPtr schema) {
-            ts_extent_created_f = schema->get_mutable_field("__springtail_ts_msg_created");
-            ts_msg_created_f = schema->get_mutable_field("__springtail_ts_msg_created");
-            ts_msg_pop_f = schema->get_mutable_field("__springtail_ts_msg_pop");
-            msg_queue_size_f = schema->get_mutable_field("__springtail_msg_queue_size");
-
-            ts_log_entry_created_f = schema->get_mutable_field("__springtail_ts_log_entry_created");
-            ts_log_entry_pop_f = schema->get_mutable_field("__springtail_ts_log_entry_pop");
-            log_queue_size_f = schema->get_mutable_field("__springtail_log_queue_size");
-        }
-
-        static void add_metric_fields(std::vector<SchemaColumn> &cols)
-        {
-            cols.emplace_back("__springtail_ts_extent_created", 0, SchemaType::UINT64, 0, false);
-            cols.emplace_back("__springtail_ts_msg_created", 0, SchemaType::UINT64, 0, false);
-            cols.emplace_back("__springtail_ts_msg_pop", 0, SchemaType::UINT64, 0, false);
-            cols.emplace_back("__springtail_msg_queue_size", 0, SchemaType::UINT64, 0, false);
-
-            cols.emplace_back("__springtail_ts_log_entry_created", 0, SchemaType::UINT64, 0, false);
-            cols.emplace_back("__springtail_ts_log_entry_pop", 0, SchemaType::UINT64, 0, false);
-            cols.emplace_back("__springtail_log_queue_size", 0, SchemaType::UINT64, 0, false);
-        }
-    };
-
     /**
      * @brief Log reader class.  Reads logs written by PgLogWriter.  Collects the various table
      * mutations into batches which are passed to the WriteCache to make them available to the
@@ -253,25 +219,16 @@ namespace springtail::pg_log_mgr {
                 MutableFieldPtr op_f; ///< The field accessor for the mutation's operation type.
                 MutableFieldPtr lsn_f; ///< The field accessor for the mutation's LSN.
 
-                INSTRUMENT_INGEST_DATA(std::shared_ptr<MetricFields>, metric_f;)
-
-                using clock = std::chrono::steady_clock;
-                INSTRUMENT_INGEST_DATA(clock::time_point, ts_extent_created)
-
                 MutableFieldArrayPtr fields; ///< The underlying fields of the schema that match the columns from the table schema.
                 MutableFieldArrayPtr pkey_fields; ///< The underlying fields of the schema that match the pkey columns from the table schema.
 
                 FieldArrayPtr pg_fields; ///< The matching fields for processing a PgMsgTupleData
                 FieldArrayPtr pg_pkey_fields; ///< The matching pkey fields for processing a PgMsgTupleData
 
-                TableEntry() {
-                    INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {ts_extent_created = clock::now();});
-                }
+                TableEntry() {}
                 explicit TableEntry(ExtentSchemaPtr table_schema)
                     : table_schema(table_schema) 
-                {
-                    INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, {ts_extent_created = clock::now();});
-                }
+                {}
 
                 /**
                  * Updates the schema and related fields from the table_schema.

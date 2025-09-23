@@ -4,11 +4,6 @@
 #include <variant>
 #include <chrono>
 
-#include <pg_repl/pg_repl_instrument.hh>
-#if defined(PROFILE_INGEST) && !defined(PROFILE_INGEST_ENABLED)
-static_assert(false, "This error means that <pg_repl_instrument.hh> was included before PROFILE_INGEST is set.");
-#endif
-
 #include <pg_repl/pg_types.hh>
 #include <nlohmann/json.hpp>
 #include <storage/schema_type.hh>
@@ -361,27 +356,9 @@ namespace springtail
         bool is_streaming;     ///< is this a streaming message
 
 
-        using clock = std::chrono::steady_clock;
-        struct Metrics {
-            clock::time_point ts_created;
-            clock::time_point ts_pop;
-            size_t msg_queue_size;
-
-            clock::time_point ts_log_entry_created;
-            clock::time_point ts_log_entry_pop;
-            size_t log_queue_size;
-        };
-        INSTRUMENT_INGEST_DATA(Metrics, metrics)
-
         explicit PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
             : msg_type(type)
-        {
-            INSTRUMENT_INGEST(LOG_LEVEL_OBSERVABILITY_2, { 
-                    metrics.ts_created = clock::now();
-                    metrics.log_queue_size = 0;
-                    metrics.msg_queue_size = 0;
-                    } )
-        }
+        {}
 
         PgMsg() = delete;
         PgMsg(const PgMsg&) = delete;
