@@ -279,6 +279,7 @@ namespace springtail {
             }
 
             SafeExtent &operator=(const SafeExtent &other) {
+                if (this == &other) return *this;
                 if (_extent) {
                     StorageCache::get_instance()->_data_cache->put(_extent);
                 }
@@ -290,12 +291,12 @@ namespace springtail {
             }
 
             // move handling
-            SafeExtent(SafeExtent &&other) {
+            SafeExtent(SafeExtent &&other) noexcept  {
                 _extent = other._extent;
                 other._extent = nullptr;
             }
 
-            SafeExtent &operator=(SafeExtent &&other) {
+            SafeExtent &operator=(SafeExtent &&other) noexcept {
                 if (_extent) {
                     StorageCache::get_instance()->_data_cache->put(_extent);
                 }
@@ -1008,7 +1009,7 @@ namespace springtail {
             SafePagePtr()
             {}
 
-            SafePagePtr(SafePagePtr &&other) {
+            SafePagePtr(SafePagePtr &&other) noexcept {
                 _p = other._p;
                 _c = other._c;
                 _cb = other._cb;
@@ -1291,6 +1292,35 @@ namespace springtail {
             _page_cache->validate();
         }
 
+        using ExtentExpireNotifyFun = std::function<void(const std::filesystem::path&,
+                                        uint64_t,
+                                        uint32_t,
+                                        uint64_t)>;
+
+        /**
+         * @brief Set the extent expire notify function. This function is called when extend
+         *      is expired.
+         *
+         * @param cb - callback function to call
+         */
+        void set_extent_expire_notify_fun(ExtentExpireNotifyFun cb) {
+            _extent_expire_notify_fn = cb;
+        }
+
+        /**
+         * @brief Call extent expire notification callback.
+         *
+         * @param file - file name
+         * @param extent_id - extent id
+         * @param size - file size
+         * @param xid - transaction id
+         */
+        void call_extent_expire_notify_fun(const std::filesystem::path& file,
+                                        uint64_t extent_id,
+                                        uint32_t size,
+                                        uint64_t xid) {
+            _extent_expire_notify_fn(file, extent_id, size, xid);
+        }
     private:
         // INTERNAL MEMBER VARIABLES
 
@@ -1318,5 +1348,10 @@ namespace springtail {
             metrics::StorageCache::DropCalls>;
 
         std::unique_ptr<MetricCounters> _metric_counters;
+
+        ExtentExpireNotifyFun _extent_expire_notify_fn =
+            [](const std::filesystem::path&, uint64_t, uint32_t, uint64_t) {
+                // no-op
+            };
     };
 }

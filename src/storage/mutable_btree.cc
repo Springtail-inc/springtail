@@ -2,7 +2,6 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <storage/mutable_btree.hh>
-#include <storage/vacuumer.hh>
 
 namespace springtail {
 
@@ -191,7 +190,9 @@ namespace springtail {
 
         // Smart vacuum if index exists
         if (std::filesystem::exists(_file)) {
-            Vacuumer::get_instance()->expire_extent(_file, 0, std::filesystem::file_size(_file), _xid);
+            StorageCache::get_instance()->call_extent_expire_notify_fun(
+                _file, 0,
+                std::filesystem::file_size(_file), _xid);
         } else {
             LOG_INFO("TRUNCATE: File: {} doesn't exist to report to vacuum", _file);
         }
@@ -1059,7 +1060,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
             auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid, constant::LATEST_XID, _max_extent_size);
 
             // add pointers to the new root for each new page
-            for (PagePtr child : new_pages) {
+            for (PagePtr &child : new_pages) {
                 auto child_keys = child->index_keys();
                 auto child_itr = child->last();
                 Extent::Row child_row = *child_itr;

@@ -19,7 +19,8 @@ FSCheck::FSCheck( std::optional<uint64_t> db_id, uint64_t max_xid, bool all_xids
     _table_base = Properties::make_absolute_path(_table_base);
     LOG_INFO("Verifying tables at table_base = {}, max_xid = {}", _table_base.string(), _max_xid);
 
-    bool vacuumer_enabled = Vacuumer::get_instance()->is_enabled();
+    VacuumerUtils vacuumer_utils;
+    bool vacuumer_enabled = vacuumer_utils.is_enabled();
     for (const auto &[db_id, db_name]: _databases) {
         if (_db_id && _db_id != db_id) {
             continue;
@@ -27,7 +28,7 @@ FSCheck::FSCheck( std::optional<uint64_t> db_id, uint64_t max_xid, bool all_xids
 
         uint64_t cutoff_xid = 0;
         if (vacuumer_enabled) {
-            cutoff_xid = Vacuumer::get_instance()->get_last_seen_cutoff_xid(db_id);
+            cutoff_xid = vacuumer_utils.get_last_seen_cutoff_xid(db_id);
         }
         if (!vacuumer_enabled || _max_xid >= cutoff_xid) {
             _db_id_to_cutoff_xid.insert(std::make_pair(db_id, cutoff_xid));
