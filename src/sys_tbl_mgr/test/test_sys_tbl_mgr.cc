@@ -208,7 +208,7 @@ namespace {
         drop_msg.table = name;
 
         _server->drop_table(_db, xid, drop_msg);
-        _client->invalidate_table(_db, drop_msg.oid, xid);;
+        _client->invalidate_table(_db, drop_msg.oid, xid);
     }
 
     void

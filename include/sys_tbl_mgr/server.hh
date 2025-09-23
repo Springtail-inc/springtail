@@ -16,7 +16,6 @@ class Server final : public Singleton<Server>
     friend class Singleton<Server>;
     friend class Service;
 public:
-    // static void start();
 
     /**
      * @brief Create table API cal

@@ -18,7 +18,7 @@ Server::Server() : Singleton<Server>(ServiceId::SysTblMgrServerId)
 {
     auto json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
     nlohmann::json rpc_json;
-    uint64_t cache_size;
+    uint64_t cache_size = 0;
 
     if (!Json::get_to<uint64_t>(json, "cache_size", cache_size)) {
         throw Error("Sys tbl mgr cache size settings not found");
@@ -176,8 +176,6 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         ddl["action"] = "set_rls_forced";
         ddl["rls_forced"] = request.table().rls_forced();
     } else {
-        XidLsn xid(request.xid(), request.lsn());
-
         // get the schema prior to this change
         auto info = _get_schema_info(db_id, request.table().id(), xid, xid);
 
@@ -817,8 +815,8 @@ Server::revert(uint64_t db_id, uint64_t xid)
             }
 
             try {
-                uint64_t xid = std::stoull(filename.substr(6)); // skip "roots."
-                roots_files.try_emplace(xid, entry.path());
+                uint64_t filename_xid = std::stoull(filename.substr(6)); // skip "roots."
+                roots_files.try_emplace(filename_xid, entry.path());
             } catch (...) {
                 // Skip files with invalid numbers
                 continue;
@@ -1156,16 +1154,12 @@ Server::_get_unfinished_indexes_info(uint64_t db_id)
             info.table_id = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
 
             // Pick the latest unfinished state for the index
-            if (unfinished_indexes_map.find(index_id) != unfinished_indexes_map.end()) {
-                unfinished_indexes_map.erase(index_id);
-            }
+            unfinished_indexes_map.erase(index_id);
             unfinished_indexes_map.try_emplace(index_id)
                 .first->second
                 .try_emplace(index_xid, std::move(info));
         } else {
-            if (unfinished_indexes_map.find(index_id) != unfinished_indexes_map.end()) {
-                unfinished_indexes_map.erase(index_id);
-            }
+            unfinished_indexes_map.erase(index_id);
         }
     }
 
@@ -1398,10 +1392,10 @@ Server::_find_index(uint64_t db_id,
 
     XidLsn index_xid;
     uint64_t table_id = 0;
-    bool is_unique;
+    bool is_unique = false;
     std::string name;
-    uint64_t namespace_id;
-    uint8_t state;
+    uint64_t namespace_id = 0;
+    uint8_t state = 0;
     bool found = false;
 
     // find the last XID for this index
@@ -1417,15 +1411,14 @@ Server::_find_index(uint64_t db_id,
             break;
         }
 
-        {
-            uint64_t xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row);
-            uint64_t lsn = names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row);
-            index_xid = {xid, lsn};
-            if (access_xid < index_xid) {
-                continue;
-            }
+        uint64_t xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row);
+        uint64_t lsn = names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row);
+        index_xid = {xid, lsn};
+        if (access_xid < index_xid) {
+            continue;
         }
-        auto found_tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
+
+            auto found_tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
         if (tid && tid != found_tid) {
             LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found a dupoicate index id {} -- {}, {}/{}", db_id,
                                 index_id, tid, found_tid);
@@ -1732,7 +1725,7 @@ Server::_mutate_namespace(
     // record the namespace info into the cache
     {
         boost::unique_lock lock(_mutex);
-        auto entry = std::make_shared<NamespaceCacheRecord>(ns_id, (name) ? *name : "", exists);
+        auto entry = std::make_shared<NamespaceCacheRecord>(ns_id, name.value_or(""), exists);
         _namespace_id_cache[db_id][ns_id][xid] = entry;
         if (name) {
             // XXX do we need to make sure we cache the name even if it's not provided?  e.g.,
@@ -1744,7 +1737,7 @@ Server::_mutate_namespace(
     // add the namespace to the namespace_names table
     auto table = _get_mutable_system_table(db_id, sys_tbl::NamespaceNames::ID);
     auto tuple =
-        sys_tbl::NamespaceNames::Data::tuple(ns_id, (name) ? *name : "", xid.xid, xid.lsn, exists);
+        sys_tbl::NamespaceNames::Data::tuple(ns_id, name.value_or(""), xid.xid, xid.lsn, exists);
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
@@ -1849,17 +1842,17 @@ Server::_get_modified_partition_details(uint64_t db_id,
 
     // Validate the system table ids from cache
     // Only add the tables that have the right table parent table id
-    for (const auto& table_id_pair : _table_cache[db_id]) {
-        const auto& [latest_key, latest_table_ptr] = *table_id_pair.second.begin();
+    for (const auto& [tid, xid_map] : _table_cache[db_id]) {
+        const auto& [latest_key, latest_table_ptr] = *xid_map.begin();
 
         // Add the table id to the system_table_ids set if the parent table id matches the current table id
         // Remove the table id from the system_table_ids set if the cache doesn't have the table info
         if (latest_table_ptr->parent_table_id == table_id) {
-            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Adding cached table {}:{} to system_table_ids", table_id_pair.first, latest_table_ptr->name);
-            system_table_ids.try_emplace(table_id_pair.first, latest_table_ptr->xid);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Adding cached table {}:{} to system_table_ids", tid, latest_table_ptr->name);
+            system_table_ids.try_emplace(tid, latest_table_ptr->xid);
         } else {
-            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Removing table {}:{} from system_table_ids", table_id_pair.first, latest_table_ptr->name);
-            system_table_ids.erase(table_id_pair.first);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Removing table {}:{} from system_table_ids", tid, latest_table_ptr->name);
+            system_table_ids.erase(tid);
         }
     }
 
@@ -3245,11 +3238,11 @@ Server::_write_index(const XidLsn& xid,
                                                  0,   // empty position; filled below
                                                  0);  // empty column ID; filled below
 
-    for (auto&& entry : keys) {
+    for (auto& [pos, col_id] : keys) {
         fields->at(sys_tbl::Indexes::Data::POSITION) =
-            std::make_shared<ConstTypeField<uint32_t>>(entry.first);
+            std::make_shared<ConstTypeField<uint32_t>>(pos);
         fields->at(sys_tbl::Indexes::Data::COLUMN_ID) =
-            std::make_shared<ConstTypeField<uint32_t>>(entry.second);
+            std::make_shared<ConstTypeField<uint32_t>>(col_id);
 
         indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr),
                           constant::UNKNOWN_EXTENT);

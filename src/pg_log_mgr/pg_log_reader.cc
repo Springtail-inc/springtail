@@ -1212,7 +1212,7 @@ namespace springtail::pg_log_mgr {
                     drop_msg.oid = table_info.id();
                     drop_msg.namespace_name = table_info.namespace_name();
                     drop_msg.table = table_info.name();
-                    std::string &&ddl_stmt = server->drop_table(_db_id, XidLsn{xid}, std::move(drop_msg));
+                    std::string &&ddl_stmt = server->drop_table(_db_id, XidLsn{xid}, drop_msg);
                     ddls.emplace_back(ddl_stmt);
                 } else {
 

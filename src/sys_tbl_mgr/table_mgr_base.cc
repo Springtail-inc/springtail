@@ -20,7 +20,7 @@ namespace springtail {
         for (auto &&column : columns) {
             LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "col_pos={} col_name={}",
                         column.position, column.name);
-            column_map.insert({column.position, column});
+            column_map.emplace(column.position, column);
         }
         return column_map;
     }
