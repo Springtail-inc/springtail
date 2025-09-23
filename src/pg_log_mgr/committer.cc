@@ -537,7 +537,7 @@ namespace springtail::committer {
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_INSERTS, tx_counters.inserts);
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_DELETES, tx_counters.deletes);
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_UPDATES, tx_counters.updates);
-        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_TRANCATES, tx_counters.trancates);
+        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_TRUNCATES, tx_counters.truncates);
 
         if (min_md) {
             // log how long it took to process this table
@@ -648,7 +648,7 @@ namespace springtail::committer {
 
             case TRUNCATE:
                 {
-                    ++tx_counters.trancates;
+                    ++tx_counters.truncates;
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "TRUNCATE");
                     // note: this should always be the first operation within an extent
                     table->truncate();

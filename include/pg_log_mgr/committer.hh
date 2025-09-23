@@ -47,14 +47,14 @@ namespace springtail::committer {
             size_t inserts = 0;
             size_t updates = 0;
             size_t deletes = 0;
-            size_t trancates = 0;
+            size_t truncates = 0;
             size_t messages = 0;
 
             TxCounters& operator+=(const TxCounters& rhs) {
                 inserts += rhs.inserts;
                 updates += rhs.updates;
                 deletes += rhs.deletes;
-                trancates += rhs.trancates;
+                truncates += rhs.truncates;
                 messages += rhs.messages;
                 return *this;
             }

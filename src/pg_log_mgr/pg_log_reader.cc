@@ -232,8 +232,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::add_mutation(uint64_t current_xid,
                                      int32_t pg_xid,
                                      int32_t tid,
-                                     PgMsgTupleData &data,
-                                     const PgMsgPtr& msg)
+                                     PgMsgTupleData &data)
     {
         time_trace::Trace add_mutation_trace;
         TIME_TRACE_START(add_mutation_trace);
@@ -1023,7 +1022,7 @@ namespace springtail::pg_log_mgr {
 
                 // note: the current XID is only used to determine table existence
                 _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
-                                                                insert.rel_id, insert.new_tuple, msg);
+                                                                insert.rel_id, insert.new_tuple);
                 break;
             }
         case PgMsgEnum::DELETE:
@@ -1039,7 +1038,7 @@ namespace springtail::pg_log_mgr {
 
                 // note: the current XID is only used to determine table existence
                 _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
-                                                                remove.rel_id, remove.tuple, msg);
+                                                                remove.rel_id, remove.tuple);
                 break;
             }
         case PgMsgEnum::UPDATE:
@@ -1057,12 +1056,12 @@ namespace springtail::pg_log_mgr {
                 uint64_t current_xid = this->get_current_xid();
                 if (update.old_type == 0) {
                     _current_batch->add_mutation<PgMsgEnum::UPDATE>(current_xid, pg_xid,
-                                                                    update.rel_id, update.new_tuple, msg);
+                                                                    update.rel_id, update.new_tuple);
                 } else {
                     _current_batch->add_mutation<PgMsgEnum::DELETE>(current_xid, pg_xid,
-                                                                    update.rel_id, update.old_tuple, msg);
+                                                                    update.rel_id, update.old_tuple);
                     _current_batch->add_mutation<PgMsgEnum::INSERT>(current_xid, pg_xid,
-                                                                    update.rel_id, update.new_tuple, msg);
+                                                                    update.rel_id, update.new_tuple);
                 }
                 break;
             }

@@ -60,9 +60,12 @@ namespace springtail::pg_log_mgr {
          *
          * @param pg_xid - Postgres Xid
          */
-
-        std::optional<Timestamps> find_ts(int32_t pg_xid) const
+        std::optional<Timestamps> 
+        find_ts(int32_t pg_xid) const
         {
+            // acquire shared lock for read accessd
+            std::shared_lock<std::shared_mutex> lock(_mt);
+
             auto it = _pg_xid_to_ts.find(pg_xid);
             if (it == _pg_xid_to_ts.end()) {
                 return {};
@@ -206,7 +209,7 @@ namespace springtail::pg_log_mgr {
         std::map<uint64_t, uint32_t> _ts_to_pg_xid_count;   ///< map to keep the number of times that timestamp ids are used for Postgres Xid
         std::map<uint64_t, uint64_t> _xid_to_ts;            ///< map Springtail Xid to timestamp id
         std::map<uint64_t, uint32_t> _ts_to_xid_count;      ///< map to keep the number of times that timestamp ids are used for Springtail Xid
-        std::shared_mutex _mt;                              ///< mutext for access to this class data structures
+        mutable std::shared_mutex _mt;                      ///< mutext for access to this class data structures
     } ;
     using WalProgressTrackerPtr = std::shared_ptr<WalProgressTracker>;
 

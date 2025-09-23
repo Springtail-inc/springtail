@@ -46,7 +46,7 @@ namespace springtail {
     constexpr std::string_view COMMITTER_TXN_INSERTS = "committer_inserts";
     constexpr std::string_view COMMITTER_TXN_DELETES = "committer_deletes";
     constexpr std::string_view COMMITTER_TXN_UPDATES = "committer_updates";
-    constexpr std::string_view COMMITTER_TXN_TRANCATES = "committer_trancates";
+    constexpr std::string_view COMMITTER_TXN_TRUNCATES = "committer_trancates";
 
     // sys_tbl_mgr counter metrics
     constexpr std::string_view SYS_TBL_MGR_CREATE_INDEX_CALLS = "sys_tbl_mgr_create_index_calls";
@@ -129,7 +129,7 @@ namespace springtail {
             {COMMITTER_TXN_INSERTS, "INSERT counter"},
             {COMMITTER_TXN_DELETES, "DELETE counter"},
             {COMMITTER_TXN_UPDATES, "UPDATE counter"},
-            {COMMITTER_TXN_TRANCATES, "TRANCATE counter"},
+            {COMMITTER_TXN_TRUNCATES, "TRUNCATE counter"},
 
             // log manager histogram metrics
             {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"},

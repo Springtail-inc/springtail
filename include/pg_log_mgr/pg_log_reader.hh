@@ -187,7 +187,7 @@ namespace springtail::pg_log_mgr {
              * Adds a mutation to a given table's batch.
              */
             template <int T>
-            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, PgMsgTupleData &data, const PgMsgPtr& msg);
+            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, PgMsgTupleData &data);
 
             /**
              * Records a truncation of a given set of tables into the batch.
