@@ -348,7 +348,7 @@ namespace springtail
          PgMsgAttachPartition,
          PgMsgDetachPartition
         > msg;                 ///< message data
-                               ///
+
         /** timestamp id of the current Postgres log file -- will be zero for internal messages */
         uint64_t pg_log_timestamp{0};
         PgMsgEnum msg_type;    ///< type defining union member

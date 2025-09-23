@@ -2,7 +2,6 @@
     "logging" : {
         "log_level" : "debug",
         "log_level_debug" : 1,
-        "log_level_observability" : 2,
         "log_path" : "/opt/springtail/logs/",
         "log_file_size" : 10000000,
         "log_file_count" : 10,
