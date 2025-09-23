@@ -132,7 +132,7 @@ namespace springtail::pg_fdw {
     void PgDDLMgr::_on_database_ids_changed(const std::string &path,
                                             const nlohmann::json &new_value)
     {
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
+        LOG_INFO("Replicated databases changed event: {}", new_value.dump(4));
         CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
 
         // get a vector of old database ids from _log_mgrs
@@ -237,9 +237,8 @@ namespace springtail::pg_fdw {
             // if the FDW is using a prefix, prepend it
             _db_prefix = fdw_config.at("db_prefix").get<std::string>();
         }
-
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "FDW ID: {}, Host: {}, Port: {}, FDW Username: {}",
-                     _fdw_id, _hostname, _port, _username);
+        LOG_INFO("FDW init: ID={}, Host={}, Port={}, FDW Username={}",
+                 _fdw_id, _hostname, _port, _username);
 
         // add subscribers to pubsub threads
         _db_instance_id = Properties::get_db_instance_id();
@@ -649,6 +648,7 @@ namespace springtail::pg_fdw {
                 );
             }
         }
+        LOG_INFO("Sync thread exiting");
     }
 
     PgDDLMgr::UserTypeMap
@@ -685,7 +685,7 @@ namespace springtail::pg_fdw {
             DCHECK_EQ(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row), constant::USER_TYPE_ENUM);
 
             // insert into map by namespace_id
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
+            LOG_INFO("Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
             usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
         }
 
@@ -701,6 +701,8 @@ namespace springtail::pg_fdw {
         bool all_schemas = false;
         std::set<std::string> schemas;
         std::unordered_map<uint64_t, std::string> schema_map;
+
+        LOG_INFO("Scanning for schemas in db_id={}, xid={}", db_id, xid);
 
         // scan through includes
         auto includes = db_config["include"];
@@ -793,7 +795,7 @@ namespace springtail::pg_fdw {
 
 
             // execute the SQL command to enable RLS
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Applying RLS SQL command: {}", sql);
+            LOG_INFO("Applying RLS SQL command: {}", sql);
             conn->exec(sql);
             conn->clear();
         }
@@ -856,8 +858,7 @@ namespace springtail::pg_fdw {
     std::string
     PgDDLMgr::_get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema)
     {
-        return fmt::format("ALTER SCHEMA {} RENAME TO {};",
-                           old_schema, new_schema);
+        return fmt::format("ALTER SCHEMA {} RENAME TO {};", old_schema, new_schema);
 #if 0
         /** Alter schema with grants, params: old_schema, new_schema, new_schema, user, new_schema, user, new_schema, user */
         return fmt::format("ALTER SCHEMA {} RENAME TO {};"
@@ -1047,6 +1048,7 @@ namespace springtail::pg_fdw {
                     uint64_t db_id = entry.at("db_id").get<uint64_t>();
                     uint64_t schema_xid = entry.at("xid").get<uint64_t>();
                     auto ddls = entry.at("ddls");
+                    auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
 
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Original DDLS: {}", ddls.dump(4));
 
@@ -1059,17 +1061,19 @@ namespace springtail::pg_fdw {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                     } else {
-                        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "New schema XID will be applied: db_id={}, current={}, new={}",
-                                    db_id, _db_xid_map[db_id], schema_xid);
+                        LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
+                                  db_id, _db_xid_map[db_id], schema_xid);
                         db_map[db_id][schema_xid] = sorted_ddls;
                     }
                 }
+
                 if (db_map.empty()) {
                     LOG_WARN("All schemas have already been applied");
                     db_lock.unlock();
                     redis_ddl.commit_fdw_no_update(_fdw_id);
                     continue;
                 }
+
                 db_lock.unlock();
 
                 // queue each DBs DDL statements for processing
@@ -1078,11 +1082,15 @@ namespace springtail::pg_fdw {
                         db_id, [this, &redis_ddl, db_id, xid_map]() {
                             try {
                                 uint64_t schema_xid = xid_map.rbegin()->first;
+                                auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+
                                 LOG_DEBUG(
                                     LOG_FDW, LOG_LEVEL_DEBUG1, "Updating redis ddl @ through schema XID: {}, db_id: {}",
                                     schema_xid, db_id);
 
-                                    // apply the DDL statements
+
+
+                                // apply the DDL statements
                                 bool status = _update_schemas(db_id, xid_map);
                                 if (!status) {
                                     // error occured, abort the DDL
@@ -1127,6 +1135,8 @@ namespace springtail::pg_fdw {
         }
         _thread_manager->notify_shutdown();
         _thread_manager->shutdown();
+
+        LOG_INFO("DDL manager thread exiting");
     }
 
     LibPqConnectionPtr
@@ -1241,7 +1251,7 @@ namespace springtail::pg_fdw {
 
         // exectute each DDL statement
         for (const auto &sql : txn) {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Executing DDL: {}", sql);
+            LOG_INFO("Executing DDL: {}", sql);
             conn->exec(sql);
             conn->clear();
         }
@@ -1546,7 +1556,7 @@ namespace springtail::pg_fdw {
                                const std::string &db_name)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
+        LOG_INFO("Creating DB ID: {}, DB Name: {} (dropping then creating)", db_id, db_name);
 
         // drop and create database on fdw
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
@@ -1705,6 +1715,8 @@ namespace springtail::pg_fdw {
 
         // update redis with the schema xid
         redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
+        LOG_INFO("Schema initialization complete for db_id={}, db_name={}, xid={}",
+                 db_id, db_name, xid);
     }
 
     void
@@ -1789,7 +1801,7 @@ namespace springtail::pg_fdw {
             {
                 std::shared_lock shared_lock(_db_mutex);
                 if (_db_xid_map.contains(db_id)) {
-                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Database {} already exists in the fdw", db_name);
+                    LOG_INFO("Database {} already exists in the fdw", db_name);
                     return;
                 }
             }
@@ -1868,15 +1880,10 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Comparing enum types: {}.{} from: {} to: {}", schema, type_name, from.dump(), to.dump());
 
         while (i < from.size() && j < to.size()) {
-
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "i={}, j={}", i, j);
-
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "got from vals");
-
             std::string from_key = from[i].begin().key();
             std::string to_key = to[j].begin().key();
 
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "From key: {}, From val: {}, To key: {}, To val: {}", from_key,
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG2, "From key: {}, From val: {}, To key: {}, To val: {}", from_key,
                     (float)from[i].begin().value(), to_key, (float)to[j].begin().value());
 
             if (from_key == to_key) {
