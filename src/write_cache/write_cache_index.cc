@@ -22,7 +22,7 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::commit(std::vector<uint64_t> pg_xids, uint64_t xid, WriteCacheTableSet::Metadata md)
+    WriteCacheIndex::commit(const std::vector<uint64_t>& pg_xids, uint64_t xid, WriteCacheTableSet::Metadata md)
     {
         for (auto &p: _partitions) {
             p->commit(pg_xids, xid, std::move(md));
@@ -45,7 +45,7 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::abort(std::vector<uint64_t> pg_xids)
+    WriteCacheIndex::abort(const std::vector<uint64_t>& pg_xids)
     {
         for (auto &p: _partitions) {
             for (auto &pg_xid: pg_xids) {

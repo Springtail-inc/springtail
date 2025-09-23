@@ -68,7 +68,7 @@ namespace springtail {
          * @param xid springtail XID
          * @param commit_ts postgres commit ts
          */
-        void commit(std::vector<uint64_t> pg_xids, uint64_t xid, Metadata md);
+        void commit(const std::vector<uint64_t>& pg_xids, uint64_t xid, Metadata md);
 
         /**
          * @brief Get a list of table IDs
