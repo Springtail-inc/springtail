@@ -1138,11 +1138,24 @@ namespace springtail
                                                    request->table_oid,
                                                    copy_result);
 
+                bool is_partition_table = false;
+                if (info->info != nullptr) {
+                    // Get the details about the table to find out if its a partitioned tables
+                    // If the partition_keys is not empty or partition_bound is not empty, then it is a partitioned table
+                    auto table_req_info = info->info->table_req().table();
+                    is_partition_table = !table_req_info.partition_bound().empty() || !table_req_info.partition_key().empty();
+                }
+
                 // add the table oid to the result
                 copy_result->add_table(info);
                 if (copy_result->tids.size() > 0) {
                     result.push_back(copy_result);
-                    copy_table._send_sync_msg(copy_result);
+                    // If the table is not a partitioned table, send sync message
+                    // If it is a partitioned table, wait for all partition tables to be processed,
+                    //                               i.e., all the tables in the current copy_queue are processed
+                    if (!is_partition_table || copy_queue->empty()) {
+                        copy_table._send_sync_msg(copy_result);
+                    }
                 }
             } catch (PgRetryError &e) {
                 LOG_ERROR("Unexpected error, will retry table copy: {}", request->table_oid);
@@ -1159,7 +1172,7 @@ namespace springtail
             copy_table._end_copy();
             copy_table.disconnect();
 
-            LOG_INFO("Copy table complete: oid {}", request->table_oid);
+            LOG_INFO("Copy table complete: oid {}, xid: {}", request->table_oid, xid.xid);
 
             // reset schema object for next table
             copy_table._reset_schema();
@@ -1170,6 +1183,7 @@ namespace springtail
     PgCopyTable::_send_sync_msg(PgCopyResultPtr result)
     {
         std::string sync_msg = fmt::format(R"({{"target_xid":{}, "pg_xid":{}}})", result->target_xid, result->pg_xid);
+        LOG_INFO("[DEBUG] Sending sync msg: {}", sync_msg);
         std::string query = fmt::format(REPL_MSG_QUERY, pg_msg::MSG_PREFIX_COPY_SYNC, sync_msg);
 
         _connection.exec(query);
