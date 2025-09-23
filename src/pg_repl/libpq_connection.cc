@@ -255,7 +255,7 @@ namespace springtail {
             savepoint(savepoint_name);
         }
 
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query: {}", cmd);
+        LOG_INFO("Executing query: {}", cmd);
         _result = std::make_shared<LibPqResult>(PQexec(_connection, cmd));
 
         auto status = PQresultStatus(_result->result);
@@ -263,10 +263,12 @@ namespace springtail {
             if (!savepoint_name.empty()) {
                 auto old_result = _result; // keep the result for logging
                 // rollback to savepoint if in transaction
-                LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Rolling back to savepoint: {}, error on exec: {}", savepoint_name, result_error_message());
+                LOG_WARN("Rolling back to savepoint: {}, error on exec: {}", savepoint_name, result_error_message());
                 rollback_savepoint(savepoint_name);
                 _result = old_result; // restore the result for logging
             }
+            std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(_result->result));
+            LOG_ERROR("Error executing query: error={}", error_message);
             return false; // error executing query
         }
 
@@ -299,8 +301,7 @@ namespace springtail {
         }
 
         if (exec_no_throw(cmd, false) == false) {
-            std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(_result->result));
-            LOG_ERROR("Error executing query: {}", error_message);
+
             throw PgQueryError();
         }
     }
