@@ -9,6 +9,11 @@ namespace springtail {
 
     AdminServer::AdminServer() : Singleton<AdminServer>()
     {
+        // change thread pool to only use 1 thread
+        _svr.new_task_queue = [] {
+            return new httplib::ThreadPool(1);
+        };
+
         // Default dispatch routes
         _svr.Get("/health",
                  []([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
@@ -25,14 +30,14 @@ namespace springtail {
 
         _svr.Get("/logging",
                  [this]([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
-                    _wrap_error_handler(res, []() {
+                    _wrap_error_handler(res, []() -> nlohmann::json {
                         return logging::Logger::get_instance()->get_stats();
                     });
                 });
 
         _svr.Post("/logging",
                   [this]([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
-                    _wrap_error_handler(res, [&req]() {
+                    _wrap_error_handler(res, [&req, &res]() -> nlohmann::json {
                         nlohmann::json json_body = nlohmann::json::parse(req.body);
                         if (json_body.contains("log_level")) {
                             std::string log_level_str = json_body["log_level"];
@@ -43,8 +48,22 @@ namespace springtail {
                             uint32_t level = json_body["debug_level"];
                             logging::Logger::get_instance()->set_debug_level(level);
                         }
-                        nlohmann::json result = {{ "status", "ok"}};
-                        return result;
+                        if (json_body.contains("module_mask")) {
+                            if (!json_body["module_mask"].is_object() ||
+                                !json_body["module_mask"].contains("module") ||
+                                !json_body["module_mask"].contains("value")) {
+                                res.status = 500;
+                                return {{ "status", "Invalid input"}};
+                            }
+                            const std::string &module_name = json_body["module_mask"]["module"];
+                            bool value = json_body["module_mask"]["value"];
+                            if (!logging::Logger::get_instance()->set_log_mask(module_name, value)) {
+                                res.status = 500;
+                                return {{ "status", "Invalid module name"}};
+                            }
+                        }
+                        return {{ "status", "ok"},
+                                {"result", logging::Logger::get_instance()->get_stats()}};;
                     });
                 });
 
@@ -95,7 +114,7 @@ namespace springtail {
     void
     AdminServer::_dispatch_get(const httplib::Request& req, httplib::Response& res)
     {
-        _wrap_error_handler(res, [this, &req]() {
+        _wrap_error_handler(res, [this, &req]() -> nlohmann::json {
             GetHandler handler;
             {
                 std::shared_lock lock(_mutex);
@@ -117,7 +136,7 @@ namespace springtail {
     void
     AdminServer::_dispatch_post(const httplib::Request& req, httplib::Response& res)
     {
-        _wrap_error_handler(res, [this, &req]() {
+        _wrap_error_handler(res, [this, &req]() -> nlohmann::json {
             PostHandler handler;
             {
                 std::shared_lock lock(_mutex);

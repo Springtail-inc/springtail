@@ -24,6 +24,7 @@ namespace springtail::pg_fdw {
         _cleanup_redis_data();
 
         _redis_thread = std::thread(&PgXidCollector::_redis_thread_run, this);
+        pthread_setname_np(_redis_thread.native_handle(), "RedisThread");
     }
 
     void

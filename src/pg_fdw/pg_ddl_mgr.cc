@@ -195,6 +195,7 @@ namespace springtail::pg_fdw {
                     fdw_id, username, password, hostname.value_or(""));
         PgDDLMgr::get_instance()->init(fdw_id, username, password, proxy_password, hostname);
         PgDDLMgr::get_instance()->_pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
+        pthread_setname_np(PgDDLMgr::get_instance()->_pg_ddl_mgr_thread.native_handle(), "PgDDLMgrThread");
     }
 
     void
@@ -250,11 +251,12 @@ namespace springtail::pg_fdw {
 
         _init_fdw();
 
-        _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
+        _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE, "DDL_MQThrMgr");
         _thread_manager->start();
 
         // create a new thread to run the policy and role sync
         _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this, sync_interval_secs);
+        pthread_setname_np(_sync_thread.native_handle(), "DDLMgrSync");
         LOG_INFO("PgDDLMgr::init() done");
 
         Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_RUNNING);

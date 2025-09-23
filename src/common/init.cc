@@ -235,6 +235,7 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
 };
 
 static const std::map<ServiceId, std::string> dependencies_names = {
+    {ServiceId::ServiceInvalidId,      "Invalid"},
     {ServiceId::ServiceRegisterId,     "ServiceRegister"},
     {ServiceId::DatabaseMgrId,         "DatabaseMgr"},
     {ServiceId::UserMgrId,             "UserMgr"},
@@ -257,6 +258,15 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::VacuumerId,            "Vacuumer"},
     {ServiceId::SystemTableMgrId,      "SystemTableMgr"}
 };
+
+const std::string &
+springtail_get_service_name(ServiceId id)
+{
+    if (id >= ServiceId::ServiceInvalidId && id < ServiceId::ServiceCountId) {
+        return dependencies_names.at(id);
+    }
+    return dependencies_names.at(ServiceId::ServiceInvalidId);
+}
 
 std::vector<ServiceId>
 topo_sort()

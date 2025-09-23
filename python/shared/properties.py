@@ -63,10 +63,10 @@ class Properties:
                 self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
                 self.redis_ssl = system_json['redis']['ssl'] if 'ssl' in system_json['redis'] else False
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
+                self.instance_key = str(system_json['org']['instance_key'])
                 self.fdw_id = system_json['org']['fdw_id']
 
                 # not in config file, but will be set in production env
-                self.instance_key = None
                 self.service_name = None
 
                 # set the environment variables
@@ -75,6 +75,7 @@ class Properties:
                     'ACCOUNT_ID': system_json['org']['account_id'],
                     'FDW_ID': system_json['org']['fdw_id'],
                     'DATABASE_INSTANCE_ID': str(self.db_instance_id),
+                    'INSTANCE_KEY': self.instance_key,
                     'REDIS_HOSTNAME': self.redis_host,
                     'REDIS_PORT': str(self.redis_port),
                     'REDIS_USER': self.redis_user,
@@ -107,12 +108,12 @@ class Properties:
             self.redis_config_db = int(os.environ.get('REDIS_CONFIG_DATABASE_ID', 0))
             self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', 'false'))
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
+            self.instance_key = os.environ.get('INSTANCE_KEY', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
             self.org_id = os.environ.get('ORGANIZATION_ID', None)
             self.account_id = os.environ.get('ACCOUNT_ID', None)
 
             # not in config file, but will be set in production env
-            self.instance_key = os.environ.get('INSTANCE_KEY', None)
             self.service_name = os.environ.get('SERVICE_NAME', None)
 
             # fetch replication user from aws secrets manager
@@ -277,6 +278,10 @@ class Properties:
     def get_db_instance_id(self) -> str:
         """Return the database instance id."""
         return self.db_instance_id
+
+    def get_instance_key(self) -> str:
+        """Return the instance key."""
+        return self.instance_key
 
     def get_liveness_hash(self) -> str:
         """Return the liveness hash key."""
@@ -597,6 +602,7 @@ def main():
         'ACCOUNT_ID',
         'FDW_ID',
         'DATABASE_INSTANCE_ID',
+        'INSTANCE_KEY',
         'REDIS_HOSTNAME',
         'REDIS_PORT',
         'REDIS_USER',
