@@ -56,7 +56,7 @@ namespace springtail {
          * @param xid springtail XID
          * @param commit_ts postgres commit ts
          */
-        void commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts);
+        void commit(const std::vector<uint64_t>& pg_xids, uint64_t xid, PostgresTimestamp commit_ts);
 
         /**
          * @brief Drop a table from the index
@@ -75,7 +75,7 @@ namespace springtail {
          * @brief Drop all data for a given XID
          * @param pg_xids Postgres XIDs
          */
-        void abort(std::vector<uint64_t> pg_xids);
+        void abort(const std::vector<uint64_t>& pg_xids);
 
         //// RPC interface
 

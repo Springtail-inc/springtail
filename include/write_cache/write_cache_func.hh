@@ -54,7 +54,7 @@ namespace springtail {
          * @param xid Springtail XID
          * @param pg_xid Postgres XIDs
          */
-        static void commit(uint64_t db_id, uint64_t xid, std::vector<uint64_t> pg_xids, PostgresTimestamp commit_ts)
+        static void commit(uint64_t db_id, uint64_t xid, const std::vector<uint64_t>& pg_xids, PostgresTimestamp commit_ts)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             index->commit(pg_xids, xid, commit_ts);
