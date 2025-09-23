@@ -225,7 +225,7 @@ namespace springtail::pg_log_mgr {
                 FieldArrayPtr pg_fields; ///< The matching fields for processing a PgMsgTupleData
                 FieldArrayPtr pg_pkey_fields; ///< The matching pkey fields for processing a PgMsgTupleData
 
-                TableEntry() {}
+                TableEntry() = default;
                 explicit TableEntry(ExtentSchemaPtr table_schema)
                     : table_schema(table_schema) 
                 {}
