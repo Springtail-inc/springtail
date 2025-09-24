@@ -114,7 +114,7 @@ class Properties:
             self.fdw_id = os.environ.get('FDW_ID', None)
             self.org_id = os.environ.get('ORGANIZATION_ID', None)
             self.account_id = os.environ.get('ACCOUNT_ID', None)
-            self.main_db = os.environ.get('PGDATABASE', '__springtail')
+            self.maint_db = os.environ.get('PGDATABASE', '__springtail')
 
             # not in config file, but will be set in production env
             self.service_name = os.environ.get('SERVICE_NAME', None)
