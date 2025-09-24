@@ -317,16 +317,19 @@ public:
         static constexpr uint32_t XID = 1;
         static constexpr uint32_t ROW_COUNT = 2;
         static constexpr uint32_t END_OFFSET = 3;
+        static constexpr uint32_t LAST_INTERNAL_ROW_ID = 4;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
-        static TuplePtr tuple(uint64_t table_id, uint64_t xid, uint64_t row_count, uint64_t end_offset)
+        static TuplePtr tuple(uint64_t table_id, uint64_t xid, uint64_t row_count,
+                uint64_t end_offset, uint64_t last_internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(4);
+            auto fields = std::make_shared<FieldArray>(5);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(ROW_COUNT) = std::make_shared<ConstTypeField<uint64_t>>(row_count);
             fields->at(END_OFFSET) = std::make_shared<ConstTypeField<uint64_t>>(end_offset);
+            fields->at(LAST_INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(last_internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };

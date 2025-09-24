@@ -109,7 +109,8 @@ const std::vector<SchemaColumn> TableStats::Data::SCHEMA = {
     {"table_id", 1, SchemaType::UINT64, INT8OID, false, 0},
     {"xid", 2, SchemaType::UINT64, INT8OID, false, 1},
     {"row_count", 3, SchemaType::UINT64, INT8OID, false},
-    {"end_offset", 4, SchemaType::UINT64, INT8OID, false}};
+    {"end_offset", 4, SchemaType::UINT64, INT8OID, false},
+    {"last_internal_row_id", 5, SchemaType::UINT64, INT8OID, false}};
 
 const std::vector<SchemaColumn> TableStats::Primary::SCHEMA = {
     {"table_id", 1, SchemaType::UINT64, INT8OID, false},

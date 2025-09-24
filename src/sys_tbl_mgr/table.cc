@@ -581,6 +581,9 @@ namespace indexer_helpers {
         _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
         _data_file = _table_dir / constant::DATA_FILE;
 
+        // Initialize the last internal row ID in the table
+        _internal_row_id = metadata.stats.last_internal_row_id;
+
         // make sure that the table directory exists
         std::filesystem::create_directories(_table_dir);
 

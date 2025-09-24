@@ -2186,6 +2186,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // possibly cached stats
     uint64_t row_count = 0;
     uint64_t end_offset = 0;
+    uint64_t last_internal_row_id = 0;
     bool stats_found = false;
 
     // get cached roots
@@ -2215,6 +2216,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             // we found a cached entry, update the stats
             row_count = xid_roots.second->stats().row_count();
             end_offset = xid_roots.second->stats().end_offset();
+            last_internal_row_id = xid_roots.second->stats().last_internal_row_id();
             stats_found = true;
             auto it = std::ranges::find_if(xid_roots.second->roots(), [index_id](const auto& v) {
                         return index_id == v.index_id();
@@ -2332,8 +2334,10 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             // retrieve the stats from the row
             auto row_count_f = stats_schema->get_field("row_count");
             auto end_offset_f = stats_schema->get_field("end_offset");
+            auto last_internal_row_id_f = stats_schema->get_field("last_internal_row_id");
             row_count = row_count_f->get_uint64(&row);
             end_offset = end_offset_f->get_uint64(&row);
+            last_internal_row_id = last_internal_row_id_f->get_uint64(&row);
         } else {
             // no stats for this table?  seems like a potential error
             LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
@@ -2343,6 +2347,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     roots_info->mutable_stats()->set_row_count(row_count);
     roots_info->mutable_stats()->set_end_offset(end_offset);
+    roots_info->mutable_stats()->set_last_internal_row_id(last_internal_row_id);
     roots_info->set_snapshot_xid(snapshot_xid);
 
     return roots_info;
@@ -2374,7 +2379,8 @@ Service::_set_roots_info(uint64_t db_id,
     // update the table_stats
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
     auto tuple =
-        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(), roots_info->stats().end_offset());
+        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(),
+                roots_info->stats().end_offset(), roots_info->stats().last_internal_row_id());
     table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,

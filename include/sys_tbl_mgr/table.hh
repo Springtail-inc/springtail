@@ -77,6 +77,7 @@ namespace indexer_helpers {
     struct TableStats {
         uint64_t row_count = 0;
         uint64_t end_offset = 0;
+        uint64_t last_internal_row_id = 0;
     };
 
     /**
@@ -774,6 +775,13 @@ namespace indexer_helpers {
             return _stats;
         }
 
+        /**
+         * @brief Get next internal row ID to be used for the row in the mutation
+         */
+        uint64_t get_next_internal_row_id() {
+            return ++_internal_row_id;
+        }
+
     protected:
         /**
          * Page callback on evict() / flush_file() that will perform an _invalidate_indexes() and
@@ -892,6 +900,13 @@ namespace indexer_helpers {
         uint64_t _access_xid; ///< The access XID for this set of mutations.
         uint64_t _target_xid; ///< The final target XID for this set of mutations.
         uint64_t _snapshot_xid; ///< The XID of the snapshot that this version of the table started from.
+
+        /**
+         * Internal row ID for each of the row in the table, used in generating
+         * look-aside index for secondary indexes
+         */
+        std::atomic<uint64_t> _internal_row_id{0};
+
         std::filesystem::path _table_dir; ///< The directory containing the table data.
         std::filesystem::path _data_file; ///< The file containing the table data extents.
 

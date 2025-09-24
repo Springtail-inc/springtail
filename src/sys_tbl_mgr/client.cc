@@ -503,6 +503,7 @@ Client::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
     auto *stats = request.mutable_stats();
     stats->set_row_count(metadata.stats.row_count);
     stats->set_end_offset(metadata.stats.end_offset);
+    stats->set_last_internal_row_id(metadata.stats.last_internal_row_id);
     request.set_snapshot_xid(metadata.snapshot_xid);
 
     google::protobuf::Empty response;
@@ -583,6 +584,7 @@ Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
     }
     metadata->stats.row_count = response.stats().row_count();
     metadata->stats.end_offset = response.stats().end_offset();
+    metadata->stats.last_internal_row_id = response.stats().last_internal_row_id();
     metadata->snapshot_xid = response.snapshot_xid();
 
     return metadata;
