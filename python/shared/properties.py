@@ -65,6 +65,7 @@ class Properties:
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
                 self.instance_key = str(system_json['org']['instance_key'])
                 self.fdw_id = system_json['org']['fdw_id']
+                self.maint_db = 'postgres'
 
                 # not in config file, but will be set in production env
                 self.service_name = None
@@ -87,6 +88,7 @@ class Properties:
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
                     'INSTANCE_KEY': system_json['org']['instance_key'],
+                    'PGDATABASE': self.maint_db
                 }
 
                 self.aws_users = self._get_users_from_json(system_json['aws_users_override'])
@@ -112,6 +114,7 @@ class Properties:
             self.fdw_id = os.environ.get('FDW_ID', None)
             self.org_id = os.environ.get('ORGANIZATION_ID', None)
             self.account_id = os.environ.get('ACCOUNT_ID', None)
+            self.maint_db = os.environ.get('PGDATABASE', '__springtail')
 
             # not in config file, but will be set in production env
             self.service_name = os.environ.get('SERVICE_NAME', None)
@@ -125,6 +128,10 @@ class Properties:
 
         self.redis = Redis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
                            username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
+
+    def get_maint_db(self) -> str:
+        """Return the maintenance database name."""
+        return self.maint_db
 
     def _get_users_from_json(self, user_json: list[dict]) -> Dict[str, tuple[str, str]]:
         """Get the users from the config file.
