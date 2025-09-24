@@ -244,7 +244,7 @@ namespace springtail::pg_log_mgr {
         std::thread _table_copy_thread;            ///< table copy thread
 
         /** Do the table copies; return the results */
-        void _do_table_copies(std::optional<std::set<uint32_t>> table_ids = std::nullopt);
+        void _do_table_copies(std::optional<std::unordered_set<uint32_t>> table_ids = std::nullopt);
 
         /** Copy table thread; waits on table sync queue */
         void _copy_thread();
@@ -259,7 +259,7 @@ namespace springtail::pg_log_mgr {
          *
          * @return pair<table_id, optional<XidLsn of the copy table>>
          */
-        std::pair<std::set<uint32_t>, std::optional<XidLsn>> _get_copy_table_ids(uint32_t timeout=0);
+        std::pair<std::unordered_set<uint32_t>, std::optional<XidLsn>> _get_copy_table_ids(uint32_t timeout=0);
 
         /** Redis cache callback for watching database state change */
         RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states;

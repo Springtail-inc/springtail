@@ -1049,7 +1049,7 @@ namespace springtail
     std::vector<PgCopyResultPtr>
     PgCopyTable::copy_tables(uint64_t db_id,
                              uint64_t xid,
-                             const std::set<uint32_t> &table_oids)
+                             const std::unordered_set<uint32_t> &table_oids)
     {
         return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids);
     }
@@ -1183,7 +1183,6 @@ namespace springtail
     PgCopyTable::_send_sync_msg(PgCopyResultPtr result)
     {
         std::string sync_msg = fmt::format(R"({{"target_xid":{}, "pg_xid":{}}})", result->target_xid, result->pg_xid);
-        LOG_INFO("[DEBUG] Sending sync msg: {}", sync_msg);
         std::string query = fmt::format(REPL_MSG_QUERY, pg_msg::MSG_PREFIX_COPY_SYNC, sync_msg);
 
         _connection.exec(query);
@@ -1373,7 +1372,7 @@ namespace springtail
                                 uint64_t target_xid,
                                 std::optional<std::string> schema_name,
                                 std::optional<std::pair<std::string, std::string>> schema_table,
-                                std::optional<std::set<uint32_t>> table_tids,
+                                std::optional<std::unordered_set<uint32_t>> table_tids,
                                 std::optional<nlohmann::json> include_json)
     {
         CopyQueuePtr copy_queue = std::make_shared<CopyQueue>();
@@ -1412,6 +1411,9 @@ namespace springtail
         // close this connection
         copy_table._end_copy();
         copy_table.disconnect();
+
+        auto token_init = open_telemetry::OpenTelemetry::get_instance()->set_context_variables(
+            {{"db_id", std::to_string(db_id)}, {"xid", std::to_string(target_xid)}});
 
         // create a worker thread to copy the tables
         std::vector<std::thread> workers;

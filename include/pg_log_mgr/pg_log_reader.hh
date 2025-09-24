@@ -294,7 +294,7 @@ namespace springtail::pg_log_mgr {
              * @param xidlsn XID LSN
              * @param pg_xids PG XIDs
              */
-            void _mark_table_resync(const std::set<uint32_t> &table_oids,
+            void _mark_table_resync(const std::unordered_set<uint32_t> &table_oids,
                                     const XidLsn &xidlsn,
                                     const std::vector<uint64_t> &pg_xids);
 

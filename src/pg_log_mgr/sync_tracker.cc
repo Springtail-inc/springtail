@@ -25,7 +25,7 @@ SyncTracker::_block_commits(uint64_t db_id, CommitterQueuePtr committer_queue)
 
 void
 SyncTracker::issue_resync_and_wait(uint64_t db_id,
-                                   const std::set<uint32_t> &table_ids,
+                                   const std::unordered_set<uint32_t> &table_ids,
                                    const XidLsn &xid,
                                    CommitterQueuePtr committer_queue)
 {

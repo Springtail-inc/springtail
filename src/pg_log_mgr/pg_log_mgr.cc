@@ -316,7 +316,7 @@ namespace springtail::pg_log_mgr {
         }
 
         while (!_shutdown) {
-            std::set<uint32_t> table_ids;
+            std::unordered_set<uint32_t> table_ids;
 
             // _get_copy_table_ids block on redis table sync queue w/timeout for shutdown
             auto [next_table_ids, next_xid_lsn] = _get_copy_table_ids(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
@@ -354,9 +354,9 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    std::pair<std::set<uint32_t>, std::optional<XidLsn>>
+    std::pair<std::unordered_set<uint32_t>, std::optional<XidLsn>>
     PgLogMgr::_get_copy_table_ids(uint32_t timeout) {
-        std::set<uint32_t> table_ids;
+        std::unordered_set<uint32_t> table_ids;
         std::shared_ptr<TableSyncRequest> request;
         if (timeout > 0) {
             request = _redis_sync_queue.pop(REDIS_WORKER_ID, timeout);
@@ -365,7 +365,7 @@ namespace springtail::pg_log_mgr {
         }
         if (request != nullptr) {
             // populate the tables to copy; check for more work
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Table sync queue: {}@{}:{}", fmt::join(request->table_ids(), ","),
+            LOG_INFO("Table sync queue: {}@{}:{}", fmt::join(request->table_ids(), ","),
                     request->xid().xid, request->xid().lsn);
             return std::make_pair(request->table_ids(), request->xid());
         }
@@ -373,7 +373,7 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogMgr::_do_table_copies(std::optional<std::set<uint32_t>> table_ids)
+    PgLogMgr::_do_table_copies(std::optional<std::unordered_set<uint32_t>> table_ids)
     {
         // set state to sync stall, make sure we are in the running or startup sync state first
         // XXX blocked here if we get a second table sync while one is in-flight
@@ -394,10 +394,10 @@ namespace springtail::pg_log_mgr {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying tables with table_ids: {}, xid={}", fmt::join(table_ids.value(), ","), xid);
+            LOG_INFO("Copying tables with table_ids: {}, xid={}", fmt::join(table_ids.value(), ","), xid);
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
         } else {
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying all tables for db={}; xid={}", _db_id, xid);
+            LOG_INFO("Copying all tables for db={}; xid={}", _db_id, xid);
             res = PgCopyTable::copy_db(_db_id, xid);
         }
 

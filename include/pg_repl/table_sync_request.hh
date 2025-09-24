@@ -6,8 +6,8 @@
 
 #include <cstdint>
 #include <memory>
-#include <set>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include <common/common.hh>
@@ -20,7 +20,7 @@ namespace springtail {
  */
 class TableSyncRequest {
 public:
-    TableSyncRequest(const std::set<uint32_t> &table_ids, const XidLsn &xid) : _table_ids(table_ids), _xid(xid) {}
+    TableSyncRequest(const std::unordered_set<uint32_t> &table_ids, const XidLsn &xid) : _table_ids(table_ids), _xid(xid) {}
 
     explicit TableSyncRequest(std::string_view serialized) {
         std::vector<std::string> split;
@@ -43,7 +43,7 @@ public:
         return fmt::format("{}:{}:{}", fmt::join(_table_ids, ","), _xid.xid, _xid.lsn);
     }
 
-    const std::set<uint32_t> &table_ids() const {
+    const std::unordered_set<uint32_t> &table_ids() const {
         return _table_ids;
     }
 
@@ -52,7 +52,7 @@ public:
     }
 
 private:
-    std::set<uint32_t> _table_ids;
+    std::unordered_set<uint32_t> _table_ids;
     XidLsn _xid;
 };
 using TableSyncRequestPtr = std::shared_ptr<TableSyncRequest>;

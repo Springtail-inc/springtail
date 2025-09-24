@@ -90,7 +90,7 @@ namespace springtail::pg_log_mgr {
         /**
          * Issue's a resync request for a table and waits for the table copy to start.
          */
-        void issue_resync_and_wait(uint64_t db_id, const std::set<uint32_t> &table_ids, const XidLsn &xid, CommitterQueuePtr committer_queue);
+        void issue_resync_and_wait(uint64_t db_id, const std::unordered_set<uint32_t> &table_ids, const XidLsn &xid, CommitterQueuePtr committer_queue);
 
         /**
          * Marks that the coppy thread has started the COPY request for this table.  This record is

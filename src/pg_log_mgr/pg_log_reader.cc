@@ -681,7 +681,7 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::_mark_table_resync(const std::set<uint32_t> &table_oids,
+    PgLogReader::Batch::_mark_table_resync(const std::unordered_set<uint32_t> &table_oids,
                                            const XidLsn &xidlsn,
                                            const std::vector<uint64_t> &pg_xids)
     {
@@ -709,7 +709,7 @@ namespace springtail::pg_log_mgr {
                                            const XidLsn &xidlsn,
                                            const std::vector<uint64_t> &pg_xids)
     {
-        _mark_table_resync(std::set<uint32_t>{ table_oid }, xidlsn, pg_xids);
+        _mark_table_resync(std::unordered_set<uint32_t>{ table_oid }, xidlsn, pg_xids);
     }
 
     void
@@ -757,7 +757,7 @@ namespace springtail::pg_log_mgr {
                 if (action.get<std::string>() == "resync") {
                     _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
                 } else if (action.get<std::string>() == "resync_partitions") {
-                    std::set<uint32_t> table_ids;
+                    std::unordered_set<uint32_t> table_ids;
                     table_ids.insert(table_msg.oid);
                     nlohmann::json table_ids_json = nlohmann::json::parse(ddl_stmt).at("table_ids");
                     for (auto table_id : table_ids_json.get<std::vector<uint32_t>>()) {
