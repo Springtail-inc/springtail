@@ -1807,7 +1807,7 @@ namespace springtail::pg_fdw {
             }
 
             // looks like it exists in xid map, so get a connection and really check
-            conn = _get_fdw_connection(std::nullopt, "postgres");
+            conn = _get_fdw_connection(std::nullopt, "template1");
             std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
             conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
             if (conn->ntuples() > 0) {
@@ -1825,7 +1825,7 @@ namespace springtail::pg_fdw {
         }
 
         if (!conn) {
-            conn = _get_fdw_connection(std::nullopt, "postgres");
+            conn = _get_fdw_connection(std::nullopt, "template1");
         }
 
         // drop/add database
@@ -1851,7 +1851,7 @@ namespace springtail::pg_fdw {
         std::string db_name = db_config["name"];
 
         // drop database
-        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "postgres");
+        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
         std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
         conn->exec(drop_db);
