@@ -177,7 +177,7 @@ SystemTableMgr::get_columns(uint64_t db_id, uint64_t table_id, const XidLsn &xid
     case sys_tbl::UserTypes::ID:
         return _convert_columns(sys_tbl::UserTypes::Data::SCHEMA);
     default:
-        assert(false);
+        CHECK(false);
         break;
     }
 }
