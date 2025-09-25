@@ -39,7 +39,7 @@ namespace springtail::sys_tbl_mgr {
         using Lock = Traits::Lock;
         using SharableLock = Traits::SharableLock;
 
-        //** Message stored in the cache **/
+        /** Message stored in the cache **/
         struct Message
         {
             explicit Message(const Value::allocator_type& al) 
@@ -52,6 +52,7 @@ namespace springtail::sys_tbl_mgr {
         using Cache = Traits::template Cache<Key, Message>;
         using Messages = Traits::template Messages<Message>;
 
+        /** LRU key that is used for eviction and LRU lookup **/
         struct LruKey
         {
             DbId db;
@@ -68,11 +69,15 @@ namespace springtail::sys_tbl_mgr {
                 return boost::hash<Tuple>{}(t);
             }
         };
+
+        /** LRU is a multiple index container that keeps the insertion order (first index) 
+         * and allows fast lookup by key (second index).
+         */
         using Lru = bmi::multi_index_container<
             LruKey,
             bmi::indexed_by<
-                bmi::sequenced<>, // this will keep the insertion order
-                bmi::hashed_unique<bmi::identity<LruKey>, LruHashFunc> //no duplicates
+                bmi::sequenced<>, ///< this will keep the insertion order
+                bmi::hashed_unique<bmi::identity<LruKey>, LruHashFunc> ///< no duplicates
             >, 
             Alloc<LruKey> >;
 
@@ -81,10 +86,10 @@ namespace springtail::sys_tbl_mgr {
          * @param messages_alloc The allocator to use for the messages container.
          * @param value_alloc The allocator to use for the message value.
          */
-        MsgCache(Mutex& _mutex,
+        MsgCache(Mutex& mutex,
                 Messages::allocator_type& messages_alloc,
                 Value::allocator_type& value_alloc)
-            :_mutex{_mutex},
+            :_mutex{mutex},
             _messages_alloc{messages_alloc},
             _value_alloc{value_alloc}
         {};

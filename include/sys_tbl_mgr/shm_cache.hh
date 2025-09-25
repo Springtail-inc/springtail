@@ -39,7 +39,7 @@ class ShmCache
         template <typename T>
             using Alloc = ipc::allocator<T, ipc::managed_shared_memory::segment_manager>;
 
-        // sericalized (like protobuf( message stored in the cache
+        // serialized (like protobuf) message stored in the cache
         using Value = ipc::vector<char, Alloc<char>>;
 
         // containers used in the cache
