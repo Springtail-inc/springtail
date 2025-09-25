@@ -4,6 +4,7 @@
 #include <proto/sys_tbl_mgr.grpc.pb.h>
 #include <storage/schema.hh>
 #include <storage/xid.hh>
+#include <sys_tbl_mgr/table.hh>
 
 namespace springtail::sys_tbl_mgr {
     class RequestHelper {
@@ -217,6 +218,27 @@ namespace springtail::sys_tbl_mgr {
 
             metadata->access_range = XidRange(access_start, access_end);
             metadata->target_range = XidRange(target_start, target_end);
+
+            return metadata;
+        }
+
+        /**
+         * @brief Convert API call result into table metadata object
+         *
+         * @param result - result of an API call
+         * @return TableMetadataPtr - table metadata object
+         */
+        static TableMetadataPtr
+        pack_table_metadata(const proto::GetRootsResponse &result)
+        {
+            auto metadata = std::make_shared<TableMetadata>();
+
+            for (const auto &root : result.roots()) {
+                metadata->roots.push_back({root.index_id(), root.extent_id()});
+            }
+            metadata->stats.row_count = result.stats().row_count();
+            metadata->stats.end_offset = result.stats().end_offset();
+            metadata->snapshot_xid = result.snapshot_xid();
 
             return metadata;
         }

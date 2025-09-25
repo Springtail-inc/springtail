@@ -88,15 +88,7 @@ Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
         }
     }
 
-    auto metadata = std::make_shared<TableMetadata>();
-    for (const auto &root : response.roots()) {
-        metadata->roots.push_back({root.index_id(), root.extent_id()});
-    }
-    metadata->stats.row_count = response.stats().row_count();
-    metadata->stats.end_offset = response.stats().end_offset();
-    metadata->snapshot_xid = response.snapshot_xid();
-
-    return metadata;
+    return RequestHelper::pack_table_metadata(response);
 }
 
 std::shared_ptr<const SchemaMetadata>

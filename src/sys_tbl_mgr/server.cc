@@ -811,12 +811,9 @@ Server::revert(const uint64_t db_id, const uint64_t xid)
     }
 }
 
-// TODO: some common code with GetRoots implementation in Service, fix it
 TableMetadataPtr
 Server::get_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t xid)
 {
-    proto::GetRootsResponse response;
-
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_roots() -- db {} tid {} xid {}",
                 db_id, table_id, xid);
 
@@ -834,44 +831,24 @@ Server::get_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t 
     // get the roots
     auto info = _get_roots_info(db_id, table_id, xid_lsn);
 
-    response = *info;
-
-    auto metadata = std::make_shared<TableMetadata>();
-
-    for (const auto &root : response.roots()) {
-        metadata->roots.push_back({root.index_id(), root.extent_id()});
-    }
-    metadata->stats.row_count = response.stats().row_count();
-    metadata->stats.end_offset = response.stats().end_offset();
-    metadata->snapshot_xid = response.snapshot_xid();
-
-    return metadata;
+    return RequestHelper::pack_table_metadata(*info);
 }
 
 std::shared_ptr<const SchemaMetadata>
 Server::get_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid)
 {
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_schema() -- db {} tid {} xid {} lsn {}",
+                db_id, table_id, xid.xid, xid.lsn);
+
     auto populate = [this](uint64_t db_id, uint64_t table_id, const XidLsn &xid) {
-        proto::GetSchemaRequest request;
-        request.set_db_id(db_id);
-        request.set_table_id(table_id);
-        request.set_xid(xid.xid);
-        request.set_lsn(xid.lsn);
-
-        proto::GetSchemaResponse response;
-        LOG_INFO("got get_schema(): db {} tid {} xid {} lsn {}", db_id,
-                request.table_id(), request.xid(), request.lsn());
-
         boost::shared_lock lock(_read_mutex);
 
-        auto info = _get_schema_info(db_id, request.table_id(), xid, xid);
+        auto info = _get_schema_info(db_id, table_id, xid, xid);
 
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Returning start_xid {}:{}, end_xid {}:{}",
-                            info->access_xid_start(), info->access_lsn_start(), info->access_xid_end(),
-                            info->access_lsn_end());
+                    info->access_xid_start(), info->access_lsn_start(), info->access_xid_end(), info->access_lsn_end());
 
-        response = *info;
-        return RequestHelper::pack_metadata(response);
+        return RequestHelper::pack_metadata(*info);
     };
 
     // Retrieve through the schema cache
@@ -882,8 +859,6 @@ Server::get_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &
 SchemaMetadataPtr
 Server::get_target_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid)
 {
-    proto::GetSchemaResponse response;
-
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_target_schema() -- {}, {}",
                 access_xid.xid, target_xid.xid);
 
@@ -891,8 +866,7 @@ Server::get_target_schema(const uint64_t db_id, const uint64_t table_id, const X
 
     auto info = _get_schema_info(db_id, table_id, access_xid, target_xid);
 
-    response = *info;
-    return RequestHelper::pack_metadata(response);
+    return RequestHelper::pack_metadata(*info);
 }
 
 bool
