@@ -49,6 +49,9 @@ namespace springtail::constant {
     /** An index ID that represents the primary index. */
     static constexpr uint64_t INDEX_PRIMARY = 0;
 
+    /** An index ID that represents the look-aside index. */
+    static constexpr uint64_t INDEX_LOOK_ASIDE = std::numeric_limits<uint64_t>::max();
+
     /** The name of the child pointer field in a BTree branch extent. */
     static const std::string BTREE_CHILD_FIELD = "__springtail_child";
 
@@ -61,6 +64,13 @@ namespace springtail::constant {
     /** The format of an index file name. */
     static constexpr std::string_view INDEX_FILE = "{}.idx";
     static constexpr std::string_view INDEX_PRIMARY_FILE = "0.idx";
+    static constexpr std::string_view INDEX_LOOK_ASIDE_FILE = "look_aside.idx";
+
+    /**
+     * Name of the internal row ID for the rows in the table,
+     * to be used in the look-aside index for secondary indexes
+     */
+    static const std::string INTERNAL_ROW_ID = "internal_row_id";
 
     /** The format of a raw data file name. */
     static constexpr std::string_view DATA_FILE = "raw";

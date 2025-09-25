@@ -645,7 +645,8 @@ namespace indexer_helpers {
                      const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
-                     bool for_gc = false);
+                     bool for_gc = false,
+                     bool use_look_aside = true);
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -917,6 +918,11 @@ namespace indexer_helpers {
 
         /** The primary index of the table. */
         MutableBTreePtr _primary_index; ///< The mutable primary index btree.
+
+        /**
+         * Look aside index for the secondary indexes
+         */
+        MutableBTreePtr _look_aside_index; ///< The mutable look-aside index btree.
 
         /** A map of secondary indexes
          * first is the index id

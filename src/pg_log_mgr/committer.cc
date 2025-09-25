@@ -553,7 +553,8 @@ namespace springtail::committer {
 
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
-        std::vector<SchemaColumn> new_columns{op, lsn};
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, columns.size(), SchemaType::UINT64, 0, false);
+        std::vector<SchemaColumn> new_columns{op, lsn, internal_row_id};
 
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
 
@@ -566,6 +567,7 @@ namespace springtail::committer {
 
         // process the rows
         auto op_f = wc_schema->get_field("__springtail_op");
+        columns.push_back(constant::INTERNAL_ROW_ID);
         auto wc_fields = wc_schema->get_fields(columns);
         auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
 
@@ -584,6 +586,9 @@ namespace springtail::committer {
             switch (op) {
             case INSERT:
                 {
+                    // Get the mutable field to set it in the row for INSERTs
+                    auto internal_row_id_f = wc_schema->get_mutable_field(constant::INTERNAL_ROW_ID);
+                    internal_row_id_f->set_uint64(const_cast<Extent::Row *>(&row), table->get_next_internal_row_id());
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, constant::UNKNOWN_EXTENT);

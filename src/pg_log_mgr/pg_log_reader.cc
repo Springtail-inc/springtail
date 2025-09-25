@@ -157,13 +157,15 @@ namespace springtail::pg_log_mgr {
 
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
 
-        std::vector<SchemaColumn> new_columns{op, lsn};
+        std::vector<SchemaColumn> new_columns{op, lsn, internal_row_id};
 
         schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
+        row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
 
         // reset fields; forces a resync of fields during add_mutation()
         fields = nullptr;
@@ -296,6 +298,7 @@ namespace springtail::pg_log_mgr {
         }
         entry.op_f->set_uint8(&row, T);
         entry.lsn_f->set_uint64(&row, _lsn++);
+        entry.row_id_f->set_uint64(&row, 0);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
@@ -368,6 +371,7 @@ namespace springtail::pg_log_mgr {
             auto &&row = entry.extent->append();
             entry.op_f->set_uint8(&row, PgMsgEnum::TRUNCATE);
             entry.lsn_f->set_uint64(&row, _lsn++);
+            entry.row_id_f->set_uint64(&row, 0);
         }
     }
 

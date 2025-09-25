@@ -566,7 +566,8 @@ namespace indexer_helpers {
                                const std::vector<Index> &secondary,
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
-                               bool for_gc)
+                               bool for_gc,
+                               bool use_look_aside)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
@@ -626,6 +627,7 @@ namespace indexer_helpers {
         // construct the primary index btree
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 2, SchemaType::UINT64, 0, false);
 
 
         ExtentSchemaPtr primary_schema;
@@ -662,6 +664,35 @@ namespace indexer_helpers {
         }
         _use_empty = _primary_index->empty();
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
+
+        //if (use_look_aside) {
+        //    ExtentSchemaPtr look_aside_schema;
+        //    std::vector<std::string> col_names;
+        //    col_names.push_back(constant::INTERNAL_ROW_ID);
+
+        //    auto look_aside_keys = col_names;
+        //    look_aside_keys.push_back(constant::INDEX_EID_FIELD);
+        //    look_aside_keys.push_back(constant::INDEX_RID_FIELD);
+
+        //    look_aside_schema = _schema->create_schema({}, { extent_c, row_c, internal_row_id }, look_aside_keys);
+
+        //    _look_aside_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_LOOK_ASIDE_FILE,
+        //            look_aside_keys,
+        //            look_aside_schema,
+        //            _target_xid, get_max_extent_size());
+
+        //    // find look-aside index root
+        //    auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
+
+        //    // initialize the look-aside index
+        //    if (la_it != roots.end() && la_it->extent_id != constant::UNKNOWN_EXTENT) {
+        //        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init with root: {}", la_it->extent_id);
+        //        _look_aside_index->init(la_it->extent_id);
+        //    } else {
+        //        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init empty");
+        //        _look_aside_index->init_empty();
+        //    }
+        //}
 
         // deal with secondary indexes
         for (auto const& idx: secondary) {
@@ -927,6 +958,7 @@ namespace indexer_helpers {
         // Store file end offset for xid
         // to be used later to catch-up index if needed
         metadata.stats.end_offset = end_offset;
+        metadata.stats.last_internal_row_id = _internal_row_id;
 
         // store the roots into a look-aside root file
         // XXX maybe we only need to do this for system tables?  or even just the table_roots table?
@@ -1217,6 +1249,10 @@ namespace indexer_helpers {
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
+        for (const auto&row : *page) {
+            auto kv = std::make_shared<FieldTuple>(_schema->get_fields(), &row);
+            LOG_INFO("CONTENT FOR THE ROW: {}", kv->to_string());
+        }
         // check if we need to convert the page contents to a new schema
         _check_convert_page(page);
 
@@ -1254,6 +1290,7 @@ namespace indexer_helpers {
         auto search_key = _schema->tuple_subset(value, _primary_key);
         uint64_t extent_id = _get_extent_id(search_key);
 
+        LOG_INFO("GOT THE EXTENT BY LOOKUP:: {}", extent_id);
         // then we can do a direct update
         _update_direct(value, extent_id);
     }

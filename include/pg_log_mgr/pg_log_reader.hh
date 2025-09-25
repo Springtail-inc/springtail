@@ -216,6 +216,7 @@ namespace springtail::pg_log_mgr {
 
                 MutableFieldPtr op_f; ///< The field accessor for the mutation's operation type.
                 MutableFieldPtr lsn_f; ///< The field accessor for the mutation's LSN.
+                MutableFieldPtr row_id_f; ///< The field accessor for the mutation's LSN.
                 MutableFieldArrayPtr fields; ///< The underlying fields of the schema that match the columns from the table schema.
                 MutableFieldArrayPtr pkey_fields; ///< The underlying fields of the schema that match the pkey columns from the table schema.
 

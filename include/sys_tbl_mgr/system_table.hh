@@ -57,7 +57,7 @@ namespace springtail {
                            ExtentSchemaPtr schema,
                            bool for_gc = false) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, for_gc) {}
+                         secondary, metadata, schema, for_gc, false) {}
 
         /**
          * Truncate function call is empty as we are not going to truncate system tables.

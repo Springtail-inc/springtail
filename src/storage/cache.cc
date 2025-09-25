@@ -968,6 +968,9 @@ StorageCache::PageCache::background_cleaner()
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
+        for (auto &testkey: schema->get_sort_keys()) {
+            LOG_INFO("KEY IN THE SORT KEYS::: {}", testkey);
+        }
         // extract the key to find the insert position
         auto key = schema->tuple_subset(tuple, schema->get_sort_keys());
 

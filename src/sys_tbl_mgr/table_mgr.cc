@@ -89,6 +89,14 @@ namespace springtail {
         XidLsn xid(target_xid);
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid);
 
+        // Create schema for INSERT mutation to include internal_row_id
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, schema->column_order().size(), SchemaType::UINT64, 0, false);
+
+        auto columns_with_row_id = schema->column_order();
+        columns_with_row_id.push_back(constant::INTERNAL_ROW_ID);
+
+        auto schema_with_row_id = schema->create_schema(schema->column_order(), { internal_row_id }, schema->get_sort_keys());
+
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
@@ -105,7 +113,7 @@ namespace springtail {
 
         return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_indexes,
-                                                  *tbl_meta, schema, for_gc);
+                                                  *tbl_meta, schema_with_row_id, for_gc);
     }
 
     MutableTablePtr
