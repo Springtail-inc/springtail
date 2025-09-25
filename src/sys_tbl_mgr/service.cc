@@ -1691,6 +1691,8 @@ Service::AttachPartition(grpc::ServerContext* context,
     ddl["partition_bound"] = partition_bound;
     ddl["schema"] = request->namespace_name();
     ddl["table"] = request->table_name();
+    ddl["xid"] = request->xid();
+    ddl["lsn"] = request->lsn();
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attach partition DDL: {}", ddl.dump());
 
@@ -1755,6 +1757,8 @@ Service::DetachPartition(grpc::ServerContext* context,
     ddl["partition_name"] = partition_name;
     ddl["schema"] = request->namespace_name();
     ddl["table"] = request->table_name();
+    ddl["xid"] = request->xid();
+    ddl["lsn"] = request->lsn();
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detach partition DDL: {}", ddl.dump());
 
