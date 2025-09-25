@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <optional>
+#include <shared_mutex>
 #include <boost/interprocess/managed_shared_memory.hpp>
 #include <boost/interprocess/sync/named_sharable_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
@@ -17,26 +18,50 @@
 #include <boost/multi_index/member.hpp>
 #include <boost/functional/hash.hpp>
 
+#include <sys_tbl_mgr/msg_cache.hh>
+
 namespace springtail::sys_tbl_mgr {
 
 namespace ipc = boost::interprocess;
-namespace bmi = boost::multi_index;
 
 // global cache names
 static constexpr char SHM_CACHE_ROOTS[] = "springtail.roots";
-
-using DbId = uint64_t;
-using TableId = uint64_t;
-using Xid = uint64_t;
-
 
 /**
  * A generic interprocess cache. The cache is intended for caching serialized 
  * table metadata. The metadata strings are keyed by the database ID, 
  * table ID and XID.
  */
-class ShmCache
+class ShmCache 
 {
+    // Traits for the MsgCache
+    struct Traits {
+        template <typename T>
+            using Alloc = ipc::allocator<T, ipc::managed_shared_memory::segment_manager>;
+
+        // sericalized (like protobuf( message stored in the cache
+        using Value = ipc::vector<char, Alloc<char>>;
+
+        // containers used in the cache
+        template<typename Message>
+            using Messages = ipc::vector<Message, Alloc<Message>>;
+
+        template<typename Key, typename Message>
+            using Cache = ipc::map<Key, 
+                  Messages<Message>,
+                  std::less<Key>,
+                  Alloc<std::pair<const Key, Messages<Message>>>>;
+
+        // synchronization
+        using Mutex = ipc::named_sharable_mutex;
+        using Lock = ipc::scoped_lock<Mutex>;
+        using SharableLock = ipc::sharable_lock<Mutex>;
+    };
+    using GenericCache = MsgCache<Traits>;
+
+    template <typename T>
+    using Alloc = Traits::Alloc<T>;
+
 public:
 
     /**
@@ -65,19 +90,9 @@ public:
     /**
      * Returns number of elements in the cache.
      */
-    size_t size() const;
-
-    /** 
-     * Cache the string message.
-     * @param db The DB ID.
-     * @param tid The table ID.
-     * @param xid The XID.
-     * @param msg The message to cache. Usually it's a serialized proto message.
-     * @param drop_table Mark the table as dropped,
-     * @return true if the element has been actually inserted 
-     *         and false if it was already in the cache.
-     */
-    bool insert(DbId db, TableId tid, Xid xid, const std::string& msg, bool drop_table = false);
+    size_t size() const {
+        return _msg_cache.size();
+    }
 
     /** 
      * Mark the table as dropped. 
@@ -87,7 +102,23 @@ public:
      */
     bool mark_dropped(DbId db, TableId tid, Xid xid) 
     {
-        return insert(db, tid, xid, "", true); 
+        return _msg_cache.insert(db, tid, xid, "", true); 
+    }
+
+    /** 
+     * Cache the string message.
+     * @param db The DB ID.
+     * @param tid The table ID.
+     * @param xid The XID.
+     * @param msg The message to cache. Usually it's a serialized proto message.
+     * @return true if the element has been actually inserted 
+     *         and false if it was already in the cache.
+     */
+    bool
+    insert(DbId db, TableId tid, Xid xid, const std::string& msg)
+    {
+        check_free_space_locked();
+        return _msg_cache.insert(db, tid, xid, msg, false);
     }
 
     /** 
@@ -97,15 +128,10 @@ public:
      * @param xid The XID.
      * @return The cached string.
      */
-    std::optional<std::string> find(DbId db, TableId tid, Xid xid);
-
-    /**
-     * This will mark the system resources associated with the cache 
-     * as deleted.  The existing cache clients will continue to work
-     * using the ghosted cache. Creating another ShmCache with the 
-     * same name will create an new empty cache.
-     */
-    static void remove(const std::string& name);
+    std::optional<std::string> find(DbId db, TableId tid, Xid xid)
+    {
+        return _msg_cache.find(db, tid, xid);
+    }
 
     /**
      * This will update committed XID and set _xid_committed_time to now().
@@ -132,7 +158,18 @@ public:
      * Return all tables that are tracked by the cache.
      * The least used tables will be at the front.
      */
-    std::vector<TableId> get_db_tables(DbId db, bool exclude_dropped=true);
+    std::vector<TableId> get_db_tables(DbId db, bool exclude_dropped=true)
+    {
+        return _msg_cache.get_db_tables(db, exclude_dropped);
+    }
+
+    /**
+     * This will mark the system resources associated with the cache 
+     * as deleted.  The existing cache clients will continue to work
+     * using the ghosted cache. Creating another ShmCache with the 
+     * same name will create an new empty cache.
+     */
+    static void remove(const std::string& name);
 
 private:
     void _init();
@@ -141,7 +178,6 @@ private:
     // until we reach the watermark
     constexpr static double FREE_MEM_LIMIT = 0.3; // 30%
     constexpr static double FREE_MEM_WATERMARK = 0.5; // 50%
-                                                      //
 
     /**
      * This will verify that the cache has free space as defined by
@@ -151,68 +187,27 @@ private:
      */
     void check_free_space_locked();
 
-    void evict_locked();
-
-    template <typename T>
-    using Alloc = ipc::allocator<T, ipc::managed_shared_memory::segment_manager>;
-
-    using String =  ipc::vector<char, Alloc<char>>;
-
-    using Key = std::pair<DbId, TableId>;
-
-    struct Message
-    {
-        explicit Message(const String::allocator_type& al) 
-            :msg{al}
-        {}
-        Xid xid = 0;
-        String msg;
-        bool dropped = false;
-    };
-
-    struct LruKey
-    {
-        DbId db;
-        TableId tid;
-        Xid xid;
-        bool operator==(const LruKey& rhs) const = default;
-    };
-    struct LruHashFunc
-    {
-        size_t operator()(const LruKey& k) const
-        {
-            using Tuple = std::tuple<DbId, TableId, Xid>;
-            Tuple t{k.db, k.tid, k.xid};
-            return boost::hash<Tuple>{}(t);
-        }
-    };
-
-    using Lru = bmi::multi_index_container<
-        LruKey,
-        bmi::indexed_by<
-            bmi::sequenced<>, // this will keep the insertion order
-            bmi::hashed_unique<bmi::identity<LruKey>, LruHashFunc> //no duplicates
-        >, 
-        Alloc<LruKey> >;
-
-
-    //ordered by Message::xid
-    using Messages = ipc::vector<Message, Alloc<Message>>;
-    using Cache = ipc::map<Key, Messages, std::less<Key>, Alloc<std::pair<const Key, Messages>>>;
-    using Mutex = ipc::named_sharable_mutex;
-    
+    using String = GenericCache::Value;
+    using Key = GenericCache::Key;
+    using Message = GenericCache::Message; 
+    using Messages = GenericCache::Messages;
+    using LruKey = GenericCache::LruKey; 
+    using Lru = GenericCache::Lru; 
+    using Mutex = GenericCache::Mutex; 
+    using CacheContainer = GenericCache::Cache;
 
     std::string _name;
     bool _created;
-    mutable Mutex _mutex;
     ipc::managed_shared_memory _shm;
+    Mutex _mutex;
     Messages::allocator_type _messages_alloc;
     String::allocator_type _string_alloc;
+    GenericCache _msg_cache;
 
     // _cache and _lru are named objects in the shared memory.
     // They are allocated or opened by the ipc allocators.
     // The objects are deleted when the shared memory is deleted.
-    Cache* _cache;
+    CacheContainer* _cache;
     Lru* _lru;
 
     // Xid updates
