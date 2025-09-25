@@ -127,24 +127,33 @@ TEST(CommonTest, CircularBuffer) {
 }
 
 TEST(CommonTest, EventFrequency) {
+    using clock = std::chrono::steady_clock;
+
     {
         EventFrequency<20> ef;
 
+
+        auto start = clock::now();
         for (size_t i = 0; i != 15; ++i) {
             ef.event();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        auto end = clock::now();
 
+        double exp_freq = 15.0 / std::chrono::duration<double>(end - start).count();
         auto f = ef.frequency();
-        ASSERT_TRUE(f > 80 && f < 110);
+        ASSERT_TRUE(f > exp_freq*0.9 && f < exp_freq*1.1);
 
+        start = clock::now();
         for (size_t i = 0; i != 90; ++i) {
             ef.event();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        end = clock::now();
     
+        exp_freq = 90.0 / std::chrono::duration<double>(end - start).count();
         f = ef.frequency();
-        ASSERT_TRUE(f > 80 && f < 110);
+        ASSERT_TRUE(f > exp_freq*0.9 && f < exp_freq*1.1);
 
         for (size_t i = 0; i != 10; ++i) {
             ef.event();
@@ -154,13 +163,16 @@ TEST(CommonTest, EventFrequency) {
         auto f1 = ef.frequency();
         ASSERT_LT(f1, f);
 
+        start = clock::now();
         for (size_t i = 0; i != 120; ++i) {
             ef.event();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
+        end = clock::now();
 
-        auto f2 = ef.frequency();
-        ASSERT_TRUE(f2 > 900 && f2 < 1100);
+        exp_freq = 120.0 / std::chrono::duration<double>(end - start).count();
+        f = ef.frequency();
+        ASSERT_TRUE(f > exp_freq*0.9 && f < exp_freq*1.1);
     }
 
     // corner case
