@@ -7,6 +7,8 @@
 #include <absl/log/check.h>
 #include <fmt/format.h>
 
+#include <common/event_frequency.hh>
+
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_repl_connection.hh>
@@ -242,6 +244,14 @@ namespace springtail {
 
         bool _read_hdr = false;         ///< true if header needs to be read (set when opening a new file)
         bool _streaming = false;        ///< true if streaming mode (between stream_start and stream_stop)
+
+
+        struct Metrics {
+            EventFrequency<256> _commit_txn_freq;
+            EventFrequency<256> _stream_abort_freq;
+            EventFrequency<256> _stream_commit_freq;
+        };
+        Metrics _metrics;
 
         /** Helper to check for eof errors in reading stream */
         void _check_fail() {
