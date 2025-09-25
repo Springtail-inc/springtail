@@ -15,6 +15,7 @@
 #include <common/properties.hh>
 #include <common/state_synchronizer.hh>
 #include <common/time_trace.hh>
+#include <common/event_frequency.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>

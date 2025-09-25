@@ -1,7 +1,10 @@
+#include <any>
+#include <chrono>
+#include <codecvt>
 #include <memory>
 #include <thread>
+
 #include <common/filesystem.hh>
-#include <common/logging.hh>
 #include <common/open_telemetry.hh>
 #include <common/coordinator.hh>
 
@@ -47,12 +50,12 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
+    PgLogReader::Batch::commit(uint64_t xid, WriteCacheTableSet::Metadata md)
     {
         time_trace::Trace commit_trace;
         TIME_TRACE_START(commit_trace);
         auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-        _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
+        _span->AddEvent("commit", {{"pg_commit_time", md.pg_commit_ts.to_unix_ns()}});
 
         // update any changes in the table invalidation state
         for (const auto &entry : _table_validations) {
@@ -93,7 +96,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // assign an XID to the committed transaction and update the mappings in the write cache
-        WriteCacheFuncImpl::commit(_db, xid, pg_xids, commit_ts);
+        WriteCacheFuncImpl::commit(_db, xid, pg_xids, std::move(md));
 
         // stop timing for this transaction
         if (_span->IsRecording()) {
@@ -150,7 +153,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::TableEntry::update_schema()
     {
         auto columns = table_schema->column_order();
-        CHECK_GT(columns.size(), 0);
+        DCHECK_GT(columns.size(), 0);
 
         auto sort_keys = table_schema->get_sort_keys();
         sort_keys.push_back("__springtail_lsn");
@@ -161,7 +164,6 @@ namespace springtail::pg_log_mgr {
         std::vector<SchemaColumn> new_columns{op, lsn};
 
         schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
-
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
 
@@ -282,7 +284,7 @@ namespace springtail::pg_log_mgr {
         if (entry.fields == nullptr) {
             entry.update_fields(this, xidlsn);
         }
-        CHECK_NE(entry.fields, nullptr);
+        DCHECK_NE(entry.fields, nullptr);
 
         // add the mutation to the batch
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, T);
@@ -892,6 +894,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::enqueue_msg(PgMsgPtr msg)
     {
+        open_telemetry::OpenTelemetry::get_instance()->record_histogram(INGEST_MSG_QUEUE_SIZE, _msg_queue.size());
         _msg_queue.push(msg);
     }
 
@@ -922,11 +925,10 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::process_log(const std::filesystem::path &path,
                              uint64_t timestamp,
-                             uint64_t start_offset,
-                             uint64_t end_offset)
+                             const PgLogQueueEntryPtr& entry)
     {
         // init stream reader
-        _reader.set_file(path, start_offset);
+        _reader.set_file(path, entry->start_offset);
 
         static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
@@ -946,9 +948,10 @@ namespace springtail::pg_log_mgr {
 
         // consume messages from log; end offset of -1 means go until eos
         bool eos = false; // end of stream
-        while ((end_offset == -1 || _reader.offset() < end_offset) && !eos) {
+        while ((entry->end_offset == static_cast<uint64_t>(-1) || _reader.offset() < entry->end_offset) && !eos) {
             // read next message
             PgMsgPtr msg = _reader.read_message(filter, eos);
+
             if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
 
@@ -1291,7 +1294,7 @@ namespace springtail::pg_log_mgr {
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue, _exists_cache, _index_requests_mgr);
         _batch_map.try_emplace(begin_msg.xid, _current_batch);
-        _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp);
+        _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp, begin_msg.local_begin_ts);
     }
 
     void
@@ -1318,15 +1321,21 @@ namespace springtail::pg_log_mgr {
         // transaction.  This can occur in the unlikely case that we are performing a log recovery
         // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
         // the most recently written PGXID -> Springtail XID mapping.
-        auto postgres_timestamp = PostgresTimestamp(commit_msg.commit_ts);
+        WriteCacheTableSet::Metadata md;
+        md.local_commit_ts = commit_msg.local_commit_ts;
+        md.pg_commit_ts = PostgresTimestamp(commit_msg.commit_ts);
         if (xid <= _committed_xid) {
             // we abort this batch since it was already processed
-            _current_batch->abort(postgres_timestamp);
+            _current_batch->abort(md.pg_commit_ts);
             _xid_ts_tracker->remove_pg_xid(_current_xact->xid);
         } else {
             // update the write cache and system tables as needed
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Commit db_id: {}, xid={}, pg_xid={}", _db_id, xid, _current_xact->xid);
-            _current_batch->commit(xid, postgres_timestamp);
+            auto ts = _xid_ts_tracker->find_ts(_current_xact->xid);
+            if (ts.has_value()) {
+                md.local_begin_ts = ts->second;
+            }
+            _current_batch->commit(xid, md);
             _xid_ts_tracker->add_xid(_current_xact->xid, xid);
         }
 
@@ -1336,9 +1345,10 @@ namespace springtail::pg_log_mgr {
 
         // note: this check should only be false when re-processing records during recovery
         if (xid > _committed_xid) {
+
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
+                std::chrono::system_clock::now() - md.pg_commit_ts.to_system_time());
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Commit processed {} milliseconds after postgres commit",
                       duration.count());
@@ -1374,7 +1384,7 @@ namespace springtail::pg_log_mgr {
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue, _exists_cache, _index_requests_mgr);
         _batch_map.try_emplace(start_msg.xid, _current_batch);
-        _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp);
+        _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp, start_msg.local_ts);
     }
 
     void
@@ -1419,7 +1429,14 @@ namespace springtail::pg_log_mgr {
             _xid_ts_tracker->remove_pg_xid(commit_msg.xid);
         } else {
             // update the write cache and system tables as needed
-            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
+            WriteCacheTableSet::Metadata md;
+            md.local_commit_ts = commit_msg.local_commit_ts;
+            md.pg_commit_ts = PostgresTimestamp(commit_msg.commit_ts);
+            auto ts = _xid_ts_tracker->find_ts(commit_msg.xid);
+            if (ts.has_value()) {
+                md.local_begin_ts = ts->second;
+            }
+            _current_batch->commit(xid, std::move(md));
             _xid_ts_tracker->add_xid(commit_msg.xid, xid);
         }
 

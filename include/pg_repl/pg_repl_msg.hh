@@ -2,10 +2,12 @@
 
 #include <optional>
 #include <variant>
+#include <chrono>
 
 #include <pg_repl/pg_types.hh>
 #include <nlohmann/json.hpp>
 #include <storage/schema_type.hh>
+
 
 namespace springtail
 {
@@ -34,6 +36,7 @@ namespace springtail
         int32_t xid;
         LSN_t xact_lsn;
         int64_t commit_ts;
+        std::chrono::steady_clock::time_point local_begin_ts;
     };
 
     /** Commit message not streaming */
@@ -41,6 +44,7 @@ namespace springtail
         LSN_t commit_lsn;
         LSN_t xact_lsn;
         int64_t commit_ts;
+        std::chrono::steady_clock::time_point local_commit_ts;
     };
 
     /** Origin message */
@@ -128,6 +132,7 @@ namespace springtail
     struct PgMsgStreamStart {
         int32_t xid;
         bool first;
+        std::chrono::steady_clock::time_point local_ts;
     };
 
     /** Stream stop -- in proto vers 2+ only */
@@ -141,6 +146,7 @@ namespace springtail
         LSN_t xact_lsn;
         int64_t commit_ts;
         int32_t xid;
+        std::chrono::steady_clock::time_point local_commit_ts;
     };
 
     /** Stream abort message -- in proto vers 2+ only --
@@ -151,6 +157,7 @@ namespace springtail
         int64_t abort_ts;   // proto vers 4+
         int32_t xid;
         int32_t sub_xid;
+        std::chrono::steady_clock::time_point local_abort_ts;
     };
 
     /** Column schema for a single column used by Create table and Alter table */
@@ -310,6 +317,8 @@ namespace springtail
      * @details Contains union of messages with the type
      *          specified by the Pgmsg_type
      */
+
+
     struct PgMsg {
         std::variant<
          PgMsgKeepAlive,
@@ -346,8 +355,16 @@ namespace springtail
         int proto_version;     ///< which protocol version
         bool is_streaming;     ///< is this a streaming message
 
-        PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
-            : msg_type(type) {}
+
+        explicit PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
+            : msg_type(type)
+        {}
+
+        PgMsg() = delete;
+        PgMsg(const PgMsg&) = delete;
+        const PgMsg& operator=(const PgMsg&) = delete;
+
+        PgMsg(PgMsg&&) = default;
     };
     using PgMsgPtr = std::shared_ptr<PgMsg>;
 
