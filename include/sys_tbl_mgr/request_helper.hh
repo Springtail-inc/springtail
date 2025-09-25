@@ -95,6 +95,33 @@ namespace springtail::sys_tbl_mgr {
         }
 
         /**
+         * @brief Convert PgMsgSchemaColumn object into proto::TableColumn
+         *
+         * @param msg - schema column message
+         * @return proto::TableColumn - table column in protobuf format
+         */
+        static proto::TableColumn
+        get_table_column(const PgMsgSchemaColumn &msg)
+        {
+            proto::TableColumn column;
+            column.set_name(msg.name);
+            column.set_type(msg.type);
+            column.set_pg_type(msg.pg_type);
+            column.set_position(msg.position);
+            column.set_is_nullable(msg.is_nullable);
+            column.set_is_generated(msg.is_generated);
+            column.set_type_name(msg.type_name);
+            column.set_type_namespace(msg.type_namespace);
+            if (msg.is_pkey) {
+                column.set_pk_position(msg.pk_position);
+            }
+            if (msg.default_value) {
+                column.set_default_value(*msg.default_value);
+            }
+            return column;
+        }
+
+        /**
          * @brief Generate index request.
          *
          * @param db_id - database id
@@ -193,8 +220,6 @@ namespace springtail::sys_tbl_mgr {
 
             return metadata;
         }
-
     };
-
 
 } // namespace springtail::sys_tbl_mgr

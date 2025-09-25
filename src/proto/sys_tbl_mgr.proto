@@ -4,10 +4,6 @@ package springtail.proto;
 
 import "google/protobuf/empty.proto";
 
-message DDLStatement {
-  string statement = 1;
-}
-
 message TableColumn {
   string name = 1;
   int32 type = 2;
@@ -21,6 +17,7 @@ message TableColumn {
   optional string default_value = 10;
 }
 
+// TODO: Remove after gp_copy conversion
 message PartitionData {
   string table_name = 1;
   int64 table_id = 2;
@@ -31,6 +28,7 @@ message PartitionData {
   int64 parent_table_id = 7;
 }
 
+// TODO: Remove after gp_copy conversion
 message TableInfo {
   int64 id = 1;
   string namespace_name = 2;
@@ -44,6 +42,7 @@ message TableInfo {
   bool rls_forced = 10;
 }
 
+// TODO: Remove after gp_copy conversion
 message TableRequest {
   int64 db_id = 1;
   int64 xid = 2;
@@ -52,6 +51,7 @@ message TableRequest {
   int64 snapshot_xid = 5;
 }
 
+// TODO: Remove after gp_copy conversion
 message DropTableRequest {
   int64 db_id = 1;
   int64 xid = 2;
@@ -61,24 +61,13 @@ message DropTableRequest {
   string name = 6;
 }
 
+// TODO: Remove after gp_copy conversion
 message NamespaceRequest {
   int64 db_id = 1;
   int64 namespace_id = 2;
   string name = 3;
   int64 xid = 4;
   int64 lsn = 5;
-}
-
-message UserTypeRequest {
-  int64 db_id = 1;
-  int64 xid = 2;
-  int64 lsn = 3;
-  int64 namespace_id = 4;
-  int64 type_id = 5;
-  string namespace_name = 6;
-  string name = 7;
-  string value_json = 8;
-  int32 type = 9;
 }
 
 message TableStats {
@@ -109,14 +98,7 @@ message IndexInfo {
   int64 namespace_id = 9;
 }
 
-message IndexInfoList {
-    repeated IndexInfo indexes = 1;
-}
-
-message IndexesInfo {
-    map<uint64, IndexInfoList> xid_index_map = 1;
-}
-
+// TODO: Remove after gp_copy conversion
 message IndexRequest {
   int64 db_id = 1;
   int64 xid = 2;
@@ -124,41 +106,7 @@ message IndexRequest {
   IndexInfo index = 4;
 }
 
-message SetIndexStateRequest {
-  int64 db_id = 1;
-  int64 xid = 2;
-  int64 lsn = 3;
-  uint64 table_id = 4;
-  uint64 index_id = 5;
-  int32 state = 6;
-}
-
-message DropIndexRequest {
-  int64 db_id = 1;
-  int64 xid = 2;
-  int64 lsn = 3;
-  uint64 index_id = 4;
-  string namespace_name = 5;
-  string name = 6;
-}
-
-message IndexProcessRequest {
-  string action = 1;
-  IndexInfo index = 2;
-}
-
-message GetUnfinishedIndexesInfoRequest {
-  int64 db_id = 1;
-}
-
-message GetIndexInfoRequest {
-  int64 db_id = 1;
-  int64 xid = 2;
-  int64 lsn = 3;
-  uint64 index_id = 4;
-  optional int64 table_id = 5;
-}
-
+// TODO: Remove after gp_copy conversion
 message UpdateRootsRequest {
   int64 db_id = 1;
   int64 xid = 2;
@@ -166,11 +114,6 @@ message UpdateRootsRequest {
   repeated RootInfo roots = 4;
   TableStats stats = 5;
   int64 snapshot_xid = 6;
-}
-
-message FinalizeRequest {
-  int64 db_id = 1;
-  int64 xid = 2;
 }
 
 message GetRootsRequest {
@@ -217,28 +160,6 @@ message GetUserTypeResponse {
   bool exists = 6;
 }
 
-message AttachPartitionRequest {
-  int64 db_id = 1;
-  int64 xid = 2;
-  int64 lsn = 3;
-  int64 table_id = 4;
-  string namespace_name = 5;
-  string table_name = 6;
-  string partition_key = 7;
-  repeated PartitionData partition_data = 8;
-}
-
-message DetachPartitionRequest {
-  int64 db_id = 1;
-  int64 xid = 2;
-  int64 lsn = 3;
-  int64 table_id = 4;
-  string namespace_name = 5;
-  string table_name = 6;
-  string partition_key = 7;
-  repeated PartitionData partition_data = 8;
-}
-
 message ColumnHistory {
   int64 xid = 1;
   int64 lsn = 2;
@@ -267,18 +188,6 @@ message ExistsRequest {
   int64 table_id = 2;
   int64 xid = 3;
   int64 lsn = 4;
-}
-
-message SwapSyncTableRequest {
-  NamespaceRequest namespace_req = 1;
-  TableRequest create_req = 2;
-  repeated IndexRequest index_reqs = 3;
-  UpdateRootsRequest roots_req = 4;
-}
-
-message RevertRequest {
-  int64 db_id = 1;
-  int64 xid = 2;
 }
 
 // Service for managing system tables

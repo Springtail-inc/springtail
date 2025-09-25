@@ -3,6 +3,7 @@
 #include <sys_tbl_mgr/server.hh>
 
 namespace springtail::test::ddl_helpers {
+    using namespace sys_tbl_mgr;
     void create_table(uint64_t db_id, uint64_t table_id, uint64_t xid, std::string table_name, std::vector<PgMsgSchemaColumn> columns)
     {
         // create a table
@@ -17,7 +18,7 @@ namespace springtail::test::ddl_helpers {
         sys_tbl_mgr::Server::get_instance()->create_table(db_id, { xid, 0 }, create_msg);
     }
 
-    proto::IndexProcessRequest create_index(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t index_id,
+    Server::IndexProcessRequest create_index(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t index_id,
             std::string idx_name, std::vector<PgMsgSchemaColumn> columns, sys_tbl::IndexNames::State idx_state, bool is_unique)
     {
 
@@ -38,7 +39,7 @@ namespace springtail::test::ddl_helpers {
 
         XidLsn xid_lsn{xid};
 
-        return sys_tbl_mgr::Server::get_instance()->create_index(db_id, xid_lsn, msg, idx_state);
+        return Server::get_instance()->create_index(db_id, xid_lsn, msg, idx_state);
 
     }
 

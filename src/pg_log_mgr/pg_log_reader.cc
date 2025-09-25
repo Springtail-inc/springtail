@@ -698,9 +698,9 @@ namespace springtail::pg_log_mgr {
         // Add a message to skip indexes for this table
         // for the currently building indexes and the ones
         // belonging to this transaction
-        proto::IndexProcessRequest index_request;
-        index_request.set_action("abort_index");
-        index_request.mutable_index()->set_table_id(table_oid);
+        Server::IndexProcessRequest index_request;
+        index_request.action = "abort_index";
+        index_request.index.set_table_id(table_oid);
         _index_requests_mgr->add_index_request(_db, xidlsn.xid, index_request);
     }
 
@@ -826,7 +826,7 @@ namespace springtail::pg_log_mgr {
                                                                   sys_tbl::IndexNames::State::NOT_READY);
 
                 // Store the index process request for the Committer
-                if (create_index_response.action() == "create_index") {
+                if (create_index_response.action == "create_index") {
                     _index_requests_mgr->add_index_request(_db, xidlsn.xid, create_index_response);
                 } else {
                     LOG_WARN("Failed to create an index for db {}", _db);

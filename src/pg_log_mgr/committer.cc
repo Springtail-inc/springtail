@@ -365,13 +365,13 @@ namespace springtail::committer {
     }
 
     void
-    Committer::_expire_index_drops(uint64_t db_id, std::list<proto::IndexProcessRequest>& index_requests, uint64_t committed_xid)
+    Committer::_expire_index_drops(uint64_t db_id, std::list<Server::IndexProcessRequest>& index_requests, uint64_t committed_xid)
     {
         for (auto const& index_request: index_requests) {
-            auto action = index_request.action();
+            auto action = index_request.action;
             if (action == "drop_index") {
-                auto tid = index_request.index().table_id();
-                auto index_id = index_request.index().id();
+                auto tid = index_request.index.table_id();
+                auto index_id = index_request.index.id();
                 auto _dropped_index_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
                 if (_dropped_index_table_dir.has_value()) {
                     auto index_file_path = _dropped_index_table_dir.value() / fmt::format(constant::INDEX_FILE, index_id);

@@ -44,12 +44,12 @@ Server::_internal_shutdown()
 }
 
 std::string
-Server::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
+Server::create_table(const uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 {
     auto request = RequestHelper::gen_table_request(db_id, xid, msg);
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_table() -- db {} table {} xid {} lsn {}", db_id,
-            request.table().id(), request.xid(), request.lsn());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_table() -- db {} table {} xid {} lsn {}",
+            db_id, msg.oid, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
@@ -62,12 +62,16 @@ Server::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 }
 
 std::string
-Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
+Server::alter_table(const uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 {
-    auto request = RequestHelper::gen_table_request(db_id, xid, msg);
+    uint64_t table_id = msg.oid;
+    const std::string &table_name = msg.table;
+    const std::string &namespace_name = msg.namespace_name;
+    bool rls_enabled = msg.rls_enabled;
+    bool rls_forced = msg.rls_forced;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got alter_table() -- db {} table {} xid {} lsn {}", db_id,
-            request.table().id(), xid.xid, xid.lsn);
+            table_id, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
@@ -75,20 +79,20 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     // retrieve the id of the namespace
     // this function is called by drop table, so we don't check if
     // the namespace exists
-    auto ns_info = _get_namespace_info(db_id, request.table().namespace_name(), xid, false);
+    auto ns_info = _get_namespace_info(db_id, namespace_name, xid, false);
     CHECK(ns_info);
 
     nlohmann::json ddl;
-    ddl["tid"] = request.table().id();
-    ddl["xid"] = request.xid();
-    ddl["lsn"] = request.lsn();
-    ddl["schema"] = request.table().namespace_name();
-    ddl["table"] = request.table().name();
-    ddl["rls_enabled"] = request.table().rls_enabled();
-    ddl["rls_forced"] = request.table().rls_forced();
+    ddl["tid"] = table_id;
+    ddl["xid"] = xid.xid;
+    ddl["lsn"] = xid.lsn;
+    ddl["schema"] = namespace_name;
+    ddl["table"] = table_name;
+    ddl["rls_enabled"] = rls_enabled;
+    ddl["rls_forced"] = rls_forced;
 
     // retrieve the name of the table at the point of alteration
-    auto table_info = _get_table_info(db_id, request.table().id(), xid);
+    auto table_info = _get_table_info(db_id, table_id, xid);
 
     // note: table should always exist when calling alter_table()
     assert(table_info != nullptr);
@@ -97,33 +101,26 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     std::optional<uint64_t> parent_table_id = std::nullopt;
     std::optional<std::string> partition_key = std::nullopt;
     std::optional<std::string> partition_bound = std::nullopt;
-    if (request.table().has_parent_table_id() && request.table().parent_table_id() != constant::INVALID_TABLE) {
-        parent_table_id = request.table().parent_table_id();
-    }
-    if (request.table().has_partition_key() && !request.table().partition_key().empty()) {
-        partition_key = request.table().partition_key();
-    }
-    if (request.table().has_partition_bound() && !request.table().partition_bound().empty()) {
-        partition_bound = request.table().partition_bound();
-    }
-
     // update the partition details
-    if (partition_key.has_value()) {
-        ddl["partition_key"] = partition_key.value();
+    if (!msg.partition_key.empty()) {
+        partition_key = msg.partition_key;
+        ddl["partition_key"] = partition_key;
     }
-    if (partition_bound.has_value()) {
-        ddl["partition_bound"] = partition_bound.value();
+    if (!msg.partition_bound.empty()) {
+        partition_bound = msg.partition_bound;
+        ddl["partition_bound"] = partition_bound;
     }
-    if (parent_table_id.has_value()) {
-        ddl["parent_table_id"] = parent_table_id.value();
+    if (msg.parent_table_id != constant::INVALID_TABLE) {
+        parent_table_id = msg.parent_table_id;
+        ddl["parent_table_id"] = parent_table_id;
     }
 
-    auto new_info = std::make_shared<TableCacheRecord>(request.table().id(), request.xid(),
-                                                       request.lsn(), ns_info->id,
-                                                       request.table().name(),
+    auto new_info = std::make_shared<TableCacheRecord>(table_id, xid.xid,
+                                                       xid.lsn, ns_info->id,
+                                                       table_name,
                                                        parent_table_id, partition_key,
-                                                       partition_bound, request.table().rls_enabled(),
-                                                       request.table().rls_forced(), true);
+                                                       partition_bound, msg.rls_enabled,
+                                                       msg.rls_forced, true);
 
     if (table_info->namespace_id != ns_info->id) {
         // if the schema/namespace changed then update the table_names table
@@ -138,7 +135,7 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         CHECK(old_ns_info);
         ddl["old_schema"] = old_ns_info->name;
 
-    } else if (table_info->name != request.table().name()) {
+    } else if (table_info->name != table_name) {
         // if the name is changed, update the name in the table_names table
         // insert the new name for this oid
         _set_table_info(db_id, new_info);
@@ -152,66 +149,65 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
             CHECK(old_ns_info);
             ddl["old_schema"] = old_ns_info->name;
         } else {
-            ddl["old_schema"] = request.table().namespace_name();
+            ddl["old_schema"] = namespace_name;
         }
 
-        _set_primary_index(db_id, ns_info->id, request.table().id(), table_info->name,
+        _set_primary_index(db_id, ns_info->id, table_id, table_info->name,
                            ns_info->name, xid);
 
-    } else if (table_info->rls_enabled != request.table().rls_enabled()) {
+    } else if (table_info->rls_enabled != rls_enabled) {
         // if the RLS flags are changed, update the table_names table
         LOG_INFO("RLS enabled changed for table {}@{}:{} {} -> {}",
-                  db_id, request.xid(), request.table().id(),
-                  table_info->rls_enabled, request.table().rls_enabled());
+                  db_id, xid.xid, table_id, table_info->rls_enabled, rls_enabled);
         _set_table_info(db_id, new_info);
 
         // set the DDL statement
         ddl["action"] = "set_rls_enabled";
-        ddl["rls_enabled"] = request.table().rls_enabled();
-    } else if (table_info->rls_forced != request.table().rls_forced()) {
+        ddl["rls_enabled"] = rls_enabled;
+    } else if (table_info->rls_forced != rls_forced) {
         // if the RLS forced flags are changed, update the table_names table
         _set_table_info(db_id, new_info);
 
         // set the DDL statement
         ddl["action"] = "set_rls_forced";
-        ddl["rls_forced"] = request.table().rls_forced();
+        ddl["rls_forced"] = rls_forced;
     } else {
         // get the schema prior to this change
-        auto info = _get_schema_info(db_id, request.table().id(), xid, xid);
+        auto info = _get_schema_info(db_id, table_id, xid, xid);
 
         // generate a tuple for the change
         // note: _generate_update() sets the necessary elements of the ddl
-        auto history = _generate_update(info->columns(), request.table().columns(),
+        auto history = _generate_update(info->columns(), msg.columns,
                                         xid, ddl);
 
         // If the partition key is not empty, generate the history events for the the child partition tables
         if (partition_key.value_or("") != "") {
-            ddl = _generate_partition_updates(request, history);
+            ddl = _generate_partition_updates(table_id, msg.partition_data);
         }
 
         // we won't apply any changes to the system tables in these cases
         if (history.update_type() != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
             history.update_type() != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
             // write the column change to the schemas table and update the cache
-            _set_schema_info(db_id, request.table().id(), ns_info->id,
-                            request.table().name(), {history});
+            _set_schema_info(db_id, table_id, ns_info->id,
+                            {history});
         }
 
-        _set_primary_index(db_id, ns_info->id, request.table().id(),
-                    request.table().name(), request.table().namespace_name(), xid);
+        _set_primary_index(db_id, ns_info->id, table_id,
+                    table_name, namespace_name, xid);
     }
 
     // Automatically invalidate the schema cache from the provided XID
     invalidate_table(db_id, msg.oid, xid);
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Alter table {}@{}:{} action: {}", db_id, xid.xid,
-                            request.table().id(), ddl["action"].get<std::string>());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Alter table {}@{}:{} action: {}",
+                db_id, xid.xid, table_id, ddl["action"].get<std::string>());
 
     return nlohmann::to_string(ddl);
 }
 
 std::string
-Server::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
+Server::drop_table(const uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
 {
 
     proto::DropTableRequest request;
@@ -235,59 +231,51 @@ Server::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
 }
 
 std::string
-Server::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+Server::create_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
-    proto::NamespaceRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_namespace_id(msg.oid);
-    request.set_name(msg.name);
+    uint64_t namespace_id = msg.oid;
+    const std::string &namespace_name = msg.name;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_namespace() -- db {} namespace_id {} name {} xid {} lsn {}",
-                db_id, request.namespace_id(), request.name(), request.xid(),
-                request.lsn());
-
+                db_id, namespace_id, namespace_name, xid.xid, xid.lsn);
 
     nlohmann::json ddl;
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    auto ns_info = _get_namespace_info(db_id, request.namespace_id(), xid);
+    auto ns_info = _get_namespace_info(db_id, namespace_id, xid);
     if (ns_info) {
         LOG_INFO("Namespace exists -- db {} namespace_id {} name {} xid {} lsn {}",
-                db_id, request.namespace_id(), request.name(), request.xid(),
-                request.lsn());
+                db_id, namespace_id, namespace_name, xid.xid, xid.lsn);
         ddl["action"] = "no_change";
     } else {
         // update the namespace_names table
-        ddl = _mutate_namespace(db_id, request.namespace_id(), request.name(), xid, true);
+        ddl = _mutate_namespace(db_id, namespace_id, namespace_name, xid, true);
         ddl["action"] = "ns_create";
     }
     return nlohmann::to_string(ddl);
 }
 
 std::string
-Server::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+Server::alter_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
-    proto::NamespaceRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_namespace_id(msg.oid);
-    request.set_name(msg.name);
+    uint64_t namespace_id = msg.oid;
+    const std::string &namespace_name = msg.name;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got alter_namespace() -- db {} namespace_id {} name {} xid {} lsn {}",
-                db_id, request.namespace_id(), request.name(), request.xid(),
-                request.lsn());
+                db_id, namespace_id, namespace_name, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
     // retrieve the old namespace name
-    auto ns_info = _get_namespace_info(db_id, request.namespace_id(), xid);
+    auto ns_info = _get_namespace_info(db_id, namespace_id, xid);
     CHECK(ns_info);
 
     // update the namespace_names table
     auto ddl =
-        _mutate_namespace(db_id, request.namespace_id(), request.name(), xid, true);
+        _mutate_namespace(db_id, namespace_id, namespace_name, xid, true);
     ddl["action"] = "ns_alter";
     ddl["old_name"] = ns_info->name;
 
@@ -295,163 +283,146 @@ Server::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace 
 }
 
 std::string
-Server::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+Server::drop_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
-    proto::NamespaceRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_namespace_id(msg.oid);
-    request.set_name(msg.name);
+    uint64_t namespace_id = msg.oid;
+    const std::string &namespace_name = msg.name;
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_namespace() -- db {} namespace_id {} xid {} lsn {}", db_id,
-                request.namespace_id(), request.xid(), request.lsn());
+
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_namespace() -- db {} namespace_id {} xid {} lsn {}",
+                db_id, namespace_id, namespace_name, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
     // update the namespace_names table
     auto ddl =
-        _mutate_namespace(db_id, request.namespace_id(), request.name(), xid, false);
+        _mutate_namespace(db_id, namespace_id, namespace_name, xid, false);
     ddl["action"] = "ns_drop";
-    ddl["name"] = request.name();
+    ddl["name"] = namespace_name;
 
     return nlohmann::to_string(ddl);
 }
 
 std::string
-Server::create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+Server::create_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
-    proto::UserTypeRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_type_id(msg.oid);
-    request.set_namespace_id(msg.namespace_id);
-    request.set_name(msg.name);
-    request.set_namespace_name(msg.namespace_name);
-    request.set_value_json(msg.value_json);
-    request.set_type(msg.type);
+    uint64_t namespace_id = msg.namespace_id;
+    const std::string &namespace_name = msg.namespace_name;
+    uint64_t type_id = msg.oid;
+    char type = msg.type;
+    const std::string &type_name = msg.name;
+    const std::string &value_json = msg.value_json;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_usertype() -- db {} namespace_id {} type_id {} name {} xid {} lsn {}",
-                db_id, request.namespace_id(), request.type_id(), request.name(), request.xid(),
-                request.lsn());
+                db_id, namespace_id, type_id, type_name, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
     // update the user_types table
-    auto ddl = _mutate_usertype(db_id, request.type_id(), request.name(),
-        request.namespace_id(), request.type(), request.value_json(), xid, true);
+    auto ddl = _mutate_usertype(db_id, type_id, type_name, namespace_id, type, value_json, xid, true);
 
     ddl["action"] = "ut_create";
-    ddl["schema"] = request.namespace_name();
+    ddl["schema"] = namespace_name;
 
     return nlohmann::to_string(ddl);
 }
 
 std::string
-Server::alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+Server::alter_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
-    proto::UserTypeRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_type_id(msg.oid);
-    request.set_namespace_id(msg.namespace_id);
-    request.set_name(msg.name);
-    request.set_namespace_name(msg.namespace_name);
-    request.set_value_json(msg.value_json);
-    request.set_type(msg.type);
+    uint64_t namespace_id = msg.namespace_id;
+    const std::string &namespace_name = msg.namespace_name;
+    uint64_t type_id = msg.oid;
+    char type = msg.type;
+    const std::string &type_name = msg.name;
+    const std::string &value_json = msg.value_json;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got alter_usertype() -- db {} namespace_id {} type_id {} name {} xid {} lsn {}",
-                db_id, request.namespace_id(), request.type_id(), request.name(), request.xid(),
-                request.lsn());
+                db_id, namespace_id, type_id, type_name, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
     // retrieve the old user type name
-    auto user_type_info = _get_usertype_info(db_id, request.type_id(), xid);
+    auto user_type_info = _get_usertype_info(db_id, type_id, xid);
     CHECK(user_type_info != nullptr);
 
     // update the user defined types table
-    auto ddl = _mutate_usertype(db_id, request.type_id(), request.name(),
-        request.namespace_id(), request.type(), request.value_json(), xid, true);
+    auto ddl = _mutate_usertype(db_id, type_id, type_name, namespace_id, type, value_json, xid, true);
 
     ddl["action"] = "ut_alter";
-    ddl["schema"] = request.namespace_name();
+    ddl["schema"] = namespace_name;
     ddl["old_name"] = user_type_info->name;
     ddl["old_value"] = user_type_info->value_json;
 
     // need to get old namespace id and check if it has changed
-    if (user_type_info->namespace_id != request.namespace_id()) {
+    if (user_type_info->namespace_id != namespace_id) {
         auto old_ns_info = _get_namespace_info(db_id, user_type_info->namespace_id, xid);
         ddl["old_schema"] = old_ns_info->name;
     } else {
-        ddl["old_schema"] = request.namespace_name();
+        ddl["old_schema"] = namespace_name;
     }
 
     return nlohmann::to_string(ddl);
 }
 
 std::string
-Server::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+Server::drop_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
-    proto::UserTypeRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_type_id(msg.oid);
-    request.set_name(msg.name);
-    request.set_namespace_name(msg.namespace_name);
+    uint64_t namespace_id = msg.namespace_id;
+    const std::string &namespace_name = msg.namespace_name;
+    uint64_t type_id = msg.oid;
+    char type = msg.type;
+    const std::string &type_name = msg.name;
+    const std::string &value_json = msg.value_json;
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_usertype() -- db {} namespace_id {} type_id {} xid {} lsn {}", db_id,
-                request.namespace_id(), request.type_id(), request.xid(), request.lsn());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_usertype() -- db {} namespace_id {} type_id {} xid {} lsn {}",
+                db_id, namespace_id, type_id, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
     nlohmann::json ddl;
-    auto user_type_info = _get_usertype_info(db_id, request.type_id(), xid);
+    auto user_type_info = _get_usertype_info(db_id, type_id, xid);
     if (user_type_info == nullptr) {
         // drop could for a type we don't support, so ignore it here
-        LOG_WARN("User type {} not found", request.type_id());
+        LOG_WARN("User type {} not found", type_id);
         ddl["action"] = "no_change";
     } else {
         // update the user defined types table
-        ddl = _mutate_usertype(db_id, request.type_id(), request.name(),
-            request.namespace_id(), request.type(), request.value_json(), xid, false);
+        ddl = _mutate_usertype(db_id, type_id, type_name, namespace_id, type, value_json, xid, false);
 
         ddl["action"] = "ut_drop";
-        ddl["schema"] = request.namespace_name();
+        ddl["schema"] = namespace_name;
     }
 
     return nlohmann::to_string(ddl);
 }
 
 std::string
-Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg)
+Server::attach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg)
 {
-    proto::AttachPartitionRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_table_id(msg.table_id);
-    request.set_table_name(msg.table_name);
-    request.set_namespace_name(msg.namespace_name);
-    request.set_partition_key(msg.partition_key);
+    uint64_t table_id = msg.table_id;
+    const std::string &namespace_name = msg.namespace_name;
+    const std::string &table_name = msg.table_name;
 
-    for (const auto &partition_data : msg.partition_data) {
-        auto *info = request.add_partition_data();
-        RequestHelper::set_partition_data(info, partition_data);
-    }
-
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got attach_partition() -- db {} table {} xid {} lsn {}", db_id,
-              request.table_id(), request.xid(), request.lsn());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got attach_partition() -- db {} table {} xid {} lsn {}",
+            db_id, table_id, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
     std::unordered_map<uint64_t, std::pair<std::string, std::string>> partition_map;
-    auto attached_partitions = _get_modified_partition_details(db_id, xid, request.table_id(), request.partition_data(), &partition_map, true);
+    auto attached_partitions = _get_modified_partition_details(db_id, xid, table_id, msg.partition_data, &partition_map, true);
 
     // Update the system table for the attached partition
     std::string partition_name = "";
     std::string partition_bound = "";
     std::string partition_schema = "";
     for (const auto& attached_table_id : attached_partitions) {
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attaching Partition for table ID: {}, to parent table ID: {}", attached_table_id, request.table_id());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attaching Partition for table ID: {}, to parent table ID: {}", attached_table_id, table_id);
         auto table_info = _get_table_info(db_id, attached_table_id, xid);
 
         // note: table should always exist when calling alter_table()
@@ -471,9 +442,9 @@ Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPar
         }
 
         auto updated_table_info =
-            std::make_shared<TableCacheRecord>(attached_table_id, request.xid(), request.lsn(),
+            std::make_shared<TableCacheRecord>(attached_table_id, xid.xid, xid.lsn,
                                                table_info->namespace_id, table_info->name,
-                                               request.table_id(), partition_key, partition_bound,
+                                               table_id, partition_key, partition_bound,
                                                table_info->rls_enabled, table_info->rls_forced, true);
         _set_table_info(db_id, updated_table_info);
 
@@ -491,8 +462,8 @@ Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPar
     ddl["partition_schema"] = partition_schema;
     ddl["partition_name"] = partition_name;
     ddl["partition_bound"] = partition_bound;
-    ddl["schema"] = request.namespace_name();
-    ddl["table"] = request.table_name();
+    ddl["schema"] = namespace_name;
+    ddl["table"] = table_name;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attach partition DDL: {}", ddl.dump());
 
@@ -500,33 +471,25 @@ Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPar
 }
 
 std::string
-Server::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg)
+Server::detach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg)
 {
-    proto::DetachPartitionRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_table_id(msg.table_id);
-    request.set_namespace_name(msg.namespace_name);
-    request.set_table_name(msg.table_name);
-    request.set_partition_key(msg.partition_key);
+    uint64_t table_id = msg.table_id;
+    const std::string &namespace_name = msg.namespace_name;
+    const std::string &table_name = msg.table_name;
 
-    for (const auto &partition_data : msg.partition_data) {
-        auto *info = request.add_partition_data();
-        RequestHelper::set_partition_data(info, partition_data);
-    }
-
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got detach_partition() -- db {} table {} xid {} lsn {}", db_id,
-              request.table_id(), request.xid(), request.lsn());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got detach_partition() -- db {} table {} xid {} lsn {}",
+         db_id, table_id, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    auto detached_partitions = _get_modified_partition_details(db_id, xid, request.table_id(), request.partition_data(), nullptr, false);
+    auto detached_partitions = _get_modified_partition_details(db_id, xid, table_id, msg.partition_data, nullptr, false);
 
     // Update the system table for the detached table
     std::string partition_name = "";
     std::string partition_schema = "";
     for (const auto& detached_table_id : detached_partitions) {
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detaching Partition for table ID: {}, from parent table ID: {}", detached_table_id, request.table_id());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detaching Partition for table ID: {}, from parent table ID: {}", detached_table_id, table_id);
         auto table_info = _get_table_info(db_id, detached_table_id, xid);
 
         // note: table should always exist when calling alter_table()
@@ -539,7 +502,7 @@ Server::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPar
 
         // update the system table
         auto updated_table_info =
-            std::make_shared<TableCacheRecord>(detached_table_id, request.xid(), request.lsn(),
+            std::make_shared<TableCacheRecord>(detached_table_id, xid.xid, xid.lsn,
                                                table_info->namespace_id, table_info->name,
                                                std::nullopt, partition_key, std::nullopt,
                                                table_info->rls_enabled, table_info->rls_forced, true);
@@ -558,22 +521,22 @@ Server::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPar
     ddl["action"] = "detach_partition";
     ddl["partition_schema"] = partition_schema;
     ddl["partition_name"] = partition_name;
-    ddl["schema"] = request.namespace_name();
-    ddl["table"] = request.table_name();
+    ddl["schema"] = namespace_name;
+    ddl["table"] = table_name;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detach partition DDL: {}", ddl.dump());
 
     return nlohmann::to_string(ddl);
 }
 
-proto::IndexProcessRequest
-Server::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)
+Server::IndexProcessRequest
+Server::create_index(const uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, const sys_tbl::IndexNames::State state)
 {
     auto request = RequestHelper::gen_index_request(db_id, xid, msg);
     auto *index = request.mutable_index();
     index->set_state(static_cast<int32_t>(state));
 
-    proto::IndexProcessRequest response;
+    Server::IndexProcessRequest response;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_index() -- db {}, table {}, index {}, xid {}:{}", db_id,
                 request.index().table_id(), request.index().id(), request.xid(), request.lsn());
@@ -585,11 +548,11 @@ Server::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, s
     bool created = false;
     const auto &index_info = _create_index(request, created);
     if (created) {
-        response.set_action("create_index");
+        response.action = "create_index";
     } else {
-        response.set_action("no_op");
+        response.action = "no_op";
     }
-    *response.mutable_index() = index_info;
+    response.index = index_info;
 
     // Automatically invalidate the schema cache from the provided XID
     invalidate_table(db_id, msg.table_oid, xid);
@@ -598,35 +561,23 @@ Server::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, s
 }
 
 void
-Server::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
+Server::set_index_state(const uint64_t db_id, const XidLsn &xid, const uint64_t table_id, const uint64_t index_id, const sys_tbl::IndexNames::State state)
 {
-    proto::SetIndexStateRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_table_id(table_id);
-    request.set_index_id(index_id);
-    request.set_state(static_cast<int32_t>(state));
-
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got set_index_state() -- db {}, xid {}:{}, table_id {}, index_id {}, state {}",
                 db_id, xid.xid, xid.lsn, table_id, index_id, (uint32_t)(state));
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    _set_index_state(request);
+    _set_index_state(db_id, xid, table_id, index_id, state);
 
     // Automatically invalidate the schema cache from the provided XID
     invalidate_table(db_id, table_id, xid);
 }
 
 proto::IndexInfo
-Server::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid)
+Server::get_index_info(const uint64_t db_id,const  uint64_t index_id, const XidLsn &xid, const std::optional<uint64_t> tid)
 {
-    proto::GetIndexInfoRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_index_id(index_id);
-    if (tid) {
-        request.set_table_id(*tid);
-    }
     proto::IndexInfo response;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_index_info() -- db {}, xid {}:{}, table_id {}, index_id {}",
@@ -635,17 +586,14 @@ Server::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_read_mutex);
 
-    response = _get_index_info(request);
+    response = _get_index_info(db_id, index_id, xid, tid);
     return response;
 }
 
-proto::IndexesInfo
-Server::get_unfinished_indexes_info(uint64_t db_id)
+Server::IndexesInfo
+Server::get_unfinished_indexes_info(const uint64_t db_id)
 {
-    proto::GetUnfinishedIndexesInfoRequest request;
-    request.set_db_id(db_id);
-
-    proto::IndexesInfo response;
+    Server::IndexesInfo response;
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_unfinished_indexes_info() -- {}", db_id);
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -656,18 +604,16 @@ Server::get_unfinished_indexes_info(uint64_t db_id)
     return response;
 }
 
-proto::IndexProcessRequest
-Server::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
+Server::IndexProcessRequest
+Server::drop_index(const uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
 {
-    proto::DropIndexRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_index_id(msg.oid);
-    request.set_namespace_name(msg.namespace_name);
+    uint64_t index_id = msg.oid;
+    const std::string &namespace_name = msg.namespace_name;
 
-    proto::IndexProcessRequest response;
+    Server::IndexProcessRequest response;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_index() -- db {}, index {}, xid {}:{}", db_id,
-                request.index_id(), request.xid(), request.lsn());
+                index_id, xid.xid, xid.lsn);
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
@@ -676,22 +622,23 @@ Server::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     proto::IndexInfo dropped_index;
 
     // perform the DROP INDEX
-    _drop_index(xid, db_id, request.index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED, std::ref(dropped_index));
+    _drop_index(xid, db_id, index_id, std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED, std::ref(dropped_index));
 
     // Automatically invalidate the schema cache from the provided XID
-    _schema_object_cache->invalidate_by_index(db_id, msg.oid, xid);
+    _schema_object_cache->invalidate_by_index(db_id, index_id, xid);
 
-    dropped_index.set_id(request.index_id());
-    dropped_index.set_name(request.name());
-    dropped_index.set_namespace_name(request.namespace_name());
-    response.set_action("drop_index");
-    *response.mutable_index() = dropped_index;
+    dropped_index.set_id(index_id);
+    // we do not have an index name in the request
+    // dropped_index.set_name(request.name());
+    dropped_index.set_namespace_name(namespace_name);
+    response.action = "drop_index";
+    response.index = dropped_index;
 
     return response;
 }
 
 void
-Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata)
+Server::update_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t xid, const TableMetadata &metadata)
 {
     proto::UpdateRootsRequest request;
     request.set_db_id(db_id);
@@ -720,13 +667,10 @@ Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
 }
 
 void
-Server::finalize(uint64_t db_id, uint64_t xid)
+Server::finalize(const uint64_t db_id, const uint64_t xid)
 {
-    proto::FinalizeRequest request;
-    request.set_db_id(db_id);
-    request.set_xid(xid);
-
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got finalize() -- db {}, xid {}", db_id, xid);
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got finalize() -- db {}, xid {}",
+                    db_id, xid);
 
     // block all mutations
     boost::unique_lock wlock(_write_mutex);
@@ -734,20 +678,20 @@ Server::finalize(uint64_t db_id, uint64_t xid)
     // note: it is safe to pre-write data from later XIDs into the system tables during a finalize
     //       since if there is a failure they will simply be overwritten during recovery
     auto write_xid = _get_write_xid(db_id);
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize system tables: {}@{} >= {}", db_id,
-                        request.xid(), write_xid);
-    CHECK_GE(request.xid(), write_xid);
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize system tables: {}@{} >= {}",
+                db_id, xid, write_xid);
+    CHECK_GE(xid, write_xid);
 
     // finalize the mutated tables at the write_xid
     // XXX we currently don't store the metadata, but re-read it from the roots file each time
     std::map<uint64_t, TableMetadata> md_map;
     for (const auto& entry : _write[db_id]) {
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize table {}@{}", entry.first, request.xid());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize table {}@{}", entry.first, xid);
         md_map[entry.first] = entry.second->finalize();
     }
     if (md_map.empty()) {
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Nothing to finalize: {}@{} >= {}", db_id, request.xid(),
-                    write_xid);
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Nothing to finalize: {}@{} >= {}",
+                    db_id, xid, write_xid);
     }
 
     // block all read access while we swap access roots
@@ -755,7 +699,7 @@ Server::finalize(uint64_t db_id, uint64_t xid)
 
     // move the read_xid to the request xid, and move the write_xid to just beyond the
     // provided request xid
-    _set_xids(db_id, XidLsn(request.xid()), request.xid() + 1);
+    _set_xids(db_id, XidLsn(xid), xid + 1);
 
     // note: we could update the table pointers?
     //       or maybe cache the roots to avoid reading the roots file?
@@ -767,21 +711,17 @@ Server::finalize(uint64_t db_id, uint64_t xid)
     _clear_namespace_info(db_id);
 
     // Commit expired extents in Vacuumer
-    Vacuumer::get_instance()->commit_expired_extents(db_id, request.xid());
+    Vacuumer::get_instance()->commit_expired_extents(db_id, xid);
 }
 
 void
-Server::revert(uint64_t db_id, uint64_t xid)
+Server::revert(const uint64_t db_id, const uint64_t xid)
 {
-    proto::RevertRequest request;
-    request.set_db_id(db_id);
-    request.set_xid(xid);
-
     // ensure that we don't have a partially committed XID currently in-memory
     CHECK(_write[db_id].empty());
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got revert() -- db {} xid {}", db_id,
-                request.xid());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got revert() -- db {} xid {}",
+                db_id, xid);
 
     // get the base directory for table data
     std::filesystem::path table_base;
@@ -829,7 +769,7 @@ Server::revert(uint64_t db_id, uint64_t xid)
         // find the largest valid XID
         if (!roots_files.empty()) {
             // find the first XID beyond the committed XID
-            auto del_i = roots_files.upper_bound(request.xid());
+            auto del_i = roots_files.upper_bound(xid);
             auto root_i = std::make_reverse_iterator(del_i);
 
             if (root_i == roots_files.rend()) {
@@ -863,7 +803,7 @@ Server::revert(uint64_t db_id, uint64_t xid)
         FieldPtr xid_f = schema->get_field("xid");
         auto primary_fields = schema->get_fields(table->primary_key());
         for (auto row : *table) {
-            if (xid_f->get_uint64(&row) > request.xid()) {
+            if (xid_f->get_uint64(&row) > xid) {
                 mtable->remove(std::make_shared<FieldTuple>(primary_fields, &row),
                                constant::UNKNOWN_EXTENT);
             }
@@ -873,29 +813,26 @@ Server::revert(uint64_t db_id, uint64_t xid)
 
 // TODO: some common code with GetRoots implementation in Service, fix it
 TableMetadataPtr
-Server::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
+Server::get_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t xid)
 {
     proto::GetRootsResponse response;
-    proto::GetRootsRequest request;
-    request.set_db_id(db_id);
-    request.set_table_id(table_id);
-    request.set_xid(xid);
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_roots() -- db {} tid {} xid {}", db_id, request.table_id(), request.xid());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_roots() -- db {} tid {} xid {}",
+                db_id, table_id, xid);
 
     boost::shared_lock lock(_read_mutex);
 
-    XidLsn xid_lsn(request.xid(), constant::MAX_LSN);
+    XidLsn xid_lsn(xid, constant::MAX_LSN);
 
     // make sure that the table exists at this XID
-    auto table_info = _get_table_info(db_id, request.table_id(), xid_lsn);
+    auto table_info = _get_table_info(db_id, table_id, xid_lsn);
     if (table_info == nullptr) {
         // We just return an empty response if the table doesn't exist
         return nullptr;
     }
 
     // get the roots
-    auto info = _get_roots_info(db_id, request.table_id(), xid_lsn);
+    auto info = _get_roots_info(db_id, table_id, xid_lsn);
 
     response = *info;
 
@@ -912,7 +849,7 @@ Server::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
 }
 
 std::shared_ptr<const SchemaMetadata>
-Server::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
+Server::get_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid)
 {
     auto populate = [this](uint64_t db_id, uint64_t table_id, const XidLsn &xid) {
         proto::GetSchemaRequest request;
@@ -943,42 +880,30 @@ Server::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
 }
 
 SchemaMetadataPtr
-Server::get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid)
+Server::get_target_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid)
 {
-    proto::GetTargetSchemaRequest request;
-    request.set_db_id(db_id);
-    request.set_table_id(table_id);
-    request.set_access_xid(access_xid.xid);
-    request.set_access_lsn(access_xid.lsn);
-    request.set_target_xid(target_xid.xid);
-    request.set_target_lsn(target_xid.lsn);
-
     proto::GetSchemaResponse response;
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_target_schema() -- {}, {}", request.access_xid(), request.target_xid());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_target_schema() -- {}, {}",
+                access_xid.xid, target_xid.xid);
 
     boost::shared_lock lock(_read_mutex);
 
-    auto info = _get_schema_info(db_id, request.table_id(), access_xid, target_xid);
+    auto info = _get_schema_info(db_id, table_id, access_xid, target_xid);
 
     response = *info;
     return RequestHelper::pack_metadata(response);
 }
 
 bool
-Server::exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
+Server::exists(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid)
 {
-    // prepare the request
-    proto::ExistsRequest request;
-    RequestHelper::set_request_common(request, db_id, xid);
-    request.set_table_id(table_id);
-
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got exists() -- db {} tid {} xid {} lsn {}", db_id,
-                request.table_id(), request.xid(), request.lsn());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got exists() -- db {} tid {} xid {} lsn {}",
+                db_id, table_id, xid.xid, xid.lsn);
 
     boost::shared_lock lock(_read_mutex);
 
-    auto info = _get_table_info(db_id, request.table_id(), xid);
+    auto info = _get_table_info(db_id, table_id, xid);
     if (info == nullptr) {
         return false;
     }
@@ -1076,7 +1001,7 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
 }
 
 std::shared_ptr<UserType>
-Server::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
+Server::get_usertype(const uint64_t db_id, const uint64_t type_id, const XidLsn &xid)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_usertype() -- db {} type_id {} xid {} lsn {}",
               db_id, type_id, xid.xid, xid.lsn);
@@ -1101,21 +1026,20 @@ Server::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
 }
 
 void
-Server::invalidate_table(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
+Server::invalidate_table(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid)
 {
     _schema_object_cache->invalidate_table(db_id, table_id, xid);
 }
 
 void
-Server::invalidate_db(uint64_t db_id, const XidLsn &xid)
+Server::invalidate_db(const uint64_t db_id, const XidLsn &xid)
 {
     _schema_object_cache->invalidate_db(db_id, xid);
 }
 
-proto::IndexesInfo
+Server::IndexesInfo
 Server::_get_unfinished_indexes_info(uint64_t db_id)
 {
-    proto::IndexesInfo indexes;
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
     auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
@@ -1166,54 +1090,43 @@ Server::_get_unfinished_indexes_info(uint64_t db_id)
     // From the above map, reorganize them in the form of
     // {xid: [indexes]}  =>  proto::IndexesInfo
     // after fetching full index info (proto::IndexInfo)
-    proto::IndexesInfo unfinished_indexes;
-    proto::GetIndexInfoRequest index_info_request;
-    index_info_request.set_db_id(db_id);
+    IndexesInfo unfinished_indexes;
 
     for (const auto& [index_id, index_entry]: unfinished_indexes_map) {
         auto& [index_xid, index_basic_info] = *index_entry.begin();
-        proto::IndexInfoList* index_info_list = nullptr;
-        auto it = unfinished_indexes.mutable_xid_index_map()->find(index_xid);
-        if (it != unfinished_indexes.mutable_xid_index_map()->end()) {
+        std::vector<proto::IndexInfo>* index_info_list = nullptr;
+        auto it = unfinished_indexes.find(index_xid);
+        if (it != unfinished_indexes.end()) {
             // If the xid exists, get the existing IndexInfoList
-            index_info_list = &it->second;
+            index_info_list = &(it->second);
         } else {
             // If the xid does not exist, create a new IndexInfoList
-            index_info_list = &(*unfinished_indexes.mutable_xid_index_map())[index_xid];
+            unfinished_indexes.emplace(index_xid, std::vector<proto::IndexInfo>());
+            index_info_list = &(unfinished_indexes[index_xid]);
         }
 
-        index_info_request.set_index_id(index_basic_info.index_id);
-        index_info_request.set_xid(index_basic_info.xid_lsn.xid);
-        index_info_request.set_lsn(index_basic_info.xid_lsn.lsn);
-        index_info_request.set_table_id(index_basic_info.table_id);
-        auto index_info = _get_index_info(index_info_request);
+        auto index_info = _get_index_info(db_id, index_basic_info.index_id, index_basic_info.xid_lsn, index_basic_info.table_id);
         _populate_index_columns(db_id, index_info, index_basic_info.xid_lsn);
-        *index_info_list->add_indexes() = std::move(index_info);
+        index_info_list->emplace_back(std::move(index_info));
     }
 
     return unfinished_indexes;
 }
 
 proto::IndexInfo
-Server::_get_index_info(const proto::GetIndexInfoRequest& request)
+Server::_get_index_info(const uint64_t db_id,const  uint64_t index_id, const XidLsn &xid, const std::optional<uint64_t> tid)
 {
-    XidLsn xid(request.xid(), request.lsn());
-    std::optional<uint64_t> tid;
-    if (request.has_table_id()) {
-        tid = request.table_id();
-    }
-
     // check the cache
-    auto cache_entry = _find_cached_index(request.db_id(), request.index_id(), xid, tid);
+    auto cache_entry = _find_cached_index(db_id, index_id, xid, tid);
     if (cache_entry) {
         return cache_entry->first;
     }
 
     // read from disk
-    auto info = _find_index(request.db_id(), request.index_id(), xid, tid);
+    auto info = _find_index(db_id, index_id, xid, tid);
     if (!info) {
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Index not found: {}@{} - {}", request.db_id(),
-                            request.xid(), request.index_id());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Index not found: {}@{} - {}",
+                    db_id, xid.xid, index_id);
         proto::IndexInfo dummy;
         dummy.set_id(0);
         return dummy;
@@ -1223,10 +1136,8 @@ Server::_get_index_info(const proto::GetIndexInfoRequest& request)
 }
 
 bool
-Server::_set_index_state(const proto::SetIndexStateRequest& request)
+Server::_set_index_state(const uint64_t db_id, const XidLsn &xid, const uint64_t table_id, const uint64_t index_id, const sys_tbl::IndexNames::State state)
 {
-    XidLsn xid(request.xid(), request.lsn());
-
     auto info = std::make_shared<proto::GetSchemaResponse>();
     info->set_access_xid_start(0);
     info->set_access_lsn_start(0);
@@ -1234,21 +1145,21 @@ Server::_set_index_state(const proto::SetIndexStateRequest& request)
     info->set_access_lsn_end(constant::MAX_LSN);
 
     // XXX this is overly heavy-weight to retrieve a specific index
-    _read_schema_indexes(info, request.db_id(), request.table_id(), xid);
+    _read_schema_indexes(info, db_id, table_id, xid);
 
     auto index_i = std::ranges::find_if(
-        info->indexes(), [&](const auto& v) { return request.index_id() == v.id(); });
+        info->indexes(), [&](const auto& v) { return index_id == v.id(); });
 
     if (index_i == info->mutable_indexes()->end()) {
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Index not found for table {} -- {}", request.table_id(),
-                            request.index_id());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Index not found for table {} -- {}",
+                    table_id, index_id);
         return false;
     }
 
     // this copies the existing index info
     auto index_info = *index_i;
-    CHECK(index_info.table_id() == request.table_id() && index_info.id() == request.index_id());
-    index_info.set_state(request.state());
+    CHECK(index_info.table_id() == table_id && index_info.id() == index_id);
+    index_info.set_state(static_cast<uint32_t>(state));
 
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : index_info.columns()) {
@@ -1256,11 +1167,11 @@ Server::_set_index_state(const proto::SetIndexStateRequest& request)
         keys[column.idx_position()] = column.position();
     }
 
-    return _upsert_index_name(request.db_id(), index_info, xid, keys);
+    return _upsert_index_name(db_id, index_info, xid, keys);
 }
 
 bool
-Server::_upsert_index_name(uint64_t db_id,
+Server::_upsert_index_name(const uint64_t db_id,
                             const proto::IndexInfo& index_info,
                             const XidLsn& xid,
                             const std::map<uint32_t, uint32_t>& keys,
@@ -1601,7 +1512,7 @@ Server::_create_table(const proto::TableRequest& request)
         ddl["columns"].push_back(column_json);
     }
 
-    _set_schema_info(request.db_id(), request.table().id(), ns_info->id, request.table().name(),
+    _set_schema_info(request.db_id(), request.table().id(), ns_info->id, // request.table().name(),
                      columns);
 
     _set_primary_index(request.db_id(), ns_info->id, request.table().id(), request.table().name(),
@@ -1611,17 +1522,18 @@ Server::_create_table(const proto::TableRequest& request)
 }
 
 nlohmann::json
-Server::_generate_partition_updates(const proto::TableRequest& request,
-                                     const proto::ColumnHistory& history)
+Server::_generate_partition_updates(const uint64_t table_id,
+                                    const std::vector<PartitionData>& partition_data)
 {
     nlohmann::json ddl;
     std::vector<uint64_t> table_ids;
-    for (auto &partition : request.table().partition_data()) {
-        table_ids.push_back(partition.table_id());
+    table_ids.reserve(partition_data.size());
+    for (auto &partition : partition_data) {
+        table_ids.push_back(partition.table_id);
     }
 
     ddl["action"] = "resync_partitions";
-    ddl["parent_table_id"] = request.table().id();
+    ddl["parent_table_id"] = table_id;
     ddl["table_ids"] = table_ids;
 
     return ddl;
@@ -1704,7 +1616,7 @@ Server::_drop_table(const proto::DropTableRequest& request, bool is_resync)
         change.set_update_type(static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN));
         *change.mutable_column() = column;
     }
-    _set_schema_info(request.db_id(), request.table_id(), ns_info->id, request.name(), changes);
+    _set_schema_info(request.db_id(), request.table_id(), ns_info->id, changes);
 
     return ddl;
 }
@@ -1801,12 +1713,12 @@ Server::_set_xids(uint64_t db_id, const XidLsn& read_xid, uint64_t write_xid)
 }
 
 std::vector<uint64_t>
-Server::_get_modified_partition_details(uint64_t db_id,
-                                         const XidLsn &xid,
-                                         uint64_t table_id,
-                                         const google::protobuf::RepeatedPtrField<proto::PartitionData> &partition_data,
-                                         std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
-                                         bool is_attached)
+Server::_get_modified_partition_details(const uint64_t db_id,
+                                        const XidLsn &xid,
+                                        const uint64_t table_id,
+                                        const std::vector<PartitionData> &partition_data,
+                                        std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
+                                        bool is_attached)
 {
     auto table = _get_system_table(db_id, sys_tbl::TableNames::ID);
     auto schema = table->extent_schema();
@@ -1860,18 +1772,18 @@ Server::_get_modified_partition_details(uint64_t db_id,
     std::unordered_set<uint64_t> table_ids;
     for ( const auto &part_data : partition_data ) {
         // Validate the partition data parent table id to match the current table_id
-        if (part_data.parent_table_id() != table_id) {
+        if (part_data.parent_table_id != table_id) {
             LOG_WARN("Parent table id {} does not match the current table id {}",
-                part_data.parent_table_id(), table_id);
+                part_data.parent_table_id, table_id);
             continue;
         }
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Adding partition table {}:{} to table_ids", part_data.table_id(), part_data.table_name());
-        table_ids.insert(part_data.table_id());
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Adding partition table {}:{} to table_ids", part_data.table_id, part_data.table_name);
+        table_ids.insert(part_data.table_id);
         if (partition_map != nullptr) {
             partition_map->insert(std::make_pair(
-                part_data.table_id(), std::make_pair(
-                    part_data.partition_bound(),
-                    part_data.partition_key()
+                part_data.table_id, std::make_pair(
+                    part_data.partition_bound,
+                    part_data.partition_key
                 )
             ));
         }
@@ -3102,7 +3014,6 @@ void
 Server::_set_schema_info(uint64_t db_id,
                           uint64_t table_id,
                           uint64_t namespace_id,
-                          const std::string& table_name,
                           const std::vector<proto::ColumnHistory>& columns)
 {
     auto schemas_t = _get_mutable_system_table(db_id, sys_tbl::Schemas::ID);
@@ -3251,9 +3162,9 @@ Server::_write_index(const XidLsn& xid,
 
 proto::ColumnHistory
 Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
-                          const google::protobuf::RepeatedPtrField<proto::TableColumn>& new_schema,
-                          const XidLsn& xid,
-                          nlohmann::json& ddl)
+                        const std::vector<PgMsgSchemaColumn> &new_schema,
+                        const XidLsn& xid,
+                        nlohmann::json& ddl)
 {
     proto::ColumnHistory update;
     update.set_xid(xid.xid);
@@ -3265,9 +3176,9 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
         oldMap[column.position()] = &column;
     }
 
-    std::map<uint32_t, const proto::TableColumn*> newMap;
+    std::map<uint32_t, const proto::TableColumn> newMap;
     for (const auto& column : new_schema) {
-        newMap[column.position()] = &column;
+        newMap.emplace(column.position, RequestHelper::get_table_column(column));
     }
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Comparing schemas for update: old size = {}, new size = {}",
@@ -3328,22 +3239,22 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
     for (const auto& [pos, old_col] : oldMap) {
         auto it = newMap.find(pos);
         if (it != newMap.end()) {
-            const auto* new_col = it->second;
+            const auto& new_col = it->second;
             // Check for a name change
-            if (old_col->name() != new_col->name()) {
-                *update.mutable_column() = *new_col;
+            if (old_col->name() != new_col.name()) {
+                *update.mutable_column() = new_col;
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NAME_CHANGE));
                 update.set_exists(true);
                 ddl["action"] = "col_rename";
                 ddl["old_name"] = old_col->name();
-                ddl["new_name"] = new_col->name();
+                ddl["new_name"] = new_col.name();
                 return update;
             }
 
             // Check for a change in nullability (from not-null to nullable).
             // A column going from nullable to not-nullable results in NULL values being
             // populated with a default, which aren't sent via the log.
-            if (!old_col->is_nullable() && new_col->is_nullable()) {
+            if (!old_col->is_nullable() && new_col.is_nullable()) {
 #if ENABLE_SCHEMA_MUTATES
                 *update.mutable_column() = *new_col;
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
@@ -3359,7 +3270,7 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
             }
 
             // Changing from nullable to not-nullable requires a resync
-            if (old_col->is_nullable() && !new_col->is_nullable()) {
+            if (old_col->is_nullable() && !new_col.is_nullable()) {
 
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
@@ -3367,14 +3278,14 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
             }
 
             // Check for a change in the data type
-            if (old_col->pg_type() != new_col->pg_type()) {
+            if (old_col->pg_type() != new_col.pg_type()) {
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
                 return update;
             }
 
             // Check for a primary key position change
-            if (old_col->pk_position() != new_col->pk_position()) {
+            if (old_col->pk_position() != new_col.pk_position()) {
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
                 return update;

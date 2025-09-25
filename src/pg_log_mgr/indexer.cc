@@ -23,20 +23,20 @@ namespace springtail::committer {
         LOG_INFO("Indexer created: {}", worker_count);
     }
 
-    void Indexer::process_requests(uint64_t db_id, uint64_t xid, const std::list<proto::IndexProcessRequest> &index_requests)
+    void Indexer::process_requests(uint64_t db_id, uint64_t xid, const std::list<Server::IndexProcessRequest> &index_requests)
     {
         std::scoped_lock lock(_xid_ddl_counter_map_mtx);
         // Set counter for XID for ddls
         _xid_ddl_counter_map[xid].store(index_requests.size());
         for (auto const& index_request: index_requests) {
-            LOG_INFO("Process index request {} for XID: {}@{}, table_id: {}", index_request.action(), db_id, xid, index_request.index().table_id());
-            auto &action = index_request.action();
+            LOG_INFO("Process index request {} for XID: {}@{}, table_id: {}", index_request.action, db_id, xid, index_request.index.table_id());
+            auto &action = index_request.action;
             if (action == "create_index") {
                 build({db_id, xid, index_request});
             } else if (action == "drop_index") {
-                drop(db_id, index_request.index().id(), xid);
+                drop(db_id, index_request.index.id(), xid);
             } else if (action == "abort_index") {
-                abort_indexes(db_id, index_request.index().table_id(), xid);
+                abort_indexes(db_id, index_request.index.table_id(), xid);
             } else {
                 CHECK(false);
             }
@@ -71,21 +71,21 @@ namespace springtail::committer {
         auto unfinished_indexes_info = sys_tbl_mgr::Server::get_instance()->get_unfinished_indexes_info(db_id);
 
         // Get each such XIDs and their indexes
-        for (const auto& [index_xid, idx_list]: unfinished_indexes_info.xid_index_map()) {
-            std::list<proto::IndexProcessRequest> index_requests;
-            for (const auto& index_info: idx_list.indexes()) {
+        for (const auto& [index_xid, idx_list]: unfinished_indexes_info) {
+            std::list<Server::IndexProcessRequest> index_requests;
+            for (const auto& index_info: idx_list) {
                 // Build indexer-known ddl out of the indexes - to be created/dropped
                 if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
                         == sys_tbl::IndexNames::State::NOT_READY) {
-                    proto::IndexProcessRequest create_idx_request;
-                    create_idx_request.set_action("create_index");
-                    *create_idx_request.mutable_index() = std::move(index_info);
+                    Server::IndexProcessRequest create_idx_request;
+                    create_idx_request.action = "create_index";
+                    create_idx_request.index = std::move(index_info);
                     index_requests.push_back(std::move(create_idx_request));
                 } else if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
                         == sys_tbl::IndexNames::State::BEING_DELETED) {
-                    proto::IndexProcessRequest drop_idx_request;
-                    drop_idx_request.set_action("drop_index");
-                    *drop_idx_request.mutable_index() = std::move(index_info);
+                    Server::IndexProcessRequest drop_idx_request;
+                    drop_idx_request.action = "drop_index";
+                    drop_idx_request.index = std::move(index_info);
                     index_requests.push_back(std::move(drop_idx_request));
                 } else {
                     // We shouldnt hit this point as we picked only the unfinished indexes
@@ -126,11 +126,11 @@ namespace springtail::committer {
     void Indexer::build(IndexParams idx)
     {
         std::scoped_lock g(_m, _table_idx_map_mtx);
-        Key key(idx._db_id, idx._index_request.index().id());
+        Key key(idx._db_id, idx._index_request.index.id());
         // I don't think PG will issue two creates with the same index ID.
         CHECK(_work_set.find(key) == _work_set.end());
         auto server = sys_tbl_mgr::Server::get_instance();
-        proto::IndexInfo info = server->get_index_info(idx._db_id, idx._index_request.index().id(), {idx._xid, constant::MAX_LSN});
+        proto::IndexInfo info = server->get_index_info(idx._db_id, idx._index_request.index.id(), {idx._xid, constant::MAX_LSN});
         if (info.id() != 0 && static_cast<sys_tbl::IndexNames::State>(info.state()) == sys_tbl::IndexNames::State::READY) {
             // Decrement the counter as we are not going to process the create request
             // as the index already exists
@@ -141,7 +141,7 @@ namespace springtail::committer {
             // Insert into table-indices map
             _table_idx_map.try_emplace(idx._db_id)
                 .first->second
-                .try_emplace(idx._index_request.index().table_id())
+                .try_emplace(idx._index_request.index.table_id())
                 .first->second.push_back(key);
             _work_set[key] = std::move(idx);
             _queue.push(key);
@@ -280,18 +280,18 @@ namespace springtail::committer {
     {
         constexpr int DROP_CHECK_PERIOD = 1000;
 
-        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Build index: {}:{} - {}", key.first, key.second, idx._index_request.index().id());
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Build index: {}:{} - {}", key.first, key.second, idx._index_request.index.id());
 
         auto [db_id, index_id] = key;
-        auto tid = static_cast<uint64_t>(idx._index_request.index().table_id());
+        auto tid = static_cast<uint64_t>(idx._index_request.index.table_id());
 
-        CHECK_EQ(idx._index_request.action(), "create_index");
+        CHECK_EQ(idx._index_request.action, "create_index");
 
         auto server = sys_tbl_mgr::Server::get_instance();
         server->invalidate_table(db_id, tid, XidLsn{idx._xid});
 
         // index column positions
-        auto idx_cols = _get_index_cols(idx._index_request.index());
+        auto idx_cols = _get_index_cols(idx._index_request.index);
 
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
@@ -377,7 +377,7 @@ namespace springtail::committer {
     Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid)
     {
         auto [db_id, index_id] = key;
-        auto tid = idx._index_request.index().table_id();
+        auto tid = idx._index_request.index.table_id();
         XidLsn xid{end_xid, constant::INDEX_COMMIT_LSN};
 
         IndexParams work_item;
@@ -522,7 +522,7 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index reconciliation in progress: {}:{}", db_id, index_id);
 
             // index column positions
-            auto idx_cols = _get_index_cols(idx_state._idx._index_request.index());
+            auto idx_cols = _get_index_cols(idx_state._idx._index_request.index);
 
             // Get the next_extent from disk using the stats last offset
             auto table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, idx_state._idx._xid);

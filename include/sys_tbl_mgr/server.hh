@@ -17,143 +17,150 @@ class Server final : public Singleton<Server>
     friend class Service;
 public:
 
+    struct IndexProcessRequest {
+        std::string action;
+        proto::IndexInfo index;
+    };
+
+    using IndexesInfo = std::map<uint64_t, std::vector<proto::IndexInfo>>;
+
     /**
      * @brief Create table API cal
      */
     std::string
-    create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
+    create_table(const uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
     /**
      * @brief Alter table API cal
      */
     std::string
-    alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
+    alter_table(const uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
     /**
      * @brief Drop table API cal
      */
     std::string
-    drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
+    drop_table(const uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
     /**
      * @brief Create namespace API cal
      */
     std::string
-    create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
+    create_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
     /**
      * @brief Alter namespace API cal
      */
     std::string
-    alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
+    alter_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
     /**
      * @brief Drop namespace API cal
      */
     std::string
-    drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
+    drop_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
     /**
      * @brief Create user type API cal
      */
     std::string
-    create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
+    create_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
     /**
      * @brief Alter user type API cal
      */
     std::string
-    alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
+    alter_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
     /**
      * @brief Drop user type API cal
      */
     std::string
-    drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
+    drop_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
     /**
      * @brief Attach partition API cal
      */
     std::string
-    attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg);
+    attach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg);
 
     /**
      * @brief Detach partition API cal
      */
     std::string
-    detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg);
+    detach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg);
 
     /**
      * @brief Create index API cal
      */
-    proto::IndexProcessRequest
-    create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state);
+    IndexProcessRequest
+    create_index(const uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, const sys_tbl::IndexNames::State state);
 
     /**
      * @brief Set index state API cal
      */
     void
-    set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
+    set_index_state(const uint64_t db_id, const XidLsn &xid, const uint64_t table_id,const  uint64_t index_id, const sys_tbl::IndexNames::State state);
 
     /**
      * @brief Get index info API cal
      */
     proto::IndexInfo
-    get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid = std::nullopt);
+    get_index_info(const uint64_t db_id, const uint64_t index_id, const XidLsn &xid, const std::optional<uint64_t> tid = std::nullopt);
 
     /**
      * @brief Get unfinished indexes info API cal
      */
-    proto::IndexesInfo
-    get_unfinished_indexes_info(uint64_t db_id);
+    IndexesInfo
+    get_unfinished_indexes_info(const uint64_t db_id);
 
     /**
      * @brief Drop index API cal
      */
-    proto::IndexProcessRequest
-    drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg);
+    IndexProcessRequest
+    drop_index(const uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg);
 
     /**
      * @brief Update roots API cal
      */
     void
-    update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata);
+    update_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t xid, const TableMetadata &metadata);
 
     /**
      * @brief Finalize API cal
      */
     void
-    finalize(uint64_t db_id, uint64_t xid);
+    finalize(const uint64_t db_id, const uint64_t xid);
 
     /**
      * @brief Revert API cal
      */
     void
-    revert(uint64_t db_id, uint64_t xid);
+    revert(const uint64_t db_id, const uint64_t xid);
 
     /**
      * @brief Get roots API cal
      */
     TableMetadataPtr
-    get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid);
+    get_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t xid);
 
     /**
      * @brief Get schema API cal
      */
     std::shared_ptr<const SchemaMetadata>
-    get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+    get_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid);
 
     /**
      * @brief Get target schema API cal
      */
     SchemaMetadataPtr
-    get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+    get_target_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
     /**
      * @brief Table exists API cal
      */
     bool
-    exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+    exists(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid);
 
     /**
      * @brief Swap and sync table  API cal
@@ -168,17 +175,17 @@ public:
      * @brief Get user type API cal
      */
     std::shared_ptr<UserType>
-    get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid);
+    get_usertype(const uint64_t db_id, const uint64_t type_id, const XidLsn &xid);
 
     /**
      * Invalidates the schema entry for a given table from a given XID/LSN
      */
-    void invalidate_table(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+    void invalidate_table(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid);
 
     /**
      * Invalidates all of the tables of a db in the schema cache.
      */
-    void invalidate_db(uint64_t db_id, const XidLsn &xid);
+    void invalidate_db(const uint64_t db_id, const XidLsn &xid);
 
 private:
     Server();
@@ -319,15 +326,14 @@ private:
      * tables.  We don't finalize the system tables so they may remain dirty in the
      * StorageCache.  Nothing from the cache is not evicted until _clear_schema_info() is
      * called.
+     * @param db_id The database that the schema is for.
      * @param table_id The table that the schema is for.
-     * @param table_name The table name.
-     * @param schema The table schema.
+     * @param namespace_id The namespace that the schema is.
      * @param columns The set of column data to record.
      */
     void _set_schema_info(uint64_t db_id,
                           uint64_t table_id,
                           uint64_t namespace_id,
-                          const std::string& table_name,
                           const std::vector<proto::ColumnHistory>& columns);
 
     /**
@@ -435,13 +441,14 @@ private:
 
     /**
      * Helper function to generate the history events for the child partition tables.
-     * @param request The table request for which we are generating the history events.
-     * @param history The history event to be generated.
+     * @param table_id The table id for which we generate partition data
+     * @param partition_data The information regarding table partition
      *
      * @return A vector of ColumnHistory objects containing the history events for the child partition tables.
      */
-    nlohmann::json _generate_partition_updates(const proto::TableRequest& request,
-                                               const proto::ColumnHistory& history);
+    nlohmann::json
+    _generate_partition_updates(const uint64_t table_id,
+                                const std::vector<PartitionData>& partition_data);
 
     /**
      * Helper function to extract a change entry for a schema by comparing the old and new
@@ -453,7 +460,7 @@ private:
      */
     proto::ColumnHistory _generate_update(
         const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
-        const google::protobuf::RepeatedPtrField<proto::TableColumn>& new_schema,
+        const std::vector<PgMsgSchemaColumn> &new_schema,
         const XidLsn& xid,
         nlohmann::json& ddl);
 
@@ -611,7 +618,7 @@ private:
 
     /** Performs an set_index_state() assuming that the correct locks are already held.
      */
-    bool _set_index_state(const proto::SetIndexStateRequest& request);
+    bool _set_index_state(const uint64_t db_id, const XidLsn &xid, const uint64_t table_id, const uint64_t index_id, const sys_tbl::IndexNames::State state);
 
     /**
      * @brief Upserts index name entry with the give index info
@@ -622,13 +629,12 @@ private:
      * @param is_primary_index Indicates if its primary or secondary index
      * @return bool indicating the upsert is successful or not
      */
-    bool _upsert_index_name(uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
+    bool _upsert_index_name(const uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
             const std::map<uint32_t, uint32_t>& keys, bool is_primary_index=false);
 
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
-    proto::IndexInfo _get_index_info(const proto::GetIndexInfoRequest& request);
-
+    proto::IndexInfo _get_index_info(const uint64_t db_id, const  uint64_t index_id, const XidLsn &xid, const std::optional<uint64_t> tid);
 
     /**
      * @brief Get the list of indexes which are to be built/deleted for the db,
@@ -637,7 +643,7 @@ private:
      * @param db_id Database ID
      * @return IndexesInfo
      */
-    proto::IndexesInfo _get_unfinished_indexes_info(uint64_t db_id);
+    IndexesInfo _get_unfinished_indexes_info(uint64_t db_id);
 
     /** This doesn't return information about index columns
      */
@@ -690,10 +696,10 @@ private:
      * @param is_attached Whether the partition is being attached or detached.
      * @return std::vector<uint64_t> The modified partition details.
      */
-    std::vector<uint64_t> _get_modified_partition_details(uint64_t db_id,
+    std::vector<uint64_t> _get_modified_partition_details(const uint64_t db_id,
                                 const XidLsn &xid,
-                                uint64_t table_id,
-                                const google::protobuf::RepeatedPtrField<proto::PartitionData> &partition_data,
+                                const uint64_t table_id,
+                                const std::vector<PartitionData> &partition_data,
                                 std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
                                 bool is_attached);
 
