@@ -80,4 +80,15 @@ namespace springtail {
         }
     };
 
+    inline uint64_t time_point_to_numeric(const std::chrono::steady_clock::time_point& tp)
+    {
+        using namespace std::chrono;
+        return duration_cast<nanoseconds>(tp.time_since_epoch()).count();
+    }
+
+    inline std::chrono::steady_clock::time_point numeric_to_time_point(uint64_t ns)
+    {
+        using namespace std::chrono;
+        return steady_clock::time_point{nanoseconds{ns}};
+    }
 }
