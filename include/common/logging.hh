@@ -74,6 +74,7 @@ namespace springtail {
         LOG_LEVEL_DEBUG4 = 4  // lowest level, least priority
     };
 
+
     namespace logging {
         /**
          * @brief Logger singleton class

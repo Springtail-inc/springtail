@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <vector>
 #include <memory>
 
@@ -765,11 +766,11 @@ namespace springtail {
             Int64 Commit timestamp of the transaction. Number of microseconds since Y2K
             Int32 Xid of the transaction.
         */
-
         PgMsgBegin begin;
         begin.xact_lsn = _recvint64();
         begin.commit_ts = _recvint64();
         begin.xid = _recvint32();
+        begin.local_begin_ts = std::chrono::steady_clock::now();
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::BEGIN);
         msg->msg.emplace<PgMsgBegin>(begin);
@@ -793,6 +794,11 @@ namespace springtail {
             Int64 The end LSN of the transaction.
             Int64 Commit timestamp of the transaction. Number of microseconds since Y2K
         */
+        _metrics._commit_txn_freq.event();
+        double f = _metrics._commit_txn_freq.frequency();
+        if (f > std::numeric_limits<double>::min()) {
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_COMMIT_TXN_FREQ, f);
+        }
 
         PgMsgCommit commit;
 
@@ -802,6 +808,7 @@ namespace springtail {
         commit.commit_lsn = _recvint64();
         commit.xact_lsn = _recvint64();
         commit.commit_ts = _recvint64();
+        commit.local_commit_ts = std::chrono::steady_clock::now();
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COMMIT);
         msg->msg.emplace<PgMsgCommit>(commit);
@@ -825,11 +832,11 @@ namespace springtail {
             Int32       Xid of the transaction.
             Int8_t      A value of 1 indicates this is the first stream segment for this XID, 0 for any other stream segment.
         */
-
         PgMsgStreamStart start;
 
         start.xid = _recvint32();
         start.first = (_recvint8() == 1);
+        start.local_ts = std::chrono::steady_clock::now();
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_START);
         msg->msg.emplace<PgMsgStreamStart>(start);
@@ -876,6 +883,12 @@ namespace springtail {
             Int64       Commit timestamp of the transaction. The value is in number of
                         microseconds since PostgreSQL epoch (2000-01-01).
         */
+        _metrics._stream_commit_freq.event();
+        double f = _metrics._stream_commit_freq.frequency();
+        if (f > std::numeric_limits<double>::min()) {
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_STREAM_COMMIT_FREQ, f);
+        }
+
         PgMsgStreamCommit commit;
 
         commit.xid = _recvint32();
@@ -883,6 +896,7 @@ namespace springtail {
         commit.commit_lsn = _recvint64();
         commit.xact_lsn = _recvint64();
         commit.commit_ts = _recvint64();
+        commit.local_commit_ts = std::chrono::steady_clock::now();
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_COMMIT);
         msg->msg.emplace<PgMsgStreamCommit>(commit);
@@ -912,6 +926,12 @@ namespace springtail {
                         microseconds since PostgreSQL epoch (2000-01-01). This field is available
                         since protocol version 4.
         */
+        _metrics._stream_abort_freq.event();
+        double f = _metrics._stream_abort_freq.frequency();
+        if (f > std::numeric_limits<double>::min()) {
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_STREAM_ABORT_FREQ, f);
+        }
+
         PgMsgStreamAbort abort;
 
         abort.xid = _recvint32();
@@ -920,6 +940,7 @@ namespace springtail {
             abort.abort_lsn = _recvint64();
             abort.abort_ts = _recvint64();
         }
+        abort.local_abort_ts = std::chrono::steady_clock::now();
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_ABORT);
         msg->msg.emplace<PgMsgStreamAbort>(abort);

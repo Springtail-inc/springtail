@@ -14,7 +14,6 @@ namespace springtail {
      */
     class WriteCacheFuncImpl {
     public:
-
         /** Delete constructor */
         WriteCacheFuncImpl() = delete;
 
@@ -54,10 +53,10 @@ namespace springtail {
          * @param xid Springtail XID
          * @param pg_xid Postgres XIDs
          */
-        static void commit(uint64_t db_id, uint64_t xid, const std::vector<uint64_t>& pg_xids, PostgresTimestamp commit_ts)
+        static void commit(uint64_t db_id, uint64_t xid, const std::vector<uint64_t>& pg_xids, WriteCacheTableSet::Metadata md)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            index->commit(pg_xids, xid, commit_ts);
+            index->commit(pg_xids, xid, std::move(md));
         }
 
         /**
@@ -65,12 +64,12 @@ namespace springtail {
          * @param db_id database ID
          * @param xid Springtail XID
          * @param pg_xid Postgres XIDs
-         * @param commit_ts Postgres commit ts
+         * @param md Metadata
          */
-        static void commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid, PostgresTimestamp commit_ts)
+        static void commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid, WriteCacheTableSet::Metadata md)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            index->commit(pg_xid, xid, commit_ts);
+            index->commit(pg_xid, xid, std::move(md));
         }
 
         /**
@@ -127,11 +126,11 @@ namespace springtail {
          * @return vector of extents
          */
         static std::vector<WriteCacheIndexExtentPtr>
-        get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
+        get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, WriteCacheTableSet::Metadata &md)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             std::vector<WriteCacheIndexExtentPtr> idx_extents =
-                index->get_extents(tid, xid, count, cursor, commit_ts);
+                index->get_extents(tid, xid, count, cursor, md);
 
             return idx_extents;
         }
