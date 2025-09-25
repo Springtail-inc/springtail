@@ -117,7 +117,7 @@ namespace springtail::sys_tbl_mgr {
          * @return true if the element has been actually inserted 
          *         and false if it was already in the cache.
          */
-        bool insert(DbId db, TableId tid, Xid xid, const std::string& msg, bool drop_table)
+        bool insert(DbId db, TableId tid, Xid xid, std::string_view msg, bool drop_table)
         {
             Key k{db, tid};
 
@@ -158,7 +158,7 @@ namespace springtail::sys_tbl_mgr {
 
                     item.msg.insert(item.msg.end(), msg.data(), msg.data() + msg.size());
 
-                    if (!it->second.empty() && (--it->second.end())->xid < xid) {
+                    if (!it->second.empty() && it->second.back().xid < xid) {
                         it->second.push_back(item);
                     } else {
                         it->second.push_back(item);

@@ -115,7 +115,7 @@ public:
      *         and false if it was already in the cache.
      */
     bool
-    insert(DbId db, TableId tid, Xid xid, const std::string& msg)
+    insert(DbId db, TableId tid, Xid xid, std::string_view msg)
     {
         check_free_space_locked();
         return _msg_cache.insert(db, tid, xid, msg, false);
