@@ -143,3 +143,4 @@ Service::GetUserType(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
+} // springtail::sys_tbl_mgr
