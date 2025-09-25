@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -717,7 +718,7 @@ namespace springtail::pg_log_mgr {
                                 return;
                             }
                         }
-                        post_recovery_queue.emplace_back(PgLogQueueEntry(start_offset, end_offset, file_path));
+                        post_recovery_queue.emplace_back(start_offset, end_offset, file_path);
                     }
                 )) {
                     done = true;
@@ -729,6 +730,7 @@ namespace springtail::pg_log_mgr {
                 // copy queue from
                 LOG_INFO("Moving data to _logger_queue, recovery is done");
                 _logger_queue.push(post_recovery_queue);
+                open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
             }
         }
 
@@ -743,7 +745,9 @@ namespace springtail::pg_log_mgr {
                     [this](uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &file_path) {
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Queueing log entry: start_offset={}, end_offset={}, file_path={}",
                                   start_offset, end_offset, file_path);
+
                         _logger_queue.push(start_offset, end_offset, file_path);
+                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
                     }
                 )) {
                     break;
@@ -805,7 +809,7 @@ namespace springtail::pg_log_mgr {
 
                 _internal_state.set(STATE_RUNNING);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Sync to complete");
-
+                
                 continue;
             }
 
@@ -820,8 +824,7 @@ namespace springtail::pg_log_mgr {
                 last_path = log_entry->path;
             }
 
-            _pg_log_reader->process_log(log_entry->path, last_timestamp,
-                                        log_entry->start_offset, log_entry->end_offset);
+            _pg_log_reader->process_log(log_entry->path, last_timestamp, log_entry);
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Exiting log reader thread");
 

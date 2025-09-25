@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <common/timestamp.hh>
 
 #include <pg_repl/pg_msg_stream.hh>
@@ -8,13 +9,16 @@
 #include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
+#include <write_cache/write_cache_table_set.hh>
 
 #include <storage/field.hh>
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
+#include <pg_log_mgr/pg_log_queue.hh>
 
 namespace springtail::pg_log_mgr {
+
     /**
      * @brief Log reader class.  Reads logs written by PgLogWriter.  Collects the various table
      * mutations into batches which are passed to the WriteCache to make them available to the
@@ -54,14 +58,12 @@ namespace springtail::pg_log_mgr {
          * @brief Process next set of messages from log file
          * @param path file path
          * @param timestamp log file timestamp
-         * @param start_offset starting file offset
-         * @param end_offset ending file offset (-1 = read until eos)
+         * @param entry log entry
          */
         void process_log(const std::filesystem::path &path,
                          uint64_t timestamp,
-                         uint64_t start_offset,
-                         uint64_t end_offset);
-
+                         const PgLogQueueEntryPtr& entry);
+                         
         /**
          * Set the starting point for XID assignment.
          */
@@ -166,9 +168,9 @@ namespace springtail::pg_log_mgr {
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
              * provided xid.
              * @param xid springtail xid
-             * @param commit_ts Postgres commit ts
+             * @param md Metadata 
              */
-            void commit(uint64_t xid, PostgresTimestamp commit_ts);
+            void commit(uint64_t xid, WriteCacheTableSet::Metadata md);
 
             /**
              * Abort the entire transaction.  Drop all related batches from the WriteCache.
@@ -216,6 +218,7 @@ namespace springtail::pg_log_mgr {
 
                 MutableFieldPtr op_f; ///< The field accessor for the mutation's operation type.
                 MutableFieldPtr lsn_f; ///< The field accessor for the mutation's LSN.
+
                 MutableFieldArrayPtr fields; ///< The underlying fields of the schema that match the columns from the table schema.
                 MutableFieldArrayPtr pkey_fields; ///< The underlying fields of the schema that match the pkey columns from the table schema.
 
@@ -224,8 +227,8 @@ namespace springtail::pg_log_mgr {
 
                 TableEntry() = default;
                 explicit TableEntry(ExtentSchemaPtr table_schema)
-                    : table_schema(table_schema)
-                { }
+                    : table_schema(table_schema) 
+                {}
 
                 /**
                  * Updates the schema and related fields from the table_schema.

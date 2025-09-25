@@ -19,7 +19,10 @@ namespace springtail {
 
         WriteCacheIndexExtent(uint64_t xid, uint64_t xid_seq, const ExtentPtr &data)
             : xid(xid), xid_seq(xid_seq), data(data)
-        { }
+        {}
+        WriteCacheIndexExtent(const WriteCacheIndexExtent&) = delete;
+        WriteCacheIndexExtent(WriteCacheIndexExtent&&) = delete;
+        const WriteCacheIndexExtent& operator=(const WriteCacheIndexExtent&) = delete;
 
         std::string dump() {
             return fmt::format("XID:{} XID_SEQ:{}", xid, xid_seq);
