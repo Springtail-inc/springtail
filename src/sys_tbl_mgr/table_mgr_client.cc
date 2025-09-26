@@ -27,7 +27,7 @@ namespace springtail {
 
         return std::make_shared<UserClientTable>(db_id, table_id, xid, _table_base,
                                                  schema->get_sort_keys(), secondary_indexes,
-                                                 tbl_meta, schema);
+                                                 *tbl_meta, schema);
     }
 
     std::map<uint32_t, SchemaColumn>

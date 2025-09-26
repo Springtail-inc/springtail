@@ -98,12 +98,8 @@ SystemTableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid)
     std::vector<Index> secondary_keys;
 
     // construct generic table metadata for the system tables
-    TableMetadata tbl_meta;
+    TableMetadata tbl_meta{};
     tbl_meta.snapshot_xid = 1;
-
-    std::shared_ptr<TableMetadata> tbl_meta_ptr(&tbl_meta, [](TableMetadata*) {
-        // no-op deleter: do nothing
-    });
 
     // get the table's schema
     auto schema = _get_extent_schema(table_id);
@@ -113,43 +109,43 @@ SystemTableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid)
         secondary_keys = _get_secondary_keys<sys_tbl::TableNames>();
         return std::make_shared<SystemTable>(db_id, table_id, xid, _table_base,
                                              sys_tbl::TableNames::Primary::KEY,
-                                             secondary_keys, tbl_meta_ptr, schema);
+                                             secondary_keys, tbl_meta, schema);
     }
     case sys_tbl::TableRoots::ID: {
         return std::make_shared<SystemTable>(db_id, table_id, xid, _table_base,
                                              sys_tbl::TableRoots::Primary::KEY,
-                                             secondary_keys, tbl_meta_ptr, schema);
+                                             secondary_keys, tbl_meta, schema);
     }
     case sys_tbl::Indexes::ID: {
         return std::make_shared<SystemTable>(db_id, table_id, xid, _table_base,
                                              sys_tbl::Indexes::Primary::KEY,
-                                             secondary_keys, tbl_meta_ptr, schema);
+                                             secondary_keys, tbl_meta, schema);
     }
     case sys_tbl::Schemas::ID: {
         return std::make_shared<SystemTable>(db_id, table_id, xid, _table_base,
                                              sys_tbl::Schemas::Primary::KEY,
-                                             secondary_keys, tbl_meta_ptr, schema);
+                                             secondary_keys, tbl_meta, schema);
     }
     case sys_tbl::TableStats::ID: {
         return std::make_shared<SystemTable>(db_id, table_id, xid, _table_base,
                                              sys_tbl::TableStats::Primary::KEY,
-                                             secondary_keys, tbl_meta_ptr, schema);
+                                             secondary_keys, tbl_meta, schema);
     }
     case sys_tbl::IndexNames::ID: {
         return std::make_shared<SystemTable>(db_id, table_id, xid, _table_base,
                                              sys_tbl::IndexNames::Primary::KEY,
-                                             secondary_keys, tbl_meta_ptr, schema);
+                                             secondary_keys, tbl_meta, schema);
     }
     case sys_tbl::NamespaceNames::ID: {
         secondary_keys = _get_secondary_keys<sys_tbl::NamespaceNames>();
         return std::make_shared<SystemTable>(db_id, table_id, xid, _table_base,
                                              sys_tbl::NamespaceNames::Primary::KEY,
-                                             secondary_keys, tbl_meta_ptr, schema);
+                                             secondary_keys, tbl_meta, schema);
     }
     case sys_tbl::UserTypes::ID: {
         return std::make_shared<SystemTable>(db_id, table_id, xid, _table_base,
                                              sys_tbl::UserTypes::Primary::KEY,
-                                             secondary_keys, tbl_meta_ptr, schema);
+                                             secondary_keys, tbl_meta, schema);
     }
     default:
         CHECK(0);
@@ -190,12 +186,8 @@ SystemTableMgr::get_mutable_system_table(uint64_t db_id, uint64_t table_id,
     // initialize the system tables using the look-aside root files
     std::vector<Index> secondary_keys;
 
-    TableMetadata tbl_meta;
+    TableMetadata tbl_meta{};
     tbl_meta.snapshot_xid = 1;
-
-    std::shared_ptr<TableMetadata> tbl_meta_ptr(&tbl_meta, [](TableMetadata*) {
-        // no-op deleter: do nothing
-    });
 
     auto schema = _get_extent_schema(table_id);
 
@@ -208,43 +200,43 @@ SystemTableMgr::get_mutable_system_table(uint64_t db_id, uint64_t table_id,
 
         return std::make_shared<SystemMutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                     sys_tbl::TableNames::Primary::KEY, secondary_keys,
-                                                    tbl_meta_ptr, schema);
+                                                    tbl_meta, schema);
     }
     case sys_tbl::TableRoots::ID: {
         return std::make_shared<SystemMutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                     sys_tbl::TableRoots::Primary::KEY, secondary_keys,
-                                                    tbl_meta_ptr, schema);
+                                                    tbl_meta, schema);
     }
     case sys_tbl::Indexes::ID: {
         return std::make_shared<SystemMutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                     sys_tbl::Indexes::Primary::KEY, secondary_keys,
-                                                    tbl_meta_ptr, schema);
+                                                    tbl_meta, schema);
     }
     case sys_tbl::Schemas::ID: {
         return std::make_shared<SystemMutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                     sys_tbl::Schemas::Primary::KEY, secondary_keys,
-                                                    tbl_meta_ptr, schema);
+                                                    tbl_meta, schema);
     }
     case sys_tbl::TableStats::ID: {
         return std::make_shared<SystemMutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                     sys_tbl::TableStats::Primary::KEY, secondary_keys,
-                                                    tbl_meta_ptr, schema);
+                                                    tbl_meta, schema);
     }
     case sys_tbl::IndexNames::ID: {
         return std::make_shared<SystemMutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                     sys_tbl::IndexNames::Primary::KEY, secondary_keys,
-                                                    tbl_meta_ptr, schema);
+                                                    tbl_meta, schema);
     }
     case sys_tbl::NamespaceNames::ID: {
         secondary_keys = _get_secondary_keys<sys_tbl::NamespaceNames>();
         return std::make_shared<SystemMutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                     sys_tbl::NamespaceNames::Primary::KEY, secondary_keys,
-                                                    tbl_meta_ptr, schema);
+                                                    tbl_meta, schema);
     }
     case sys_tbl::UserTypes::ID: {
         return std::make_shared<SystemMutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                     sys_tbl::UserTypes::Primary::KEY, secondary_keys,
-                                                    tbl_meta_ptr, schema);
+                                                    tbl_meta, schema);
     }
     default:
         LOG_ERROR("Unable to find the requested system table: {}", table_id);
