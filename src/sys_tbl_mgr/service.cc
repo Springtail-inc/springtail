@@ -214,12 +214,12 @@ Service::_upsert_index_name(uint64_t db_id,
                             const proto::IndexInfo& index_info,
                             const XidLsn& xid,
                             const std::map<uint32_t, uint32_t>& keys,
-                            bool is_primary_index)
+                            Service::IndexType index_type)
 {
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
 
     auto is_unique = index_info.is_unique();
-    if (is_primary_index) {
+    if (index_type == Service::IndexType::PRIMARY) {
         is_unique = true;
     }
 
@@ -231,10 +231,12 @@ Service::_upsert_index_name(uint64_t db_id,
     index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     // update columns with the state XID
-    if (is_primary_index) {
+    if (index_type == Service::IndexType::PRIMARY) {
         if(!keys.empty()) {
             _write_index(xid, db_id, index_info.table_id(), constant::INDEX_PRIMARY, keys);
         }
+    }  else if (index_type == Service::IndexType::LOOKASIDE) {
+        _write_index(xid, db_id, index_info.table_id(), constant::INDEX_LOOK_ASIDE, keys);
     } else {
         _write_index(xid, db_id, index_info.table_id(), index_info.id(), keys);
     }
@@ -910,7 +912,7 @@ Service::_drop_table(const proto::DropTableRequest& request, bool is_resync)
     _read_schema_indexes(index_info, request.db_id(), request.table_id(), xid);
 
     for (auto const& idx : index_info->indexes()) {
-        if (is_resync || idx.id() == constant::INDEX_PRIMARY) {
+        if (is_resync || idx.id() == constant::INDEX_PRIMARY || idx.id() == constant::INDEX_LOOK_ASIDE) {
             // If resync, all the indexes can be marked as dropped as new ones will be created while copying table
             _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::DELETED);
         } else {
@@ -3139,7 +3141,40 @@ Service::_set_primary_index(uint64_t db_id,
         primary_keys[c.pk_position()] = c.position();
     }
 
-    _upsert_index_name(db_id, index, xid, primary_keys, true);
+    _upsert_index_name(db_id, index, xid, primary_keys, IndexType::PRIMARY);
+
+    // Set also lookaside index for the table
+    _set_lookaside_index(db_id, namespace_id, table_id, namespace_name, table_name, xid);
+}
+
+void
+Service::_set_lookaside_index(uint64_t db_id,
+                           uint64_t namespace_id,
+                           uint64_t table_id,
+                           const std::string& namespace_name,
+                           const std::string& table_name,
+                           const XidLsn& xid)
+{
+    // pk_position, position
+    std::map<uint32_t, uint32_t> look_aside_keys;
+
+    proto::IndexInfo index;
+
+    index.set_id(constant::INDEX_LOOK_ASIDE);
+    index.set_name(table_name + ".lookaside_key");
+    index.set_is_unique(true);
+    index.set_namespace_name(namespace_name);
+    index.set_namespace_id(namespace_id);
+    index.set_table_id(table_id);
+    index.set_state(static_cast<uint8_t>(sys_tbl::IndexNames::State::READY));
+
+    proto::IndexColumn col;
+    col.set_position(0);
+    col.set_idx_position(0);
+    *index.add_columns() = col;
+    look_aside_keys[0] = 0;
+
+    _upsert_index_name(db_id, index, xid, look_aside_keys, IndexType::LOOKASIDE);
 }
 
 void

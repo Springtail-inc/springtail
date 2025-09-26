@@ -221,6 +221,13 @@ private:
     using TableCacheRecordPtr = std::shared_ptr<TableCacheRecord>;
 
     /**
+     * @brief Enum for different types of indexes
+     */
+    enum IndexType {
+        PRIMARY, SECONDARY, LOOKASIDE
+    };
+
+    /**
      * Retrieve the TableCacheRecord either from the cache or from the system tables if not
      * available.
      * @param db_id The ID of the database.
@@ -326,6 +333,20 @@ private:
                             const std::string& table_name,
                             const XidLsn& xid);
 
+    /**
+     * Set look-aside index information according to the current state
+     * of the table.
+     * @param db_id The database ID.
+     * @param table_id The table that the schema is for.
+     * @param schema The table schema.
+     * @param table_name The table name.
+     */
+    void _set_lookaside_index(uint64_t db_id,
+                              uint64_t namespace_id,
+                              uint64_t table_id,
+                              const std::string& schema,
+                              const std::string& table_name,
+                              const XidLsn& xid);
     /**
      * Clears the cache of schema data.  Called by finalize() once the system tables are
      * all committed to disk.
@@ -600,11 +621,11 @@ private:
      * @param index_info       proto::IndexInfo containing the index details
      * @param xid              XidLsn entry at which index is mutated
      * @param keys             Index keys
-     * @param is_primary_index Indicates if its primary or secondary index
+     * @param index_type       Identifies the type of the index (ENUM: IndexType)
      * @return bool indicating the upsert is successful or not
      */
     bool _upsert_index_name(uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
-            const std::map<uint32_t, uint32_t>& keys, bool is_primary_index=false);
+            const std::map<uint32_t, uint32_t>& keys, IndexType index_type=IndexType::SECONDARY);
 
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */

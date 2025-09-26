@@ -51,12 +51,12 @@ namespace indexer_helpers {
             uint64_t                        extent_id,
             const RowPtrT                  &rows,        // pointer-like, supports *rows
             const MutableBTreePtr          &root,
-            const std::vector<uint32_t>    &idx_cols,
+            const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
         /* 1. Column metadata is the same for every row - fetch it once. */
-        const auto column_names = schema->get_column_names(idx_cols);
-        const auto key_fields   = schema->get_fields(column_names);
+        //const auto column_names = schema->get_column_names(idx_cols);
+        const auto key_fields   = schema->get_fields(idx_cols);
 
         /* 2. Build the (extent_id , row_id) value tuple incrementally. */
         auto value_fields   = std::make_shared<FieldArray>(2);
@@ -85,7 +85,7 @@ namespace indexer_helpers {
     void populate_index_for_page(uint64_t extent_id,
             const StorageCache::SafePagePtr &page,
             const MutableBTreePtr          &root,
-            const std::vector<uint32_t>    &idx_cols,
+            const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
         _update_secondary_index<IndexOperation::Insert>(extent_id, page, root,
@@ -95,7 +95,7 @@ namespace indexer_helpers {
     void invalidate_index_for_page(uint64_t extent_id,
             const StorageCache::SafePagePtr &page,
             const MutableBTreePtr          &root,
-            const std::vector<uint32_t>    &idx_cols,
+            const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
         _update_secondary_index<IndexOperation::Remove>(extent_id, page, root,
@@ -104,20 +104,20 @@ namespace indexer_helpers {
 
     /* -----------------------------  EXTENT  ---------------------------------- */
     void populate_index_for_extent(uint64_t extent_id,
-            const std::shared_ptr<Extent> &extent,
-            const MutableBTreePtr         &root,
-            const std::vector<uint32_t>   &idx_cols,
-            const ExtentSchemaPtr         &schema)
+            const std::shared_ptr<Extent>  &extent,
+            const MutableBTreePtr          &root,
+            const std::vector<std::string> &idx_cols,
+            const ExtentSchemaPtr          &schema)
     {
         _update_secondary_index<IndexOperation::Insert>(extent_id, extent, root,
                 idx_cols, schema);
     }
 
     void invalidate_index_for_extent(uint64_t extent_id,
-            const std::shared_ptr<Extent> &extent,
-            const MutableBTreePtr         &root,
-            const std::vector<uint32_t>   &idx_cols,
-            const ExtentSchemaPtr         &schema)
+            const std::shared_ptr<Extent>  &extent,
+            const MutableBTreePtr          &root,
+            const std::vector<std::string> &idx_cols,
+            const ExtentSchemaPtr          &schema)
     {
         _update_secondary_index<IndexOperation::Remove>(extent_id, extent, root,
                 idx_cols, schema);
@@ -629,7 +629,6 @@ namespace indexer_helpers {
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
         SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 2, SchemaType::UINT64, 0, false);
 
-
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
@@ -665,34 +664,33 @@ namespace indexer_helpers {
         _use_empty = _primary_index->empty();
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
-        //if (use_look_aside) {
-        //    ExtentSchemaPtr look_aside_schema;
-        //    std::vector<std::string> col_names;
-        //    col_names.push_back(constant::INTERNAL_ROW_ID);
+        if (use_look_aside) {
+            std::vector<std::string> col_names;
+            col_names.push_back(constant::INTERNAL_ROW_ID);
 
-        //    auto look_aside_keys = col_names;
-        //    look_aside_keys.push_back(constant::INDEX_EID_FIELD);
-        //    look_aside_keys.push_back(constant::INDEX_RID_FIELD);
+            auto look_aside_keys = col_names;
+            look_aside_keys.push_back(constant::INDEX_EID_FIELD);
+            look_aside_keys.push_back(constant::INDEX_RID_FIELD);
 
-        //    look_aside_schema = _schema->create_schema({}, { extent_c, row_c, internal_row_id }, look_aside_keys);
+            _look_aside_schema = _schema->create_schema({}, { extent_c, row_c, internal_row_id }, look_aside_keys);
 
-        //    _look_aside_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_LOOK_ASIDE_FILE,
-        //            look_aside_keys,
-        //            look_aside_schema,
-        //            _target_xid, get_max_extent_size());
+            _look_aside_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_LOOK_ASIDE_FILE,
+                    look_aside_keys,
+                    _look_aside_schema,
+                    _target_xid, get_max_extent_size());
 
-        //    // find look-aside index root
-        //    auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
+            // find look-aside index root
+            auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
 
-        //    // initialize the look-aside index
-        //    if (la_it != roots.end() && la_it->extent_id != constant::UNKNOWN_EXTENT) {
-        //        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init with root: {}", la_it->extent_id);
-        //        _look_aside_index->init(la_it->extent_id);
-        //    } else {
-        //        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init empty");
-        //        _look_aside_index->init_empty();
-        //    }
-        //}
+            // initialize the look-aside index
+            if (la_it != roots.end() && la_it->extent_id != constant::UNKNOWN_EXTENT) {
+                LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init with root: {}", la_it->extent_id);
+                _look_aside_index->init(la_it->extent_id);
+            } else {
+                LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init empty");
+                _look_aside_index->init_empty();
+            }
+        }
 
         // deal with secondary indexes
         for (auto const& idx: secondary) {
@@ -877,7 +875,12 @@ namespace indexer_helpers {
         // INVALIDATE SECONDARY INDEXES
 
         for (auto const& [index_id, idx]: _secondary_indexes) {
-            indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, idx.first, idx.second, _schema);
+            indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, idx.first, _schema->get_column_names(idx.second), _schema);
+        }
+
+        if (_look_aside_index) {
+            // Invalidate look aside index
+            indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, _look_aside_index, _look_aside_schema->column_order(), _look_aside_schema);
         }
     }
 
@@ -924,7 +927,12 @@ namespace indexer_helpers {
 
             // POPULATE SECONDARY INDEXES
             for (auto const& [index_id, idx]: _secondary_indexes) {
-                indexer_helpers::populate_index_for_page(extent_id, new_page, idx.first, idx.second, _schema);
+                indexer_helpers::populate_index_for_page(extent_id, new_page, idx.first, _schema->get_column_names(idx.second), _schema);
+            }
+
+            if (_look_aside_index) {
+                // Populate look aside index
+                indexer_helpers::populate_index_for_page(extent_id, new_page, _look_aside_index, _look_aside_schema->column_order(), _look_aside_schema);
             }
         }
     }
@@ -946,6 +954,11 @@ namespace indexer_helpers {
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
         metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
+
+        // Flush the look aside index if available
+        if (_look_aside_index) {
+            metadata.roots.push_back({constant::INDEX_LOOK_ASIDE, _look_aside_index->finalize()});
+        }
 
         // now flush the indexes, capturing the roots
         for (auto &secondary : _secondary_indexes) {

@@ -550,7 +550,7 @@ namespace springtail::committer {
                     auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
 
                     // and invalidate index for the rows in the prev page
-                    indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._root, idx_cols, prev_schema);
+                    indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._root, prev_schema->get_column_names(idx_cols), prev_schema);
 
                     // Insert into a set to skip for other extents pointing
                     // to the same previous extent
@@ -558,7 +558,7 @@ namespace springtail::committer {
                 }
 
                 // Populate index for the rows in the next page
-                indexer_helpers::populate_index_for_extent(next_eid, next_extent, idx_state._root, idx_cols, next_schema);
+                indexer_helpers::populate_index_for_extent(next_eid, next_extent, idx_state._root, next_schema->get_column_names(idx_cols), next_schema);
 
                 // Get the next extent if next_offset is present, else exit the reconciliation
                 next_eid = next_extent_result.second;

@@ -30,7 +30,7 @@ namespace indexer_helpers {
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Remove secondary-index entries for every row in an extent.
@@ -42,7 +42,7 @@ namespace indexer_helpers {
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void invalidate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Insert secondary-index entries for every row in a page.
@@ -54,7 +54,7 @@ namespace indexer_helpers {
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Insert secondary-index entries for every row in an extent.
@@ -66,7 +66,7 @@ namespace indexer_helpers {
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void populate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 } // namespace indexer_helpers
 
     /**
@@ -931,6 +931,7 @@ namespace indexer_helpers {
          */
         std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The mutable secondary index btrees.
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
+        ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index.
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.

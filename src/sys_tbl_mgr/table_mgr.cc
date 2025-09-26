@@ -43,7 +43,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY && v.id != constant::INDEX_LOOK_ASIDE; });
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         return std::make_shared<UserTable>(db_id, table_id, xid, _table_base,
@@ -100,7 +100,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY && v.id != constant::INDEX_LOOK_ASIDE; });
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Get mutable table: table {}, access_xid {}", table_id, access_xid);
