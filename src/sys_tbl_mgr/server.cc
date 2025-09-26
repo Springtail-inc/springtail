@@ -464,6 +464,8 @@ Server::attach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgAtt
     ddl["partition_bound"] = partition_bound;
     ddl["schema"] = namespace_name;
     ddl["table"] = table_name;
+    ddl["xid"] = xid.xid;
+    ddl["lsn"] = xid.lsn;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attach partition DDL: {}", ddl.dump());
 
@@ -523,6 +525,8 @@ Server::detach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgDet
     ddl["partition_name"] = partition_name;
     ddl["schema"] = namespace_name;
     ddl["table"] = table_name;
+    ddl["xid"] = xid.xid;
+    ddl["lsn"] = xid.lsn;
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detach partition DDL: {}", ddl.dump());
 

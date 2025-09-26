@@ -45,17 +45,17 @@ namespace {
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, lsn, data);
-        index->commit(pg_xid, xid, commit_ts);
+        index->commit(pg_xid, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
-        PostgresTimestamp returned_commit_ts;
-        auto extents = index->get_extents(tid, xid, 1, cursor, returned_commit_ts);
+        WriteCacheTableSet::Metadata md;
+        auto extents = index->get_extents(tid, xid, 1, cursor, md);
         ASSERT_EQ(extents.size(), 1);
         EXPECT_EQ(cursor, 1);
         EXPECT_EQ(extents[0]->xid, xid);
         EXPECT_EQ(extents[0]->xid_seq, lsn);
         EXPECT_EQ(extents[0]->data, data);
-        EXPECT_EQ(returned_commit_ts, commit_ts);
+        EXPECT_EQ(md.pg_commit_ts, commit_ts);
     }
 
     TEST_F(WriteCacheIndexTest, CommitAndGetTids)
@@ -69,7 +69,7 @@ namespace {
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, lsn, data);
-        index->commit(pg_xid, xid, commit_ts);
+        index->commit(pg_xid, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
         auto tids = index->get_tids(xid, 1, cursor);
@@ -89,11 +89,11 @@ namespace {
         index->drop_table(tid, pg_xid);
 
         uint64_t cursor = 0;
-        PostgresTimestamp returned_commit_ts;
-        auto extents = index->get_extents(tid, pg_xid, 1, cursor, returned_commit_ts);
+        WriteCacheTableSet::Metadata md;
+        auto extents = index->get_extents(tid, pg_xid, 1, cursor, md);
         EXPECT_EQ(cursor, 0);
         EXPECT_TRUE(extents.empty());
-        EXPECT_EQ(returned_commit_ts, PostgresTimestamp());
+        EXPECT_EQ(md.pg_commit_ts, PostgresTimestamp());
     }
 
     TEST_F(WriteCacheIndexTest, Abort)
@@ -107,11 +107,11 @@ namespace {
         index->abort(pg_xid);
 
         uint64_t cursor = 0;
-        PostgresTimestamp returned_commit_ts;
-        auto extents = index->get_extents(tid, pg_xid, 1, cursor, returned_commit_ts);
+        WriteCacheTableSet::Metadata md;
+        auto extents = index->get_extents(tid, pg_xid, 1, cursor, md);
         EXPECT_EQ(cursor, 0);
         EXPECT_TRUE(extents.empty());
-        EXPECT_EQ(returned_commit_ts, PostgresTimestamp());
+        EXPECT_EQ(md.pg_commit_ts, PostgresTimestamp());
     }
 
     TEST_F(WriteCacheIndexTest, EvictTable)
@@ -124,21 +124,21 @@ namespace {
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, 200, data);
-        index->commit(pg_xid, xid, commit_ts);
+        index->commit(pg_xid, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
-        PostgresTimestamp returned_commit_ts;
-        auto extents = index->get_extents(tid, xid, 1, cursor, returned_commit_ts);
+        WriteCacheTableSet::Metadata md;
+        auto extents = index->get_extents(tid, xid, 1, cursor, md);
         EXPECT_EQ(extents.size(), 1);
-        EXPECT_EQ(returned_commit_ts, commit_ts);
+        EXPECT_EQ(md.pg_commit_ts, commit_ts);
 
         index->evict_table(tid, xid);
 
         cursor = 0;
-        returned_commit_ts = {};
-        extents = index->get_extents(tid, xid, 1, cursor, returned_commit_ts);
+        md = {};
+        extents = index->get_extents(tid, xid, 1, cursor, md);
         EXPECT_TRUE(extents.empty());
-        EXPECT_EQ(returned_commit_ts, commit_ts);
+        EXPECT_EQ(md.pg_commit_ts, commit_ts);
     }
 
     TEST_F(WriteCacheIndexTest, EvictXid)
@@ -151,22 +151,21 @@ namespace {
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, 200, data);
-        index->commit(pg_xid, xid, commit_ts);
+        index->commit(pg_xid, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
-        PostgresTimestamp returned_commit_ts;
-        auto extents = index->get_extents(tid, xid, 1, cursor, returned_commit_ts);
+        WriteCacheTableSet::Metadata md;
+        auto extents = index->get_extents(tid, xid, 1, cursor, md);
         EXPECT_EQ(extents.size(), 1);
-        EXPECT_EQ(returned_commit_ts, commit_ts);
+        EXPECT_EQ(md.pg_commit_ts, commit_ts);
 
         index->evict_xid(xid);
-        index->commit(pg_xid, xid, commit_ts);
+        index->commit(pg_xid, xid, {commit_ts, {}});
 
         cursor = 0;
-        returned_commit_ts = {};
-        extents = index->get_extents(tid, xid, 1, cursor, returned_commit_ts);
+        extents = index->get_extents(tid, xid, 1, cursor, md);
         EXPECT_TRUE(extents.empty());
-        EXPECT_EQ(returned_commit_ts, commit_ts);
+        EXPECT_EQ(md.pg_commit_ts, commit_ts);
     }
 
     void add_extent_thread(WriteCacheIndexPtr index, uint64_t tid, uint64_t pg_xid, uint64_t lsn_start, uint64_t count, std::mutex &mtx) {
@@ -202,19 +201,19 @@ namespace {
             t.join();
         }
 
-        index->commit(pg_xid, xid, commit_ts);
+        index->commit(pg_xid, xid, {commit_ts, {}});
 
         // Verify the data
         std::vector<WriteCacheIndexExtentPtr> fetched_extents;
         uint64_t cursor = 0;
-        PostgresTimestamp returned_commit_ts;
+        WriteCacheTableSet::Metadata md;
         while (true) {
-            auto extents = index->get_extents(tid, xid, 4, cursor, returned_commit_ts);
+            auto extents = index->get_extents(tid, xid, 4, cursor, md);
             if (extents.empty()) {
                 break;
             }
             EXPECT_LE(extents.size(), 4);
-            EXPECT_EQ(returned_commit_ts, commit_ts);
+            EXPECT_EQ(md.pg_commit_ts, commit_ts);
             fetched_extents.insert(fetched_extents.end(), extents.begin(), extents.end());
         }
         ASSERT_EQ(fetched_extents.size(), 4 * count);
@@ -243,7 +242,7 @@ namespace {
             }
         }
 
-        index->commit(pg_xid, xid, commit_ts);
+        index->commit(pg_xid, xid, {commit_ts, {}});
 
         // Fetch tids using multiple get_tids() calls with the cursor
         uint64_t cursor = 0;
@@ -283,18 +282,18 @@ namespace {
             pg_xids.push_back(pg_xid + i);
         }
 
-        index->commit(pg_xids, xid, commit_ts);
+        index->commit(pg_xids, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
-        PostgresTimestamp returned_commit_ts;
         std::vector<WriteCacheIndexExtentPtr> fetched_extents;
+        WriteCacheTableSet::Metadata md;
         while (true) {
-            auto extents = index->get_extents(tid, xid, 2, cursor, returned_commit_ts);
+            auto extents = index->get_extents(tid, xid, 2, cursor, md);
             if (extents.empty()) {
                 break;
             }
             EXPECT_LE(extents.size(), 2);
-            EXPECT_EQ(returned_commit_ts, commit_ts);
+            EXPECT_EQ(md.pg_commit_ts, commit_ts);
             fetched_extents.insert(fetched_extents.end(), extents.begin(), extents.end());
         }
         ASSERT_EQ(fetched_extents.size(), xid_count);
@@ -325,7 +324,7 @@ namespace {
             pg_xids.push_back(pg_xid + i);
         }
 
-        index->commit(pg_xids, xid, commit_ts);
+        index->commit(pg_xids, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
         std::set<uint64_t> fetched_tids;
