@@ -56,6 +56,9 @@ namespace springtail {
 
         // retrieve the roots and stats of the table
         auto &&tbl_meta = sys_tbl_mgr::Server::get_instance()->get_roots(db_id, table_id, access_xid);
+        if (tbl_meta == nullptr) {
+            tbl_meta = std::make_shared<TableMetadata>();
+        }
 
         // construct the mutable table and return it
         XidLsn xid(target_xid);
