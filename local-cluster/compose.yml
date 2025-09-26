@@ -27,8 +27,6 @@ services:
     user: root
     volumes:
       - ./env:/envfiles:rw  # We will be updating this file for other services to consume.
-      - ./_temp/prod.system.settings.json:/etc/default-system-settings.json:ro
-      - ./_temp/scripts:/app/scripts:ro
     init: true
     command: [ "sh", "-c", "cd /app && ./local-cluster-bootstrap " ]
     depends_on:
@@ -56,8 +54,6 @@ services:
     volumes:
       - ./env:/envfiles:rw
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./_temp/prod.system.settings.json:/etc/default-system-settings.json:ro
-      - ./_temp/scripts:/app/scripts:ro
     init: true
     command: [ "sh", "-lc", "cd /app && ./stctl server run --port $$CONTROLLER_PORT" ]
     depends_on:
@@ -142,6 +138,8 @@ services:
     environment:
       - SERVICE_NAME=ingestion
       - INSTANCE_KEY=default
+      - PGSSLCERT=/certs/client_cert.pem
+      - PGSSLKEY=/certs/client_key.pem
     cap_add:
       - SYS_ADMIN
       - SYS_PTRACE
@@ -150,7 +148,6 @@ services:
       - ./etc/supervisor:/etc/supervisor:rw
       - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
       - "ingestion_logs:${INSTALL_DIR}/logs:rw"
-      - .certs:/certs:ro
     restart: unless-stopped
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:
@@ -182,6 +179,8 @@ services:
       - SERVICE_NAME=proxy
       - NFS_SERVER_IP=ingestion
       - INSTANCE_KEY=default
+      - PGSSLCERT=/certs/client_cert.pem
+      - PGSSLKEY=/certs/client_key.pem
     cap_add:
       - SYS_ADMIN
       - SYS_PTRACE
@@ -192,7 +191,6 @@ services:
       - shadow_logs:/shadow_logs:rw
       - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
       - "proxy_logs:${INSTALL_DIR}/logs:rw"
-      - .certs:/certs:ro
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:
       ingestion:
@@ -225,6 +223,8 @@ services:
       - SERVICE_NAME=fdw
       - NFS_SERVER_IP=ingestion
       - INSTANCE_KEY=default
+      - FDW_ID=default
+      - PGDATABASE=__springtail
     cap_add:
       - SYS_ADMIN
       - SYS_PTRACE
@@ -235,7 +235,6 @@ services:
       - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
       - "./opt/springtail/customize-pg.yml:${INSTALL_DIR}/customize-pg.yml:ro"
       - "fdw_logs:${INSTALL_DIR}/logs:rw"
-      - .certs:/certs:ro
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:
       ingestion:
