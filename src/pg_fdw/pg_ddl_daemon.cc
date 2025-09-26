@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
     // initialize the springtail subsystems
     std::optional<std::string> pidfile;
     if (vm.count("daemonize")) {
-        pidfile = "pg_ddl_mgr.pid";
+        pidfile = "pg_ddl_daemon.pid";
     }
 
     // check if the socket path is valid
