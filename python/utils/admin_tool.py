@@ -35,7 +35,6 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-d', '--daemon', type=str, required=True,
                         choices=["proxy",
                                  "pg_log_mgr_daemon",
-                                 "sys_tbl_mgr_daemon",
                                  "pg_ddl_daemon",
                                  "pg_xid_subscriber_daemon"],
                         help="Process name")

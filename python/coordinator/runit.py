@@ -23,7 +23,7 @@ from properties import Properties
 def parse_arguments():
     """Parse the command line arguments."""
     # Create the argument parser
-    parser = argparse.ArgumentParser(description="Run tests, or start/stop/kill components. Component names: xid_mgr_daemon, sys_tbl_mgr_daemon, gc_daemon, postgres, ddl_daemon")
+    parser = argparse.ArgumentParser(description="Run tests, or start/stop/kill components. Component names: postgres, ddl_daemon")
 
     # Add arguments -f for config file and -b for build directory
     parser.add_argument('-c', '--config-file', type=str, default='config.yaml', help='Path to the configuration file')
@@ -85,14 +85,9 @@ def run_tests(factory: ComponentFactory) -> None:
     """Run tests for all components"""
     # Create components and test if they are running
 
-    pg_xid_subscriber_daemon = factory.create_pg_xid_subscriber_daemon()
+    pg_xid_subscriber_daemon = factory.create_xid_subscriber_daemon()
     test(pg_xid_subscriber_daemon)
-    assert not sys_tbl_mgr_daemon.is_running()
-
-    sys_tbl_mgr_daemon = factory.create_sys_tbl_mgr_daemon()
-    test(sys_tbl_mgr_daemon)
-    assert not sys_tbl_mgr_daemon.is_running()
-
+    assert not pg_xid_subscriber_daemon.is_running()
 
     postgres = factory.create_postgres()
     test(postgres)
@@ -105,9 +100,6 @@ def run_tests(factory: ComponentFactory) -> None:
     ddl_daemon = factory.create_ddl_daemon()
     test(ddl_daemon)
     assert not ddl_daemon.is_running()
-
-    xid_mgr_daemon.kill()
-    assert not xid_mgr_daemon.is_running()
 
 
 if __name__ == "__main__":
@@ -149,18 +141,12 @@ if __name__ == "__main__":
 
     if args.stopall:
         # Stop all components
-        sys_tbl_mgr_daemon = factory.create_sys_tbl_mgr_daemon()
-        if not sys_tbl_mgr_daemon.shutdown() and not sys_tbl_mgr_daemon.kill():
-            raise ValueError("Failed to stop sys_tbl_mgr_daemon")
-        pg_xid_subscriber_daemon = factory.create_pg_xid_subscriber_daemon()
+        pg_xid_subscriber_daemon = factory.create_xid_subscriber_daemon()
         if not pg_xid_subscriber_daemon.shutdown() and not pg_xid_subscriber_daemon.kill():
             raise ValueError("Failed to stop pg_xid_subscriber_daemon")
         ddl_daemon = factory.create_ddl_daemon('test_user', 'test_password')
         if not ddl_daemon.shutdown() and not ddl_daemon.kill():
             raise ValueError("Failed to stop ddl_daemon")
-        xid_mgr_daemon = factory.create_xid_mgr_daemon()
-        if not xid_mgr_daemon.shutdown() and not xid_mgr_daemon.kill():
-            raise ValueError("Failed to stop xid_mgr_daemon")
         sys.exit(0)
 
     # Start/stop/kill components
@@ -174,11 +160,7 @@ if __name__ == "__main__":
 
     # Create the component
     component = None
-    if component_name == 'xid_mgr_daemon':
-        component = factory.create_xid_mgr_daemon()
-    elif component_name == 'sys_tbl_mgr_daemon':
-        component = factory.create_sys_tbl_mgr_daemon()
-    elif component_name == 'postgres':
+    if component_name == 'postgres':
         component = factory.create_postgres()
     elif component_name == 'ddl_daemon':
         component = factory.create_ddl_daemon()
