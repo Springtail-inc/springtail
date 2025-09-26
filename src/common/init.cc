@@ -142,19 +142,23 @@ springtail_init(const bool load_redis,
 }
 
 void
-springtail_init_daemon(const std::optional<std::string> &log_filename,
-                       const std::optional<std::string> &daemon_pid,
+springtail_init_daemon(const std::string &program_name,
+                       bool daemonize,
                        const std::optional<uint32_t> &logging_mask)
 {
+    std::optional<std::string> exec_name = std::filesystem::path(program_name).filename().string();
+    std::optional<std::string> daemon_pid;
+    daemon_pid = exec_name.value() + ".pid";
+
     std::vector<std::unique_ptr<ServiceRunner>> service_runners;
     service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesRunner>(false));
-    if (daemon_pid.has_value()) {
+    if (daemonize) {
         service_runners.emplace_back(std::make_unique<DaemonRunner>(daemon_pid.value()));
     }
-    service_runners.emplace_back(std::make_unique<LoggingRunner>(log_filename, daemon_pid, logging_mask));
-    service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(log_filename));
+    service_runners.emplace_back(std::make_unique<LoggingRunner>(exec_name, daemon_pid, logging_mask));
+    service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(exec_name));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
     service_runners.emplace_back(std::make_unique<CoordinatorRunner>());

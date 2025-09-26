@@ -40,9 +40,9 @@ int main(int argc, char* argv[])
         force_shadow = true;
     }
 
-    std::optional<std::string> pidfile;
+    bool daemonize = false;
     if (vm.count("daemonize")) {
-        pidfile = "proxy.pid";
+        daemonize = true;
     }
 
     springtail_store_arguments(ServiceId::ProxyServerId,
@@ -51,7 +51,7 @@ int main(int argc, char* argv[])
             {"force_primary", std::any(force_primary)}
         });
 
-    springtail_init_daemon("proxy", pidfile, LOG_PROXY);
+    springtail_init_daemon(argv[0], daemonize, LOG_PROXY);
     ProxyServer::start();
     springtail_daemon_run();
 
