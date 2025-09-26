@@ -70,16 +70,12 @@ FSCheck::_get_table_and_fields(uint64_t db_id)
         }
         secondary_keys.push_back(idx);
     }
-    TableMetadata tbl_meta;
+    TableMetadata tbl_meta{};
     tbl_meta.snapshot_xid = 1;
-
-    std::shared_ptr<TableMetadata> tbl_meta_ptr(&tbl_meta, [](TableMetadata*) {
-        // no-op deleter: do nothing
-    });
 
     uint64_t xid = constant::LATEST_XID;
 
-    TablePtr table = std::make_shared<SystemTable>(db_id, Tbl::ID, xid, _table_base, Tbl::Primary::KEY, secondary_keys, tbl_meta_ptr, schema);
+    TablePtr table = std::make_shared<SystemTable>(db_id, Tbl::ID, xid, _table_base, Tbl::Primary::KEY, secondary_keys, tbl_meta, schema);
     std::shared_ptr<std::vector<FieldPtr>> fields = schema->get_fields();
 
     return std::make_pair(table, fields);
@@ -631,12 +627,13 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
 
     // 5. Create table
     auto schema = std::make_shared<ExtentSchema>(columns);
-    auto tbl_meta = std::make_shared<TableMetadata>();
-    tbl_meta->roots = roots;
 
-    tbl_meta->stats.row_count = row_count;
-    tbl_meta->stats.end_offset = end_offset;
-    tbl_meta->snapshot_xid = root_sxid;
+    TableMetadata tbl_meta{};
+    tbl_meta.roots = roots;
+
+    tbl_meta.stats.row_count = row_count;
+    tbl_meta.stats.end_offset = end_offset;
+    tbl_meta.snapshot_xid = root_sxid;
 
     auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
                                 schema->get_sort_keys(), secondary_indexes, tbl_meta, schema);

@@ -29,7 +29,7 @@ namespace springtail {
 
         return std::make_shared<UserTable>(db_id, table_id, xid, _table_base,
                                            schema->get_sort_keys(), secondary_indexes,
-                                           tbl_meta, schema);
+                                           *tbl_meta, schema);
     }
 
     std::optional<std::filesystem::path>
@@ -77,7 +77,7 @@ namespace springtail {
 
         return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_indexes,
-                                                  tbl_meta, schema, for_gc);
+                                                  *tbl_meta, schema, for_gc);
     }
 
     MutableTablePtr
@@ -87,11 +87,8 @@ namespace springtail {
                                  ExtentSchemaPtr schema,
                                  const std::vector<Index>& secondary_keys)
     {
-        TableMetadata tbl_meta;
+        TableMetadata tbl_meta{};
         tbl_meta.snapshot_xid = snapshot_xid;
-        std::shared_ptr<TableMetadata> tbl_meta_ptr(&tbl_meta, [](TableMetadata*) {
-            // no-op deleter: do nothing
-        });
 
         // NOTE: in the case of a failure, there may be a partially copied table already present in
         //       the directory structure, so we need to make sure to delete it before we try to
@@ -104,7 +101,7 @@ namespace springtail {
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_keys,
-                                                  tbl_meta_ptr, schema, false);
+                                                  tbl_meta, schema, false);
     }
 
     std::map<uint32_t, SchemaColumn>

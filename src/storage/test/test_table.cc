@@ -166,15 +166,11 @@ namespace {
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
-            std::shared_ptr<TableMetadata> tbl_meta_ptr(&tbl_meta, [](TableMetadata*) {
-                // no-op deleter: do nothing
-            });
-
             auto keys = _make_keys(table_id, roots);
 
             return std::make_shared<UserTable>(_db_id, table_id, xid, _base_dir,
                                            _primary_keys, keys,
-                                           tbl_meta_ptr, _schema);
+                                           tbl_meta, _schema);
         }
 
         MutableTablePtr
@@ -184,16 +180,12 @@ namespace {
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
-            std::shared_ptr<TableMetadata> tbl_meta_ptr(&tbl_meta, [](TableMetadata*) {
-                // no-op deleter: do nothing
-            });
-
             auto keys = _make_keys(table_id, roots);
 
 
             return std::make_shared<UserMutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
                                                   _primary_keys, keys,
-                                                  tbl_meta_ptr, _schema);
+                                                  tbl_meta, _schema);
         }
 
         std::shared_ptr<Tuple>
