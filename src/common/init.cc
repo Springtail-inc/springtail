@@ -148,13 +148,13 @@ springtail_init_daemon(const std::string &program_name,
 {
     std::optional<std::string> exec_name = std::filesystem::path(program_name).filename().string();
     std::optional<std::string> daemon_pid;
-    daemon_pid = exec_name.value() + ".pid";
 
     std::vector<std::unique_ptr<ServiceRunner>> service_runners;
     service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesRunner>(false));
     if (daemonize) {
+        daemon_pid = exec_name.value() + ".pid";
         service_runners.emplace_back(std::make_unique<DaemonRunner>(daemon_pid.value()));
     }
     service_runners.emplace_back(std::make_unique<LoggingRunner>(exec_name, daemon_pid, logging_mask));
