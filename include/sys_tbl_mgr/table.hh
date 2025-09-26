@@ -433,7 +433,7 @@ namespace indexer_helpers {
               const std::filesystem::path &table_base,
               const std::vector<std::string> &primary_key,
               const std::vector<Index> &secondary,
-              const TableMetadataPtr metadata,
+              const TableMetadata& metadata,
               ExtentSchemaPtr schema);
 
         /** Returns true if the table has a primary key.  False otherwise. */
@@ -642,7 +642,7 @@ namespace indexer_helpers {
                      const std::filesystem::path &table_base,
                      const std::vector<std::string> &primary_key,
                      const std::vector<Index> &secondary,
-                     const TableMetadataPtr metadata,
+                     const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
                      bool for_gc = false);
 

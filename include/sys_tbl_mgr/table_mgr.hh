@@ -97,7 +97,7 @@ namespace springtail {
                   const std::filesystem::path &table_base,
                   const std::vector<std::string> &primary_key,
                   const std::vector<Index> &secondary,
-                  const TableMetadataPtr metadata,
+                  const TableMetadata &metadata,
                   ExtentSchemaPtr schema) :
             Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema) {}
 
@@ -137,7 +137,7 @@ namespace springtail {
                          const std::filesystem::path &table_base,
                          const std::vector<std::string> &primary_key,
                          const std::vector<Index> &secondary,
-                         const TableMetadataPtr metadata,
+                         const TableMetadata &metadata,
                          ExtentSchemaPtr schema,
                          bool for_gc = false) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,

@@ -151,7 +151,7 @@ namespace indexer_helpers {
                  const std::filesystem::path &table_base,
                  const std::vector<std::string> &primary_key,
                  const std::vector<Index> &secondary,
-                 const TableMetadataPtr metadata,
+                 const TableMetadata& metadata,
                  ExtentSchemaPtr schema)
         : _db_id(db_id),
           _id(table_id),
@@ -161,11 +161,9 @@ namespace indexer_helpers {
     {
         std::vector<TableRoot> roots;
         uint64_t snapshot_xid = 0;
-        if (metadata != nullptr) {
-            _stats = metadata->stats;
-            roots = metadata->roots;
-            snapshot_xid = metadata->snapshot_xid;
-        }
+        _stats = metadata.stats;
+        roots = metadata.roots;
+        snapshot_xid = metadata.snapshot_xid;
 
         // construct the table's data directory
         _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, snapshot_xid);
@@ -567,7 +565,7 @@ namespace indexer_helpers {
                                const std::filesystem::path &table_base,
                                const std::vector<std::string> &primary_key,
                                const std::vector<Index> &secondary,
-                               const TableMetadataPtr metadata,
+                               const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
                                bool for_gc)
     : _db_id(db_id),
@@ -579,11 +577,9 @@ namespace indexer_helpers {
       _for_gc(for_gc)
     {
         std::vector<TableRoot> roots;
-        if (metadata != nullptr) {
-            _snapshot_xid = metadata->snapshot_xid;
-            _stats = metadata->stats;
-            roots = metadata->roots;
-        }
+        _snapshot_xid = metadata.snapshot_xid;
+        _stats = metadata.stats;
+        roots = metadata.roots;
 
         // construct the table's data directory
         _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, _snapshot_xid);
