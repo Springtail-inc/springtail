@@ -32,7 +32,7 @@ from sys_tbl_mgr import SysTblMgrClient
 
 from otel_logger import init_logging
 
-ALL_DAEMONS = ['sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy', 'pg_xid_subscriber_daemon']
+ALL_DAEMONS = ['pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy', 'pg_xid_subscriber_daemon']
 
 
 class Coordinator:
@@ -147,7 +147,6 @@ class Coordinator:
 
         match self.service_name:
             case "ingestion":
-                self.scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 1)
                 self.scheduler.register_component(factory.create_log_mgr_daemon(), 2)
 
             case "fdw":
@@ -164,13 +163,6 @@ class Coordinator:
                     if not postgres.start():
                         self.logger.error("Failed to start Postgres")
                         raise ValueError("Failed to start Postgres")
-
-                # in test startup ingestion services
-                if not self.production:
-                    self.sys_tlb_mgr_component = factory.create_sys_tbl_mgr_daemon()
-                    if not self.sys_tlb_mgr_component.start():
-                        self.logger.error("Failed to start sys_tbl_mgr_component")
-                        raise ValueError("Failed to start components")
 
                 # wait for ingestion to be ready
                 self._wait_for_ingestion(self.props)
@@ -220,11 +212,6 @@ class Coordinator:
         if self.scheduler:
             self.logger.info(f"Received signal {signum}, shutting down...")
             self.scheduler.shutdown()
-
-        # if not in production, shutdown the sys_tbl_mgr
-        if not self.production and self.service_name == 'fdw':
-            if self.sys_tlb_mgr_component:
-                self.sys_tlb_mgr_component.shutdown()
 
         # make sure everything is shutdown
         stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
