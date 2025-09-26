@@ -4,6 +4,9 @@ networks:
     driver: bridge
     external: true
 
+x-common-labels: &common_labels
+  io.springtail.container.group: "local-cluster"
+
 volumes:
   shadow_logs:
   pgdata:
@@ -69,6 +72,8 @@ services:
   # The primary DB
   primary:
     image: postgres-custom:16
+    labels:
+      <<: *common_labels
     networks:
       - local-cluster
     env_file:
@@ -103,6 +108,8 @@ services:
 
   redis:
     image: redis:7.0
+    labels:
+      <<: *common_labels
     networks:
       - local-cluster
     ports:
@@ -122,6 +129,8 @@ services:
 
   ingestion:
     image: ${IMAGE:-local-cluster-img:latest}
+    labels:
+      <<: *common_labels
     privileged: true
     security_opt:
       - seccomp:unconfined
@@ -162,6 +171,8 @@ services:
 
   proxy:
     image: ${IMAGE:-local-cluster-img:latest}
+    labels:
+      <<: *common_labels
     privileged: true
     security_opt:
       - seccomp:unconfined
@@ -206,6 +217,8 @@ services:
 
   fdw:
     image: ${IMAGE:-local-cluster-img:latest}
+    labels:
+      <<: *common_labels
     privileged: true
     security_opt:
       - seccomp:unconfined
@@ -251,6 +264,8 @@ services:
   # Mock AWS Service
   aws-mock:
     image: motoserver/moto:latest
+    labels:
+      <<: *common_labels
     networks:
       - local-cluster
     environment:

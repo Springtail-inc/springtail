@@ -8,6 +8,7 @@ cffi==2.0.0
 charset-normalizer==3.4.3
 click==8.2.1
 cryptography==45.0.7
+docker==7.1.0
 fastapi==0.116.1
 h11==0.16.0
 hiredis==3.2.1

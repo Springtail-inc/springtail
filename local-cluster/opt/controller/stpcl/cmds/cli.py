@@ -1,6 +1,7 @@
 import sys
 import os
 import click
+import docker
 import logging
 import redis
 import boto3
@@ -13,6 +14,7 @@ from stpcl.consts import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 # Most of the options can be set via environment variables as well, see defaults.
 @click.group()
@@ -112,6 +114,7 @@ def cli(
     For Redis connection: REDIS_HOST, REDIS_PORT, REDIS_USER, REDIS_PASSWORD, REDIS_DB
     if not explicitly set via command line arguments. If nothing set, defaults (localhost:6379) will be used.
     """
+    from stpcl.imp.utils import DockerCli
     if deployment_env == DEPLOYMENT_ENV_UNSET:
         logger.fatal(
             "DEPLOYMENT_ENV is not set. You need to set it to one of ['%s', '%s', '%s']",
@@ -162,6 +165,7 @@ def cli(
         region_name=aws_region,
         endpoint_url=aws_sns_endpoint,
     )
+    ctx.obj["docker_cli"] = DockerCli()
 
 
 @cli.group()
