@@ -12,10 +12,10 @@ class ComponentFactory:
     # NOTE: IDs must match the IDs used in the Redis queue defined
     # in src/common/coordinator.hh enum DaemonType
     LOG_MGR_ID = "1"
-    DDL_ID = "2"
-    SYS_TBL_MGR_ID = "3"
-    PROXY_ID = "4"
-    XID_SUBSCRIBER_ID = "5"
+    DDL_MGR_ID = "4"
+    SYS_TBL_MGR_ID = "6"
+    PROXY_ID = "7"
+    XID_SUBSCRIBER_ID = "9"
     POSTGRES = "10"
 
     def __init__(self, install_dir : str, props: Properties):
@@ -31,7 +31,7 @@ class ComponentFactory:
             id=self.LOG_MGR_ID,
             args=["--daemonize"],
             path=self.install_dir,
-            pid_path=os.path.join(self.pid_dir, 'pg_log_mgr.pid')
+            pid_path=os.path.join(self.pid_dir, 'pg_log_mgr_daemon.pid')
         )
 
     def create_sys_tbl_mgr_daemon(self) -> Component:
@@ -41,17 +41,17 @@ class ComponentFactory:
             id=self.SYS_TBL_MGR_ID,
             args=["--daemonize"],
             path=self.install_dir,
-            pid_path=os.path.join(self.pid_dir, 'sys_tbl_mgr.pid')
+            pid_path=os.path.join(self.pid_dir, 'sys_tbl_mgr_daemon.pid')
         )
 
     def create_ddl_daemon(self) -> Component:
         """Create a new write cache component."""
         return Component(
             name="pg_ddl_daemon",
-            id=self.DDL_ID,
+            id=self.DDL_MGR_ID,
             args=["--daemonize", "-s", "/var/run/postgresql"],
             path=self.install_dir,
-            pid_path=os.path.join(self.pid_dir, 'pg_ddl_mgr.pid')
+            pid_path=os.path.join(self.pid_dir, 'pg_ddl_daemon.pid')
         )
 
     def create_proxy(self) -> Component:
