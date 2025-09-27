@@ -28,17 +28,18 @@ int main(int argc, char *argv[])
     po::notify(vm);
 
     // initialize the springtail subsystems
-    std::optional<std::string> pidfile;
+    bool daemonize = false;
     if (vm.count("daemonize")) {
-        pidfile = "pg_log_mgr.pid";
+        daemonize = true;
     }
 
     springtail_store_arguments(ServiceId::VacuumerId,
         {
             {"vacuum_global_ns", std::any(vaccumer_namespace)}
         });
-    springtail_init_daemon("pg_log_mgr", pidfile,
+    springtail_init_daemon(argv[0], daemonize,
                            LOG_ALL ^ (LOG_PG_REPL | LOG_STORAGE | LOG_CACHE));
+
     pg_log_mgr::PgLogCoordinator::get_instance()->init();
 
     springtail_daemon_run();

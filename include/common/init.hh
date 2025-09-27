@@ -40,8 +40,8 @@ void springtail_init(const bool load_redis = false,
                      const std::optional<std::string> &log_filename = std::nullopt,
                      const std::optional<uint32_t> &logging_mask = std::nullopt);
 
-void springtail_init_daemon(const std::optional<std::string> &log_filename = std::nullopt,
-                            const std::optional<std::string> &daemon_pid = std::nullopt,
+void springtail_init_daemon(const std::string &program_name,
+                            bool daemonize,
                             const std::optional<uint32_t> &logging_mask = std::nullopt);
 
 void springtail_init_test(const std::optional<uint32_t> &logging_mask = std::nullopt);

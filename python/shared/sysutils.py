@@ -48,7 +48,7 @@ def restart_container(container_name: str) -> bool:
         sock.close()
 
 
-def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
+def stop_daemons(pid_path : str, daemons : List[str] = []) -> None:
     """Stop all daemons in the order specified by the daemons list, waiting for each to shutdown before proceeding."""
     # Stop the daemons
     if not os.path.exists(pid_path):
@@ -59,16 +59,14 @@ def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
 
     # Stop daemons in the order specified by the daemons list, waiting for each to complete
     for daemon in daemons:
-        daemon_name = daemon[0] if daemon else None
-        if not daemon_name:
-            continue
 
-        pid_file = os.path.join(pid_path, f"{daemon_name}.pid")
+        pid_file = os.path.join(pid_path, f"{daemon}.pid")
+
         if os.path.exists(pid_file):
             with open(pid_file, 'r') as f:
                 pid = f.read().strip()
                 all_found_pids.append(pid)
-                print(f"Stopping daemon {daemon_name} with pid: {pid}")
+                print(f"Stopping daemon {daemon} with pid: {pid}")
                 try:
                     run_command('kill', ['-s', 'TERM', pid])
                 except Exception as e:
@@ -81,15 +79,17 @@ def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
                 while retry > 0:
                     (pids, _) = running_pids([daemon], [pid])
                     if pids is None or len(pids) == 0:
-                        print(f"Daemon {daemon_name} has stopped")
+                        print(f"Daemon {daemon} has stopped")
                         break
                     time.sleep(1)
                     retry -= 1
 
                 # If daemon didn't stop gracefully, force kill it before proceeding
                 if retry == 0:
-                    print(f"Force killing daemon {daemon_name}")
+                    print(f"Force killing daemon {daemon}")
                     kill_processes([daemon])
+        else:
+            print("Failed to find pid file: ", pid_file)
 
     # Final check for any remaining processes
     (remaining_pids, _) = running_pids(daemons, all_found_pids)
