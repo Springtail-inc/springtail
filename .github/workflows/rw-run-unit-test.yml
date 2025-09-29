@@ -52,7 +52,7 @@ on:
 jobs:
   test:
     name: unit-test
-    runs-on: warp-ubuntu-latest-arm64-4x;snapshot.key=${{ inputs.image_tag }}
+    runs-on: warp-ubuntu-latest-arm64-4x;snapshot.key=test-foo
     timeout-minutes: ${{ inputs.timeout_minutes }}
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}

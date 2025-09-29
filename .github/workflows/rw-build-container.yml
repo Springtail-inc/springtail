@@ -113,7 +113,7 @@ jobs:
       - name: Snapshot the VM
         uses: WarpBuilds/snapshot-save@v1
         with:
-          alias: ${{ steps.prepare-build.outputs.output_image_tag }}
+          alias: test-foo
           fail-on-error: true
           wait-timeout-minutes: 30
           
