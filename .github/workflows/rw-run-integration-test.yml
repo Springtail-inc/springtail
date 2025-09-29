@@ -35,7 +35,7 @@ on:
         description: 'The timeout in minutes for the entire job.'
         type: number
         required: false
-        default: 30
+        default: 60
       reuse_code:
         description: 'Whether to reuse the existing code from /home/dev/springtail or do a fresh checkout.'
         type: boolean
