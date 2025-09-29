@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <chrono>
 
 #include <storage/vacuumer.hh>
 #include <storage/interval_tree.hh>
@@ -75,9 +76,7 @@ Vacuumer::_init()
     Json::get_to<bool>(vacuum_config_json, "enabled", _vacuum_start_enabled);
 
     if (_vacuum_start_enabled) {
-        // Core thread of the vacuumer
-        _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
-        pthread_setname_np(_vacuumer_thread.native_handle(), "Vacuumer");
+        start_thread();
         LOG_INFO("Vacuumer thread started");
     } else {
         _extents_tracking_enabled = false;
@@ -91,13 +90,7 @@ Vacuumer::_init()
 void
 Vacuumer::_internal_shutdown()
 {
-    // Set flag and wait for the thread to join
-    _shutdown = true;
-
-    if (_vacuum_start_enabled) {
-        _vacuumer_thread.join();
-        LOG_INFO("Vacuumer thread joined");
-    }
+    LOG_INFO("Vacuumer shutdown: threaded: {}", _vacuum_start_enabled);
 }
 
 void
@@ -752,7 +745,6 @@ Vacuumer::_run_recovery()
      *   Truncate global records with XID > committed_xid
     ----------------------------------------------------------------------*/
 
-    std::unique_lock lock(_mutex);
     LOG_INFO("Vacuum Recovery started");
 
     auto global_runfile_exists = false;
@@ -797,15 +789,13 @@ Vacuumer::_run_recovery()
 void
 Vacuumer::run_vacuum_once()
 {
+    std::unique_lock lock(_mutex);
     _do_vacuum_run();
 }
 
 void
 Vacuumer::_do_vacuum_run()
 {
-    // lock while accessing the maps
-    std::unique_lock lock(_mutex);
-
     // Flush everything if the entries in the map crosses threshold
     if (_entries_count_in_memory > _max_entries_in_memory) {
         LOG_INFO("Flushing all to disk as entries exceed threshold {} > {}", _entries_count_in_memory, _max_entries_in_memory);
@@ -1008,22 +998,33 @@ Vacuumer::_do_vacuum_run()
 
         LOG_INFO("Vacuum completed");
     }
-    lock.unlock();
+}
+
+void 
+Vacuumer::_internal_thread_shutdown()
+{
+    // Important: the is_shutting_down flag must be set by Singleton 
+    // before calling this function
+    _cv.notify_one();
 }
 
 void
 Vacuumer::_internal_run()
 {
+    std::unique_lock<std::mutex> lock(_mutex);
+
     // Run recovery for first time
     _run_recovery();
 
-    while(!_shutdown) {
-        // sleep for 1 second before trying to expire more data
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-
+    while(true) {
+        if (_cv.wait_until(lock,
+                    std::chrono::steady_clock::now() + std::chrono::seconds(1), 
+                    [this] { return _is_shutting_down(); })) {
+            // is_shutting_down is true
+            break;
+        }
         // Run vacuum once
         _do_vacuum_run();
-
     }
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <condition_variable>
 #include <list>
 #include <map>
 #include <thread>
@@ -205,6 +206,7 @@ private:
     std::mutex _mutex; ///< Protects the internal maps
     ExtentMap _extent_map; ///< Maps File -> XID -> list of expired extent
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
+    std::condition_variable _cv; ///< Condition variable to wake up the vacuumer thread
 
     /**
      * Schema to create global and partial vacuum files
@@ -219,10 +221,12 @@ private:
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
-    std::thread _vacuumer_thread;           ///< Vacuumer thread
-
-    std::atomic<bool> _shutdown{false};   ///< shutdown flag
     std::atomic<int64_t> _entries_count_in_memory = 0;  ///< To track count of entries in the memory
+
+    /**
+     * @brief Vacuumer thread shutdown
+     */
+    void _internal_thread_shutdown() override;
 
     /**
      * @brief Round a value up to the nearest multiple of `align`
