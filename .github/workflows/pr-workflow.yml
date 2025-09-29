@@ -112,6 +112,8 @@ jobs:
     if: ${{ github.event.pull_request.draft == false && (needs.integration-test-p1.result != 'skipped' && needs.integration-test-p2.result != 'skipped' && needs.integration-test-p3.result != 'skipped' && needs.integration-test-p4.result != 'skipped') }}
     outputs:
       test_log_s3_uri: ${{ steps.set_outputs.outputs.test_log_s3_uri }}
+      springtail_log_s3_uris: ${{ steps.set_outputs.outputs.springtail_log_s3_uris }}
+      agg_result: ${{ needs.integration-test-p1.result == 'success' && needs.integration-test-p2.result == 'success' && needs.integration-test-p3.result == 'success' && needs.integration-test-p4.result == 'success' && 'success' || 'failure' }}
 
     steps:
       - name: Set Outputs
@@ -134,7 +136,7 @@ jobs:
         by ${{ github.event.pull_request.user.login }} has completed the CI workflow
       attachment: |
         {
-          "color": "${{ needs.unit-test.result == 'success' && needs.integration-test.result == 'success' && 'good' || 'danger' }}",
+          "color": "${{ needs.unit-test.result == 'success' && needs.integration-test-join.agg_result == 'success' && 'good' || 'danger' }}",
           "fields": [
             {
               "title": "Unit Test",
@@ -143,7 +145,7 @@ jobs:
             },
             {
               "title": "Integration Test",
-              "value": "${{ needs.integration-test.result }}; \ntest logs: ${{ needs.integration-test-join.outputs.test_log_s3_uris }}\nspringtail logs: ${{ needs.integration-test-join.outputs.springtail_log_s3_uris }}",
+              "value": "${{ needs.integration-test.agg_result }}; \ntest logs: ${{ needs.integration-test-join.outputs.test_log_s3_uris }}\nspringtail logs: ${{ needs.integration-test-join.outputs.springtail_log_s3_uris }}",
               "short": false
             }
           ]

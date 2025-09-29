@@ -267,7 +267,7 @@ jobs:
         uses: dorny/test-reporter@v1
         if: success() || failure()                         # Only upload the *last* report
         with:
-          name: "Integration Test Report - ${{ inputs.config_to_run }}"      # Name of the check run which will be created
+          name: "IT Report - ${{ inputs.config_to_run }}"      # Name of the check run which will be created
           path: ./integration-test-report.xml
           reporter: java-junit
 
