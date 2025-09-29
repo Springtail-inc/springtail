@@ -13,6 +13,8 @@
 #include <pg_log_mgr/sync_tracker.hh>
 
 #include <redis/redis_ddl.hh>
+#include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
@@ -269,7 +271,7 @@ namespace springtail::pg_log_mgr {
             if (entry.schema == nullptr) {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, true);
                 }
                 entry.update_schema();
             }
@@ -357,7 +359,7 @@ namespace springtail::pg_log_mgr {
                 XidLsn current(current_xid);
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, true);
                 }
                 entry.update_schema();
             }
@@ -564,7 +566,7 @@ namespace springtail::pg_log_mgr {
         if (msg->msg_type == PgMsgEnum::CREATE_TABLE || msg->msg_type == PgMsgEnum::ALTER_TABLE) {
             auto &table = std::get<PgMsgTable>(msg->msg);
             std::vector<SchemaColumn> columns;
-            for (auto column : table.columns) {
+            for (auto &column : table.columns) {
                 std::optional<uint32_t> pkey;
                 if (column.is_pkey) {
                     pkey = column.pk_position;
@@ -720,7 +722,7 @@ namespace springtail::pg_log_mgr {
                                              const std::vector<uint64_t> &pg_xids)
     {
         RedisDDL redis_ddl;
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
 
         switch(change->msg_type) {
         case PgMsgEnum::CREATE_TABLE:
@@ -732,7 +734,7 @@ namespace springtail::pg_log_mgr {
                 PgMsgNamespace namespace_msg{table_msg.lsn, table_msg.namespace_id, table_msg.xid, table_msg.namespace_name};
 
                 // make sure that the namespace is created
-                std::string &&ddl_stmt = client->create_namespace(_db, xidlsn, namespace_msg);
+                std::string &&ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
 
                 if (action.get<std::string>() != "no_change") {
@@ -740,7 +742,7 @@ namespace springtail::pg_log_mgr {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
 
-                ddl_stmt = client->create_table(_db, xidlsn, table_msg);
+                ddl_stmt = server->create_table(_db, xidlsn, table_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 _exists_cache->insert(_db, table_msg.oid, true);
                 break;
@@ -751,7 +753,7 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "ALTER TABLE: xid={}, lsn={}, pg_xid={}, tid={}", xidlsn.xid, xidlsn.lsn,
                           table_msg.xid, table_msg.oid);
 
-                std::string &&ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
+                std::string &&ddl_stmt = server->alter_table(_db, xidlsn, table_msg);
 
                 // check for re-sync
                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
@@ -778,7 +780,7 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "DROP TABLE: xid={}, pg_xid={}, tid={}", xidlsn.xid,
                           drop_msg.xid, drop_msg.oid);
 
-                std::string &&ddl_stmt = client->drop_table(_db, xidlsn, drop_msg);
+                std::string &&ddl_stmt = server->drop_table(_db, xidlsn, drop_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 _exists_cache->insert(_db, drop_msg.oid, false);
                 break;
@@ -786,42 +788,42 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_NAMESPACE:
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
-                std::string &&ddl_stmt = client->create_namespace(_db, xidlsn, namespace_msg);
+                std::string &&ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::ALTER_NAMESPACE:
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
-                std::string &&ddl_stmt = client->alter_namespace(_db, xidlsn, namespace_msg);
+                std::string &&ddl_stmt = server->alter_namespace(_db, xidlsn, namespace_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::DROP_NAMESPACE:
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
-                std::string &&ddl_stmt = client->drop_namespace(_db, xidlsn, namespace_msg);
+                std::string &&ddl_stmt = server->drop_namespace(_db, xidlsn, namespace_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::CREATE_TYPE:
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
-                std::string &&ddl_stmt = client->create_usertype(_db, xidlsn, type_msg);
+                std::string &&ddl_stmt = server->create_usertype(_db, xidlsn, type_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::ALTER_TYPE:
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
-                std::string &&ddl_stmt = client->alter_usertype(_db, xidlsn, type_msg);
+                std::string &&ddl_stmt = server->alter_usertype(_db, xidlsn, type_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::DROP_TYPE:
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
-                std::string &&ddl_stmt = client->drop_usertype(_db, xidlsn, type_msg);
+                std::string &&ddl_stmt = server->drop_usertype(_db, xidlsn, type_msg);
                 auto json = nlohmann::json::parse(ddl_stmt);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "DROP TYPE: xid={}, pg_xid={}, tid={}, ddl={}", xidlsn.xid,
                           type_msg.xid, type_msg.oid, json.dump());
@@ -833,7 +835,7 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_INDEX:
             {
                 auto &index_msg = std::get<PgMsgIndex>(change->msg);
-                auto &&create_index_response = client->create_index(_db, xidlsn, index_msg,
+                auto &&create_index_response = server->create_index(_db, xidlsn, index_msg,
                                                                   sys_tbl::IndexNames::State::NOT_READY);
 
                 // Store the index process request for the Committer
@@ -847,7 +849,7 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::DROP_INDEX:
             {
                 auto &index_msg = std::get<PgMsgDropIndex>(change->msg);
-                auto &&drop_index_response = client->drop_index(_db, xidlsn, index_msg);
+                auto &&drop_index_response = server->drop_index(_db, xidlsn, index_msg);
 
                 // Store the index process request for the Committer
                 _index_requests_mgr->add_index_request(_db, xidlsn.xid, drop_index_response);
@@ -865,7 +867,7 @@ namespace springtail::pg_log_mgr {
                 auto &attach_partition_msg = std::get<PgMsgAttachPartition>(change->msg);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "ATTACH PARTITION: xid={}, pg_xid={}, tid={}", xidlsn.xid,
                     attach_partition_msg.xid, attach_partition_msg.table_id);
-                std::string &&ddl_stmt = client->attach_partition(_db, xidlsn, attach_partition_msg);
+                std::string &&ddl_stmt = server->attach_partition(_db, xidlsn, attach_partition_msg);
 
                 // Store the DDL statement for the Committer
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
@@ -877,7 +879,7 @@ namespace springtail::pg_log_mgr {
                 auto &detach_partition_msg = std::get<PgMsgDetachPartition>(change->msg);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "DETACH PARTITION: xid={}, pg_xid={}, tid={}", xidlsn.xid,
                     detach_partition_msg.xid, detach_partition_msg.table_id);
-                std::string &&ddl_stmt = client->detach_partition(_db, xidlsn, detach_partition_msg);
+                std::string &&ddl_stmt = server->detach_partition(_db, xidlsn, detach_partition_msg);
 
                 // Store the DDL statement for the Committer
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
@@ -1198,7 +1200,7 @@ namespace springtail::pg_log_mgr {
             uint64_t xid = get_next_xid();
 
             // for operations at the SysTblMgr
-            auto client = sys_tbl_mgr::Client::get_instance();
+            auto server = sys_tbl_mgr::Server::get_instance();
             nlohmann::json ddls = nlohmann::json::array({});
             std::vector<uint64_t> table_ids;
 
@@ -1219,12 +1221,12 @@ namespace springtail::pg_log_mgr {
                     // Table is dropped when the sync was in queue/in-progress
 
                     auto table_req = copy_info->table_req();
-                    auto table_info = table_req.table();
+                    auto &table_info = table_req.table();
                     PgMsgDropTable drop_msg;
                     drop_msg.oid = table_info.id();
                     drop_msg.namespace_name = table_info.namespace_name();
                     drop_msg.table = table_info.name();
-                    std::string &&ddl_stmt = client->drop_table(_db_id, XidLsn{xid}, std::move(drop_msg));
+                    std::string &&ddl_stmt = server->drop_table(_db_id, XidLsn{xid}, drop_msg);
                     ddls.emplace_back(ddl_stmt);
                 } else {
 
@@ -1251,7 +1253,7 @@ namespace springtail::pg_log_mgr {
                     roots->set_xid(xid);
 
                     // note: this will also invalidate the table's client cache entry
-                    auto ddl_str = client->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
+                    auto ddl_str = server->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
 
                     // store the ddl mutations for the FDWs
                     auto ddl = nlohmann::json::parse(ddl_str);

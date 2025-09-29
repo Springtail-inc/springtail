@@ -12,10 +12,6 @@
 #include <storage/field.hh>
 #include <storage/schema.hh>
 
-#include <sys_tbl_mgr/schema_mgr.hh>
-#include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/table.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
 

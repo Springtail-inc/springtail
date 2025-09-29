@@ -9,14 +9,13 @@
 #include <common/properties.hh>
 #include <common/threaded_test.hh>
 
-#include <sys_tbl_mgr/client.hh>
-#include "sys_tbl_mgr/shm_cache.hh"
-#include <test/services.hh>
 #include <storage/schema.hh>
 #include <storage/xid.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
+#include <sys_tbl_mgr/system_tables.hh>
+#include <test/services.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_fdw/pg_xid_subscriber_mgr.hh>
@@ -36,7 +35,7 @@ namespace {
             springtail_init_test(LOG_ALL ^ LOG_STORAGE);
             test::start_services(true, true, false);
 
-            sys_tbl_mgr::Client *client = sys_tbl_mgr::Client::get_instance();
+            sys_tbl_mgr::Server *server = sys_tbl_mgr::Server::get_instance();
 
             // move to the next XID
             ++_xid.xid;
@@ -45,13 +44,14 @@ namespace {
             PgMsgNamespace ns_msg;
             ns_msg.oid = 90000;
             ns_msg.name = "public";
-            client->create_namespace(1, _xid, ns_msg);
+            server->create_namespace(1, _xid, ns_msg);
         }
 
         static void TearDownTestSuite() {
             springtail_shutdown();
         }
 
+        sys_tbl_mgr::Server *_server = sys_tbl_mgr::Server::get_instance();
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
         static XidLsn _xid;
     };
@@ -91,14 +91,14 @@ namespace {
         create_msg.table = "test_table";
         create_msg.columns.emplace_back("col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true);
         create_msg.columns.emplace_back("col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false);
-        _client->create_table(db, _xid, create_msg);
+        _server->create_table(db, _xid, create_msg);
         auto &&metadata = _client->get_roots(db, tid, _xid.xid);
 
         // this
         xid_mgr_server->commit_xid(db, 1, _xid.xid, true);
 
         ++_xid.xid;
-        _client->update_roots(db, tid, _xid.xid, {{{0, 1234}}, {17}});
+        _server->update_roots(db, tid, _xid.xid, {{{0, 1234}}, {17}});
         // commit new xid
         xid_mgr_server->commit_xid(db, 1, _xid.xid, true);
 

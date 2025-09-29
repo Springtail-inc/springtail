@@ -6,8 +6,7 @@
 #include <chrono>
 #include <memory>
 #include <redis/db_state_change.hh>
-#include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
 #include <xid_mgr/xid_mgr_server.hh>
@@ -20,7 +19,8 @@ namespace springtail::committer {
     bool
     _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     {
-        auto meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
+        auto meta = sys_tbl_mgr::Server::get_instance()->get_roots(db_id, tid, xid);
+        DCHECK(meta != nullptr);
         auto it =
             std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
         return it != meta->roots.end();
@@ -135,7 +135,7 @@ namespace springtail::committer {
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // finalize the system metadata
-                    sys_tbl_mgr::Client::get_instance()->finalize(db_id, completed_xid);
+                    sys_tbl_mgr::Server::get_instance()->finalize(db_id, completed_xid);
 
                     // perform a commit to the XidMgr
                     xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true);
@@ -152,7 +152,9 @@ namespace springtail::committer {
                         // Send completed_xid - 1 to get the previous old snapshot dir
                         // and then expire that at the completed_xid
                         auto swapped_table_old_dir = TableMgr::get_instance()->get_table_data_dir(db_id, swapped_tid, completed_xid - 1);
-                        Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir, completed_xid);
+                        if (swapped_table_old_dir.has_value()) {
+                            Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir.value(), completed_xid);
+                        }
                     }
                 } else {
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Record DDL changes db {} xid {}", db_id, completed_xid);
@@ -262,7 +264,7 @@ namespace springtail::committer {
                 // finalize the system metadata
                 // note: we do this even without DDL changes to ensure the primary and secondary
                 //       index root offsets are written to disk
-                sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+                sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
 
                 // Check and notify vacuumer about dropped tables
                 if (!completed_ddls.is_null()) {
@@ -373,8 +375,10 @@ namespace springtail::committer {
                 auto tid = index_request.index().table_id();
                 auto index_id = index_request.index().id();
                 auto _dropped_index_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
-                auto index_file_path = _dropped_index_table_dir / fmt::format(constant::INDEX_FILE, index_id);
-                Vacuumer::get_instance()->expire_snapshot(db_id, index_file_path, committed_xid);
+                if (_dropped_index_table_dir.has_value()) {
+                    auto index_file_path = _dropped_index_table_dir.value() / fmt::format(constant::INDEX_FILE, index_id);
+                    Vacuumer::get_instance()->expire_snapshot(db_id, index_file_path, committed_xid);
+                }
             }
         }
     }
@@ -388,7 +392,9 @@ namespace springtail::committer {
                 auto action = ddl["action"].get<std::string>();
                 if (action == "drop") {
                     auto dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
-                    Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir, committed_xid);
+                    if (dropped_table_dir.has_value()) {
+                        Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir.value(), committed_xid);
+                    }
                 }
             }
         }
@@ -397,7 +403,7 @@ namespace springtail::committer {
     void
     Committer::_invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls)
     {
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
         for (auto ddl : completed_ddls) {
             if (!ddl.contains("tid")) {
                 continue; // mutation doesn't reference a specific table
@@ -405,7 +411,7 @@ namespace springtail::committer {
 
             uint64_t tid = ddl["tid"].get<uint64_t>();
             XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
-            client->invalidate_table(db, tid, ddl_xid);
+            server->invalidate_table(db, tid, ddl_xid);
         }
     }
 
@@ -468,9 +474,7 @@ namespace springtail::committer {
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
         auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, thread_name);
 
-        // construct the mutable table object
-        auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
-        if (!sys_tbl_mgr::Client::get_instance()->exists(db_id, tid, XidLsn{xid})) {
+        if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid})) {
             // This could happen if the table is dropped in the same transaction
             // BEGIN/INSERT/DROP/COMMIT
             // TODO: another way to handle the case would be to drop the table mutation
@@ -479,6 +483,9 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exists: {}", tid);
             return;
         }
+
+        // construct the mutable table object
+        auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
@@ -531,7 +538,7 @@ namespace springtail::committer {
         Coordinator::get_instance()->register_thread(daemon_type, thread_name);
 
         // update the system table roots
-        TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
 
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_MESSAGES, tx_counters.messages);
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_INSERTS, tx_counters.inserts);
@@ -572,7 +579,7 @@ namespace springtail::committer {
         // get the schema at the given XID/LSN
         // note: we are guaranteed that the entire batch will utilize the same schema
         XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, tid, xid);
+        auto schema = TableMgr::get_instance()->get_extent_schema(db_id, tid, xid);
 
         auto sort_keys = schema->get_sort_keys();
         sort_keys.push_back("__springtail_lsn");
