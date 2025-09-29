@@ -128,25 +128,12 @@ protected:
     /**
      * @brief Destroy the Vacuumer object
      */
-    ~Vacuumer() override = default;
+    ~Vacuumer() override;
 
     /**
      * @brief Initializes vacuumer thread
      */
     void _init();
-
-    /**
-     * @brief Core runner of the vacuum that
-     *        - hole-punches files,
-     *        removes dropped table and index paths
-     */
-    void _internal_run() override;
-
-    /**
-     * @brief Graceful shutdown of vacuumer thread
-     */
-    void _internal_shutdown() override;
-
 
 private:
     /**
@@ -161,6 +148,8 @@ private:
      * Enum to indicate the type of cleanup on the global vacuum file
      */
     enum class CleanupOperation { DB_CLEANUP, RECOVERY };
+
+    void _task(std::stop_token st);
 
     /**
      * Hole-punch block size
@@ -219,9 +208,8 @@ private:
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
-    std::thread _vacuumer_thread;           ///< Vacuumer thread
+    std::jthread _vacuumer_thread;           ///< Vacuumer thread
 
-    std::atomic<bool> _shutdown{false};   ///< shutdown flag
     std::atomic<int64_t> _entries_count_in_memory = 0;  ///< To track count of entries in the memory
 
     /**

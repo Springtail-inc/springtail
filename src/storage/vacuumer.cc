@@ -2,6 +2,8 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <chrono>
+#include <stop_token>
 
 #include <storage/vacuumer.hh>
 #include <storage/interval_tree.hh>
@@ -10,6 +12,15 @@
 #include <common/redis_types.hh>
 
 namespace springtail {
+
+Vacuumer::~Vacuumer()
+{
+    if (!_vacuum_start_enabled)
+        return;
+    _vacuumer_thread.request_stop();
+    _vacuumer_thread.join();
+    LOG_INFO("Vacuumer thread joined");
+}
 
 void
 Vacuumer::_init()
@@ -76,7 +87,7 @@ Vacuumer::_init()
 
     if (_vacuum_start_enabled) {
         // Core thread of the vacuumer
-        _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
+        _vacuumer_thread = std::jthread([this](std::stop_token st) { _task(st); });
         pthread_setname_np(_vacuumer_thread.native_handle(), "Vacuumer");
         LOG_INFO("Vacuumer thread started");
     } else {
@@ -86,18 +97,6 @@ Vacuumer::_init()
     // Initialize redis hash to save cutoff XIDs
     uint64_t db_instance_id = Properties::get_db_instance_id();
     _vacuum_cutoff_xid_redis_hash = fmt::format(redis::VACUUM_CUTOFF_XID, db_instance_id);
-}
-
-void
-Vacuumer::_internal_shutdown()
-{
-    // Set flag and wait for the thread to join
-    _shutdown = true;
-
-    if (_vacuum_start_enabled) {
-        _vacuumer_thread.join();
-        LOG_INFO("Vacuumer thread joined");
-    }
 }
 
 void
@@ -1012,18 +1011,39 @@ Vacuumer::_do_vacuum_run()
 }
 
 void
-Vacuumer::_internal_run()
+Vacuumer::_task(std::stop_token st)
 {
     // Run recovery for first time
     _run_recovery();
 
-    while(!_shutdown) {
-        // sleep for 1 second before trying to expire more data
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    auto wait_for_timeout = [&st](std::chrono::milliseconds duration) {
+        // the promise will be set when stop is requested
+        std::promise<void> p;
 
+        // called when stop is requested
+        std::stop_callback cb(st, [&p]{
+            try { 
+                // unblock the wait below
+                p.set_value(); 
+            } catch(const std::future_error&) {
+                // promise already satisfied, ignore
+            } 
+        });
+
+        auto fut = p.get_future();
+
+        if (fut.wait_for(duration) == std::future_status::ready) {
+            // stop requested
+            return false;
+        } else {
+            // timeout
+            return true;
+        }
+    };
+
+    while(wait_for_timeout(std::chrono::seconds(1))) {
         // Run vacuum once
         _do_vacuum_run();
-
     }
 }
 
