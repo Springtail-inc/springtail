@@ -44,49 +44,62 @@ configs:
     - overlay: ~
       test_sets: 'all'
     - overlay: 'small_log_rotate'
-      test_sets: ['recovery']
+      test_sets: [ 'recovery' ]
     - overlay: 'small_log_rotate_with_streaming'
-      test_sets: ['recovery']
+      test_sets: [ 'recovery' ]
     - overlay: 'small_cache_size'
-      test_sets: ['basic']
+      test_sets: [ 'basic' ]
     - overlay: 'streaming_postgres_config'
-      test_sets: ['recovery', 'large_data']
+      test_sets: [ 'recovery', 'large_data' ]
     # temporary commented out because it does not work yet
     # - overlay: 'integration_test_config'
     #   test_sets: ['basic', 'framework']
     - overlay: 'include_schema_config'
-      test_sets: ['include_schema']
+      test_sets: [ 'include_schema' ]
 
-  # configuration for github CI
-  github_ci:
+  # configuration for github CI, split into multiple parts to allow parallel execution
+  # Long tests:
+  #  - basic ~ 4min
+  #  - recovery (small log rotate) ~ 5min
+  #  - recovery (small log rotate with streaming) ~ 6min
+  #  - small cache size ~ 4min
+  github_ci_p1:
     - overlay: ~
-      test_sets: ['basic', 'framework', 'preload', 'enum_bits', 'complex', 'numeric', 'query_benchmark']
-    - overlay: 'small_log_rotate'
-      test_sets: ['recovery']
-    - overlay: 'small_log_rotate_with_streaming'
-      test_sets: ['recovery']
-    - overlay: 'small_cache_size'
-      test_sets: ['basic']
-    - overlay: 'streaming_postgres_config'
-      test_sets: ['recovery']
-    # temporary commented out because it does not work yet
-    # - overlay: 'integration_test_config'
-    #   test_sets: ['basic', 'framework']
+      test_sets: [ 'basic', 'framework', 'preload' ]
     - overlay: 'include_schema_config'
-      test_sets: ['include_schema']
+      test_sets: [ 'include_schema' ]
+
+  github_ci_p2:
+    - overlay: ~
+      test_sets: [ 'enum_bits', 'complex' ]
+    - overlay: 'small_log_rotate'
+      test_sets: [ 'recovery' ]
+
+  github_ci_p3:
+    - overlay: 'small_log_rotate_with_streaming'
+      test_sets: [ 'recovery' ]
+
+  github_ci_p4:
+    - overlay: ~
+      test_sets: [ 'numeric', 'query_benchmark' ]
+    - overlay: 'small_cache_size'
+      test_sets: [ 'basic' ]
+    - overlay: 'streaming_postgres_config'
+      test_sets: [ 'recovery' ]
+
 
   # this configuration runs when there is nothing specified on the command line
   default:
     - overlay: ~
-      test_sets: ['basic', 'framework', 'preload', 'enum_bits', 'complex', 'numeric', 'query_benchmark']
+      test_sets: [ 'basic', 'framework', 'preload', 'enum_bits', 'complex', 'numeric', 'query_benchmark' ]
     - overlay: 'small_log_rotate'
-      test_sets: ['recovery']
+      test_sets: [ 'recovery' ]
     - overlay: 'small_log_rotate_with_streaming'
-      test_sets: ['recovery']
+      test_sets: [ 'recovery' ]
     - overlay: 'small_cache_size'
-      test_sets: ['basic']
+      test_sets: [ 'basic' ]
     - overlay: 'streaming_postgres_config'
-      test_sets: ['recovery', 'large_data']
+      test_sets: [ 'recovery', 'large_data' ]
     - overlay: 'include_schema_config'
-      test_sets: ['include_schema']
+      test_sets: [ 'include_schema' ]
     

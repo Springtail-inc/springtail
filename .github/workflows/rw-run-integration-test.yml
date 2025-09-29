@@ -247,7 +247,7 @@ jobs:
             echo "test_log_s3_uri=${log_s3_key}" >> $GITHUB_OUTPUT
           
             # Springtail service logs
-            springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.tar.gz"
+            springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}-${INTEGRATION_TEST_CONFIG}.tar.gz"
             output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../${CI_BUILD_TYPE})
             fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
             springtail_log_s3_key="${S3_LOGS_PREFIX_FULL}/${springtail_log_file}"
