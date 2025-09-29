@@ -35,9 +35,9 @@ int main(int argc, char *argv[])
     }
 
     // initialize the springtail subsystems
-    std::optional<std::string> pidfile;
+    bool daemonize = false;
     if (vm.count("daemonize")) {
-        pidfile = "pg_ddl_mgr.pid";
+        daemonize = true;
     }
 
     // check if the socket path is valid
@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
             {"hostname", std::any(socket_hostname)}
         });
 
-    springtail_init_daemon("pg_ddl_mgr", pidfile, LOG_ALL ^ (LOG_STORAGE | LOG_CACHE));
+    springtail_init_daemon(argv[0], daemonize, LOG_ALL ^ (LOG_STORAGE | LOG_CACHE));
     PgDDLMgr::start();
     springtail_daemon_run();
 
