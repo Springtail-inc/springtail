@@ -43,7 +43,7 @@ namespace springtail::pg_fdw {
         "WHERE typisdefined = true";
 
     static constexpr char ALTER_TABLE_RLS[] =
-        "ALTER FOREIGN TABLE {}.{} "
+        "ALTER {} TABLE {}.{} "
         "  ENABLE ROW LEVEL SECURITY {}";
 
     /** Calls primary function to get diff of policy changes; see policy.sql */
@@ -771,6 +771,12 @@ namespace springtail::pg_fdw {
             // get the table name and schema name
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
 
+            // check if table is a parent partition; thus a regular table
+            bool is_parent_partition = false;
+            if (!fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->is_null(&row)) {
+                is_parent_partition = true;
+            }
+
             // get schema name from schema map
             uint64_t namespace_oid = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
             DCHECK_NE(namespace_oid, 0) << "Namespace OID should not be 0";
@@ -790,6 +796,7 @@ namespace springtail::pg_fdw {
 
             // create the RLS policy for the table
             auto sql = fmt::format(ALTER_TABLE_RLS,
+                is_parent_partition ? "" : "FOREIGN",
                 conn->escape_identifier(schema_name), conn->escape_identifier(table_name),
                 rls_forced ? ", FORCE ROW LEVEL SECURITY" : "");
 
@@ -1306,12 +1313,10 @@ namespace springtail::pg_fdw {
 
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "DDL JSON: {}", ddl.dump(4));
 
+        // determine if this is a foreign table or regular table operation
+        // if partition_key is empty, then it's a foreign table, since it is a leaf table
         PartitionInfo partition_info = _get_partition_info(ddl);
-
-        bool is_regular_table = partition_info.parent_table_id() == 0 && partition_info.partition_key().empty();
-        bool is_leaf_partitioned_table = partition_info.parent_table_id() > 0 && !partition_info.partition_bound().empty() && partition_info.partition_key().empty();
-
-        bool is_regular_table_type = is_regular_table || is_leaf_partitioned_table;
+        bool is_foreign_table_type = partition_info.partition_key().empty();
 
         auto const &action = ddl.at("action");
         if (action == "create") { // create table
@@ -1328,7 +1333,7 @@ namespace springtail::pg_fdw {
             }
 
             return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns,
-                                                   partition_info, is_regular_table_type,
+                                                   partition_info, is_foreign_table_type,
                                                    [conn](const std::string &name) {
                                                         return conn->escape_identifier(name.c_str());
                                                    });
@@ -1336,7 +1341,7 @@ namespace springtail::pg_fdw {
 
         else if (action == "rename") { // rename table
             std::string rename = fmt::format("ALTER {} TABLE {}.{} RENAME TO {};",
-                                             is_regular_table_type ? "FOREIGN" : "",
+                                             is_foreign_table_type ? "FOREIGN" : "",
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
                                              conn->escape_identifier(ddl.at("table").get<std::string>()));
@@ -1344,7 +1349,7 @@ namespace springtail::pg_fdw {
             // XXX it's not clear to me that we need to support a schema change here?
             if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
                 return rename + fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
-                                            is_regular_table_type ? "FOREIGN" : "",
+                                            is_foreign_table_type ? "FOREIGN" : "",
                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                             conn->escape_identifier(ddl.at("table").get<std::string>()),
                                             conn->escape_identifier(ddl.at("schema").get<std::string>()));
@@ -1355,7 +1360,7 @@ namespace springtail::pg_fdw {
 
         else if (action == "drop") {  // drop table
             return fmt::format("DROP {} TABLE IF EXISTS {}.{};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
@@ -1382,7 +1387,7 @@ namespace springtail::pg_fdw {
                 type_name = std::get<0>(it->second);
             }
             return fmt::format("ALTER {} TABLE {}.{} ADD COLUMN {} {} {};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(col.at("name").get<std::string>()),
@@ -1392,7 +1397,7 @@ namespace springtail::pg_fdw {
 
         else if (action == "col_drop") {  // alter table drop column
             return fmt::format("ALTER {} TABLE {}.{} DROP COLUMN {};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("column").get<std::string>()));
@@ -1401,7 +1406,7 @@ namespace springtail::pg_fdw {
 
         else if (action == "col_rename") {
             return fmt::format("ALTER {} TABLE {}.{} RENAME COLUMN {} TO {};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("old_name").get<std::string>()),
@@ -1455,7 +1460,7 @@ namespace springtail::pg_fdw {
             const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
 
             return fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                old_schema, table, schema);
         }
         else if (action == "ut_create") {
@@ -1528,7 +1533,7 @@ namespace springtail::pg_fdw {
             bool rls_enabled = ddl.at("rls_enabled").get<bool>();
 
             return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                schema, table,
                                rls_enabled ? "ENABLE" : "DISABLE");
         } else if (action == "set_rls_forced") {
@@ -1538,7 +1543,7 @@ namespace springtail::pg_fdw {
             bool rls_forced = ddl.at("rls_forced").get<bool>();
 
             return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                schema, table,
                                rls_forced ? "FORCE" : "NO FORCE");
         }
