@@ -40,8 +40,8 @@ on:
 jobs:
   build-container:
     name: Build Springtail Container
-    runs-on: warp-ubuntu-latest-arm64-8x
-    timeout-minutes: 15
+    runs-on: warp-ubuntu-latest-arm64-4x
+    timeout-minutes: 20
     env:
       CI_BUILD_TYPE: ${{ inputs.build_type }}
       ECR_REPO_URI: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}
@@ -95,7 +95,7 @@ jobs:
         with:
           profile-name: "Springtail-CI"
           context: .
-          push: true
+          push: false
           file: .github/workflows/Dockerfile.build
           tags: |
             ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ steps.prepare-build.outputs.output_image_tag }}
@@ -104,3 +104,16 @@ jobs:
             CI_BUILD_TYPE=${{ inputs.build_type }}
             NCORES=${{ inputs.num_procs }}
             ${{ steps.prepare-build.outputs.springtail_include_time_traces }}
+
+      - name: Clean up secrets
+        run: |
+          docker logout ${ECR_REPO_URI}
+          rm -f $HOME/.aws $HOME/.ssh $HOME/.git-credentials
+
+      - name: Snapshot the VM
+        uses: WarpBuilds/snapshot-save@v1
+        with:
+          alias: ${{ steps.prepare-build.outputs.output_image_tag }}
+          fail-on-error: true
+          wait-timeout-minutes: 30
+          

@@ -27,7 +27,7 @@ jobs:
     with:
       base_image_tag: ci-debug-202509091508-gold
       build_type: "debug"
-      num_procs: "8"
+      num_procs: "6"
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
