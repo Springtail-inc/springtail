@@ -3,7 +3,7 @@
 #include <common/logging.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_recovery.hh>
-#include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/server.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -66,10 +66,10 @@ void
 PgLogRecovery::_revert_system_tables()
 {
     // ask the SysTblMgr to revert the system tables to the most recently committed XID
-    sys_tbl_mgr::Client::get_instance()->revert(_db_id, _committed_xid);
+    sys_tbl_mgr::Server::get_instance()->revert(_db_id, _committed_xid);
 
     // perform a commit at the next XID to ensure we have a clean snapshot from this point
-    sys_tbl_mgr::Client::get_instance()->finalize(_db_id, _committed_xid + 1);
+    sys_tbl_mgr::Server::get_instance()->finalize(_db_id, _committed_xid + 1);
 }
 
 bool

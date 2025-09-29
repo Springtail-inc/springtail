@@ -21,7 +21,7 @@
 
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/table_mgr_client.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
@@ -30,7 +30,7 @@ using namespace springtail::pg_fdw;
 void
 list_tables(uint64_t db_id)
 {
-    auto table = TableMgr::get_instance()->get_table(db_id,
+    auto table = TableMgrClient::get_instance()->get_table(db_id,
                                                      sys_tbl::TableNames::ID,
                                                      constant::LATEST_XID);
     // get field array
@@ -54,7 +54,7 @@ list_tables(uint64_t db_id)
 uint64_t
 find_namespace_id(uint64_t db_id, const std::string &name, const XidLsn &xid)
 {
-    auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID,
+    auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID,
                                                      constant::LATEST_XID);
     auto schema = table->extent_schema();
     auto fields = schema->get_fields();
@@ -94,7 +94,7 @@ lookup_table(uint64_t db_id,
     uint64_t namespace_id = find_namespace_id(db_id, schema_name, XidLsn(xid));
 
     // get the table names table
-    auto table = TableMgr::get_instance()->get_table(db_id,
+    auto table = TableMgrClient::get_instance()->get_table(db_id,
                                                      sys_tbl::TableNames::ID,
                                                      constant::LATEST_XID);
     // get field array
@@ -156,9 +156,9 @@ dump_table(uint64_t db_id,
            uint64_t tid,
            uint64_t xid)
 {
-    TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
+    TablePtr table = TableMgrClient::get_instance()->get_table(db_id, tid, xid);
     ExtentSchemaPtr schema = table->extent_schema();
-    std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(db_id, tid, { xid, constant::MAX_LSN });
+    std::map<uint32_t, SchemaColumn> columns = TableMgrClient::get_instance()->get_columns(db_id, tid, { xid, constant::MAX_LSN });
 
     auto fields = schema->get_fields();
     FormData_pg_attribute attrdata[fields->size()];

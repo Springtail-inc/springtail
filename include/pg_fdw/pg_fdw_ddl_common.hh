@@ -9,7 +9,7 @@
 
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/table_mgr_client.hh>
 
 #include <pg_repl/libpq_connection.hh>
 
@@ -265,7 +265,7 @@ namespace springtail::pg_fdw {
             LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Getting schema ddl for {} @ {}:{}", namespace_name, schema_xid, constant::MAX_LSN);
 
             // lookup the namespace_id for the requested schema
-            auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
+            auto ns_table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
             auto ns_key = sys_tbl::NamespaceNames::Secondary::key_tuple(namespace_name, schema_xid, constant::MAX_LSN);
             auto ns_i = ns_table->inverse_lower_bound(ns_key, 1);
 
@@ -339,7 +339,7 @@ namespace springtail::pg_fdw {
             std::string current_table;
 
             // get the schemas table
-            auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Schemas::ID,
+            auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::Schemas::ID,
                                                         schema_xid);
 
             // iterate through it
