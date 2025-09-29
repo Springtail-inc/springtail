@@ -36,6 +36,11 @@ on:
         description: 'Whether to reuse the existing code from /home/dev/springtail or do a fresh checkout.'
         type: boolean
         required: false
+      snapshot_alias:
+        description: 'Only used if reuse_code is true. The snapshot alias to use for the runner.'
+        type: string
+        required: false
+        default: ""
     secrets:
       aws_role_arn:
         description: "The ARN of the role to assume."
@@ -52,7 +57,7 @@ on:
 jobs:
   test:
     name: unit-test
-    runs-on: warp-ubuntu-latest-arm64-4x;snapshot.key=test-foo
+    runs-on: ${{ inputs.reuse_code && format('warp-ubuntu-latest-arm64-4x;snapshot.key={0}', inputs['snapshot_alias']) || 'warp-ubuntu-latest-arm64-4x' }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}

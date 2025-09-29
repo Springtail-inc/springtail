@@ -11,6 +11,11 @@ on:
         type: string
         required: true
         default: "debug"
+      push:
+        description: 'Whether to push the built image to ECR. If false, the image will only be loaded into the local Docker daemon. Otherwise it will be pushed to ECR but not loaded locally.'
+        type: boolean
+        required: false
+        default: true
       num_procs:
         description: 'The number of parallel processes to use for building and testing.'
         type: string
@@ -74,7 +79,7 @@ jobs:
           if [ -z "${OUTPUT_IMAGE_TAG}" ]; then
             # Generate a unique short random tag
             r=$(head /dev/urandom | tr -dc a-f0-9 | head -c6)
-            output_image_tag="${BASE_IMAGE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
+            output_image_tag="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
           fi
           
           # Logs in ECR
@@ -95,7 +100,8 @@ jobs:
         with:
           profile-name: "Springtail-CI"
           context: .
-          push: false
+          push: ${{ inputs.push }}
+          load: ${{ !inputs.push }}
           file: .github/workflows/Dockerfile.build
           tags: |
             ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ steps.prepare-build.outputs.output_image_tag }}
@@ -110,10 +116,12 @@ jobs:
           docker logout ${ECR_REPO_URI}
           rm -f $HOME/.aws $HOME/.ssh $HOME/.git-credentials
 
+      # Reuse the Image Tag as the snapshot ID. This allows reusing the
+      # same snapshot in subsequent jobs.
       - name: Snapshot the VM
         uses: WarpBuilds/snapshot-save@v1
         with:
-          alias: test-foo
+          alias: ${{ steps.prepare-build.outputs.output_image_tag }}
           fail-on-error: true
           wait-timeout-minutes: 30
           
