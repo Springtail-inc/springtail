@@ -1,4 +1,6 @@
 // springtail includes
+#include <common/json.hh>
+
 #include <pg_log_mgr/sync_tracker.hh>
 
 #include <pg_repl/exception.hh>
@@ -6,7 +8,7 @@
 #include <storage/schema.hh>
 #include <storage/field.hh>
 
-#include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
@@ -1278,7 +1280,7 @@ namespace springtail
             return;
         }
 
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
         // iterate through the results and get the user defined types
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t enum_type_oid = copy_table._connection.get_int32(i, 0);
@@ -1287,20 +1289,19 @@ namespace springtail
             std::string enum_type_name = copy_table._connection.get_string(i, 3);
             std::string enum_value_json = copy_table._connection.get_string(i, 4);
 
-            proto::UserTypeRequest udt_req;
-            udt_req.set_db_id(db_id);
-            udt_req.set_xid(xid);
-            udt_req.set_lsn(0);
-            udt_req.set_name(enum_type_name);
-            udt_req.set_type_id(enum_type_oid);
-            udt_req.set_namespace_id(namespace_oid);
-            udt_req.set_namespace_name(namespace_name);
-            udt_req.set_value_json(enum_value_json);
-            udt_req.set_type(constant::USER_TYPE_ENUM); // only support enum types
-
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Creating user defined type: {}, values: {}", enum_type_name, enum_value_json);
 
-            client->create_usertype(udt_req);
+            PgMsgUserType msg;
+            msg.lsn = 0;
+            msg.oid = enum_type_oid;
+            msg.xid = xid;
+            msg.namespace_id = namespace_oid;
+            msg.type = constant::USER_TYPE_ENUM; // only support enum types
+            msg.namespace_name = namespace_name;
+            msg.name = enum_type_name;
+            msg.value_json = enum_value_json;
+
+            server->create_usertype(db_id, {xid, 0}, msg);
         }
 
         // disconnect from the database
@@ -1321,20 +1322,17 @@ namespace springtail
         // disconnect from the database
         copy_table.disconnect();
 
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
         // create the namespaces
         for (const auto &namespace_info : namespaces) {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Creating namespace: {}", namespace_info.second);
 
-            proto::NamespaceRequest ns_req;
-            ns_req.set_db_id(db_id);
-            ns_req.set_namespace_id(namespace_info.first);
-            ns_req.set_name(namespace_info.second);
-            ns_req.set_xid(xid);
-            ns_req.set_lsn(0);
+            PgMsgNamespace msg;
+            msg.oid = namespace_info.first;
+            msg.name = namespace_info.second;
 
             // create the namespace
-            client->create_namespace(ns_req);
+            server->create_namespace(db_id, {xid, 0}, msg);
         }
     }
 

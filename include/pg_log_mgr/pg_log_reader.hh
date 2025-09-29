@@ -9,13 +9,12 @@
 #include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
+#include <pg_log_mgr/pg_log_queue.hh>
 #include <write_cache/write_cache_table_set.hh>
 
 #include <storage/field.hh>
 
-#include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
-#include <pg_log_mgr/pg_log_queue.hh>
+#include <sys_tbl_mgr/server.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -114,7 +113,7 @@ namespace springtail::pg_log_mgr {
                     }
                 }
 
-                bool exists = sys_tbl_mgr::Client::get_instance()->exists(key.first, key.second, xid);
+                bool exists = sys_tbl_mgr::Server::get_instance()->exists(key.first, key.second, xid);
 
                 {
                     std::scoped_lock lock(_mutex);
@@ -349,7 +348,7 @@ namespace springtail::pg_log_mgr {
                 if (it != _user_types.end()) {
                     return it->second;
                 }
-                auto utp = SchemaMgr::get_instance()->get_usertype(_db, pg_type, xidlsn);
+                auto utp = sys_tbl_mgr::Server::get_instance()->get_usertype(_db, pg_type, xidlsn);
                 _user_types[pg_type] = utp;
                 return utp;
             }

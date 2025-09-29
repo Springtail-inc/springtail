@@ -1,14 +1,17 @@
-#include "common/constants.hh"
+#include <limits>
+
 #include <gtest/gtest.h>
 
+#include <common/constants.hh>
 #include <common/init.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
-#include <limits>
-#include <sys_tbl_mgr/table.hh>
-
 #include <pg_fdw/pg_fdw_mgr.hh>
+
+#include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <test/services.hh>
 #include <test/ddl_helpers.hh>
@@ -70,7 +73,7 @@ namespace {
             PgMsgNamespace ns_msg;
             ns_msg.oid = 900;
             ns_msg.name = "public";
-            sys_tbl_mgr::Client::get_instance()->create_namespace(_db_id, { access_xid, 0 }, ns_msg);
+            sys_tbl_mgr::Server::get_instance()->create_namespace(_db_id, { access_xid, 0 }, ns_msg);
 
             // create the table via the table mgr
             create_table(_db_id, _tid, access_xid, "test_table_where", _columns);
@@ -81,7 +84,7 @@ namespace {
                 std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::READY);
             access_xid++;
             target_xid++;
-            sys_tbl_mgr::Client::get_instance()->finalize(_db_id, access_xid);
+            sys_tbl_mgr::Server::get_instance()->finalize(_db_id, access_xid);
 
 
             // create a mutable table
@@ -92,7 +95,7 @@ namespace {
 
             // finalize the empty table
             auto &&metadata = mtable->finalize();
-            TableMgr::get_instance()->update_roots(_db_id, _tid, target_xid, metadata);
+            sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, _tid, target_xid, metadata);
 
             _table_xid = target_xid+1;
         }
@@ -257,7 +260,7 @@ namespace {
             PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
             // don't call create state as it calls xid mgr, just create state
-            auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid);
+            auto table = TableMgrClient::get_instance()->get_table(_db_id, _tid, _table_xid);
 
             SpringtailPlanState plan{_db_id, _tid, _table_xid};
 

@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <common/init.hh>
-#include <sys_tbl_mgr/client.hh>
 #include <pg_fdw/pg_fdw_ddl_common.hh>
+#include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/client.hh>
 #include <test/services.hh>
 
 using namespace springtail;
@@ -24,7 +25,7 @@ protected:
         ns_msg.oid = 90000;
         ns_msg.name = "public";
 
-        sys_tbl_mgr::Client::get_instance()->create_namespace(db_id, {1, 1}, ns_msg);
+        sys_tbl_mgr::Server::get_instance()->create_namespace(db_id, {1, 1}, ns_msg);
 
         PgMsgTable create_table_msg;
         create_table_msg.lsn = 2;
@@ -39,7 +40,7 @@ protected:
         create_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
-        sys_tbl_mgr::Client::get_instance()->create_table(db_id, {2, 2}, create_table_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {2, 2}, create_table_msg);
 
         create_table_msg.lsn = 3;
         create_table_msg.xid = 3;
@@ -53,7 +54,7 @@ protected:
         create_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
-        sys_tbl_mgr::Client::get_instance()->create_table(db_id, {3, 3}, create_table_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {3, 3}, create_table_msg);
 
         PgMsgDropTable drop_msg;
         drop_msg.lsn = 4;
@@ -61,7 +62,7 @@ protected:
         drop_msg.oid = 500002;
         drop_msg.namespace_name = "public";
         drop_msg.table = "child_partition_table";
-        TableMgr::get_instance()->drop_table(db_id, {4, 4}, drop_msg);
+        sys_tbl_mgr::Server::get_instance()->drop_table(db_id, {4, 4}, drop_msg);
 
         PgMsgNamespace dummy_ns_msg;
         dummy_ns_msg.lsn = 5;
@@ -69,7 +70,7 @@ protected:
         dummy_ns_msg.oid = 8888;
         dummy_ns_msg.name = "dummy";
 
-        sys_tbl_mgr::Client::get_instance()->create_namespace(db_id, {5, 5}, dummy_ns_msg);
+        sys_tbl_mgr::Server::get_instance()->create_namespace(db_id, {5, 5}, dummy_ns_msg);
 
         PgMsgNamespace drop_ns_msg;
         drop_ns_msg.lsn = 6;
@@ -77,9 +78,9 @@ protected:
         drop_ns_msg.oid = 8888;
         drop_ns_msg.name = "dummy";
 
-        sys_tbl_mgr::Client::get_instance()->drop_namespace(db_id, {6, 6}, drop_ns_msg);
+        sys_tbl_mgr::Server::get_instance()->drop_namespace(db_id, {6, 6}, drop_ns_msg);
 
-        TableMgr::get_instance()->finalize_metadata(db_id, 7);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 7);
     }
 
     static void SetUpTestSuite() {

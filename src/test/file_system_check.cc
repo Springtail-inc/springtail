@@ -69,7 +69,7 @@ FSCheck::_get_table_and_fields(uint64_t db_id)
         }
         secondary_keys.push_back(idx);
     }
-    TableMetadata tbl_meta;
+    TableMetadata tbl_meta{};
     tbl_meta.snapshot_xid = 1;
 
     uint64_t xid = constant::LATEST_XID;
@@ -626,15 +626,16 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
 
     // 5. Create table
     auto schema = std::make_shared<ExtentSchema>(columns);
-    auto tbl_meta = std::make_shared<TableMetadata>();
-    tbl_meta->roots = roots;
 
-    tbl_meta->stats.row_count = row_count;
-    tbl_meta->stats.end_offset = end_offset;
-    tbl_meta->snapshot_xid = root_sxid;
+    TableMetadata tbl_meta{};
+    tbl_meta.roots = roots;
+
+    tbl_meta.stats.row_count = row_count;
+    tbl_meta.stats.end_offset = end_offset;
+    tbl_meta.snapshot_xid = root_sxid;
 
     auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
-                                schema->get_sort_keys(), secondary_indexes, *tbl_meta, schema);
+                                schema->get_sort_keys(), secondary_indexes, tbl_meta, schema);
 
     LOG_INFO("\tValidata Table indexes for table {}, dir: {}, row_count: {}, end_offset: {}, sxid: {}",
             table->id(), table->get_dir_path().c_str(), row_count, end_offset, root_sxid);

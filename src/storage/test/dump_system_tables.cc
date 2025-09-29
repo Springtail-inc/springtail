@@ -33,7 +33,7 @@ main(int argc,
                            sys_tbl::IndexNames::ID,
                            sys_tbl::NamespaceNames::ID,
                            sys_tbl::UserTypes::ID }) {
-        auto table = SystemTableMgr::get_instance()->get_system_table(db_id,
+        auto table = SystemTableMgr::get_instance()->get_table(db_id,
                                                          table_id,
                                                          constant::LATEST_XID);
         auto schema = table->extent_schema();

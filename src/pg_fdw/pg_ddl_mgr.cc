@@ -658,7 +658,7 @@ namespace springtail::pg_fdw {
         UserTypeMap usertype_map;
 
         // iterate through the user types and add them to the map
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
         auto fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
             uint64_t namespace_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row);
@@ -730,7 +730,7 @@ namespace springtail::pg_fdw {
         }
 
         // iterate through the schemas and get the schema ids
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
             // make sure entry exists at this xid
@@ -757,7 +757,7 @@ namespace springtail::pg_fdw {
                         LibPqConnectionPtr conn)
     {
         // Iterate through the TableNames table to look for rls_enabled tables
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
 
         for (auto row : (*table)) {
@@ -1723,7 +1723,7 @@ namespace springtail::pg_fdw {
     PgDDLMgr::_add_partition_table_comment(LibPqConnectionPtr conn, const uint64_t db_id, const std::string &schema_name, const uint64_t xid)
     {
         // 1. look up schema id in NamespaceNames (use inverse iterator)
-        auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
+        auto ns_table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
         auto ns_fields = ns_table->extent_schema()->get_fields();
         auto ns_search_key = sys_tbl::NamespaceNames::Secondary::key_tuple(schema_name, xid, constant::MAX_LSN);
         auto table_iter = ns_table->inverse_lower_bound(ns_search_key, 1);
@@ -1744,7 +1744,7 @@ namespace springtail::pg_fdw {
         //      limit search till xid exceeds xid passed as parameter
         //      per table store table_name and table_id
         std::set<std::pair<uint64_t, std::string>> tables;
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
         for (auto row: (*table)) {
             uint64_t table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);

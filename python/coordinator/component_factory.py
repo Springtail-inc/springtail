@@ -13,7 +13,6 @@ class ComponentFactory:
     # in src/common/coordinator.hh enum DaemonType
     LOG_MGR_ID = "1"
     DDL_MGR_ID = "4"
-    SYS_TBL_MGR_ID = "6"
     PROXY_ID = "7"
     XID_SUBSCRIBER_ID = "9"
     POSTGRES = "10"
@@ -32,16 +31,6 @@ class ComponentFactory:
             args=["--daemonize"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_log_mgr_daemon.pid')
-        )
-
-    def create_sys_tbl_mgr_daemon(self) -> Component:
-        """Create a new sys table mgr component."""
-        return Component(
-            name="sys_tbl_mgr_daemon",
-            id=self.SYS_TBL_MGR_ID,
-            args=["--daemonize"],
-            path=self.install_dir,
-            pid_path=os.path.join(self.pid_dir, 'sys_tbl_mgr_daemon.pid')
         )
 
     def create_ddl_daemon(self) -> Component:
