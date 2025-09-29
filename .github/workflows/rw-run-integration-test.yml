@@ -74,7 +74,7 @@ on:
 jobs:
   test:
     name: integration-test
-    runs-on: ${{ inputs.reuse_code && format('warp-ubuntu-latest-arm64-4x;snapshot.key={0}', inputs['snapshot_alias']) || 'warp-ubuntu-latest-arm64-4x' }}
+    runs-on: ${{ inputs.reuse_code && inputs.shapshot_alias != '' && format('warp-ubuntu-latest-arm64-4x;snapshot.key={0}', inputs['snapshot_alias']) || 'warp-ubuntu-latest-arm64-4x' }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}

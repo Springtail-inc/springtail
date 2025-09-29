@@ -112,6 +112,7 @@ jobs:
             ${{ steps.prepare-build.outputs.springtail_include_time_traces }}
 
       - name: Clean up secrets
+        if: always()
         run: |
           docker logout ${ECR_REPO_URI}
           rm -f $HOME/.aws $HOME/.ssh $HOME/.git-credentials
@@ -120,6 +121,7 @@ jobs:
       # same snapshot in subsequent jobs.
       - name: Snapshot the VM
         uses: WarpBuilds/snapshot-save@v1
+        if: ${{ !inputs.push }}
         with:
           alias: ${{ steps.prepare-build.outputs.output_image_tag }}
           fail-on-error: true
