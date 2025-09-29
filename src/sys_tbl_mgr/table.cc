@@ -665,19 +665,17 @@ namespace indexer_helpers {
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
         if (use_look_aside) {
-            std::vector<std::string> col_names;
-            col_names.push_back(constant::INTERNAL_ROW_ID);
-
-            auto look_aside_keys = col_names;
+            std::vector<std::string> look_aside_keys;
+            look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
             look_aside_keys.push_back(constant::INDEX_EID_FIELD);
             look_aside_keys.push_back(constant::INDEX_RID_FIELD);
 
-            _look_aside_schema = _schema->create_schema({}, { extent_c, row_c, internal_row_id }, look_aside_keys);
+            _look_aside_schema = _schema->create_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys);
 
             _look_aside_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_LOOK_ASIDE_FILE,
                     look_aside_keys,
                     _look_aside_schema,
-                    _target_xid, get_max_extent_size());
+                    _target_xid, get_max_extent_size_secondary());
 
             // find look-aside index root
             auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
@@ -880,7 +878,9 @@ namespace indexer_helpers {
 
         if (_look_aside_index) {
             // Invalidate look aside index
-            indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, _look_aside_index, _look_aside_schema->column_order(), _look_aside_schema);
+            std::vector<std::string> look_aside_keys;
+            look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
+            indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, _look_aside_index, look_aside_keys, _schema);
         }
     }
 
@@ -932,7 +932,9 @@ namespace indexer_helpers {
 
             if (_look_aside_index) {
                 // Populate look aside index
-                indexer_helpers::populate_index_for_page(extent_id, new_page, _look_aside_index, _look_aside_schema->column_order(), _look_aside_schema);
+                std::vector<std::string> look_aside_keys;
+                look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
+                indexer_helpers::populate_index_for_page(extent_id, new_page, _look_aside_index, look_aside_keys, _schema);
             }
         }
     }
@@ -1004,14 +1006,12 @@ namespace indexer_helpers {
         // get the column names in the order they appear in the index
         auto &&col_names = _schema->get_column_names(index_columns);
 
-        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
-        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
 
         auto key = col_names;
-        key.push_back(constant::INDEX_EID_FIELD);
-        key.push_back(constant::INDEX_RID_FIELD);
+        key.push_back(constant::INTERNAL_ROW_ID);
 
-        auto index_schema = _schema->create_schema(col_names, { extent_c, row_c }, key);
+        auto index_schema = _schema->create_schema(col_names, { internal_row_id }, key);
 
         auto btree = std::make_shared<MutableBTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 key, index_schema,

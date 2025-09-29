@@ -213,10 +213,17 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false,
+                bool with_internal_row_id = false) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
+            }
+
+            if (with_internal_row_id) {
+                SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
+                auto next_key = column_map.empty() ? 0 : column_map.rbegin()->first + 1;
+                column_map.try_emplace(next_key, internal_row_id);
             }
 
             // populate the field map using the column definitions
@@ -227,8 +234,14 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, bool allow_undefined = false)
+        explicit ExtentSchema(std::map<uint32_t, SchemaColumn> columns, bool allow_undefined = false,
+                bool with_internal_row_id = false)
         {
+            if (with_internal_row_id) {
+                SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
+                auto next_key = columns.empty() ? 0 : columns.rbegin()->first + 1;
+                columns.try_emplace(next_key, internal_row_id);
+            }
             _populate(columns, allow_undefined);
         }
 

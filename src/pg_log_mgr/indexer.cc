@@ -300,11 +300,11 @@ namespace springtail::committer {
         root->init_empty();
         key_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
 
+        auto internal_row_id_f = mutable_table->schema()->get_field(constant::INTERNAL_ROW_ID);
+
         // additional fields in the root schema to keep extent and row ids
-        auto value_fields = std::make_shared<FieldArray>(2);
+        auto value_fields = std::make_shared<FieldArray>(1);
         uint64_t row_cnt = 0;
-        uint64_t current_extent_id = 0;
-        uint32_t current_row_id = 0;
 
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexing build in progress: {}:{}", db_id, index_id);
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
@@ -317,25 +317,13 @@ namespace springtail::committer {
             if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
                 return {root, key, idx, tid};
             }
-            auto extent_id = row_i.extent_id();
-
-            if (extent_id != current_extent_id) {
-                // We are scanning in primary key order. It guarantees that
-                // row IDs start from zero and be in ascending order for
-                // each new extent. Note: The extent IDs (offsets) may
-                // be at any order.
-                current_extent_id = extent_id;
-                current_row_id = 0;
-            }
-            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(current_row_id);
 
             // insert key
             auto &&row = *row_i;
+            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
             auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, &row);
             root->insert(svalue);
 
-            ++current_row_id;
             ++row_cnt;
         }
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
@@ -532,13 +520,14 @@ namespace springtail::committer {
 
             // To keep track of invalidated extent IDs, as multiple extents can have same previous extent
             std::unordered_set<uint64_t> invalidated_eids;
+            auto value_fields = std::make_shared<FieldArray>(1);
 
             // If next_extent is available, invalidate previous extent first and then populate using next_extent
             while (next_extent) {
                 // Get the table at the next XID
                 // and fetch the page for the extent
                 auto next_xid = next_extent->header().xid;
-                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
+                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid), false, true);
 
                 // If previous offset exists and not processed before, lets invalidate that first
                 if (auto prev_eid = next_extent->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT
@@ -547,10 +536,16 @@ namespace springtail::committer {
                     // Get the previous extent and its schema
                     auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
                     auto prev_xid = prev_extent->header().xid;
-                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
+                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid), false, true);
+                    auto internal_row_id_f = prev_schema->get_field(constant::INTERNAL_ROW_ID);
 
                     // and invalidate index for the rows in the prev page
-                    indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._root, prev_schema->get_column_names(idx_cols), prev_schema);
+                    auto &&idx_col_fields = prev_schema->get_fields(prev_schema->get_column_names(idx_cols));
+                    for (auto &row: *prev_extent) {
+                        (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                        auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
+                        idx_state._root->remove(svalue);
+                    }
 
                     // Insert into a set to skip for other extents pointing
                     // to the same previous extent
@@ -558,7 +553,13 @@ namespace springtail::committer {
                 }
 
                 // Populate index for the rows in the next page
-                indexer_helpers::populate_index_for_extent(next_eid, next_extent, idx_state._root, next_schema->get_column_names(idx_cols), next_schema);
+                auto internal_row_id_f = next_schema->get_field(constant::INTERNAL_ROW_ID);
+                auto &&idx_col_fields = next_schema->get_fields(next_schema->get_column_names(idx_cols));
+                for (auto &row: *next_extent) {
+                    (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                    auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
+                    idx_state._root->insert(svalue);
+                }
 
                 // Get the next extent if next_offset is present, else exit the reconciliation
                 next_eid = next_extent_result.second;

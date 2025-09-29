@@ -906,7 +906,7 @@ namespace indexer_helpers {
          * Internal row ID for each of the row in the table, used in generating
          * look-aside index for secondary indexes
          */
-        std::atomic<uint64_t> _internal_row_id{0};
+        std::atomic<uint64_t> _internal_row_id{1};
 
         std::filesystem::path _table_dir; ///< The directory containing the table data.
         std::filesystem::path _data_file; ///< The file containing the table data extents.

@@ -553,7 +553,7 @@ namespace springtail::committer {
 
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
-        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, columns.size(), SchemaType::UINT64, 0, false);
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
         std::vector<SchemaColumn> new_columns{op, lsn, internal_row_id};
 
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
