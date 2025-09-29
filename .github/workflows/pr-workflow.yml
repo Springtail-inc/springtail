@@ -55,7 +55,7 @@ jobs:
       s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
-      timeout_minutes: '20'
+      timeout_minutes: 20
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
@@ -70,7 +70,7 @@ jobs:
       s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
-      timeout_minutes: '20'
+      timeout_minutes: 20
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
@@ -85,7 +85,7 @@ jobs:
       s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
-      timeout_minutes: '20'
+      timeout_minutes: 20
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
@@ -100,7 +100,7 @@ jobs:
       s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
-      timeout_minutes: '20'
+      timeout_minutes: 20
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
