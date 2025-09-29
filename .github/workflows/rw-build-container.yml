@@ -40,7 +40,7 @@ on:
 jobs:
   build-container:
     name: Build Springtail Container
-    runs-on: warp-ubuntu-latest-arm64-4x
+    runs-on: warp-ubuntu-latest-arm64-8x
     timeout-minutes: 15
     env:
       CI_BUILD_TYPE: ${{ inputs.build_type }}

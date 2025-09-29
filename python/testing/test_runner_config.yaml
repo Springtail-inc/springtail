@@ -63,6 +63,7 @@ configs:
   #  - recovery (small log rotate) ~ 5min
   #  - recovery (small log rotate with streaming) ~ 6min
   #  - small cache size ~ 4min
+  #  - streaming postgres config ~ 5min
   github_ci_p1:
     - overlay: ~
       test_sets: [ 'basic', 'framework', 'preload' ]
@@ -78,14 +79,14 @@ configs:
   github_ci_p3:
     - overlay: 'small_log_rotate_with_streaming'
       test_sets: [ 'recovery' ]
+    - overlay: 'streaming_postgres_config'
+      test_sets: [ 'recovery' ]
 
   github_ci_p4:
     - overlay: ~
       test_sets: [ 'numeric', 'query_benchmark' ]
     - overlay: 'small_cache_size'
       test_sets: [ 'basic' ]
-    - overlay: 'streaming_postgres_config'
-      test_sets: [ 'recovery' ]
 
 
   # this configuration runs when there is nothing specified on the command line

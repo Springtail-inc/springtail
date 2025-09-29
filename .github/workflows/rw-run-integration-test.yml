@@ -267,20 +267,20 @@ jobs:
         uses: dorny/test-reporter@v1
         if: success() || failure()                         # Only upload the *last* report
         with:
-          name: Integration Tests (test_runner)            # Name of the check run which will be created
+          name: "Integration Test Report - ${{ inputs.config_to_run }}"      # Name of the check run which will be created
           path: ./integration-test-report.xml
           reporter: java-junit
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # Only upload the *last* log file
         with:
-          name: 'Integration Test Logs'
+          name: "Integration Test Logs - ${{ inputs.config_to_run }}"
           path: ./python/testing/integration-test-*.log
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # Only upload the *last* springtail log file
         with:
-          name: 'Springtail Logs'
+          name: "Springtail Logs - ${{ inputs.config_to_run }}"
           path: ./python/testing/springtail-*.tar.gz
 
       - name: Run Proxy Test
