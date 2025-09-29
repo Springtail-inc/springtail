@@ -1,3 +1,5 @@
+#pragma once
+
 #include <list>
 #include <sys_tbl_mgr/table.hh>
 

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <iterator>
+
 #include <optional>
 
 #include <common/init.hh>
@@ -9,7 +9,7 @@
 #include <common/properties.hh>
 #include <common/threaded_test.hh>
 
-#include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
@@ -69,7 +69,7 @@ namespace {
         ns_msg.xid = 1;
         ns_msg.oid = 90000;
         ns_msg.name = "public";
-        sys_tbl_mgr::Client::get_instance()->create_namespace(db_id, {1, 1}, ns_msg);
+        sys_tbl_mgr::Server::get_instance()->create_namespace(db_id, {1, 1}, ns_msg);
 
         // create a table
         PgMsgTable create_msg;
@@ -86,7 +86,7 @@ namespace {
         create_msg.columns.emplace_back("col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true);
         create_msg.columns.emplace_back("col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false);
 
-        TableMgr::get_instance()->create_table(db_id, {2, 2}, create_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {2, 2}, create_msg);
 
         // alter the table's schema
         PgMsgTable alter_msg;
@@ -103,7 +103,7 @@ namespace {
         alter_msg.columns.emplace_back("col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true);
         alter_msg.columns.emplace_back("colnew", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false);
 
-        TableMgr::get_instance()->alter_table(db_id, {3, 3}, alter_msg);
+        sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {3, 3}, alter_msg);
 
         // drop the table
         PgMsgDropTable drop_msg;
@@ -112,9 +112,9 @@ namespace {
         drop_msg.xid = 4;
         drop_msg.namespace_name = "public";
         drop_msg.table = "x";
-        TableMgr::get_instance()->drop_table(db_id, {4, 4}, drop_msg);
+        sys_tbl_mgr::Server::get_instance()->drop_table(db_id, {4, 4}, drop_msg);
 
-        TableMgr::get_instance()->finalize_metadata(db_id, 4);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 4);
 
         // create a table
         PgMsgTable create_parent_table_msg;
@@ -132,7 +132,7 @@ namespace {
         create_parent_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_parent_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
-        TableMgr::get_instance()->create_table(db_id, {5, 5}, create_parent_table_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {5, 5}, create_parent_table_msg);
 
         PgMsgTable create_child_table_msg;
         create_child_table_msg.lsn = 6;
@@ -149,9 +149,9 @@ namespace {
         create_child_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_child_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
-        TableMgr::get_instance()->create_table(db_id, {6, 6}, create_child_table_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {6, 6}, create_child_table_msg);
 
-        TableMgr::get_instance()->finalize_metadata(db_id, 6);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 6);
 
         // create a table
         PgMsgTable create_parent_alter_table_msg;
@@ -169,7 +169,7 @@ namespace {
         create_parent_alter_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_parent_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
-        TableMgr::get_instance()->create_table(db_id, {7, 7}, create_parent_alter_table_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {7, 7}, create_parent_alter_table_msg);
 
         PgMsgTable create_child_alter_table_msg;
         create_child_alter_table_msg.lsn = 8;
@@ -186,7 +186,7 @@ namespace {
         create_child_alter_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_child_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
-        TableMgr::get_instance()->create_table(db_id, {8, 8}, create_child_alter_table_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {8, 8}, create_child_alter_table_msg);
 
         PgMsgTable alter_parent_alter_table_msg;
         alter_parent_alter_table_msg.lsn = 9;
@@ -204,9 +204,9 @@ namespace {
         alter_parent_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
         alter_parent_alter_table_msg.columns.emplace_back("family", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 2, 0, true, false);
 
-        TableMgr::get_instance()->alter_table(db_id, {9, 9}, alter_parent_alter_table_msg);
+        sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {9, 9}, alter_parent_alter_table_msg);
 
-        TableMgr::get_instance()->finalize_metadata(db_id, 10);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 10);
 
         // create a table
         PgMsgTable create_parent_attach_table_msg;
@@ -224,7 +224,7 @@ namespace {
         create_parent_attach_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_parent_attach_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
-        TableMgr::get_instance()->create_table(db_id, {11, 11}, create_parent_attach_table_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {11, 11}, create_parent_attach_table_msg);
 
         PgMsgTable create_child_attach_table_msg;
         create_child_attach_table_msg.lsn = 12;
@@ -241,9 +241,9 @@ namespace {
         create_child_attach_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_child_attach_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
-        TableMgr::get_instance()->create_table(db_id, {12, 12}, create_child_attach_table_msg);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {12, 12}, create_child_attach_table_msg);
 
-        TableMgr::get_instance()->finalize_metadata(db_id, 13);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 13);
 
         // attach partition
         PgMsgAttachPartition attach_partition_msg;
@@ -263,9 +263,9 @@ namespace {
         data.parent_table_id = 400000;
         attach_partition_msg.partition_data.emplace_back(data);
 
-        sys_tbl_mgr::Client::get_instance()->attach_partition(db_id, {14, 14}, attach_partition_msg);
+        sys_tbl_mgr::Server::get_instance()->attach_partition(db_id, {14, 14}, attach_partition_msg);
 
-        TableMgr::get_instance()->finalize_metadata(db_id, 15);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 15);
 
         _print_table(db_id, 15);
 
@@ -326,7 +326,7 @@ namespace {
         ns_msg.xid = 1;
         ns_msg.oid = 91000;
         ns_msg.name = "public";
-        sys_tbl_mgr::Client::get_instance()->create_namespace(db_id, {1, 1}, ns_msg);
+        sys_tbl_mgr::Server::get_instance()->create_namespace(db_id, {1, 1}, ns_msg);
 
         // Create a table with RLS enabled and forced
         PgMsgTable create_msg;
@@ -342,8 +342,8 @@ namespace {
         create_msg.rls_enabled = true;
         create_msg.rls_forced = true;
 
-        TableMgr::get_instance()->create_table(db_id, {2, 2}, create_msg);
-        TableMgr::get_instance()->finalize_metadata(db_id, 2);
+        sys_tbl_mgr::Server::get_instance()->create_table(db_id, {2, 2}, create_msg);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 2);
 
         _print_table(db_id, 2);
 
@@ -361,8 +361,8 @@ namespace {
         alter_msg.rls_enabled = false;
         alter_msg.rls_forced = false;
 
-        TableMgr::get_instance()->alter_table(db_id, {3, 3}, alter_msg);
-        TableMgr::get_instance()->finalize_metadata(db_id, 3);
+        sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {3, 3}, alter_msg);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 3);
 
         _print_table(db_id, 3);
 
@@ -380,8 +380,8 @@ namespace {
         alter_msg2.rls_enabled = true;
         alter_msg2.rls_forced = false;
 
-        TableMgr::get_instance()->alter_table(db_id, {4, 4}, alter_msg2);
-        TableMgr::get_instance()->finalize_metadata(db_id, 4);
+        sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {4, 4}, alter_msg2);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 4);
 
         _print_table(db_id, 4);
 
@@ -399,8 +399,8 @@ namespace {
         alter_msg3.rls_enabled = false;
         alter_msg3.rls_forced = true;
 
-        TableMgr::get_instance()->alter_table(db_id, {5, 5}, alter_msg3);
-        TableMgr::get_instance()->finalize_metadata(db_id, 5);
+        sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {5, 5}, alter_msg3);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 5);
 
         _print_table(db_id, 5);
 

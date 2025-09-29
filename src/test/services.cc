@@ -3,9 +3,7 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/server.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_client.hh>
 #include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_client.hh>
@@ -41,7 +39,7 @@ namespace springtail::test {
         Json::get_to<std::filesystem::path>(json, "table_dir", table_dir);
         table_dir = Properties::make_absolute_path(table_dir);
         std::filesystem::remove_all(table_dir);
-        sys_tbl_mgr::Server::start();
+        sys_tbl_mgr::Server::get_instance();
     }
 
     void

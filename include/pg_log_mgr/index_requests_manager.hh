@@ -1,5 +1,7 @@
 #pragma once
 
+#include <proto/sys_tbl_mgr.grpc.pb.h>
+
 namespace springtail::pg_log_mgr {
     /**
      * Manages index requests(create/drop) per XID per DB

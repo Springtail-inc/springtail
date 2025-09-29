@@ -5,7 +5,7 @@ namespace springtail::pg_fdw {
     PgFdwCommon::_get_namespace_name(uint64_t db_id, uint64_t schema_xid, uint64_t namespace_id)
     {
         // lookup the namespace_id for the requested schema
-        auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
+        auto ns_table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
         auto ns_key = sys_tbl::NamespaceNames::Primary::key_tuple(namespace_id, schema_xid, constant::MAX_LSN);
         auto ns_i = ns_table->inverse_lower_bound(ns_key);
 
@@ -29,7 +29,7 @@ namespace springtail::pg_fdw {
     std::pair<std::string_view, uint64_t>
     PgFdwCommon::_get_parent_table_info(uint64_t db_id, uint64_t schema_xid, uint64_t table_id)
     {
-        auto table_names_t = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, schema_xid);
+        auto table_names_t = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, schema_xid);
         auto schema = table_names_t->extent_schema();
         auto fields = schema->get_fields();
 
@@ -68,7 +68,7 @@ namespace springtail::pg_fdw {
                          PartitionMap &table_partition_map)
     {
         // get the table names table to iterate over
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
                                                             schema_xid);
         // get field array
         auto fields = table->extent_schema()->get_fields();
