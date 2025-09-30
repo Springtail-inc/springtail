@@ -36,6 +36,11 @@ on:
         description: 'Whether to reuse the existing code from /home/dev/springtail or do a fresh checkout.'
         type: boolean
         required: false
+      snapshot_alias:
+        description: 'Only used if reuse_code is true. The snapshot alias to use for the runner.'
+        type: string
+        required: false
+        default: ""
     secrets:
       aws_role_arn:
         description: "The ARN of the role to assume."
@@ -52,7 +57,7 @@ on:
 jobs:
   test:
     name: unit-test
-    runs-on: warp-ubuntu-latest-arm64-4x
+    runs-on: ${{ inputs.reuse_code && inputs.shapshot_alias != '' && format('warp-ubuntu-latest-arm64-4x;snapshot.key={0}', inputs['snapshot_alias']) || 'warp-ubuntu-latest-arm64-4x' }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}
@@ -80,6 +85,8 @@ jobs:
       GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
       GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
       NUM_PROCS: ${{ inputs.num_procs }}
+      DKR_VOLUME_NAME: pgdata-${{ github.run_id }}-ut
+      DKR_NETWORK_NAME: cinet-${{ github.run_id }}-ut
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -138,21 +145,21 @@ jobs:
 
       - name: Prepare shared Docker network
         run: |
-          docker network create ci_net || true
-          docker network connect ci_net $(hostname)           
+          docker network create ${DKR_NETWORK_NAME}
+          docker network connect ${DKR_NETWORK_NAME} $(hostname)           
+          docker volume create ${DKR_VOLUME_NAME}
 
       - name: Start Postgres (Primary Database)
         run: |
-          docker volume create pgdata 2>/dev/null || true
           docker run -d \
             --name pg16 \
             --restart unless-stopped \
-            --network ci_net \
+            --network ${DKR_NETWORK_NAME} \
             -p 5432:5432 \
             -e POSTGRES_USER=springtail \
             -e POSTGRES_PASSWORD=springtail \
             -e POSTGRES_DB=springtail \
-            -v pgdata:/var/lib/postgresql/data \
+            -v ${DKR_VOLUME_NAME}:/var/lib/postgresql/data \
             postgres:16 \
             postgres -c wal_level=logical \
             -c max_wal_senders=10 \
@@ -234,3 +241,10 @@ jobs:
         with:
           name: 'Unit Test Logs'
           path: ./${{ inputs.build_type }}/unit-test-*.log.tar.gz
+
+      - name: Clean up Volume and Network
+        if: always()
+        run: |
+          docker rm -f pg16 || true
+          docker volume rm ${DKR_VOLUME_NAME} || true
+          docker network rm ${DKR_NETWORK_NAME} || true
