@@ -221,8 +221,8 @@ namespace springtail {
             }
 
             if (with_internal_row_id) {
-                SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
                 auto next_key = column_map.empty() ? 0 : column_map.rbegin()->first + 1;
+                SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, next_key, SchemaType::UINT64, 0, false);
                 column_map.try_emplace(next_key, internal_row_id);
             }
 
@@ -238,8 +238,8 @@ namespace springtail {
                 bool with_internal_row_id = false)
         {
             if (with_internal_row_id) {
-                SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
                 auto next_key = columns.empty() ? 0 : columns.rbegin()->first + 1;
+                SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, next_key, SchemaType::UINT64, 0, false);
                 columns.try_emplace(next_key, internal_row_id);
             }
             _populate(columns, allow_undefined);

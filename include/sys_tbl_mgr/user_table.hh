@@ -28,7 +28,7 @@ namespace springtail {
          */
         virtual ExtentSchemaPtr extent_schema() const override
         {
-            return SchemaMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid));
+            return SchemaMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid), false, true);
         }
 
         /**

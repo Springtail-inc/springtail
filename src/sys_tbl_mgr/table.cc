@@ -870,17 +870,16 @@ namespace indexer_helpers {
         // remove the old primary index entry
         _primary_index->remove(pkey);
 
-        // INVALIDATE SECONDARY INDEXES
-
-        for (auto const& [index_id, idx]: _secondary_indexes) {
-            indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, idx.first, _schema->get_column_names(idx.second), _schema);
-        }
-
         if (_look_aside_index) {
             // Invalidate look aside index
             std::vector<std::string> look_aside_keys;
             look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
             indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, _look_aside_index, look_aside_keys, _schema);
+        } else {
+            // Invalidate secondary indexes as the same are not managed during mutations
+            for (auto const& [index_id, idx]: _secondary_indexes) {
+                indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, idx.first, _schema->get_column_names(idx.second), _schema);
+            }
         }
     }
 
@@ -925,16 +924,16 @@ namespace indexer_helpers {
             // insert the new primary index entry
             _primary_index->insert(pkey);
 
-            // POPULATE SECONDARY INDEXES
-            for (auto const& [index_id, idx]: _secondary_indexes) {
-                indexer_helpers::populate_index_for_page(extent_id, new_page, idx.first, _schema->get_column_names(idx.second), _schema);
-            }
-
             if (_look_aside_index) {
                 // Populate look aside index
                 std::vector<std::string> look_aside_keys;
                 look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
                 indexer_helpers::populate_index_for_page(extent_id, new_page, _look_aside_index, look_aside_keys, _schema);
+            } else {
+                // Populate secondary indexes as the same are not managed during mutations
+                for (auto const& [index_id, idx]: _secondary_indexes) {
+                    indexer_helpers::populate_index_for_page(extent_id, new_page, idx.first, _schema->get_column_names(idx.second), _schema);
+                }
             }
         }
     }
