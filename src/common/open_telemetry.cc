@@ -168,8 +168,16 @@ OpenTelemetry::_init_metrics(const ::opentelemetry::sdk::resource::Resource& res
     }
 
     // register histograms
-    for (const auto &histogram : metrics::_histogram_metrics) {
+    for (const auto &histogram : metrics::_histogram_time_metrics) {
         _register_histogram(histogram.first, histogram.second, "ms");
+    }
+
+    for (const auto &histogram : metrics::_histogram_count_metrics) {
+        _register_histogram(histogram.first, histogram.second, "count");
+    }
+
+    for (const auto &histogram : metrics::_histogram_unitless_metrics) {
+        _register_histogram(histogram.first, histogram.second, "");
     }
 }
 
