@@ -106,8 +106,8 @@ jobs:
       INTEGRATION_TEST_CONFIG: ${{ inputs.config_to_run }}
       INTEGRATION_TEST_ITERATIONS: ${{ inputs.iterations }}
       SPRINGTAIL_LOG_PATH: /var/log/springtail.log
-      DKR_VOLUME_NAME: pgdata-${{ github.run_id }}
-      DKR_NETWORK_NAME: cinet-${{ github.run_id }}
+      DKR_VOLUME_NAME: pgdata-${{ github.run_id }}-${{ inputs.config_to_run }}
+      DKR_NETWORK_NAME: cinet-${{ github.run_id }}-${{ inputs.config_to_run }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
