@@ -121,17 +121,18 @@ jobs:
       - name: Set Outputs
         id: set_outputs
         run: |
-          echo "test_log_s3_uris='${{ needs.integration-test-p1.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p4.outputs.test_log_s3_uri }}'" >> $GITHUB_OUTPUT
-          echo "springtail_log_s3_uris='${{ needs.integration-test-p1.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p4.outputs.springtail_log_s3_uri }}'" >> $GITHUB_OUTPUT
+          echo "test_log_s3_uris=${{ needs.integration-test-p1.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p4.outputs.test_log_s3_uri }}" >> $GITHUB_OUTPUT
+          echo "springtail_log_s3_uris=${{ needs.integration-test-p1.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p4.outputs.springtail_log_s3_uri }}" >> $GITHUB_OUTPUT
           if [[ "${{ needs.integration-test-p1.result }}" == "success" && "${{ needs.integration-test-p2.result }}" == "success" && "${{ needs.integration-test-p3.result }}" == "success" && "${{ needs.integration-test-p4.result }}" == "success" ]]; then
             echo "agg_result=success" >> $GITHUB_OUTPUT
           else
             echo "agg_result=failure" >> $GITHUB_OUTPUT
           fi
+
   slack-notification:
     uses: ./.github/workflows/rw-notify-slack.yml
     needs: [ unit-test, integration-test-join ]
-    # Only if non of the tests is skipped
+    # Only if none of the tests is skipped
     if: ${{ github.event.pull_request.draft == false && (needs.unit-test.result != 'skipped' && needs.integration-test-join.result != 'skipped') }}
     with:
       slack_webhook_url: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
@@ -142,16 +143,17 @@ jobs:
         by ${{ github.event.pull_request.user.login }} has completed the CI workflow
       attachment: |
         {
-          "color": "${{ needs.unit-test.result == 'success' && needs.integration-test-join.agg_result == 'success' && 'good' || 'danger' }}",
+          "mrkdwn_in": ["fields", "text"],
+          "color": "${{ needs.unit-test.result == 'success' && needs.integration-test-join.outputs.agg_result == 'success' && 'good' || 'danger' }}",
           "fields": [
             {
-              "title": "Unit Test",
-              "value": "${{ needs.unit-test.result }}; \nlogs: ${{ needs.unit-test.outputs.test_log_s3_uri }}",
+              "title": "Unit Test - *${{ needs.unit-test.result }}*",
+              "value": "test logs:\n${{ needs.unit-test.outputs.test_log_s3_uri }}",
               "short": false
             },
             {
-              "title": "Integration Test",
-              "value": "${{ needs.integration-test-join.agg_result }}; \ntest logs: ${{ needs.integration-test-join.outputs.test_log_s3_uris }}\nspringtail logs: ${{ needs.integration-test-join.outputs.springtail_log_s3_uris }}",
+              "title": "Integration Test - *${{ needs.integration-test-join.outputs.agg_result }}*",
+              "value": "test logs:\n${{ needs.integration-test-join.outputs.test_log_s3_uris }}\nspringtail logs:\n${{ needs.integration-test-join.outputs.springtail_log_s3_uris }}",
               "short": false
             }
           ]
