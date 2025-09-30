@@ -370,7 +370,7 @@ namespace springtail::committer {
     Committer::_expire_index_drops(uint64_t db_id, std::list<sys_tbl_mgr::Server::IndexProcessRequest>& index_requests, uint64_t committed_xid)
     {
         for (auto const& index_request: index_requests) {
-            auto action = index_request.action;
+            auto &action = index_request.action;
             if (action == "drop_index") {
                 auto tid = index_request.index.table_id();
                 auto index_id = index_request.index.id();
