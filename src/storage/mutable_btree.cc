@@ -1060,7 +1060,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
             auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid, constant::LATEST_XID, _max_extent_size);
 
             // add pointers to the new root for each new page
-            for (PagePtr &child : new_pages) {
+            for (const PagePtr &child : new_pages) {
                 auto child_keys = child->index_keys();
                 auto child_itr = child->last();
                 Extent::Row child_row = *child_itr;

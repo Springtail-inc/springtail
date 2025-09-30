@@ -279,7 +279,7 @@ namespace springtail {
             }
 
             SafeExtent &operator=(const SafeExtent &other) {
-                if (this == &other) return *this;
+                if (this == &other) { return *this; }
                 if (_extent) {
                     StorageCache::get_instance()->_data_cache->put(_extent);
                 }
@@ -1303,7 +1303,7 @@ namespace springtail {
          *
          * @param cb - callback function to call
          */
-        void set_extent_expire_notify_fun(ExtentExpireNotifyFun cb) {
+        void set_extent_expire_notify_fun(const ExtentExpireNotifyFun &cb) {
             _extent_expire_notify_fn = cb;
         }
 
