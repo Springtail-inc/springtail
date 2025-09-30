@@ -367,7 +367,7 @@ namespace springtail::committer {
     }
 
     void
-    Committer::_expire_index_drops(uint64_t db_id, std::list<Server::IndexProcessRequest>& index_requests, uint64_t committed_xid)
+    Committer::_expire_index_drops(uint64_t db_id, std::list<sys_tbl_mgr::Server::IndexProcessRequest>& index_requests, uint64_t committed_xid)
     {
         for (auto const& index_request: index_requests) {
             auto action = index_request.action;
@@ -562,7 +562,7 @@ namespace springtail::committer {
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration1.count());
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(TRANSACTION_LATENCIES, duration2.count());
 
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Transaction latency: xid={}, transaction_latency={}, finalize_latency={}", 
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Transaction latency: xid={}, transaction_latency={}, finalize_latency={}",
                     xid, duration2, duration1);
         }
 

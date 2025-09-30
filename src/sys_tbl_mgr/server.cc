@@ -44,7 +44,7 @@ Server::_internal_shutdown()
 }
 
 std::string
-Server::create_table(const uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
+Server::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 {
     auto request = RequestHelper::gen_table_request(db_id, xid, msg);
 
@@ -62,7 +62,7 @@ Server::create_table(const uint64_t db_id, const XidLsn &xid, const PgMsgTable &
 }
 
 std::string
-Server::alter_table(const uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
+Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 {
     uint64_t table_id = msg.oid;
     const std::string &table_name = msg.table;
@@ -207,7 +207,7 @@ Server::alter_table(const uint64_t db_id, const XidLsn &xid, const PgMsgTable &m
 }
 
 std::string
-Server::drop_table(const uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
+Server::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
 {
 
     proto::DropTableRequest request;
@@ -231,7 +231,7 @@ Server::drop_table(const uint64_t db_id, const XidLsn &xid, const PgMsgDropTable
 }
 
 std::string
-Server::create_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+Server::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
     uint64_t namespace_id = msg.oid;
     const std::string &namespace_name = msg.name;
@@ -258,7 +258,7 @@ Server::create_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNam
 }
 
 std::string
-Server::alter_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+Server::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
     uint64_t namespace_id = msg.oid;
     const std::string &namespace_name = msg.name;
@@ -283,7 +283,7 @@ Server::alter_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgName
 }
 
 std::string
-Server::drop_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+Server::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
     uint64_t namespace_id = msg.oid;
     const std::string &namespace_name = msg.name;
@@ -305,7 +305,7 @@ Server::drop_namespace(const uint64_t db_id, const XidLsn &xid, const PgMsgNames
 }
 
 std::string
-Server::create_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+Server::create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
     uint64_t namespace_id = msg.namespace_id;
     const std::string &namespace_name = msg.namespace_name;
@@ -330,7 +330,7 @@ Server::create_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUser
 }
 
 std::string
-Server::alter_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+Server::alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
     uint64_t namespace_id = msg.namespace_id;
     const std::string &namespace_name = msg.namespace_name;
@@ -369,7 +369,7 @@ Server::alter_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserT
 }
 
 std::string
-Server::drop_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+Server::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
     uint64_t namespace_id = msg.namespace_id;
     const std::string &namespace_name = msg.namespace_name;
@@ -402,7 +402,7 @@ Server::drop_usertype(const uint64_t db_id, const XidLsn &xid, const PgMsgUserTy
 }
 
 std::string
-Server::attach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg)
+Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg)
 {
     uint64_t table_id = msg.table_id;
     const std::string &namespace_name = msg.namespace_name;
@@ -473,7 +473,7 @@ Server::attach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgAtt
 }
 
 std::string
-Server::detach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg)
+Server::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg)
 {
     uint64_t table_id = msg.table_id;
     const std::string &namespace_name = msg.namespace_name;
@@ -534,7 +534,7 @@ Server::detach_partition(const uint64_t db_id, const XidLsn &xid, const PgMsgDet
 }
 
 Server::IndexProcessRequest
-Server::create_index(const uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, const sys_tbl::IndexNames::State state)
+Server::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)
 {
     auto request = RequestHelper::gen_index_request(db_id, xid, msg);
     auto *index = request.mutable_index();
@@ -565,7 +565,7 @@ Server::create_index(const uint64_t db_id, const XidLsn &xid, const PgMsgIndex &
 }
 
 void
-Server::set_index_state(const uint64_t db_id, const XidLsn &xid, const uint64_t table_id, const uint64_t index_id, const sys_tbl::IndexNames::State state)
+Server::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got set_index_state() -- db {}, xid {}:{}, table_id {}, index_id {}, state {}",
                 db_id, xid.xid, xid.lsn, table_id, index_id, (uint32_t)(state));
@@ -580,7 +580,7 @@ Server::set_index_state(const uint64_t db_id, const XidLsn &xid, const uint64_t 
 }
 
 proto::IndexInfo
-Server::get_index_info(const uint64_t db_id,const  uint64_t index_id, const XidLsn &xid, const std::optional<uint64_t> tid)
+Server::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid)
 {
     proto::IndexInfo response;
 
@@ -595,7 +595,7 @@ Server::get_index_info(const uint64_t db_id,const  uint64_t index_id, const XidL
 }
 
 Server::IndexesInfo
-Server::get_unfinished_indexes_info(const uint64_t db_id)
+Server::get_unfinished_indexes_info(uint64_t db_id)
 {
     Server::IndexesInfo response;
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_unfinished_indexes_info() -- {}", db_id);
@@ -609,7 +609,7 @@ Server::get_unfinished_indexes_info(const uint64_t db_id)
 }
 
 Server::IndexProcessRequest
-Server::drop_index(const uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
+Server::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
 {
     uint64_t index_id = msg.oid;
     const std::string &namespace_name = msg.namespace_name;
@@ -642,7 +642,7 @@ Server::drop_index(const uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex
 }
 
 void
-Server::update_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t xid, const TableMetadata &metadata)
+Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata)
 {
     proto::UpdateRootsRequest request;
     request.set_db_id(db_id);
@@ -671,7 +671,7 @@ Server::update_roots(const uint64_t db_id, const uint64_t table_id, const uint64
 }
 
 void
-Server::finalize(const uint64_t db_id, const uint64_t xid)
+Server::finalize(uint64_t db_id, uint64_t xid)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got finalize() -- db {}, xid {}",
                     db_id, xid);
@@ -719,7 +719,7 @@ Server::finalize(const uint64_t db_id, const uint64_t xid)
 }
 
 void
-Server::revert(const uint64_t db_id, const uint64_t xid)
+Server::revert(uint64_t db_id, uint64_t xid)
 {
     // ensure that we don't have a partially committed XID currently in-memory
     CHECK(_write[db_id].empty());
@@ -816,7 +816,7 @@ Server::revert(const uint64_t db_id, const uint64_t xid)
 }
 
 TableMetadataPtr
-Server::get_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t xid)
+Server::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_roots() -- db {} tid {} xid {}",
                 db_id, table_id, xid);
@@ -839,7 +839,7 @@ Server::get_roots(const uint64_t db_id, const uint64_t table_id, const uint64_t 
 }
 
 std::shared_ptr<const SchemaMetadata>
-Server::get_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid)
+Server::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_schema() -- db {} tid {} xid {} lsn {}",
                 db_id, table_id, xid.xid, xid.lsn);
@@ -861,7 +861,7 @@ Server::get_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &
 }
 
 SchemaMetadataPtr
-Server::get_target_schema(const uint64_t db_id, const uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid)
+Server::get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_target_schema() -- {}, {}",
                 access_xid.xid, target_xid.xid);
@@ -874,7 +874,7 @@ Server::get_target_schema(const uint64_t db_id, const uint64_t table_id, const X
 }
 
 bool
-Server::exists(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid)
+Server::exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got exists() -- db {} tid {} xid {} lsn {}",
                 db_id, table_id, xid.xid, xid.lsn);
@@ -979,7 +979,7 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
 }
 
 std::shared_ptr<UserType>
-Server::get_usertype(const uint64_t db_id, const uint64_t type_id, const XidLsn &xid)
+Server::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got get_usertype() -- db {} type_id {} xid {} lsn {}",
               db_id, type_id, xid.xid, xid.lsn);
@@ -1004,13 +1004,13 @@ Server::get_usertype(const uint64_t db_id, const uint64_t type_id, const XidLsn 
 }
 
 void
-Server::invalidate_table(const uint64_t db_id, const uint64_t table_id, const XidLsn &xid)
+Server::invalidate_table(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
 {
     _schema_object_cache->invalidate_table(db_id, table_id, xid);
 }
 
 void
-Server::invalidate_db(const uint64_t db_id, const XidLsn &xid)
+Server::invalidate_db(uint64_t db_id, const XidLsn &xid)
 {
     _schema_object_cache->invalidate_db(db_id, xid);
 }
@@ -1092,7 +1092,7 @@ Server::_get_unfinished_indexes_info(uint64_t db_id)
 }
 
 proto::IndexInfo
-Server::_get_index_info(const uint64_t db_id,const  uint64_t index_id, const XidLsn &xid, const std::optional<uint64_t> tid)
+Server::_get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid)
 {
     // check the cache
     auto cache_entry = _find_cached_index(db_id, index_id, xid, tid);
@@ -1114,7 +1114,7 @@ Server::_get_index_info(const uint64_t db_id,const  uint64_t index_id, const Xid
 }
 
 bool
-Server::_set_index_state(const uint64_t db_id, const XidLsn &xid, const uint64_t table_id, const uint64_t index_id, const sys_tbl::IndexNames::State state)
+Server::_set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
 {
     auto info = std::make_shared<proto::GetSchemaResponse>();
     info->set_access_xid_start(0);
@@ -1149,7 +1149,7 @@ Server::_set_index_state(const uint64_t db_id, const XidLsn &xid, const uint64_t
 }
 
 bool
-Server::_upsert_index_name(const uint64_t db_id,
+Server::_upsert_index_name(uint64_t db_id,
                             const proto::IndexInfo& index_info,
                             const XidLsn& xid,
                             const std::map<uint32_t, uint32_t>& keys,
@@ -1490,8 +1490,7 @@ Server::_create_table(const proto::TableRequest& request)
         ddl["columns"].push_back(column_json);
     }
 
-    _set_schema_info(request.db_id(), request.table().id(), ns_info->id, // request.table().name(),
-                     columns);
+    _set_schema_info(request.db_id(), request.table().id(), ns_info->id, columns);
 
     _set_primary_index(request.db_id(), ns_info->id, request.table().id(), request.table().name(),
                        request.table().namespace_name(), xid);
@@ -1691,9 +1690,9 @@ Server::_set_xids(uint64_t db_id, const XidLsn& read_xid, uint64_t write_xid)
 }
 
 std::vector<uint64_t>
-Server::_get_modified_partition_details(const uint64_t db_id,
+Server::_get_modified_partition_details( uint64_t db_id,
                                         const XidLsn &xid,
-                                        const uint64_t table_id,
+                                        uint64_t table_id,
                                         const std::vector<PartitionData> &partition_data,
                                         std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
                                         bool is_attached)

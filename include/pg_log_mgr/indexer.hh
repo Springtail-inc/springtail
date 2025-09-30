@@ -31,7 +31,7 @@ namespace springtail::committer {
         struct IndexParams {
             uint64_t _db_id;
             uint64_t _xid;
-            Server::IndexProcessRequest _index_request;
+            sys_tbl_mgr::Server::IndexProcessRequest _index_request;
             IndexStatus _status = IndexStatus::BUILDING;
 
             /**
@@ -57,7 +57,7 @@ namespace springtail::committer {
          * @param index_requests Index requests (create/drop)
          *
          */
-        void process_requests(uint64_t db_id, uint64_t xid, const std::list<Server::IndexProcessRequest> &index_requests);
+        void process_requests(uint64_t db_id, uint64_t xid, const std::list<sys_tbl_mgr::Server::IndexProcessRequest> &index_requests);
 
         /**
          * @brief Recover indexes which were not complete (build or drop) during shutdown/crash

@@ -2,8 +2,6 @@
 
 #include <sys_tbl_mgr/server.hh>
 
-using namespace springtail::sys_tbl_mgr;
-
 namespace springtail::pg_log_mgr {
     /**
      * Manages index requests(create/drop) per XID per DB
@@ -20,7 +18,7 @@ namespace springtail::pg_log_mgr {
              * @param xid The transaction ID.
              * @param index_request The IndexProcessRequest object to add.
              */
-            void add_index_request(uint64_t db_id, uint64_t xid, const Server::IndexProcessRequest& index_request) {
+            void add_index_request(uint64_t db_id, uint64_t xid, const sys_tbl_mgr::Server::IndexProcessRequest& index_request) {
                 std::lock_guard<std::mutex> lock(_idx_req_mutex);
 
                 // Insert the request into the list associated with the given db_id and xid
@@ -38,7 +36,7 @@ namespace springtail::pg_log_mgr {
              * @param xid The transaction ID.
              * @return A list of IndexProcessRequest objects, or an empty list if none exist.
              */
-            std::list<Server::IndexProcessRequest> get_index_requests(uint64_t db_id, uint64_t xid) {
+            std::list<sys_tbl_mgr::Server::IndexProcessRequest> get_index_requests(uint64_t db_id, uint64_t xid) {
                 std::lock_guard<std::mutex> lock(_idx_req_mutex);
 
                 // Attempt to find the db_id in the outer map
@@ -59,7 +57,7 @@ namespace springtail::pg_log_mgr {
                 }
 
                 // Move the list of requests out of the map
-                std::list<Server::IndexProcessRequest> result = std::move(xid_it->second);
+                std::list<sys_tbl_mgr::Server::IndexProcessRequest> result = std::move(xid_it->second);
 
                 // Remove the xid entry from the inner map
                 xid_map.erase(xid_it);
@@ -74,7 +72,7 @@ namespace springtail::pg_log_mgr {
             }
         private:
             std::unordered_map<uint64_t, std::unordered_map<uint64_t,
-                std::list<Server::IndexProcessRequest>>> _index_requests_map;
+                std::list<sys_tbl_mgr::Server::IndexProcessRequest>>> _index_requests_map;
             std::mutex _idx_req_mutex;  ///< Protects access to the index requests map.
     };
 }

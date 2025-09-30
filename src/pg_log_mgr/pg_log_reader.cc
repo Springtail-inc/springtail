@@ -1,13 +1,3 @@
-#include <any>
-#include <chrono>
-#include <codecvt>
-#include <memory>
-#include <thread>
-
-#include <common/filesystem.hh>
-#include <common/open_telemetry.hh>
-#include <common/coordinator.hh>
-
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/sync_tracker.hh>
@@ -701,7 +691,7 @@ namespace springtail::pg_log_mgr {
             // Add a message to skip indexes for this table
             // for the currently building indexes and the ones
             // belonging to this transaction
-            Server::IndexProcessRequest index_request;
+            sys_tbl_mgr::Server::IndexProcessRequest index_request;
             index_request.action = "abort_index";
             index_request.index.set_table_id(table_oid);
             _index_requests_mgr->add_index_request(_db, xidlsn.xid, index_request);

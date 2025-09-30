@@ -106,7 +106,7 @@ namespace springtail::committer {
          * @param index_requests Indexes processed
          * @param committed_xid  XID at which ddls were processed
          */
-        void _expire_index_drops(uint64_t db_id, std::list<Server::IndexProcessRequest>& index_requests, uint64_t committed_xid);
+        void _expire_index_drops(uint64_t db_id, std::list<sys_tbl_mgr::Server::IndexProcessRequest>& index_requests, uint64_t committed_xid);
 
         /**
          * The structure that defines a worker job.
