@@ -113,6 +113,7 @@ namespace springtail {
         if (!do_flush) {
             // need to update the cache with the updated size of the page
             _cache_update_size(node->page, cache_lock);
+            _cache_vacuum(cache_lock);
         }
 
         // release the nodes back to the cache
@@ -165,6 +166,7 @@ namespace springtail {
         if (!is_empty) {
             // need to update the cache with the updated size of the page
             _cache_update_size(node->page, cache_lock);
+            _cache_vacuum(cache_lock);
         }
 
         // release the nodes back to the cache
@@ -450,7 +452,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
     void
     MutableBTree::Page::update_branch(std::shared_ptr<Page> old_page,
-                                      std::vector<std::shared_ptr<Page>> new_pages,
+                                      const PageVector &new_pages,
                                       MutableFieldPtr offset_f)
     {
         // remove the old page's key from this branch page
@@ -464,8 +466,6 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // note: add them in reverse order so we can keep inserting at the same position
         for (auto &&i = new_pages.rbegin(); i != new_pages.rend(); i++) {
             auto &page = *i;
-
-            LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Adding branch entry to child extent_id: {}", page->extent_id);
 
             // XXX need a better way to create a combined tuple
             auto value = std::make_shared<FieldArray>();
@@ -514,7 +514,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         //       tree rather than cleaning up afterward.
     }
 
-    std::vector<std::shared_ptr<MutableBTree::Page>>
+    MutableBTree::PageVector
     MutableBTree::Page::flush_empty_root(uint64_t xid)
     {
         // note: we must be holding the disk_mutex, so no need to lock the access mutex
@@ -529,27 +529,23 @@ MutableBTree::lower_bound(TuplePtr search_key,
         auto page = std::make_shared<Page>(_btree, extent_id);
         page->set_cache_page(std::move(cache_page), _schema);
 
-        return std::vector<PagePtr>({page});
+        return PageVector({page});
     }
 
-    std::vector<std::shared_ptr<MutableBTree::Page>>
+    MutableBTree::PageVector
     MutableBTree::Page::flush(uint64_t xid)
     {
-        auto flush_future = async_flush(xid);
-        return flush_future.get();
+        return async_flush(xid).get();
     }
 
-    std::future<std::vector<std::shared_ptr<MutableBTree::Page>>>
-    MutableBTree::Page::async_flush(uint64_t xid)
+    std::future<MutableBTree::PageVector>
+    MutableBTree::Page::async_flush(uint64_t xid,
+                                    std::function<void (const PageVector &)> callback)
     {
-        return std::async(std::launch::async,
-                &MutableBTree::Page::_get_new_pages_post_flush,
-                this, xid);
-    }
+        // note: we must be holding the disk_mutex, so no need to lock the access mutex
+        auto promise = std::make_shared<std::promise<PageVector>>();
+        auto future = promise->get_future();
 
-    std::vector<std::shared_ptr<MutableBTree::Page>>
-    MutableBTree::Page::_get_new_pages_post_flush(uint64_t xid)
-    {
         // if the root was split, then remove the root flag from the type
         ExtentType type = (_cache_page->extent_count() > 1)
             ? ExtentType(this->type.is_branch())
@@ -557,14 +553,9 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // flush the backing page
         ExtentHeader header(type, xid, _schema->row_size(), _schema->field_types(), this->extent_id);
-
-        auto promise = std::make_shared<std::promise<std::vector<std::shared_ptr<MutableBTree::Page>>>>();
-        auto future = promise->get_future();
-        LOG_INFO("ABOUT TO FLUSH EXTENTS");
-        _cache_page->async_flush(std::move(header), [p = std::move(promise), this](std::vector<uint64_t> ids){
-                std::vector<std::shared_ptr<MutableBTree::Page>> new_pages;
-
-                LOG_INFO("GOT THE NEW EXTENT IDS");
+        _cache_page->async_flush(header, [this, promise, callback](const std::vector<uint64_t> &ids) {
+            try {
+                PageVector new_pages;
                 for (auto id : ids) {
                     // XXX how to handle XIDs?
                     auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
@@ -578,17 +569,24 @@ MutableBTree::lower_bound(TuplePtr search_key,
                         value_key = std::make_shared<ValueTuple>(key);
                     }
 
-                    auto page = std::make_shared<Page>(_btree, id, std::move(value_key), std::move(cache_page), _schema);
+                    auto page = std::make_shared<Page>(_btree, id, value_key, std::move(cache_page), _schema);
 
                     LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Creating MutableBTree Page: {} {}", id, page->extent_id);
 
-                    new_pages.push_back(std::move(page));
+                    new_pages.push_back(page);
                 }
 
-                p->set_value(new_pages);
+                if (callback) {
+                    callback(new_pages);
+                }
+
+                promise->set_value(std::move(new_pages));
+            } catch (...) {
+                LOG_ERROR("Error");
+            }
         });
 
-        return future.get();
+        return future;
     }
 
     void
@@ -706,7 +704,11 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         _cache->size = _cache->size - std::get<3>(entry) + page_size;
         std::get<3>(entry) = page_size;
+    }
 
+    void
+    MutableBTree::_cache_vacuum(boost::unique_lock<boost::shared_mutex> &cache_lock)
+    {
         // evict pages until the size is under the watermark
         while (_cache->size > _cache->max_size) {
             // there should always be an evictable page
@@ -762,7 +764,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
                 if (!page->flushed) {
                     // flush the page
                     // note: we don't cache the newly created pages since we are trying to free space
-                    _flush_page_internal(page, parent);
+                    _async_flush_page_internal(page, parent).get();
                 }
             }
 
@@ -908,6 +910,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // update the size of the page in the cache; may cause evictions
         _cache_update_size(page, cache_lock);
+        _cache_vacuum(cache_lock);
 
         // return the node for the new page
         return node;
@@ -959,73 +962,94 @@ MutableBTree::lower_bound(TuplePtr search_key,
         return node;
     }
 
-    std::future<std::vector<MutableBTree::PagePtr>>
+    std::future<MutableBTree::PageVector>
     MutableBTree::_async_flush_page_internal(PagePtr page,
-                                       PagePtr parent)
+                                             PagePtr parent,
+                                             std::function<void (const PageVector &)> callback)
     {
-        return std::async(std::launch::async,
-                &MutableBTree::_flush_and_update_branch,
-                this, std::move(page), std::move(parent));
-    }
-
-    std::vector<MutableBTree::PagePtr>
-    MutableBTree::_flush_and_update_branch(PagePtr page,
-                                           PagePtr parent)
-    {
-        auto flush_future = page->async_flush(_xid);
-
         // flush the page's extent(s) to disk
         // note: it would be nice if we could perform the disk writes without holding the parent
         //       mutex, but then there is a potential race condition between updating the
         //       parent's pointers and flushing the parent.  It might be possible with more
         //       complex logic.
-        std::vector<PagePtr> &&new_pages = flush_future.get();
+        auto future = page->async_flush(_xid, [this, parent, page, callback](const PageVector &new_pages) {
+            try {
+                // lock the parent for exclusive access
+                boost::unique_lock parent_lock(parent->mutex);
 
-        // lock the parent for exclusive access
-        boost::unique_lock parent_lock(parent->mutex);
+                // update the parent's pointers
+                parent->update_branch(page, new_pages, _branch_child_f);
 
-        // update the parent's pointers
-        parent->update_branch(page, new_pages, _branch_child_f);
+                // remove the page from the parent's children
+                parent->remove_child(page->extent_id);
 
-        // remove the page from the parent's children
-        parent->remove_child(page->extent_id);
+                // mark the page as flushed
+                page->flushed = true;
 
-        // mark the page as flushed
-        page->flushed = true;
+                // notify anyone waiting for the flush to complete
+                page->notify_flush_wait();
 
-        return std::move(new_pages);
+                if (callback) {
+                    callback(new_pages);
+                }
+            } catch (...) {
+                LOG_ERROR("Error");
+            }
+        });
 
+        return future;
     }
 
-    std::vector<MutableBTree::PagePtr>
-    MutableBTree::_flush_page_internal(PagePtr page,
-                                       PagePtr parent)
+    std::future<void>
+    MutableBTree::_async_flush_page(PagePtr page,
+                                    PagePtr parent)
     {
-        auto flush_future = _async_flush_page_internal(page, parent);
-        return flush_future.get();
-    }
 
-    std::optional<std::future<void>>
-    MutableBTree::_flush_page(PagePtr page,
-                              PagePtr parent)
-    {
         // acquire exclusive access to the page to write to disk
         boost::unique_lock data_lock(page->disk_mutex);
 
-        // if the page was already flushed, then nothing to do
-        if (page->flushed) {
-            return std::nullopt;
+        // check if the page is actively being flushed
+        auto flush_future = page->wait_for_flushing();
+        if (flush_future) {
+            return std::move(*flush_future);
         }
+
+        // we will perform the flushing
+        auto promise = std::make_shared<std::promise<void>>();
+        auto future = promise->get_future();
+
+        // page should not have been flushed already
+        CHECK(!page->flushed);
 
         // flush the children first
         // note: safe to traverse the children like this because we are holding exclusive lock
         //       on the page
-        page->flush_children();
+        std::vector<std::future<void>> child_futures;
+        std::vector<PagePtr> &&children = page->children();
+        for (auto child : children) {
+            // XXX do we need to remove this from the cache's LRU list?
+            // use a copy of the children since this will remove the child from the page's children
+            // during the flush
+            auto &&child_future = _async_flush_page(child, page);
+            child_futures.push_back(std::move(child_future));
+        }
+
+        // wait for all children to be flushed
+        for (auto &child_future : child_futures) {
+            child_future.get();
+        }
+
+        // clean up the cache
+        {
+            boost::unique_lock cache_lock(_cache->mutex);
+            _cache_vacuum(cache_lock);
+        }
 
         // if the page was not modified while flushing children, then no need to flush it
         // note: this could occur if pages were accessed for read
         if (!page->is_dirty()) {
-            return std::nullopt;
+            promise->set_value();
+            return future;
         }
 
         // check if the page is empty
@@ -1036,29 +1060,30 @@ MutableBTree::lower_bound(TuplePtr search_key,
             // evict the removed page from the cache
             boost::unique_lock cache_lock(_cache->mutex);
             _cache_evict(page->extent_id);
-            return std::nullopt;
+
+            // work complete
+            promise->set_value();
         } else {
-            return std::async(std::launch::async,
-                    &MutableBTree::_flush_and_update_cache,
-                    this, std::move(page), std::move(parent), std::move(data_lock));
+            // perform the actual page flush
+            _async_flush_page_internal(page, parent, [this, page, promise](const PageVector &new_pages) {
+                try {
+                    // evict the page from the cache and add the new pages
+                    boost::unique_lock cache_lock(_cache->mutex);
+
+                    _cache_evict(page->extent_id);
+                    for (auto &&new_page : new_pages) {
+                        _cache_insert(new_page, cache_lock);
+                    }
+
+                    // work complete
+                    promise->set_value();
+                } catch (...) {
+                    LOG_ERROR("Error");
+                }
+            });
         }
-    }
 
-    void
-    MutableBTree::_flush_and_update_cache(PagePtr page, PagePtr parent,
-        boost::unique_lock<boost::shared_mutex> data_lock)
-    {
-        auto flush_future = _async_flush_page_internal(page, parent);
-        // perform the actual page flush
-        std::vector<PagePtr> &&new_pages = flush_future.get();
-
-        // evict the page from the cache and add the new pages
-        boost::unique_lock cache_lock(_cache->mutex);
-
-        _cache_evict(page->extent_id);
-        for (auto &&new_page : new_pages) {
-            _cache_insert(new_page, cache_lock);
-        }
+        return future;
     }
 
     MutableBTree::PagePtr
@@ -1067,15 +1092,37 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // acquire exclusive access to the root page
         boost::unique_lock data_lock(page->disk_mutex);
 
-        // if the page was flushed, then nothing to do
-        if (page->flushed) {
+        // check if the page is actively being flushed
+        auto flush_future = page->wait_for_flushing();
+        if (flush_future) {
+            flush_future->get();
             return nullptr;
         }
+        CHECK(!page->flushed);
 
         // flush the children first
         // note: safe to traverse the children like this because we are holding
         //       exclusive lock on the page
-        page->flush_children();
+        std::vector<std::future<void>> child_futures;
+        std::vector<PagePtr> &&children = page->children();
+        for (auto child : children) {
+            // this will remove the child from the page's children during the flush
+            // note: we are currently holding an exlusive lock on the child's parent (this
+            //       page), so safe to call
+            auto &&child_future = _async_flush_page(child, page);
+            child_futures.push_back(std::move(child_future));
+        }
+
+        // wait for all children to be flushed
+        for (auto &child_future : child_futures) {
+            child_future.get();
+        }
+
+        // clean up the cache
+        {
+            boost::unique_lock cache_lock(_cache->mutex);
+            _cache_vacuum(cache_lock);
+        }
 
         // check if this page has actually been modified by the child flushes
         if (!page->is_dirty()) {
@@ -1087,7 +1134,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         //       mutex, but then there is a potential race condition between updating the
         //       parent's pointers and flushing the parent.  It might be possible with more
         //       complex logic.
-        std::vector<PagePtr> &&new_pages = (page->empty())
+        PageVector &&new_pages = (page->empty())
             ? page->flush_empty_root(_xid)
             : page->flush(_xid);
 
@@ -1157,6 +1204,9 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // insert the new root with a use-count of 1
         _cache_insert(new_root, cache_lock, false);
 
+        // clean up the cache
+        _cache_vacuum(cache_lock);
+
         return new_root;
     }
 
@@ -1187,6 +1237,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
     std::optional<MutableBTree::NodePtr>
     MutableBTree::_lock_and_flush_page(NodePtr node)
     {
+        // if we are trying to flush the root, just return it so it can be special-cased
         if (!node->parent) {
             return node;
         }
@@ -1205,10 +1256,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
             node->lock.unlock();
 
             // now that we are holding the parent, flush the page
-            auto flush_future_opt = _flush_page(node->page, parent);
-            if (flush_future_opt) {
-                flush_future_opt.value().get();
-            }
+            _async_flush_page(node->page, parent).get();
 
             // move to the parent
             node = node->parent;
@@ -1223,6 +1271,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
                 // otherwise, update the parent's size in the cache
                 boost::unique_lock cache_lock(_cache->mutex);
                 _cache_update_size(node->page, cache_lock);
+                _cache_vacuum(cache_lock);
                 break;
             }
         }

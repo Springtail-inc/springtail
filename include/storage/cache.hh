@@ -666,9 +666,7 @@ namespace springtail {
              * Registers an eviction callback.
              */
             void _register_flush(std::function<bool(std::shared_ptr<Page>)> callback) {
-                LOG_INFO("STUCK HERE??");
                 boost::unique_lock lock(_mutex);
-                LOG_INFO("NOT STUCK");
                 _flush_callback = callback;
             }
 
@@ -1001,7 +999,7 @@ namespace springtail {
              *
              * @return future that returns ordered list of extent IDs that represent the data of the Page.
              */
-            std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header, std::function<void(std::vector<uint64_t>)> callback = {});
+            std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header, std::function<void(const std::vector<uint64_t> &)> callback = {});
 
         private:
             /** A count of the number of users of this page. */
@@ -1042,11 +1040,25 @@ namespace springtail {
             /** Position on the PageCache flush list.  Set to end() if not on the list. */
             std::list<std::shared_ptr<Page>>::iterator _flush_pos;
 
-            /** Flag indiciating if the page is currently being flushed. */
+            /** Flag indiciating if the page is currently being flushed by flush_file() or the
+                background_cleaner().  Need this to deal with the flush_callback, otherwise could
+                end up calling it multiple times. */
             bool _is_flushing;
 
-            /** Condition variable to wait on for flushing to complete. */
+            /** Condition variable to wait on for _is_flushing to complete. */
             boost::condition_variable _flush_cond;
+
+            /** The promise type for async flush. */
+            using FlushPromise = std::promise<std::vector<uint64_t>>;
+
+            /** Mutex to protect the async_flush variables. */
+            boost::mutex _async_flush_mutex;
+
+            /** Flag indicating if the page is in the internal _async_flush() operation. */
+            bool _is_async_flushing = false;
+
+            /** List of promises to set once the flush is complete. */
+            std::vector<std::shared_ptr<FlushPromise>> _async_flush_waiters;
         };
 
         using PagePtr = std::shared_ptr<Page>;

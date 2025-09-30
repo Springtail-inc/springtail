@@ -1171,14 +1171,26 @@ StorageCache::PageCache::background_cleaner()
 
     std::future<std::vector<uint64_t>>
     StorageCache::Page::_async_flush(const ExtentHeader &header,
-                                     std::function<void(std::vector<uint64_t>)> callback)
+                                     std::function<void(const std::vector<uint64_t> &)> callback)
     {
+        auto promise = std::make_shared<FlushPromise>();
+        auto future = promise->get_future();
+
+        /* Only one person can flush at a time.  Also removes the need to hold the Page mutex on the
+            async callback since we know it won't be accessed. */
+        {
+            boost::unique_lock lock(_async_flush_mutex);
+            if (_is_async_flushing) {
+                _async_flush_waiters.push_back(promise);
+                return future;
+            } else {
+                _is_async_flushing = true;
+            }
+        }
+
         auto cache = StorageCache::get_instance();
         auto counter = std::make_shared<std::atomic<int>>(0);
         auto result = std::make_shared<std::vector<uint64_t>>(_extents.size());
-
-        auto promise = std::make_shared<std::promise<std::vector<uint64_t>>>();
-        auto future = promise->get_future();
 
         struct FlushTask {
             SafeExtent e;
@@ -1230,34 +1242,43 @@ StorageCache::PageCache::background_cleaner()
                                                           counter,
                                                           promise,
                                                           callback]() mutable {
-                    auto cache = StorageCache::get_instance();
+                    try {
+                        auto cache = StorageCache::get_instance();
 
-                    // lock the cache
-                    boost::unique_lock lock(_mutex);
-
-                    // bring MUTABLE extents to CLEAN
-                    if ((*task.e)->state() == CacheExtent::State::MUTABLE) {
-                        // return the now MUTABLE extent back to the read cache
-                        cache->_data_cache->reinsert(*task.e);
-                    }
-
-                    // update the reference with the details of the new extent
-                    _extents[task.pos] = task.e.get_ref();
-
-                    // store the new extent location
-                    result->at(task.pos) = _extents[task.pos].id();
-
-                    lock.unlock();
-
-                    // reduce the outstanding count
-                    --(*counter);
-
-                    // if this was the last outstanding, complete the promise
-                    if (!*counter) {
-                        if (callback) {
-                            callback(*result);
+                        // bring MUTABLE extents to CLEAN
+                        if ((*task.e)->state() == CacheExtent::State::MUTABLE) {
+                            // return the now MUTABLE extent back to the read cache
+                            cache->_data_cache->reinsert(*task.e);
                         }
-                        promise->set_value(std::move(*result));
+
+                        // update the reference with the details of the new extent
+                        _extents[task.pos] = task.e.get_ref();
+
+                        // store the new extent location
+                        result->at(task.pos) = _extents[task.pos].id();
+
+                        // reduce the outstanding count
+                        --(*counter);
+
+                        // if this was the last outstanding, complete the promise
+                        if (!*counter) {
+                            if (callback) {
+                                callback(*result);
+                            }
+
+                            // no longer flushing, release the page and notify any waiter
+                            {
+                                boost::unique_lock lock(_async_flush_mutex);
+                                _is_async_flushing = false;
+                                for (auto &waiter : _async_flush_waiters) {
+                                    waiter->set_value(*result);
+                                }
+                                _async_flush_waiters.clear();
+                            }
+                            promise->set_value(std::move(*result));
+                        }
+                    } catch (...) {
+                        LOG_ERROR("Error");
                     }
                 });
             }
@@ -1273,6 +1294,16 @@ StorageCache::PageCache::background_cleaner()
             // if there was no IO to perform, complete immediately
             if (callback) {
                 callback(*result);
+            }
+
+            // no longer flushing, release the page and notify any waiter
+            {
+                boost::unique_lock lock(_async_flush_mutex);
+                _is_async_flushing = false;
+                for (auto &waiter : _async_flush_waiters) {
+                    waiter->set_value(*result);
+                }
+                _async_flush_waiters.clear();
             }
             promise->set_value(std::move(*result));
 
@@ -1676,7 +1707,11 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
 
         extent->async_flush(handle, [this, extent](std::shared_ptr<IOResponseAppend> response) {
-            _flush_and_update_extent(extent, response);
+            try {
+                _flush_and_update_extent(extent, response);
+            } catch (...) {
+                LOG_ERROR("Error");
+            }
         });
 
         // reacquire the lock
@@ -1710,6 +1745,7 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
 
         // mark as MUTABLE so it's placed on the clean LRU
         extent->_state = CacheExtent::State::MUTABLE;
+        DCHECK_GT(extent->_use_count, 0);
 
         // remove the waiters from the extent and unlock
         auto waiters = std::move(extent->_flush_waiters);
