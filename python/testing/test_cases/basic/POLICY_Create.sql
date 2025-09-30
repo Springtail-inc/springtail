@@ -10,6 +10,9 @@ CREATE TABLE documents (
     owner TEXT
 );
 
+-- Enable row-level security on the table
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+
 -- Insert test data
 INSERT INTO documents (content, owner) VALUES
 ('Doc 1', 'alice'),
@@ -19,8 +22,7 @@ INSERT INTO documents (content, owner) VALUES
 
 CREATE ROLE alice LOGIN;
 
--- Enable row-level security on the table
-ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
 
 -- Create RLS policy allowing a user to read only their own rows
 CREATE POLICY read_own_documents

@@ -769,6 +769,8 @@ CREATE TABLE IF NOT EXISTS preload_sales_hash (
     amount NUMERIC NOT NULL
 ) PARTITION BY HASH (id);
 
+ALTER TABLE preload_sales_hash ENABLE ROW LEVEL SECURITY;
+
 CREATE TABLE IF NOT EXISTS preload_sales_hash_p0 PARTITION OF preload_sales_hash
     FOR VALUES WITH (MODULUS 4, REMAINDER 0);
 
