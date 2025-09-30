@@ -113,7 +113,7 @@ jobs:
     # only run if non of the Integration tests is skipped
     if: ${{ github.event.pull_request.draft == false && (needs.integration-test-p1.result != 'skipped' && needs.integration-test-p2.result != 'skipped' && needs.integration-test-p3.result != 'skipped' && needs.integration-test-p4.result != 'skipped') }}
     outputs:
-      test_log_s3_uris: ${{ steps.set_outputs.outputs.test_log_s3_uri }}
+      test_log_s3_uris: ${{ steps.set_outputs.outputs.test_log_s3_uris }}
       springtail_log_s3_uris: ${{ steps.set_outputs.outputs.springtail_log_s3_uris }}
       agg_result: ${{ steps.set_outputs.outputs.agg_result }}
 
@@ -123,8 +123,11 @@ jobs:
         run: |
           echo "test_log_s3_uris='${{ needs.integration-test-p1.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p4.outputs.test_log_s3_uri }}'" >> $GITHUB_OUTPUT
           echo "springtail_log_s3_uris='${{ needs.integration-test-p1.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p4.outputs.springtail_log_s3_uri }}'" >> $GITHUB_OUTPUT
-          echo "agg_result='${{ needs.integration-test-p1.result == 'success' && needs.integration-test-p2.result == 'success' && needs.integration-test-p3.result == 'success' && needs.integration-test-p4.result == 'success' && 'success' || 'failure' }}'" >> $GITHUB_OUTPUT
-
+          if [[ "${{ needs.integration-test-p1.result }}" == "success" && "${{ needs.integration-test-p2.result }}" == "success" && "${{ needs.integration-test-p3.result }}" == "success" && "${{ needs.integration-test-p4.result }}" == "success" ]]; then
+            echo "agg_result=success" >> $GITHUB_OUTPUT
+          else
+            echo "agg_result=failure" >> $GITHUB_OUTPUT
+          fi
   slack-notification:
     uses: ./.github/workflows/rw-notify-slack.yml
     needs: [ unit-test, integration-test-join ]
@@ -148,7 +151,7 @@ jobs:
             },
             {
               "title": "Integration Test",
-              "value": "${{ needs.integration-test.agg_result }}; \ntest logs: ${{ needs.integration-test-join.outputs.test_log_s3_uris }}\nspringtail logs: ${{ needs.integration-test-join.outputs.springtail_log_s3_uris }}",
+              "value": "${{ needs.integration-test-join.agg_result }}; \ntest logs: ${{ needs.integration-test-join.outputs.test_log_s3_uris }}\nspringtail logs: ${{ needs.integration-test-join.outputs.springtail_log_s3_uris }}",
               "short": false
             }
           ]
