@@ -5,8 +5,7 @@
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <pg_log_mgr/indexer.hh>
-#include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::committer {
@@ -17,7 +16,9 @@ namespace springtail::committer {
     {
         CHECK_GT(worker_count, 0);
         for (auto i = 0; i != worker_count; ++i) {
+            std::string thread_name = fmt::format("IndexWorker_{}", i);
             _workers.emplace_back([this](std::stop_token st) { task(st); });
+            pthread_setname_np(_workers.back().native_handle(), thread_name.c_str());
         }
         LOG_INFO("Indexer created: {}", worker_count);
     }
@@ -67,7 +68,7 @@ namespace springtail::committer {
         _cleanup_for_db(db_id);
 
         // Get indexes which were not completed during last shutdown/crash
-        auto unfinished_indexes_info = sys_tbl_mgr::Client::get_instance()->get_unfinished_indexes_info(db_id);
+        auto unfinished_indexes_info = sys_tbl_mgr::Server::get_instance()->get_unfinished_indexes_info(db_id);
 
         // Get each such XIDs and their indexes
         for (const auto& [index_xid, idx_list]: unfinished_indexes_info.xid_index_map()) {
@@ -128,8 +129,8 @@ namespace springtail::committer {
         Key key(idx._db_id, idx._index_request.index().id());
         // I don't think PG will issue two creates with the same index ID.
         CHECK(_work_set.find(key) == _work_set.end());
-        auto client = sys_tbl_mgr::Client::get_instance();
-        proto::IndexInfo info = client->get_index_info(idx._db_id, idx._index_request.index().id(), {idx._xid, constant::MAX_LSN});
+        auto server = sys_tbl_mgr::Server::get_instance();
+        proto::IndexInfo info = server->get_index_info(idx._db_id, idx._index_request.index().id(), {idx._xid, constant::MAX_LSN});
         if (info.id() != 0 && static_cast<sys_tbl::IndexNames::State>(info.state()) == sys_tbl::IndexNames::State::READY) {
             // Decrement the counter as we are not going to process the create request
             // as the index already exists
@@ -209,7 +210,7 @@ namespace springtail::committer {
         auto [db_id, index_id] = key;
         LOG_INFO("Drop index {}, {}, {}", db_id, index_id, end_xid);
 
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
 
         IndexParams work_item;
         {
@@ -224,7 +225,7 @@ namespace springtail::committer {
 
         XidLsn xid{end_xid, constant::INDEX_COMMIT_LSN};
 
-        proto::IndexInfo info = client->get_index_info(db_id, index_id, xid);
+        proto::IndexInfo info = server->get_index_info(db_id, index_id, xid);
         if (info.id() == 0) {
             //TODO: it seems like PG generates DROP INDEX with table ids, need
             //to investigate it more.
@@ -235,16 +236,17 @@ namespace springtail::committer {
         // Index should be at BEING_DELETED to be dropped
         DCHECK(static_cast<sys_tbl::IndexNames::State>(info.state()) == sys_tbl::IndexNames::State::BEING_DELETED);
 
-        auto exists = TableMgr::get_instance()->exists(db_id, info.table_id(), xid.xid, xid.lsn);
+        auto exists = sys_tbl_mgr::Server::get_instance()->exists(db_id, info.table_id(), xid);
         if (!exists) {
             // when dropping a table, PG generates DROP TABLE first
             // following by DROP INDEX, We will mark the index as DELETED in this case.
             LOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
-            client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
+            server->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
             return;
         }
 
-        auto meta = client->get_roots(db_id, info.table_id(), end_xid);
+        auto meta = server->get_roots(db_id, info.table_id(), end_xid);
+        DCHECK(meta != nullptr);
         auto it = std::ranges::find_if(meta->roots,
                 [&](auto const& v) { return index_id == v.index_id; });
         // Erase roots if present, roots wont be there if index drop came in before processing build,
@@ -265,7 +267,7 @@ namespace springtail::committer {
             root->truncate();
             root->finalize();
         }
-        client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
+        server->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
 
         // Cleanup table-index map
         _remove_index_key(db_id, info.table_id(), key);
@@ -285,8 +287,8 @@ namespace springtail::committer {
 
         CHECK_EQ(idx._index_request.action(), "create_index");
 
-        auto client = sys_tbl_mgr::Client::get_instance();
-        client->invalidate_table(db_id, tid, XidLsn{idx._xid});
+        auto server = sys_tbl_mgr::Server::get_instance();
+        server->invalidate_table(db_id, tid, XidLsn{idx._xid});
 
         // index column positions
         auto idx_cols = _get_index_cols(idx._index_request.index());
@@ -386,8 +388,8 @@ namespace springtail::committer {
         work_item = _work_set.at(key);
 
         _work_set.erase(key);
-        auto client = sys_tbl_mgr::Client::get_instance();
-        proto::IndexInfo index_info = client->get_index_info(db_id, index_id, xid);
+        auto server = sys_tbl_mgr::Server::get_instance();
+        proto::IndexInfo index_info = server->get_index_info(db_id, index_id, xid);
 
         // Table resync will cause index to be marked as deleted
         if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::DELETED) {
@@ -408,24 +410,24 @@ namespace springtail::committer {
                 //                              mark the state as DELETED
 
                 if (work_item.is_status(IndexStatus::ABORTING)) {
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+                    server->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
                 }
             } else {
                 // Index building was attempted, finalize and process build/abort
                 auto extent_id = root->finalize();
                 if (work_item.is_status(IndexStatus::BUILDING)) {
-                    auto meta = client->get_roots(db_id, tid, end_xid);
+                    auto meta = server->get_roots(db_id, tid, end_xid);
                     meta->roots.clear();
                     meta->roots.emplace_back(key.second, extent_id);
-                    client->update_roots(db_id, tid, end_xid, *meta);
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
+                    server->update_roots(db_id, tid, end_xid, *meta);
+                    server->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
                 } else if (work_item.is_status(IndexStatus::ABORTING)) {
                     // the index was deleted while we were building it
                     // lets also finalize here as part of the tree
                     // may have got finalized while we were building.
                     root->truncate();
                     root->finalize();
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+                    server->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
                 }
             }
         }
@@ -536,7 +538,7 @@ namespace springtail::committer {
                 // Get the table at the next XID
                 // and fetch the page for the extent
                 auto next_xid = next_extent->header().xid;
-                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
+                auto next_schema = TableMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
 
                 // If previous offset exists and not processed before, lets invalidate that first
                 if (auto prev_eid = next_extent->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT
@@ -545,7 +547,7 @@ namespace springtail::committer {
                     // Get the previous extent and its schema
                     auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
                     auto prev_xid = prev_extent->header().xid;
-                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
+                    auto prev_schema = TableMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
 
                     // and invalidate index for the rows in the prev page
                     indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._root, idx_cols, prev_schema);

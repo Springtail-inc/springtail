@@ -1,5 +1,18 @@
 #pragma once
 
+#include <absl/log/check.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
+#include <cstdint>
+#include <memory>
+#include <string_view>
+#include <unordered_set>
+#include <vector>
+
+#include <common/common.hh>
+#include <storage/xid.hh>
+
 namespace springtail {
 
 /**
@@ -7,23 +20,31 @@ namespace springtail {
  */
 class TableSyncRequest {
 public:
-    TableSyncRequest(uint32_t table_id, const XidLsn &xid) : _table_id(table_id), _xid(xid) {}
+    TableSyncRequest(const std::unordered_set<uint32_t> &table_ids, const XidLsn &xid) : _table_ids(table_ids), _xid(xid) {}
 
     explicit TableSyncRequest(std::string_view serialized) {
         std::vector<std::string> split;
         common::split_string(":", serialized, split);
         CHECK_EQ(split.size(), 3);
 
-        _table_id = std::stoul(split[0]);
+        std::vector<std::string> table_id_list;
+        common::split_string(",", split[0], table_id_list);
+        for (const auto &table_id : table_id_list)
+        {
+            if (!table_id.empty())
+            {
+                _table_ids.insert(static_cast<uint32_t>(std::stoul(table_id)));
+            }
+        }
         _xid = XidLsn(std::stoull(split[1]), std::stoull(split[2]));
     }
 
     explicit operator std::string() const {
-        return fmt::format("{}:{}:{}", _table_id, _xid.xid, _xid.lsn);
+        return fmt::format("{}:{}:{}", fmt::join(_table_ids, ","), _xid.xid, _xid.lsn);
     }
 
-    uint32_t table_id() const {
-        return _table_id;
+    const std::unordered_set<uint32_t> &table_ids() const {
+        return _table_ids;
     }
 
     const XidLsn &xid() const {
@@ -31,7 +52,7 @@ public:
     }
 
 private:
-    uint32_t _table_id;
+    std::unordered_set<uint32_t> _table_ids;
     XidLsn _xid;
 };
 using TableSyncRequestPtr = std::shared_ptr<TableSyncRequest>;

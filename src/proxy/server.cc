@@ -43,7 +43,7 @@ namespace springtail::pg_proxy {
                       bool enable_ssl,
                       LoggerPtr shadow_logger)
     {
-        _thread_pool = std::make_shared<ThreadPool<Session>>(thread_pool_size);
+        _thread_pool = std::make_shared<ThreadPool<Session>>(thread_pool_size, "ProxyWorker");
         _id = arc4random();
         _enable_ssl = enable_ssl;
         _mode = mode;
@@ -99,6 +99,7 @@ namespace springtail::pg_proxy {
 
         if (keep_alive_port > 0) {
             _keep_alive_thread = std::thread(&ProxyServer::_start_keep_alive, this, keep_alive_port);
+            pthread_setname_np(_keep_alive_thread.native_handle(), "KeepAlive");
         }
 
         // register "/proxy" route with AdminServer
@@ -733,6 +734,7 @@ namespace springtail::pg_proxy {
         get_instance()->init(port, num_threads, certificate, key, keep_alive_port, server_mode, enable_ssl, logger);
 
         get_instance()->_proxy_thread = std::thread(&ProxyServer::run, ProxyServer::get_instance());
+        pthread_setname_np(get_instance()->_proxy_thread.native_handle(), "Proxy");
 
         // force user manager to startup user sync thread
         UserMgr::get_instance();

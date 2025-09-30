@@ -1,7 +1,5 @@
 #pragma once
 
-#include <map>
-#include <string>
 #include <memory>
 #include <vector>
 
@@ -46,9 +44,9 @@ namespace springtail {
          * @brief Add a mapping from springtail XID to Postgres XID
          * @param pg_xid Postgres XID
          * @param xid springtail XID
-         * @param commit_ts postgres commit ts
+         * @param md Metadata 
          */
-        void commit(uint64_t pg_xid, uint64_t xid, PostgresTimestamp commit_ts);
+        void commit(uint64_t pg_xid, uint64_t xid, WriteCacheTableSet::Metadata md);
 
         /**
          * @brief Add a mapping from springtail XID to Postgres XID
@@ -56,7 +54,7 @@ namespace springtail {
          * @param xid springtail XID
          * @param commit_ts postgres commit ts
          */
-        void commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts);
+        void commit(const std::vector<uint64_t>& pg_xids, uint64_t xid, WriteCacheTableSet::Metadata md);
 
         /**
          * @brief Drop a table from the index
@@ -75,7 +73,7 @@ namespace springtail {
          * @brief Drop all data for a given XID
          * @param pg_xids Postgres XIDs
          */
-        void abort(std::vector<uint64_t> pg_xids);
+        void abort(const std::vector<uint64_t>& pg_xids);
 
         //// RPC interface
 
@@ -111,7 +109,7 @@ namespace springtail {
          * @return std::vector<WriteCacheIndexExtentPtr>
          */
         std::vector<WriteCacheIndexExtentPtr> get_extents(uint64_t tid, uint64_t xid,
-                                                          uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts);
+                                                          uint32_t count, uint64_t &cursor, WriteCacheTableSet::Metadata &md);
 
     private:
         /** Set of partitions to hold table data, enables more parallelism */

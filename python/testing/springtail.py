@@ -61,7 +61,6 @@ POSTGRES_CONTAINER = 'pg16' # Postgres primary container name
 
 # List of daemons to start tuple: (name, path, args)
 CORE_DAEMONS = [
-    ('sys_tbl_mgr_daemon', 'src/sys_tbl_mgr/sys_tbl_mgr_daemon'),
     ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon')
 ]
 

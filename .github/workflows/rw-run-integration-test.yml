@@ -35,11 +35,16 @@ on:
         description: 'The timeout in minutes for the entire job.'
         type: number
         required: false
-        default: 30
+        default: 60
       reuse_code:
         description: 'Whether to reuse the existing code from /home/dev/springtail or do a fresh checkout.'
         type: boolean
         required: false
+      snapshot_alias:
+        description: 'Only used if reuse_code is true. The snapshot alias to use for the runner.'
+        type: string
+        required: false
+        default: ""
       num_procs:
         description: 'The number of parallel processes to use for rebuilding. Only used if reuse_code is false.'
         type: string
@@ -69,7 +74,7 @@ on:
 jobs:
   test:
     name: integration-test
-    runs-on: warp-ubuntu-latest-arm64-4x
+    runs-on: ${{ inputs.reuse_code && inputs.shapshot_alias != '' && format('warp-ubuntu-latest-arm64-4x;snapshot.key={0}', inputs['snapshot_alias']) || 'warp-ubuntu-latest-arm64-4x' }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}
@@ -101,6 +106,8 @@ jobs:
       INTEGRATION_TEST_CONFIG: ${{ inputs.config_to_run }}
       INTEGRATION_TEST_ITERATIONS: ${{ inputs.iterations }}
       SPRINGTAIL_LOG_PATH: /var/log/springtail.log
+      DKR_VOLUME_NAME: pgdata-${{ github.run_id }}-${{ inputs.config_to_run }}
+      DKR_NETWORK_NAME: cinet-${{ github.run_id }}-${{ inputs.config_to_run }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -159,21 +166,21 @@ jobs:
 
       - name: Prepare shared Docker network
         run: |
-          docker network create ci_net || true
-          docker network connect ci_net $(hostname)  
+          docker network create ${DKR_NETWORK_NAME}
+          docker network connect ${DKR_NETWORK_NAME} $(hostname)  
+          docker volume create ${DKR_VOLUME_NAME}
 
       - name: Start Postgres (Primary Database)
         run: |
-          docker volume create pgdata 2>/dev/null || true
           docker run -d \
             --name pg16 \
             --restart unless-stopped \
-            --network ci_net \
+            --network ${DKR_NETWORK_NAME} \
             -p 5432:5432 \
             -e POSTGRES_USER=springtail \
             -e POSTGRES_PASSWORD=springtail \
             -e POSTGRES_DB=springtail \
-            -v pgdata:/var/lib/postgresql/data \
+            -v ${DKR_VOLUME_NAME}:/var/lib/postgresql/data \
             postgres:16 \
             postgres -c wal_level=logical \
             -c max_wal_senders=10 \
@@ -247,7 +254,7 @@ jobs:
             echo "test_log_s3_uri=${log_s3_key}" >> $GITHUB_OUTPUT
           
             # Springtail service logs
-            springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.tar.gz"
+            springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}-${INTEGRATION_TEST_CONFIG}.tar.gz"
             output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../${CI_BUILD_TYPE})
             fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
             springtail_log_s3_key="${S3_LOGS_PREFIX_FULL}/${springtail_log_file}"
@@ -267,20 +274,20 @@ jobs:
         uses: dorny/test-reporter@v1
         if: success() || failure()                         # Only upload the *last* report
         with:
-          name: Integration Tests (test_runner)            # Name of the check run which will be created
+          name: "IT Report - ${{ inputs.config_to_run }}"      # Name of the check run which will be created
           path: ./integration-test-report.xml
           reporter: java-junit
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # Only upload the *last* log file
         with:
-          name: 'Integration Test Logs'
+          name: "Integration Test Logs - ${{ inputs.config_to_run }}"
           path: ./python/testing/integration-test-*.log
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # Only upload the *last* springtail log file
         with:
-          name: 'Springtail Logs'
+          name: "Springtail Logs - ${{ inputs.config_to_run }}"
           path: ./python/testing/springtail-*.tar.gz
 
       - name: Run Proxy Test
@@ -361,3 +368,10 @@ jobs:
             fi
             exit 1
           fi
+
+      - name: Clean up Volume and Network
+        if: always()
+        run: |
+          docker rm -f pg16 || true
+          docker volume rm ${DKR_VOLUME_NAME} || true
+          docker network rm ${DKR_NETWORK_NAME} || true

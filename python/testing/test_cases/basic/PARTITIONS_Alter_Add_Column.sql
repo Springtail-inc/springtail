@@ -16,6 +16,9 @@ ALTER TABLE family_alter_parent_partition
     ATTACH PARTITION family_alter_child_partition_siblings FOR VALUES IN ('Sibling');
 
 INSERT INTO family_alter_parent_partition VALUES (1, 'John', 'Sibling');
+INSERT INTO family_alter_parent_partition VALUES (2, 'Jane', 'Sibling');
+INSERT INTO family_alter_parent_partition VALUES (3, 'Bob', 'Sibling');
+INSERT INTO family_alter_parent_partition VALUES (4, 'Alice', 'Sibling');
 
 ALTER TABLE family_alter_parent_partition
     ADD COLUMN family_name VARCHAR(100);

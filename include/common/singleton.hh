@@ -22,10 +22,10 @@ namespace springtail {
         WriteCacheServerId,
         WriteCacheClientId,
         IOMgrId,
-        SchemaMgrId,
         TableMgrId,
+        TableMgrClientId,
         SyncTrackerId,
-        PgFdwMgrId,         // NOTE: not sure if this is needed
+        PgFdwMgrId,
         PgXidSubscriberMgrId,
         PgDDLMgrId,
         PgLogCoordinatorId,
@@ -38,6 +38,17 @@ namespace springtail {
     using ShutdownFunc = void(*)();
 
     void springtail_register_service(ServiceId service_id, ShutdownFunc fn);
+    const std::string &springtail_get_service_name(ServiceId id);
+
+    template <typename T>
+    std::string get_type_name() {
+        // __PRETTY_FUNCTION__ example string:
+        // std::string springtail::get_type_name() [with T = Coordinator; std::string = std::__cxx11::basic_string<char>]
+        std::string func = __PRETTY_FUNCTION__;
+        auto start = func.find("T = ") + 4;
+        auto end = func.find(';', start);
+        return func.substr(start, end - start);
+    }
 
     template <typename T>
     class Singleton {
@@ -70,6 +81,14 @@ namespace springtail {
         {
             _has_thread = true;
             _thread = std::thread(&T::_internal_run, (T *)this);
+            std::string name = springtail_get_service_name(_service_id);
+            if (name == "Invalid") {
+                name = get_type_name<T>();
+                if (name.length() > 15) {
+                    name = name.substr(0, 15);
+                }
+            }
+            pthread_setname_np(_thread.native_handle(), name.c_str());
         }
 
         /**
@@ -119,7 +138,7 @@ namespace springtail {
          * @brief Constructor of a new Singleton object can only be accessed by the derived class
          *
          */
-        explicit Singleton(ServiceId service_id = ServiceId::ServiceInvalidId)
+        explicit Singleton(ServiceId service_id = ServiceId::ServiceInvalidId) : _service_id(service_id)
         {
             DCHECK(service_id >= ServiceId::ServiceInvalidId && service_id < ServiceId::ServiceCountId);
             if (service_id > ServiceId::ServiceInvalidId) {
@@ -158,6 +177,7 @@ namespace springtail {
         static inline std::once_flag _init_flag;          ///< initialization flag
         static inline std::once_flag _shutdown_flag;      ///< shutdown flag
         std::thread _thread;                              ///< thread ran by the object
+        ServiceId _service_id;                            ///< class service id
         bool _has_thread{false};                          ///< singleton with thread
         std::atomic<bool> _shutting_down{false};       ///< atomic flag to stop the thread execution
 

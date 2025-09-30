@@ -8,6 +8,7 @@
 #include <atomic>
 #include <mutex>
 #include <cassert>
+#include <sys/uio.h>
 
 #include <storage/io_request.hh>
 #include <storage/io_mgr.hh>
@@ -16,36 +17,51 @@
 
 namespace springtail {
 
+    class IOFile;
+
     /**
      * @brief System file handle; holds underlying file descriptor
      */
     class IOSysFH {
     private:
-        std::filesystem::path _path;  ///< underlying filename
+        std::shared_ptr<IOFile> _io_file;  ///< parent IOFile object
         int  _fd;                     ///< underlying file descriptor
-        bool _is_compressed;          ///< is underlying file compressable (append)
         bool _is_dirty;               ///< is fh dirty (unsynced writes)
         bool _is_readonly;            ///< is fh opened read-only
+        IOMgr::IO_MODE _mode;         ///< mode fh was opened in (read, write, append)
 
         /**
          * @brief Internal write used by write (overwrite) and append
-         * @param data           Vector containing pointers to data vectors
-         * @param compressor     Compressor if compression is going to be used
+         * @param data           Vector containing pointers to original data vectors
+         * @param data_ptrs      Array of iovec structures describing the data to write;
+         *                       may be compressed or uncompressed data
          * @param offset         Offset to write at (either EOF for append or other for write)
-         * @param is_compressed  Should compression be attempted
+         * @param is_compressed  Is data compressed; may be false even if file is compressable
          * @return int           Number of bytes written (hdr + data);
          *                       > 0 success, -1 io error with errno set, -2 decode error
          */
-        int _internal_write(std::vector<std::shared_ptr<std::vector<char>>> &data,
-                            std::shared_ptr<Compressor> compressor,
-                            uint64_t offset, bool is_compressed);
+        int _internal_write(const std::vector<std::shared_ptr<std::vector<char>>> &data,
+                            const struct iovec *data_ptrs,
+                            uint64_t offset,
+                            bool is_compressed);
 
         /**
          * @brief Compute hash over vector of vector (hash of hashes)
          * @param data vector of data vectors
          * @return uint64_t hash (computed as hash of hashes)
          */
-        uint64_t _compute_hash(std::vector<std::shared_ptr<std::vector<char>>> data);
+        uint64_t _compute_hash(const std::vector<std::shared_ptr<std::vector<char>>> &data) const;
+
+        /**
+         * @brief Compress data helper function
+         * @param data vector of data vectors to compress
+         * @param compressed_data output vector for compressed data
+         * @param is_compressed flag indicating if compressed data should be used
+         * @return int32_t compressed size or error code
+         */
+        int32_t _compress_data(const std::vector<std::shared_ptr<std::vector<char>>> &data,
+                               std::vector<char>* compressed_data,
+                               bool &is_compressed);
 
     public:
         std::atomic<bool> is_busy;  ///< indicates fh is busy with io for a worker
@@ -53,11 +69,11 @@ namespace springtail {
         /**
          * @brief Construct a new IOSysFH::IOSysFH object based on path, mode and whether
          *        file is compressable
-         * @param path  Path to open
+         * @param io_file  IOFile object for underlying file
          * @param mode  Open mode, read/write/append
          * @param is_compressed Is file compressable
          */
-        IOSysFH(const std::filesystem::path &path, const IOMgr::IO_MODE &mode, bool is_compressed);
+        IOSysFH(std::shared_ptr<IOFile> io_file, const IOMgr::IO_MODE &mode, bool is_compressed);
 
         /**
          * @brief Destroy the IOSysFH::IOSysFH object; close underlying fd
@@ -66,27 +82,24 @@ namespace springtail {
 
         /**
          * @brief Read data from offset pos
-         * @param pos          offset to read from
+         * @param request  read request with offset and callback
          * @param decompressor Decompressor class for decompression
-         * @param callback     callback for completion
          */
         void read(IORequestRead * const request, std::shared_ptr<Decompressor> decompressor);
 
         /**
          * @brief Overwrite data within a file, file MUST NOT be compressed
-         * @param offset     offset at which to write data
-         * @param data       vector of data vectors to write out (written out as one block)
-         * @param callback   callback for completion
+         * @param request  write request with data to write and offset
          */
         void write(IORequestWrite * const request);
 
         /**
          * @brief Append data to end of file, file may be compressed or not
          * @param data       vector of data vectors to write out
-         * @param compressor Compressor class to compress file
-         * @param callback   callback for completion
+         * @param is_compressed should compression be attempted
          */
-        void append(IORequestAppend *const request, std::shared_ptr<Compressor> compressor);
+        void append(IORequestAppend *const request,
+                    bool is_compressed);
 
         /**
          * @brief Sync data to disk
@@ -104,7 +117,14 @@ namespace springtail {
          * @return true if FH is readonly
          * @return false if FH is writeable
          */
-        bool is_readonly() { return _is_readonly; }
+        bool is_readonly() const { return _is_readonly; }
+
+        /**
+         * @brief Is FH opened compressable (append mode)
+         * @return true if FH is compressable
+         * @return false if FH is not compressable
+         */
+        bool is_compressed() const;
     };
 
 
@@ -113,7 +133,7 @@ namespace springtail {
      *        file handles for read, and a single fh for write.  Provides access to the
      *        underlying file handles.
      */
-    class IOFile {
+    class IOFile : public std::enable_shared_from_this<IOFile> {
     private:
         /** file path for underlying file */
         std::filesystem::path _path;
@@ -123,6 +143,8 @@ namespace springtail {
 
         /** count worker threads with reference to file object; protected by IOMgr::_cache_mutex */
         std::atomic<int> _in_use_count;
+
+        std::atomic<uint64_t> _append_offset{0};  ///< current append offset
 
         /** Mutex protects _cv_read, _cv_write condition variables */
         std::mutex _mutex;
@@ -136,24 +158,49 @@ namespace springtail {
         /** List of read filehandles */
         std::vector<std::shared_ptr<IOSysFH>> _read_fhs;
 
-        /** Single write filehande */
+        /** List of append filehandles */
+        std::vector<std::shared_ptr<IOSysFH>> _append_fhs;
+
+        /** Single write filehandle */
         std::shared_ptr<IOSysFH> _write_fh;
 
         /**
          * @brief Get read fh, creates file handle if it doesn't exist
-         * @param mode Mode read (used for FH creation)
          * @return std::shared_ptr<IOSysFH> System filehandle or nullptr if none available
          */
-        std::shared_ptr<IOSysFH> _get_read_fh(const IOMgr::IO_MODE &mode);
+        std::shared_ptr<IOSysFH> _get_read_fh();
 
         /**
          * @brief Get write filehandle, creates it if it doesn't exist
-         * @param mode Mode write or append (used for FH creation)
          * @return std::shared_ptr<IOSysFH> System filehandle or nullptr if busy
          */
-        std::shared_ptr<IOSysFH> _get_write_fh(const IOMgr::IO_MODE &mode);
+        std::shared_ptr<IOSysFH> _get_write_fh();
+
+        /**
+         * @brief Get write filehandle, creates it if it doesn't exist
+         * @return std::shared_ptr<IOSysFH> System filehandle or nullptr if busy
+         */
+        std::shared_ptr<IOSysFH> _get_append_fh();
 
     public:
+                /*
+         * Extent Header 12 Bytes:
+         *       0-2  (3B) Magic number (CXT for compressed, or UXT for uncompressed)
+         *       3    (1B) Vector count (number of vectors that make up this block)
+         *       4    (8B) xxHash (hash of hashes)
+         */
+        static constexpr uint8_t EXT_HDR_SIZE = 3 + 1 + 8;
+
+        /*
+         * Header per data vector:
+         *       0-3  (4B) Size of vector uncompressed
+         *       4-8  (4B) Size of vector (compressed size if compressed)
+         */
+        static constexpr uint8_t VEC_HDR_SIZE = 8;
+
+        static constexpr char HDR_MAGIC_COMPRESSED[3] = {'C', 'X', 'T'}; ///< magic for compressed hdr
+        static constexpr char HDR_MAGIC_UNCOMPRESSED[3] = {'U', 'X', 'T'}; ///< magic for uncompressed hdr
+
         /**
          * @brief Construct a new IOFile object
          * @param path          Path for underlying file
@@ -161,7 +208,12 @@ namespace springtail {
          */
         IOFile(const std::filesystem::path &path, bool is_compressed)
             : _path(path), _is_compressed(is_compressed), _in_use_count(0)
-        {}
+        {
+            // set initial append offset to end of file by getting file size
+            if (std::filesystem::exists(_path)) {
+                _append_offset = std::filesystem::file_size(_path);
+            }
+        }
 
         /**
          * @brief Indicates file object is in use by at least one worker
@@ -175,10 +227,10 @@ namespace springtail {
          *        Incremented by IOMgr::lookup
          */
         inline void incr_in_use() { _in_use_count++; }
-        
+
         /**
          * @brief Atomically decrement in use counter; Decremented by IOMgr::release
-         * 
+         *
          */
         inline void decr_in_use() { _in_use_count--; assert(_in_use_count >= 0); }
 
@@ -201,5 +253,29 @@ namespace springtail {
          * @return true on success, false otherwise
          */
         bool try_close_all();
+
+        /**
+         * @brief Get the path object
+         * @return std::filesystem::path underlying path
+         */
+        std::filesystem::path get_path() const { return _path; }
+
+        /**
+         * @brief Is file compressed
+         * @return true if file is compressed
+         * @return false if file is not compressed
+         */
+        bool is_compressed() const { return _is_compressed; }
+
+        /**
+         * @brief Reserve offset at end of file for append
+         * @param size Size to reserve
+         * @return uint64_t Offset reserved (old EOF)
+         */
+        uint64_t reserve_offset(uint64_t size) {
+            // atomic fetch and add to get current offset and increment
+            // returns the old offset
+            return _append_offset.fetch_add(size, std::memory_order_acq_rel);
+        }
     };
 }

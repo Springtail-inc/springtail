@@ -5,6 +5,7 @@
 #include <filesystem>
 
 #include <common/concurrent_queue.hh>
+#include <common/common.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -18,12 +19,19 @@ namespace springtail::pg_log_mgr {
         int num_messages;
         bool is_stall_message;
 
+        PgLogQueueEntry() = delete;
+
         PgLogQueueEntry(uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &path)
             : start_offset(start_offset), end_offset(end_offset),
               path(path), num_messages(1), is_stall_message(false)
         {}
 
-        explicit PgLogQueueEntry(bool stall) : is_stall_message(stall) {}
+        explicit PgLogQueueEntry(bool stall) : is_stall_message(stall)
+        {}
+
+        PgLogQueueEntry(const PgLogQueueEntry&) = delete;
+        PgLogQueueEntry(PgLogQueueEntry&&) = default;
+        const PgLogQueueEntry& operator=(const PgLogQueueEntry&) = delete;
     };
     using PgLogQueueEntryPtr = std::shared_ptr<PgLogQueueEntry>;
 
@@ -57,9 +65,10 @@ namespace springtail::pg_log_mgr {
 
         void push(const std::vector<PgLogQueueEntry> &entries) {
             std::unique_lock<std::mutex> write_lock{_mutex};
-            for (auto entry: entries) {
+            for (const auto& entry: entries) {
                 PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(entry.start_offset, entry.end_offset, entry.path);
-                _internal_push(new_entry, write_lock);
+                new_entry->num_messages = entry.num_messages;
+                _internal_push(std::move(new_entry), write_lock);
             }
         }
 
@@ -68,8 +77,9 @@ namespace springtail::pg_log_mgr {
          */
         void push_stall()
         {
+            auto v = std::make_shared<PgLogQueueEntry>(true);
             std::unique_lock<std::mutex> write_lock{_mutex};
-            _internal_push(std::make_shared<PgLogQueueEntry>(true), write_lock);
+            _internal_push(std::move(v), write_lock);
         }
     };
 } // namespace springtail::pg_log_mgr

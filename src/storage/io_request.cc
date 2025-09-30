@@ -4,6 +4,7 @@
 #include <storage/io_mgr.hh>
 #include <storage/io_file.hh>
 #include <storage/io_request.hh>
+#include <storage/io.hh>
 
 namespace springtail {
 
@@ -42,20 +43,15 @@ namespace springtail {
     void
     IORequestAppend::_issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept
     {
-        std::shared_ptr<Compressor> compressor;
         try {
-            compressor = io_mgr->get_compressor();
-            fh->append(this, compressor);
+            // issue append; it does the compression if needed and the callback
+            fh->append(this, fh->is_compressed());
         } catch (const std::exception &exc) {
             // log exception
             LOG_ERROR("Caught exception for IO type={}", get_type());
             LOG_ERROR("Exception: {}", exc.what());
 
             complete(std::make_shared<IOResponseAppend>(this, IOStatus::ERROR));
-        }
-
-        if (compressor) {
-            io_mgr->put_compressor(compressor);
         }
     }
 

@@ -101,13 +101,27 @@ namespace springtail {
          * @brief Construct a new Thread Pool object
          * @param max_threads number of threads to create
          */
-        ThreadPool(int max_threads, int io_request_queue_size=-1)
+        ThreadPool(int max_threads,
+                   std::optional<std::string> thread_name = std::nullopt,
+                   int io_request_queue_size=-1)
             : _queue(ConcurrentQueue<ThreadRequest>(io_request_queue_size))
         {
+            std::string thread_name_base;
+            if (thread_name.has_value()) {
+                thread_name_base = thread_name.value();
+                if (thread_name_base.length() > 12) {
+                    thread_name_base = thread_name_base.substr(0, 12);
+                }
+            } else {
+                thread_name_base = "TPoolWorker";
+            }
             for (int i = 0; i < max_threads; i++) {
                 ThreadWorkerPtr worker = std::make_shared<ThreadWorker>();
                 _workers.push_back(worker);
-                _threads.push_back(std::thread(worker->get_worker_fn(), worker, std::ref(_queue)));
+
+                std::string thread_name = fmt::format("{}_{}", thread_name_base, i);
+                _threads.emplace_back(worker->get_worker_fn(), worker, std::ref(_queue));
+                pthread_setname_np(_threads.back().native_handle(), thread_name.c_str());
             }
         }
 

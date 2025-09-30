@@ -19,6 +19,7 @@
 #include <storage/xid.hh>
 
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
 
@@ -37,14 +38,13 @@ namespace {
             test::start_services(true, true, false);
 
             // create the public namespace
-            auto client = sys_tbl_mgr::Client::get_instance();
-            client->ping();
+            auto server = sys_tbl_mgr::Server::get_instance();
 
             // create the public namespace in the sys_tbl_mgr
             PgMsgNamespace ns_msg;
             ns_msg.oid = 90000;
             ns_msg.name = "public";
-            client->create_namespace(1, _xid, ns_msg);
+            server->create_namespace(1, _xid, ns_msg);
 
             // move to the next XID
             ++_xid.xid;
@@ -73,6 +73,7 @@ namespace {
         void _set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
 
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
+        sys_tbl_mgr::Server *_server = sys_tbl_mgr::Server::get_instance();
     };
 
     XidLsn SysTblMgr_Test::_xid(1, 0);
@@ -108,27 +109,29 @@ namespace {
         auto xid = _next_xid();
 
         // finalize
-        _client->finalize(_db, xid.xid);
+        _server->finalize(_db, xid.xid);
     }
 
     void SysTblMgr_Test::_set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
     {
         auto xid = _next_lsn();
-        _client->set_index_state(_db, xid, table_id, index_id, state);
+        _server->set_index_state(_db, xid, table_id, index_id, state);
+        _client->invalidate_table(_db, table_id, xid);
     }
 
     PgMsgDropIndex SysTblMgr_Test::_drop_index(uint64_t index_id)
     {
         auto xid = _next_lsn();
 
-        PgMsgDropIndex msg;
+        PgMsgDropIndex msg{};
 
         msg.lsn = xid.lsn;
         msg.xid = xid.xid;
         msg.namespace_name = "public";
         msg.oid = index_id;
 
-        _client->drop_index(_db, xid, msg);
+        _server->drop_index(_db, xid, msg);
+        _client->invalidate_by_index(_db, msg.oid, xid);
 
         return msg;
     }
@@ -137,7 +140,7 @@ namespace {
         auto xid = _next_lsn();
 
         std::vector<PgMsgSchemaIndexColumn> columns;
-        PgMsgIndex msg;
+        PgMsgIndex msg{};
 
         msg.lsn = xid.lsn;
         msg.xid = xid.xid;
@@ -150,7 +153,8 @@ namespace {
         msg.columns.push_back({"col2", 2, 0});
         msg.columns.push_back({"col1", 1, 1});
 
-        _client->create_index(_db, xid, msg, sys_tbl::IndexNames::State::NOT_READY);
+        _server->create_index(_db, xid, msg, sys_tbl::IndexNames::State::NOT_READY);
+        _client->invalidate_table(_db, msg.table_oid, xid);
 
         return msg;
     }
@@ -161,14 +165,14 @@ namespace {
     {
         auto xid = _next_lsn();
 
-        PgMsgTable create_msg;
+        PgMsgTable create_msg{};
         create_msg.oid = tid;
         create_msg.namespace_name = "public";
         create_msg.table = name;
         create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), TEXTOID, "foo", 1, 0, false, true});
         create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 2, 0, true, false});
 
-        _client->create_table(_db, xid, create_msg);
+        _server->create_table(_db, xid, create_msg);
 
         return create_msg;
     }
@@ -198,19 +202,21 @@ namespace {
         auto xid = _next_lsn();
 
         // drop the table
-        PgMsgDropTable drop_msg;
+        PgMsgDropTable drop_msg{};
         drop_msg.oid = tid;
         drop_msg.namespace_name = "public";
         drop_msg.table = name;
 
-        _client->drop_table(_db, xid, drop_msg);
+        _server->drop_table(_db, xid, drop_msg);
+        _client->invalidate_table(_db, drop_msg.oid, xid);
     }
 
     void
     SysTblMgr_Test::_alter_table(const PgMsgTable &msg)
     {
         auto xid = _next_lsn();
-        _client->alter_table(_db, xid, msg);
+        _server->alter_table(_db, xid, msg);
+        _client->invalidate_table(_db, msg.oid, xid);
     }
 
     // Tests the schema modification paths
@@ -255,7 +261,7 @@ namespace {
 
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::NOT_READY);
 
-        auto info = _client->get_index_info(_db, index_id, _xid);
+        auto info = _server->get_index_info(_db, index_id, _xid);
         ASSERT_EQ(info.id(), index_id);
         ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
 
@@ -264,14 +270,14 @@ namespace {
         // verify the schema metadata after finalize()
         _verify_schema(tid, index_id);
 
-        info = _client->get_index_info(_db, index_id, _xid);
+        info = _server->get_index_info(_db, index_id, _xid);
         ASSERT_EQ(info.id(), index_id);
 
         // use optional table ID
-        info = _client->get_index_info(_db, index_id, _xid, tid);
+        info = _server->get_index_info(_db, index_id, _xid, tid);
         ASSERT_EQ(info.id(), index_id);
 
-        info = _client->get_index_info(_db, constant::INDEX_PRIMARY, _xid, tid);
+        info = _server->get_index_info(_db, constant::INDEX_PRIMARY, _xid, tid);
         ASSERT_EQ(info.id(), constant::INDEX_PRIMARY);
 
         // change the index to the ready state
@@ -457,11 +463,11 @@ namespace {
 
         // "add data" to the table
         _create_index(tid, "x", index_id);
-        _client->update_roots(_db, tid, _xid.xid, {{{0, 0}}, {15}});
+        _server->update_roots(_db, tid, _xid.xid, {{{0, 0}}, {15}});
         _finalize();
 
         // add more data to the table
-        _client->update_roots(_db, tid, _xid.xid, {{{0, 100}}, {30}});
+        _server->update_roots(_db, tid, _xid.xid, {{{0, 100}}, {30}});
         _finalize();
 
         // rename col2 => coltwo

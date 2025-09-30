@@ -43,7 +43,7 @@ namespace springtail::pg_fdw {
         "WHERE typisdefined = true";
 
     static constexpr char ALTER_TABLE_RLS[] =
-        "ALTER FOREIGN TABLE {}.{} "
+        "ALTER {} TABLE {}.{} "
         "  ENABLE ROW LEVEL SECURITY {}";
 
     /** Calls primary function to get diff of policy changes; see policy.sql */
@@ -132,7 +132,7 @@ namespace springtail::pg_fdw {
     void PgDDLMgr::_on_database_ids_changed(const std::string &path,
                                             const nlohmann::json &new_value)
     {
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
+        LOG_INFO("Replicated databases changed event: {}", new_value.dump(4));
         CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
 
         // get a vector of old database ids from _log_mgrs
@@ -195,6 +195,7 @@ namespace springtail::pg_fdw {
                     fdw_id, username, password, hostname.value_or(""));
         PgDDLMgr::get_instance()->init(fdw_id, username, password, proxy_password, hostname);
         PgDDLMgr::get_instance()->_pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
+        pthread_setname_np(PgDDLMgr::get_instance()->_pg_ddl_mgr_thread.native_handle(), "PgDDLMgrThread");
     }
 
     void
@@ -236,9 +237,8 @@ namespace springtail::pg_fdw {
             // if the FDW is using a prefix, prepend it
             _db_prefix = fdw_config.at("db_prefix").get<std::string>();
         }
-
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "FDW ID: {}, Host: {}, Port: {}, FDW Username: {}",
-                     _fdw_id, _hostname, _port, _username);
+        LOG_INFO("FDW init: ID={}, Host={}, Port={}, FDW Username={}",
+                 _fdw_id, _hostname, _port, _username);
 
         // add subscribers to pubsub threads
         _db_instance_id = Properties::get_db_instance_id();
@@ -250,11 +250,12 @@ namespace springtail::pg_fdw {
 
         _init_fdw();
 
-        _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
+        _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE, "DDL_MQThrMgr");
         _thread_manager->start();
 
         // create a new thread to run the policy and role sync
         _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this, sync_interval_secs);
+        pthread_setname_np(_sync_thread.native_handle(), "DDLMgrSync");
         LOG_INFO("PgDDLMgr::init() done");
 
         Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_RUNNING);
@@ -647,6 +648,7 @@ namespace springtail::pg_fdw {
                 );
             }
         }
+        LOG_INFO("Sync thread exiting");
     }
 
     PgDDLMgr::UserTypeMap
@@ -656,7 +658,7 @@ namespace springtail::pg_fdw {
         UserTypeMap usertype_map;
 
         // iterate through the user types and add them to the map
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
         auto fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
             uint64_t namespace_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row);
@@ -683,7 +685,7 @@ namespace springtail::pg_fdw {
             DCHECK_EQ(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row), constant::USER_TYPE_ENUM);
 
             // insert into map by namespace_id
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
+            LOG_INFO("Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
             usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
         }
 
@@ -699,6 +701,8 @@ namespace springtail::pg_fdw {
         bool all_schemas = false;
         std::set<std::string> schemas;
         std::unordered_map<uint64_t, std::string> schema_map;
+
+        LOG_INFO("Scanning for schemas in db_id={}, xid={}", db_id, xid);
 
         // scan through includes
         auto includes = db_config["include"];
@@ -726,7 +730,7 @@ namespace springtail::pg_fdw {
         }
 
         // iterate through the schemas and get the schema ids
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
             // make sure entry exists at this xid
@@ -753,7 +757,7 @@ namespace springtail::pg_fdw {
                         LibPqConnectionPtr conn)
     {
         // Iterate through the TableNames table to look for rls_enabled tables
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
 
         for (auto row : (*table)) {
@@ -766,6 +770,12 @@ namespace springtail::pg_fdw {
 
             // get the table name and schema name
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+
+            // check if table is a parent partition; thus a regular table
+            bool is_parent_partition = false;
+            if (!fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->is_null(&row)) {
+                is_parent_partition = true;
+            }
 
             // get schema name from schema map
             uint64_t namespace_oid = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
@@ -786,12 +796,13 @@ namespace springtail::pg_fdw {
 
             // create the RLS policy for the table
             auto sql = fmt::format(ALTER_TABLE_RLS,
+                is_parent_partition ? "" : "FOREIGN",
                 conn->escape_identifier(schema_name), conn->escape_identifier(table_name),
                 rls_forced ? ", FORCE ROW LEVEL SECURITY" : "");
 
 
             // execute the SQL command to enable RLS
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Applying RLS SQL command: {}", sql);
+            LOG_INFO("Applying RLS SQL command: {}", sql);
             conn->exec(sql);
             conn->clear();
         }
@@ -854,8 +865,7 @@ namespace springtail::pg_fdw {
     std::string
     PgDDLMgr::_get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema)
     {
-        return fmt::format("ALTER SCHEMA {} RENAME TO {};",
-                           old_schema, new_schema);
+        return fmt::format("ALTER SCHEMA {} RENAME TO {};", old_schema, new_schema);
 #if 0
         /** Alter schema with grants, params: old_schema, new_schema, new_schema, user, new_schema, user, new_schema, user */
         return fmt::format("ALTER SCHEMA {} RENAME TO {};"
@@ -1045,6 +1055,7 @@ namespace springtail::pg_fdw {
                     uint64_t db_id = entry.at("db_id").get<uint64_t>();
                     uint64_t schema_xid = entry.at("xid").get<uint64_t>();
                     auto ddls = entry.at("ddls");
+                    auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
 
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Original DDLS: {}", ddls.dump(4));
 
@@ -1057,17 +1068,19 @@ namespace springtail::pg_fdw {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                     } else {
-                        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "New schema XID will be applied: db_id={}, current={}, new={}",
-                                    db_id, _db_xid_map[db_id], schema_xid);
+                        LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
+                                  db_id, _db_xid_map[db_id], schema_xid);
                         db_map[db_id][schema_xid] = sorted_ddls;
                     }
                 }
+
                 if (db_map.empty()) {
                     LOG_WARN("All schemas have already been applied");
                     db_lock.unlock();
                     redis_ddl.commit_fdw_no_update(_fdw_id);
                     continue;
                 }
+
                 db_lock.unlock();
 
                 // queue each DBs DDL statements for processing
@@ -1076,11 +1089,15 @@ namespace springtail::pg_fdw {
                         db_id, [this, &redis_ddl, db_id, xid_map]() {
                             try {
                                 uint64_t schema_xid = xid_map.rbegin()->first;
+                                auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+
                                 LOG_DEBUG(
                                     LOG_FDW, LOG_LEVEL_DEBUG1, "Updating redis ddl @ through schema XID: {}, db_id: {}",
                                     schema_xid, db_id);
 
-                                    // apply the DDL statements
+
+
+                                // apply the DDL statements
                                 bool status = _update_schemas(db_id, xid_map);
                                 if (!status) {
                                     // error occured, abort the DDL
@@ -1125,6 +1142,8 @@ namespace springtail::pg_fdw {
         }
         _thread_manager->notify_shutdown();
         _thread_manager->shutdown();
+
+        LOG_INFO("DDL manager thread exiting");
     }
 
     LibPqConnectionPtr
@@ -1239,7 +1258,7 @@ namespace springtail::pg_fdw {
 
         // exectute each DDL statement
         for (const auto &sql : txn) {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Executing DDL: {}", sql);
+            LOG_INFO("Executing DDL: {}", sql);
             conn->exec(sql);
             conn->clear();
         }
@@ -1294,12 +1313,10 @@ namespace springtail::pg_fdw {
 
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "DDL JSON: {}", ddl.dump(4));
 
+        // determine if this is a foreign table or regular table operation
+        // if partition_key is empty, then it's a foreign table, since it is a leaf table
         PartitionInfo partition_info = _get_partition_info(ddl);
-
-        bool is_regular_table = partition_info.parent_table_id() == 0 && partition_info.partition_key().empty();
-        bool is_leaf_partitioned_table = partition_info.parent_table_id() > 0 && !partition_info.partition_bound().empty() && partition_info.partition_key().empty();
-
-        bool is_regular_table_type = is_regular_table || is_leaf_partitioned_table;
+        bool is_foreign_table_type = partition_info.partition_key().empty();
 
         auto const &action = ddl.at("action");
         if (action == "create") { // create table
@@ -1316,7 +1333,7 @@ namespace springtail::pg_fdw {
             }
 
             return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns,
-                                                   partition_info, is_regular_table_type,
+                                                   partition_info, is_foreign_table_type,
                                                    [conn](const std::string &name) {
                                                         return conn->escape_identifier(name.c_str());
                                                    });
@@ -1324,7 +1341,7 @@ namespace springtail::pg_fdw {
 
         else if (action == "rename") { // rename table
             std::string rename = fmt::format("ALTER {} TABLE {}.{} RENAME TO {};",
-                                             is_regular_table_type ? "FOREIGN" : "",
+                                             is_foreign_table_type ? "FOREIGN" : "",
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
                                              conn->escape_identifier(ddl.at("table").get<std::string>()));
@@ -1332,7 +1349,7 @@ namespace springtail::pg_fdw {
             // XXX it's not clear to me that we need to support a schema change here?
             if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
                 return rename + fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
-                                            is_regular_table_type ? "FOREIGN" : "",
+                                            is_foreign_table_type ? "FOREIGN" : "",
                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                             conn->escape_identifier(ddl.at("table").get<std::string>()),
                                             conn->escape_identifier(ddl.at("schema").get<std::string>()));
@@ -1343,7 +1360,7 @@ namespace springtail::pg_fdw {
 
         else if (action == "drop") {  // drop table
             return fmt::format("DROP {} TABLE IF EXISTS {}.{};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
@@ -1370,7 +1387,7 @@ namespace springtail::pg_fdw {
                 type_name = std::get<0>(it->second);
             }
             return fmt::format("ALTER {} TABLE {}.{} ADD COLUMN {} {} {};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(col.at("name").get<std::string>()),
@@ -1380,7 +1397,7 @@ namespace springtail::pg_fdw {
 
         else if (action == "col_drop") {  // alter table drop column
             return fmt::format("ALTER {} TABLE {}.{} DROP COLUMN {};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("column").get<std::string>()));
@@ -1389,7 +1406,7 @@ namespace springtail::pg_fdw {
 
         else if (action == "col_rename") {
             return fmt::format("ALTER {} TABLE {}.{} RENAME COLUMN {} TO {};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("old_name").get<std::string>()),
@@ -1443,7 +1460,7 @@ namespace springtail::pg_fdw {
             const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
 
             return fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                old_schema, table, schema);
         }
         else if (action == "ut_create") {
@@ -1516,7 +1533,7 @@ namespace springtail::pg_fdw {
             bool rls_enabled = ddl.at("rls_enabled").get<bool>();
 
             return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                schema, table,
                                rls_enabled ? "ENABLE" : "DISABLE");
         } else if (action == "set_rls_forced") {
@@ -1526,7 +1543,7 @@ namespace springtail::pg_fdw {
             bool rls_forced = ddl.at("rls_forced").get<bool>();
 
             return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
-                               is_regular_table_type ? "FOREIGN" : "",
+                               is_foreign_table_type ? "FOREIGN" : "",
                                schema, table,
                                rls_forced ? "FORCE" : "NO FORCE");
         }
@@ -1544,7 +1561,7 @@ namespace springtail::pg_fdw {
                                const std::string &db_name)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
+        LOG_INFO("Creating DB ID: {}, DB Name: {} (dropping then creating)", db_id, db_name);
 
         // drop and create database on fdw
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
@@ -1703,13 +1720,15 @@ namespace springtail::pg_fdw {
 
         // update redis with the schema xid
         redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
+        LOG_INFO("Schema initialization complete for db_id={}, db_name={}, xid={}",
+                 db_id, db_name, xid);
     }
 
     void
     PgDDLMgr::_add_partition_table_comment(LibPqConnectionPtr conn, const uint64_t db_id, const std::string &schema_name, const uint64_t xid)
     {
         // 1. look up schema id in NamespaceNames (use inverse iterator)
-        auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
+        auto ns_table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
         auto ns_fields = ns_table->extent_schema()->get_fields();
         auto ns_search_key = sys_tbl::NamespaceNames::Secondary::key_tuple(schema_name, xid, constant::MAX_LSN);
         auto table_iter = ns_table->inverse_lower_bound(ns_search_key, 1);
@@ -1730,7 +1749,7 @@ namespace springtail::pg_fdw {
         //      limit search till xid exceeds xid passed as parameter
         //      per table store table_name and table_id
         std::set<std::pair<uint64_t, std::string>> tables;
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
         for (auto row: (*table)) {
             uint64_t table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
@@ -1787,13 +1806,13 @@ namespace springtail::pg_fdw {
             {
                 std::shared_lock shared_lock(_db_mutex);
                 if (_db_xid_map.contains(db_id)) {
-                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Database {} already exists in the fdw", db_name);
+                    LOG_INFO("Database {} already exists in the fdw", db_name);
                     return;
                 }
             }
 
             // looks like it exists in xid map, so get a connection and really check
-            conn = _get_fdw_connection(std::nullopt, "postgres");
+            conn = _get_fdw_connection(std::nullopt, "template1");
             std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
             conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
             if (conn->ntuples() > 0) {
@@ -1811,7 +1830,7 @@ namespace springtail::pg_fdw {
         }
 
         if (!conn) {
-            conn = _get_fdw_connection(std::nullopt, "postgres");
+            conn = _get_fdw_connection(std::nullopt, "template1");
         }
 
         // drop/add database
@@ -1837,7 +1856,7 @@ namespace springtail::pg_fdw {
         std::string db_name = db_config["name"];
 
         // drop database
-        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "postgres");
+        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
         std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
         conn->exec(drop_db);
@@ -1866,15 +1885,10 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Comparing enum types: {}.{} from: {} to: {}", schema, type_name, from.dump(), to.dump());
 
         while (i < from.size() && j < to.size()) {
-
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "i={}, j={}", i, j);
-
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "got from vals");
-
             std::string from_key = from[i].begin().key();
             std::string to_key = to[j].begin().key();
 
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "From key: {}, From val: {}, To key: {}, To val: {}", from_key,
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG2, "From key: {}, From val: {}, To key: {}, To val: {}", from_key,
                     (float)from[i].begin().value(), to_key, (float)to[j].begin().value());
 
             if (from_key == to_key) {

@@ -74,6 +74,7 @@ namespace springtail {
         LOG_LEVEL_DEBUG4 = 4  // lowest level, least priority
     };
 
+
     namespace logging {
         /**
          * @brief Logger singleton class
@@ -172,6 +173,16 @@ namespace springtail {
                     _debug_log_level = static_cast<LogDebugLevel>(lvl);
                 }
             }
+
+            /**
+             * @brief Set a new log mask
+             *
+             * @param mask_name - name of the mask
+             * @param value - turn on or off
+             * @return true - log mask was changed
+             * @return false - log mask was not changed due to some failure
+             */
+            bool set_log_mask(const std::string &mask_name, bool value);
 
         protected:
             /** Helper class for forwarding failed CHECKs and DCHECKs to the log */

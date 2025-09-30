@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -149,12 +150,15 @@ namespace springtail::pg_log_mgr {
 
             // initiate table copy thread; this will perform the initial copy of all tables
             _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+            pthread_setname_np(_table_copy_thread.native_handle(), "TableCopy");
 
             // start the index reconciliation thread
             _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
+            pthread_setname_np(_reconciliation_thread.native_handle(), "Reconciliation");
 
             // start the log reader thread since it is also required for processing table copy completions
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+            pthread_setname_np(_reader_thread.native_handle(), "LogReader");
 
         } else {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Started in recovery state");
@@ -177,12 +181,15 @@ namespace springtail::pg_log_mgr {
             // initiate table copy thread; do this before we start replaying the log since it's needed
             // for table re-syncs that might have to be run
             _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+            pthread_setname_np(_table_copy_thread.native_handle(), "TableCopy");
 
             // start the index reconciliation thread
             _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
+            pthread_setname_np(_reconciliation_thread.native_handle(), "Reconciliation");
 
             // start the log reader thread since it is also used to process recovery messages
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+            pthread_setname_np(_reader_thread.native_handle(), "LogReader");
 
             // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
@@ -310,23 +317,26 @@ namespace springtail::pg_log_mgr {
         }
 
         while (!_shutdown) {
-            std::set<uint32_t> table_ids;
+            std::unordered_set<uint32_t> table_ids;
 
             // _get_copy_table_ids block on redis table sync queue w/timeout for shutdown
-            auto [next_table_id, next_xid_lsn] = _get_copy_table_ids(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (next_table_id == -1) {
+            auto [next_table_ids, next_xid_lsn] = _get_copy_table_ids(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (next_table_ids.empty()) {
                 continue; // check for shutdown
             }
             do {
                 // populate the tables to copy; check for more work
-                table_ids.insert(next_table_id);
+                table_ids.insert(next_table_ids.begin(), next_table_ids.end());
 
-                // Mark table's XID to be processed for resync
-                SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+                for (auto table_id : next_table_ids) {
+                    SyncTracker::get_instance()->pick_table_for_sync(_db_id, table_id, next_xid_lsn.value());
+                }
 
-                std::tie(next_table_id, next_xid_lsn) = _get_copy_table_ids();
-            } while (next_table_id != -1);
+                std::tie(next_table_ids, next_xid_lsn) = _get_copy_table_ids();
+            } while (!next_table_ids.empty());
 
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Doing table copies for tables {} @{}:{}", fmt::join(table_ids, ","),
+                next_xid_lsn.has_value() ? next_xid_lsn.value().xid : 0, next_xid_lsn.has_value() ? next_xid_lsn.value().lsn : 0);
             CHECK(!table_ids.empty());
 
             auto token_commit_worker = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}});
@@ -345,9 +355,9 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    std::pair<uint32_t, std::optional<XidLsn>>
+    std::pair<std::unordered_set<uint32_t>, std::optional<XidLsn>>
     PgLogMgr::_get_copy_table_ids(uint32_t timeout) {
-        uint32_t table_id = -1;
+        std::unordered_set<uint32_t> table_ids;
         std::shared_ptr<TableSyncRequest> request;
         if (timeout > 0) {
             request = _redis_sync_queue.pop(REDIS_WORKER_ID, timeout);
@@ -356,15 +366,15 @@ namespace springtail::pg_log_mgr {
         }
         if (request != nullptr) {
             // populate the tables to copy; check for more work
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Table sync queue: {}@{}:{}", request->table_id(),
+            LOG_INFO("Table sync queue: {}@{}:{}", fmt::join(request->table_ids(), ","),
                     request->xid().xid, request->xid().lsn);
-            return std::make_pair(request->table_id(), request->xid());
+            return std::make_pair(request->table_ids(), request->xid());
         }
-        return std::make_pair(table_id, std::nullopt);
+        return std::make_pair(table_ids, std::nullopt);
     }
 
     void
-    PgLogMgr::_do_table_copies(std::optional<std::set<uint32_t>> table_ids)
+    PgLogMgr::_do_table_copies(std::optional<std::unordered_set<uint32_t>> table_ids)
     {
         // set state to sync stall, make sure we are in the running or startup sync state first
         // XXX blocked here if we get a second table sync while one is in-flight
@@ -385,8 +395,10 @@ namespace springtail::pg_log_mgr {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
+            LOG_INFO("Copying tables with table_ids: {}, xid={}", fmt::join(table_ids.value(), ","), xid);
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
         } else {
+            LOG_INFO("Copying all tables for db={}; xid={}", _db_id, xid);
             res = PgCopyTable::copy_db(_db_id, xid);
         }
 
@@ -398,12 +410,16 @@ namespace springtail::pg_log_mgr {
                 // process copy results
                 copy_task_pending = _process_copy_results(res);
                 if (copy_task_pending) {
-                    auto [next_table_id, next_xid_lsn] = _get_copy_table_ids();
-                    if (next_table_id != -1) {
+                    auto [next_table_ids, next_xid_lsn] = _get_copy_table_ids();
+                    if (!next_table_ids.empty()) {
+                        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Fetching tables {} @{}:{}; target xid = {} ", fmt::join(next_table_ids, ","),
+                            next_xid_lsn.value().xid, next_xid_lsn.value().lsn, xid);
                         xid = _pg_log_reader->get_next_xid();
-                        SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+                        for (auto table_id : next_table_ids) {
+                            SyncTracker::get_instance()->pick_table_for_sync(_db_id, table_id, next_xid_lsn.value());
+                        }
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying more tables; target xid={}", xid);
-                        res = PgCopyTable::copy_tables(_db_id, xid, std::set<uint32_t>{next_table_id});
+                        res = PgCopyTable::copy_tables(_db_id, xid, next_table_ids);
                     } else {
                         // Not able to fetch next table, so exit copy
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Couldn't fetch more tables; setting state=running");
@@ -511,8 +527,11 @@ namespace springtail::pg_log_mgr {
 
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
+        pthread_setname_np(_writer_thread.native_handle(), "LogWriter");
         // create the tracer thread
         _tracer_thread = std::thread(&PgLogMgr::_trace_thread, this);
+        pthread_setname_np(_tracer_thread.native_handle(), "Tracer");
+
 
         return true;
     }
@@ -708,7 +727,7 @@ namespace springtail::pg_log_mgr {
                                 return;
                             }
                         }
-                        post_recovery_queue.emplace_back(PgLogQueueEntry(start_offset, end_offset, file_path));
+                        post_recovery_queue.emplace_back(start_offset, end_offset, file_path);
                     }
                 )) {
                     done = true;
@@ -720,6 +739,7 @@ namespace springtail::pg_log_mgr {
                 // copy queue from
                 LOG_INFO("Moving data to _logger_queue, recovery is done");
                 _logger_queue.push(post_recovery_queue);
+                open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
             }
         }
 
@@ -734,7 +754,9 @@ namespace springtail::pg_log_mgr {
                     [this](uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &file_path) {
                         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Queueing log entry: start_offset={}, end_offset={}, file_path={}",
                                   start_offset, end_offset, file_path);
+
                         _logger_queue.push(start_offset, end_offset, file_path);
+                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
                     }
                 )) {
                     break;
@@ -796,7 +818,7 @@ namespace springtail::pg_log_mgr {
 
                 _internal_state.set(STATE_RUNNING);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Sync to complete");
-
+                
                 continue;
             }
 
@@ -811,8 +833,7 @@ namespace springtail::pg_log_mgr {
                 last_path = log_entry->path;
             }
 
-            _pg_log_reader->process_log(log_entry->path, last_timestamp,
-                                        log_entry->start_offset, log_entry->end_offset);
+            _pg_log_reader->process_log(log_entry->path, last_timestamp, log_entry);
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Exiting log reader thread");
 
