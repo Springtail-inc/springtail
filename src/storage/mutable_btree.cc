@@ -554,36 +554,32 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // flush the backing page
         ExtentHeader header(type, xid, _schema->row_size(), _schema->field_types(), this->extent_id);
         _cache_page->async_flush(header, [this, promise, callback](const std::vector<uint64_t> &ids) {
-            try {
-                PageVector new_pages;
-                for (auto id : ids) {
-                    // XXX how to handle XIDs?
-                    auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+            PageVector new_pages;
+            for (auto id : ids) {
+                // XXX how to handle XIDs?
+                auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
-                    // XXX need a better way to create these combined tuples
-                    ValueTuplePtr value_key;
-                    {
-                        auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
-                        auto row = *row_i;
-                        auto key = std::make_shared<MutableTuple>(_key_fields, &row);
-                        value_key = std::make_shared<ValueTuple>(key);
-                    }
-
-                    auto page = std::make_shared<Page>(_btree, id, value_key, std::move(cache_page), _schema);
-
-                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Creating MutableBTree Page: {} {}", id, page->extent_id);
-
-                    new_pages.push_back(page);
+                // XXX need a better way to create these combined tuples
+                ValueTuplePtr value_key;
+                {
+                    auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
+                    auto row = *row_i;
+                    auto key = std::make_shared<MutableTuple>(_key_fields, &row);
+                    value_key = std::make_shared<ValueTuple>(key);
                 }
 
-                if (callback) {
-                    callback(new_pages);
-                }
+                auto page = std::make_shared<Page>(_btree, id, value_key, std::move(cache_page), _schema);
 
-                promise->set_value(std::move(new_pages));
-            } catch (...) {
-                LOG_ERROR("Error");
+                LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Creating MutableBTree Page: {} {}", id, page->extent_id);
+
+                new_pages.push_back(page);
             }
+
+            if (callback) {
+                callback(new_pages);
+            }
+
+            promise->set_value(std::move(new_pages));
         });
 
         return future;
@@ -593,8 +589,6 @@ MutableBTree::lower_bound(TuplePtr search_key,
     MutableBTree::Page::set_cache_page(StoragePagePtr cache_page,
                                        ExtentSchemaPtr schema)
     {
-        // note: we must be holding the disk_mutex, so no need to lock the access mutex
-
         // note: page should be empty when this is called
         assert(_cache_page.empty() || _cache_page.ptr()->empty());
 
@@ -854,7 +848,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
             // no longer need to access the cache, release the lock
             cache_lock.unlock();
 
-            // once we have a pointer to the page we can release the parent
+            // once we have a pointer to the page we can release the parent to be used by others
             parent_lock.unlock();
 
             // note: acquiring the disk_mutex of the new page ensures that the page data has been
@@ -967,34 +961,35 @@ MutableBTree::lower_bound(TuplePtr search_key,
                                              PagePtr parent,
                                              std::function<void (const PageVector &)> callback)
     {
+        auto promise = std::make_shared<std::promise<PageVector>>();
+        auto future = promise->get_future();
+
         // flush the page's extent(s) to disk
         // note: it would be nice if we could perform the disk writes without holding the parent
         //       mutex, but then there is a potential race condition between updating the
         //       parent's pointers and flushing the parent.  It might be possible with more
         //       complex logic.
-        auto future = page->async_flush(_xid, [this, parent, page, callback](const PageVector &new_pages) {
-            try {
-                // lock the parent for exclusive access
-                boost::unique_lock parent_lock(parent->mutex);
+        page->async_flush(_xid, [this, parent, page, callback, promise](const PageVector &new_pages) {
+            // lock the parent for exclusive access
+            boost::unique_lock parent_lock(parent->mutex);
 
-                // update the parent's pointers
-                parent->update_branch(page, new_pages, _branch_child_f);
+            // update the parent's pointers
+            parent->update_branch(page, new_pages, _branch_child_f);
 
-                // remove the page from the parent's children
-                parent->remove_child(page->extent_id);
+            // remove the page from the parent's children
+            parent->remove_child(page->extent_id);
 
-                // mark the page as flushed
-                page->flushed = true;
+            // mark the page as flushed
+            page->flushed = true;
 
-                // notify anyone waiting for the flush to complete
-                page->notify_flush_wait();
+            // notify anyone waiting for the flush to complete
+            page->notify_flush_wait();
 
-                if (callback) {
-                    callback(new_pages);
-                }
-            } catch (...) {
-                LOG_ERROR("Error");
+            if (callback) {
+                callback(new_pages);
             }
+
+            promise->set_value(std::move(new_pages));
         });
 
         return future;
@@ -1008,6 +1003,15 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // acquire exclusive access to the page to write to disk
         boost::unique_lock data_lock(page->disk_mutex);
 
+        // if page was already flushed, resolve and return immediately
+        if (page->flushed) {
+            auto promise = std::make_shared<std::promise<void>>();
+            auto future = promise->get_future();
+
+            promise->set_value();
+            return future;
+        }
+
         // check if the page is actively being flushed
         auto flush_future = page->wait_for_flushing();
         if (flush_future) {
@@ -1017,9 +1021,6 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // we will perform the flushing
         auto promise = std::make_shared<std::promise<void>>();
         auto future = promise->get_future();
-
-        // page should not have been flushed already
-        CHECK(!page->flushed);
 
         // flush the children first
         // note: safe to traverse the children like this because we are holding exclusive lock
@@ -1066,20 +1067,16 @@ MutableBTree::lower_bound(TuplePtr search_key,
         } else {
             // perform the actual page flush
             _async_flush_page_internal(page, parent, [this, page, promise](const PageVector &new_pages) {
-                try {
-                    // evict the page from the cache and add the new pages
-                    boost::unique_lock cache_lock(_cache->mutex);
+                // evict the page from the cache and add the new pages
+                boost::unique_lock cache_lock(_cache->mutex);
 
-                    _cache_evict(page->extent_id);
-                    for (auto &&new_page : new_pages) {
-                        _cache_insert(new_page, cache_lock);
-                    }
-
-                    // work complete
-                    promise->set_value();
-                } catch (...) {
-                    LOG_ERROR("Error");
+                _cache_evict(page->extent_id);
+                for (auto &&new_page : new_pages) {
+                    _cache_insert(new_page, cache_lock);
                 }
+
+                // work complete
+                promise->set_value();
             });
         }
 

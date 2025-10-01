@@ -1242,43 +1242,40 @@ StorageCache::PageCache::background_cleaner()
                                                           counter,
                                                           promise,
                                                           callback]() mutable {
-                    try {
-                        auto cache = StorageCache::get_instance();
+                    auto cache = StorageCache::get_instance();
 
-                        // bring MUTABLE extents to CLEAN
-                        if ((*task.e)->state() == CacheExtent::State::MUTABLE) {
-                            // return the now MUTABLE extent back to the read cache
-                            cache->_data_cache->reinsert(*task.e);
+                    // bring MUTABLE extents to CLEAN
+                    if ((*task.e)->state() == CacheExtent::State::MUTABLE) {
+                        // return the now MUTABLE extent back to the read cache
+                        cache->_data_cache->reinsert(*task.e);
+                    }
+
+                    // update the reference with the details of the new extent
+                    _extents[task.pos] = task.e.get_ref();
+
+                    // store the new extent location
+                    result->at(task.pos) = _extents[task.pos].id();
+
+                    // reduce the outstanding count
+                    --(*counter);
+
+                    // if this was the last outstanding, complete the promise
+                    if (!*counter) {
+                        // no longer flushing, release the page and notify any waiter
+                        {
+                            boost::unique_lock lock(_async_flush_mutex);
+                            _is_async_flushing = false;
+                            for (auto &waiter : _async_flush_waiters) {
+                                waiter->set_value(*result);
+                            }
+                            _async_flush_waiters.clear();
                         }
 
-                        // update the reference with the details of the new extent
-                        _extents[task.pos] = task.e.get_ref();
-
-                        // store the new extent location
-                        result->at(task.pos) = _extents[task.pos].id();
-
-                        // reduce the outstanding count
-                        --(*counter);
-
-                        // if this was the last outstanding, complete the promise
-                        if (!*counter) {
-                            if (callback) {
-                                callback(*result);
-                            }
-
-                            // no longer flushing, release the page and notify any waiter
-                            {
-                                boost::unique_lock lock(_async_flush_mutex);
-                                _is_async_flushing = false;
-                                for (auto &waiter : _async_flush_waiters) {
-                                    waiter->set_value(*result);
-                                }
-                                _async_flush_waiters.clear();
-                            }
-                            promise->set_value(std::move(*result));
+                        if (callback) {
+                            callback(*result);
                         }
-                    } catch (...) {
-                        LOG_ERROR("Error");
+
+                        promise->set_value(std::move(*result));
                     }
                 });
             }
@@ -1291,11 +1288,6 @@ StorageCache::PageCache::background_cleaner()
             boost::unique_lock lock(_mutex, boost::adopt_lock);
             lock.unlock();
 
-            // if there was no IO to perform, complete immediately
-            if (callback) {
-                callback(*result);
-            }
-
             // no longer flushing, release the page and notify any waiter
             {
                 boost::unique_lock lock(_async_flush_mutex);
@@ -1305,6 +1297,12 @@ StorageCache::PageCache::background_cleaner()
                 }
                 _async_flush_waiters.clear();
             }
+
+            // if there was no IO to perform, complete immediately
+            if (callback) {
+                callback(*result);
+            }
+
             promise->set_value(std::move(*result));
 
             // reacquire the lock
@@ -1707,11 +1705,7 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
 
         extent->async_flush(handle, [this, extent](std::shared_ptr<IOResponseAppend> response) {
-            try {
-                _flush_and_update_extent(extent, response);
-            } catch (...) {
-                LOG_ERROR("Error");
-            }
+            _flush_and_update_extent(extent, response);
         });
 
         // reacquire the lock
