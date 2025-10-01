@@ -87,7 +87,7 @@ namespace springtail {
                                  uint64_t table_id,
                                  const XidLsn &xid,
                                  bool allow_undefined,
-                                 bool with_internal_row_id)
+                                 bool include_internal_row_id)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
             return SystemTableMgr::get_instance()->_get_extent_schema(table_id);
@@ -99,7 +99,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta->columns, allow_undefined, with_internal_row_id);
+        return std::make_shared<ExtentSchema>(meta->columns, allow_undefined, include_internal_row_id);
     }
 
     std::shared_ptr<UserType>

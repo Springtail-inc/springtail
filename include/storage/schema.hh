@@ -214,13 +214,13 @@ namespace springtail {
          * @param columns Map from column position to the SchemaColumn definition.
          */
         explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false,
-                bool with_internal_row_id = false) {
+                bool include_internal_row_id = false) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
             }
 
-            if (with_internal_row_id) {
+            if (include_internal_row_id) {
                 auto next_key = column_map.empty() ? 0 : column_map.rbegin()->first + 1;
                 SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, next_key, SchemaType::UINT64, 0, false);
                 column_map.try_emplace(next_key, internal_row_id);
@@ -235,9 +235,9 @@ namespace springtail {
          * @param columns Map from column position to the SchemaColumn definition.
          */
         explicit ExtentSchema(std::map<uint32_t, SchemaColumn> columns, bool allow_undefined = false,
-                bool with_internal_row_id = false)
+                bool include_internal_row_id = false)
         {
-            if (with_internal_row_id) {
+            if (include_internal_row_id) {
                 auto next_key = columns.empty() ? 0 : columns.rbegin()->first + 1;
                 SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, next_key, SchemaType::UINT64, 0, false);
                 columns.try_emplace(next_key, internal_row_id);

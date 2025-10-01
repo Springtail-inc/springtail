@@ -46,7 +46,7 @@ namespace springtail {
          *            schema at the point after all changes in the XID have been applied.
          */
         std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid,
-                                                        bool allow_undefined = false, bool with_internal_row_id = false);
+                                                        bool allow_undefined = false, bool include_internal_row_id = false);
 
         /**
          * @brief Get the usertype object
