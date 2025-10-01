@@ -1318,8 +1318,11 @@ namespace springtail {
         void call_extent_expire_notify_fun(const std::filesystem::path& file,
                                         uint64_t extent_id,
                                         uint32_t size,
-                                        uint64_t xid) {
-            _extent_expire_notify_fn(file, extent_id, size, xid);
+                                        uint64_t xid)
+        {
+            if (_extent_expire_notify_fn != nullptr) {
+                _extent_expire_notify_fn(file, extent_id, size, xid);
+            }
         }
     private:
         // INTERNAL MEMBER VARIABLES
@@ -1349,9 +1352,18 @@ namespace springtail {
 
         std::unique_ptr<MetricCounters> _metric_counters;
 
-        ExtentExpireNotifyFun _extent_expire_notify_fn =
-            [](const std::filesystem::path&, uint64_t, uint32_t, uint64_t) {
-                // no-op
-            };
+        // NOTE: this extent expiration notification is an ugly hack because this StorageCache
+        //  implementation supports both mutable and immutable cases in a single compilation
+        //  unit. The mutable case requires us to write extents out to disk and have the vacuumer
+        //  called, while immutable case does not need this functionality at all. So, FDW and ddl
+        //  manager do not depend on Vacuumer, but require the Vacuumer and everything it depends
+        //  on (XID server) to be linked in. This callback function solves this problem because
+        //  now StorageCache does not need to know about Vacuumer and in the scenarios where we
+        //  use Vacuumer, it will register the callback with the StorageCache.
+        /**
+         * @brief Callback for extent expiration.
+         *
+         */
+        ExtentExpireNotifyFun _extent_expire_notify_fn{nullptr};
     };
 }
