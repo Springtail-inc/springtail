@@ -874,12 +874,12 @@ namespace springtail {
              * Updates the row in the Page with a matching key as the provided tuple to fully match
              * the tuple, using the provided ExtentSchema.
              */
-            void update(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(Extent::Row, uint64_t)> invalidate_index_handler = nullptr);
+            void update(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(Extent::Row)> invalidate_index_callback = nullptr);
 
             /**
              * Removes a row with the provided key from the Page using the provided ExtentSchema.
              */
-            void remove(TuplePtr key, ExtentSchemaPtr schema);
+            void remove(TuplePtr key, ExtentSchemaPtr schema, std::function<void(Extent::Row)> invalidate_index_callback = nullptr);
 
             /**
              * Tries to remove a row by scanning the Page for the given value.

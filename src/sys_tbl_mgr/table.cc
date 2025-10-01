@@ -1174,9 +1174,28 @@ namespace indexer_helpers {
         // check if we need to convert the page contents to a new schema
         _check_convert_page(page);
 
+        // invalidate the secondary indexes if any of the updated fields are part of the index
+        auto invalidate_index_callback = [this](Extent::Row existing_row) {
+            // get the internal row id from the existing row
+            auto internal_row_id_f = _schema->get_field(constant::INTERNAL_ROW_ID);
+            auto internal_row_id = internal_row_id_f->get_uint64(&existing_row);
+
+            for (auto const& [index_id, idx]: _secondary_indexes) {
+                const auto column_names = _schema->get_column_names(idx.second);
+                const auto key_fields = _schema->get_fields(column_names);
+
+                auto value_fields = std::make_shared<FieldArray>(1);
+                (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+
+                // remove the old row from the index
+                auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, &existing_row);
+                idx.first->remove(kv);
+            }
+        };
+
         // remove the row from the page
         // note: this can only be used when a primary key is present, otherwise use _remove_by_scan()
-        page->remove(value, _schema);
+        page->remove(value, _schema, invalidate_index_callback);
     }
 
     void
@@ -1262,6 +1281,7 @@ namespace indexer_helpers {
         for (uint64_t field_idx = 0; field_idx < fields->size(); field_idx++) {
             // Perform a comparison between the existing row and the new row
             if (!fields->at(field_idx)->equal(&existing_row, fields->at(field_idx), value->row())) {
+                // set the index of the field that is updated
                 updated_fields.push_back(field_idx + 1);
             }
         }
@@ -1269,6 +1289,8 @@ namespace indexer_helpers {
         std::vector<uint64_t> updated_index_ids;
         for (auto const &[index_id, idx] : _secondary_indexes) {
             std::vector<int> result;
+            // do an intersection between the updates fields and the fields that are present
+            // in the secondary index. If there is a match, the secondary index column is updated.
             std::set_intersection(updated_fields.begin(), updated_fields.end(),
                                   idx.second.begin(), idx.second.end(),
                                   std::back_inserter(result));
@@ -1298,9 +1320,12 @@ namespace indexer_helpers {
         uint64_t internal_row_id;
 
         // invalidate the secondary indexes if any of the updated fields are part of the index
-        auto invalidate_index_handler = [this, &updated_index_ids, &internal_row_id, value](Extent::Row existing_row, uint64_t internal_rid) {
+        auto invalidate_index_callback = [this, &updated_index_ids, &internal_row_id, value](Extent::Row existing_row) {
             updated_index_ids = _find_updated_secondary_indexes(existing_row, value);
-            internal_row_id = internal_rid;
+
+            // Get the internal row id from the existing row
+            auto internal_row_id_f = _schema->get_field(constant::INTERNAL_ROW_ID);
+            internal_row_id = internal_row_id_f->get_uint64(&existing_row);
 
             for (auto const &index_id : updated_index_ids) {
                 const auto column_names = _schema->get_column_names(_secondary_indexes[index_id].second);
@@ -1317,7 +1342,7 @@ namespace indexer_helpers {
 
         // update the row in the page
         // note: this can only be used when a primary key is present, otherwise update should have been split
-        page->update(value, _schema, invalidate_index_handler);
+        page->update(value, _schema, invalidate_index_callback);
 
         // after the page update is done, insert the updated row into the secondary indexes
         for (auto const &index_id : updated_index_ids) {

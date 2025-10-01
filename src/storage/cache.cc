@@ -964,7 +964,7 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::Page::update(TuplePtr tuple,
                                ExtentSchemaPtr schema,
-                               std::function<void(Extent::Row, uint64_t)> invalidate_index_handler)
+                               std::function<void(Extent::Row)> invalidate_index_callback)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -1005,8 +1005,10 @@ StorageCache::PageCache::background_cleaner()
         // update the existing row
         auto row = *row_i;
 
-        // callback function to invalidate the indexes
-        invalidate_index_handler(row, existing_internal_row_id);
+        if (invalidate_index_callback) {
+            // callback function to invalidate the indexes
+            invalidate_index_callback(row);
+        }
 
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
@@ -1019,7 +1021,8 @@ StorageCache::PageCache::background_cleaner()
 
     void
     StorageCache::Page::remove(TuplePtr key,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               std::function<void(Extent::Row)> invalidate_index_callback)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -1048,6 +1051,11 @@ StorageCache::PageCache::background_cleaner()
 
         // note: row's key should match the tuple's key
         DCHECK(FieldTuple(schema->get_sort_fields(), const_cast<Extent::Row *>(&*row_i)).equal_strict(*key));
+
+        if (invalidate_index_callback) {
+            // callback function to invalidate the indexes
+            invalidate_index_callback(*row_i);
+        }
 
         // remove the row
         (*extent)->remove(row_i);
