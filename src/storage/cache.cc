@@ -963,14 +963,12 @@ StorageCache::PageCache::background_cleaner()
 
     void
     StorageCache::Page::update(TuplePtr tuple,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               std::function<void(Extent::Row, uint64_t)> invalidate_index_handler)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
-        for (auto &testkey: schema->get_sort_keys()) {
-            LOG_INFO("KEY IN THE SORT KEYS::: {}", testkey);
-        }
         // extract the key to find the insert position
         auto key = schema->tuple_subset(tuple, schema->get_sort_keys());
 
@@ -1000,9 +998,20 @@ StorageCache::PageCache::background_cleaner()
         // note: row's key should match the tuple's key
         DCHECK(FieldTuple(schema->get_sort_fields(), &*row_i).equal_strict(*key));
 
+        // get the existing internal row id
+        auto internal_row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
+        auto existing_internal_row_id = internal_row_id_f->get_uint64(&*row_i);
+
         // update the existing row
         auto row = *row_i;
+
+        // callback function to invalidate the indexes
+        invalidate_index_handler(row, existing_internal_row_id);
+
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+
+        // update the original internal row id back to the row
+        internal_row_id_f->set_uint64(&row, existing_internal_row_id);
 
         // check for split
         _check_split(extent_i, *extent, schema);

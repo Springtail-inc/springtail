@@ -1252,6 +1252,36 @@ namespace indexer_helpers {
         }
     }
 
+    std::vector<uint64_t>
+    MutableTable::_find_updated_secondary_indexes(Extent::Row existing_row, TuplePtr value)
+    {
+        auto existing_row_tuple = std::make_shared<FieldTuple>(_schema->get_fields(), &existing_row);
+        std::vector<uint64_t> updated_fields;
+
+        auto fields = existing_row_tuple->fields();
+        for (uint64_t field_idx = 0; field_idx < fields->size(); field_idx++) {
+            // Perform a comparison between the existing row and the new row
+            if (!fields->at(field_idx)->equal(&existing_row, fields->at(field_idx), value->row())) {
+                updated_fields.push_back(field_idx + 1);
+            }
+        }
+
+        std::vector<uint64_t> updated_index_ids;
+        for (auto const &[index_id, idx] : _secondary_indexes) {
+            std::vector<int> result;
+            std::set_intersection(updated_fields.begin(), updated_fields.end(),
+                                  idx.second.begin(), idx.second.end(),
+                                  std::back_inserter(result));
+
+            if (!result.empty()) {
+                LOG_INFO("One of the fields in the index {} is updated", index_id);
+                updated_index_ids.push_back(index_id);
+            }
+        }
+
+        return updated_index_ids;
+    }
+
     void
     MutableTable::_update_direct(TuplePtr value, uint64_t extent_id)
     {
@@ -1261,16 +1291,46 @@ namespace indexer_helpers {
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
-        for (const auto&row : *page) {
-            auto kv = std::make_shared<FieldTuple>(_schema->get_fields(), &row);
-            LOG_INFO("CONTENT FOR THE ROW: {}", kv->to_string());
-        }
         // check if we need to convert the page contents to a new schema
         _check_convert_page(page);
 
+        std::vector<uint64_t> updated_index_ids;
+        uint64_t internal_row_id;
+
+        // invalidate the secondary indexes if any of the updated fields are part of the index
+        auto invalidate_index_handler = [this, &updated_index_ids, &internal_row_id, value](Extent::Row existing_row, uint64_t internal_rid) {
+            updated_index_ids = _find_updated_secondary_indexes(existing_row, value);
+            internal_row_id = internal_rid;
+
+            for (auto const &index_id : updated_index_ids) {
+                const auto column_names = _schema->get_column_names(_secondary_indexes[index_id].second);
+                const auto key_fields = _schema->get_fields(column_names);
+
+                auto value_fields = std::make_shared<FieldArray>(1);
+                (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+
+                // remove the old row from the index
+                auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, &existing_row);
+                _secondary_indexes[index_id].first->remove(kv);
+            }
+        };
+
         // update the row in the page
         // note: this can only be used when a primary key is present, otherwise update should have been split
-        page->update(value, _schema);
+        page->update(value, _schema, invalidate_index_handler);
+
+        // after the page update is done, insert the updated row into the secondary indexes
+        for (auto const &index_id : updated_index_ids) {
+            const auto column_names = _schema->get_column_names(_secondary_indexes[index_id].second);
+            const auto key_fields = _schema->get_fields(column_names);
+
+            auto value_fields = std::make_shared<FieldArray>(1);
+            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+
+            // insert the new row into the index
+            auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, value->row());
+            _secondary_indexes[index_id].first->insert(kv);
+        }
     }
 
     void

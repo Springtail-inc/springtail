@@ -894,6 +894,11 @@ namespace indexer_helpers {
          */
         uint64_t _get_extent_id(TuplePtr search_key);
 
+        /**
+         * Helper to find the secondary indexes that will be affected by the update
+         */
+        std::vector<uint64_t> _find_updated_secondary_indexes(Extent::Row existing_row, TuplePtr value);
+
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
