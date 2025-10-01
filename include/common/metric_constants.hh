@@ -108,28 +108,13 @@ namespace springtail {
         };
 
         // histogram metrics
-        inline const std::vector<std::pair<std::string_view, std::string_view>> _histogram_metrics = {
+        inline const std::vector<std::pair<std::string_view, std::string_view>> _histogram_time_metrics = {
             // storage cache histogram metrics
             {STORAGE_CACHE_FLUSH_LATENCIES, "Latency of storage cache flush calls"},
             {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"},
 
-            // log reader metrics
-            {LOG_READER_COMMIT_TXN_FREQ, "COMMIT frequency"},
-            {LOG_READER_STREAM_ABORT_FREQ, "Stream abort frequency"},
-            {LOG_READER_STREAM_COMMIT_FREQ, "Stream commit frequency"},
-
             {TRANSACTION_LATENCIES, "From BEGIN to finalized tables"},
             {WRITE_CACHE_FINALIZE_LATENCIES, "Time takes for cache extents to be finalized"},
-
-            {LOG_READER_QUEUE_SIZE, "Log reader queue size"},
-            {INGEST_MSG_QUEUE_SIZE, "Message queue size"},
-            {COMMITTER_QUEUE_SIZE, "Committer work queue size"},
-
-            {COMMITTER_TXN_MESSAGES, "Messages per transaction"},
-            {COMMITTER_TXN_INSERTS, "INSERT counter"},
-            {COMMITTER_TXN_DELETES, "DELETE counter"},
-            {COMMITTER_TXN_UPDATES, "UPDATE counter"},
-            {COMMITTER_TXN_TRUNCATES, "TRUNCATE counter"},
 
             // log manager histogram metrics
             {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"},
@@ -137,7 +122,26 @@ namespace springtail {
 
         };
 
+        // histogram count metrics
+        inline const std::vector<std::pair<std::string_view, std::string_view>> _histogram_count_metrics = {
+            {COMMITTER_TXN_MESSAGES, "Messages per transaction"},
+            {COMMITTER_TXN_INSERTS, "INSERT counter"},
+            {COMMITTER_TXN_DELETES, "DELETE counter"},
+            {COMMITTER_TXN_UPDATES, "UPDATE counter"},
+            {COMMITTER_TXN_TRUNCATES, "TRUNCATE counter"},
+        };
 
+        // histogram unitless metrics (that are not time or count based)
+        inline const std::vector<std::pair<std::string_view, std::string_view>> _histogram_unitless_metrics = {
+            // log reader metrics
+            {LOG_READER_COMMIT_TXN_FREQ, "COMMIT frequency"},
+            {LOG_READER_STREAM_ABORT_FREQ, "Stream abort frequency"},
+            {LOG_READER_STREAM_COMMIT_FREQ, "Stream commit frequency"},
+
+            {LOG_READER_QUEUE_SIZE, "Log reader queue size"},
+            {INGEST_MSG_QUEUE_SIZE, "Message queue size"},
+            {COMMITTER_QUEUE_SIZE, "Committer work queue size"},
+        };
 
         /**
          * Storage cache counters.
