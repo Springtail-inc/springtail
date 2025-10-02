@@ -69,6 +69,10 @@ on:
       springtail_log_s3_uri:
         description: "The full S3 prefix where the springtail service logs are stored."
         value: ${{ jobs.test.outputs.springtail_log_s3_uri }}
+      skipped_tests:
+        description: "The number of skipped tests during the integration tests."
+        value: ${{ jobs.test.outputs.skipped_tests }}
+
   workflow_dispatch:
 
 jobs:
@@ -87,6 +91,7 @@ jobs:
     outputs:
       test_log_s3_uri: ${{ steps.run-test.outputs.test_log_s3_uri }}
       springtail_log_s3_uri: ${{ steps.run-test.outputs.springtail_log_s3_uri }}
+      skipped_tests: ${{ steps.run-test.outputs.skipped_tests }}
     env:
       CI_WORKSPACE: /__w/springtail/springtail
       CI_BUILD_TYPE: ${{ inputs.build_type }}
@@ -240,6 +245,8 @@ jobs:
             then
               _LOG_FLAG="failed"
             fi
+
+            echo "skipped_tests=$(awk '/skipped:/ { for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) s+=$i } END{print s+0}' tmplog)" >> $GITHUB_OUTPUT
           
             echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
           
