@@ -419,13 +419,13 @@ namespace springtail {
             /**
              * Handles marking the page as flushing or waiting for a flush to complete if one is ongoing.
              */
-            std::optional<std::future<void>> wait_for_flushing() {
+            std::optional<std::future<PageVector>> wait_for_flushing() {
                 boost::unique_lock lock(_flush_mutex);
                 if (!_is_flushing) {
                     _is_flushing = true;
                     return std::nullopt;
                 } else {
-                    auto promise = std::make_shared<std::promise<void>>();
+                    auto promise = std::make_shared<std::promise<PageVector>>();
                     auto future = promise->get_future();
                     _flush_waiters.push_back(std::move(promise));
 
@@ -440,7 +440,7 @@ namespace springtail {
             void try_wait_for_flushing() {
                 boost::unique_lock lock(_flush_mutex);
                 if (_is_flushing) {
-                    auto promise = std::make_shared<std::promise<void>>();
+                    auto promise = std::make_shared<std::promise<PageVector>>();
                     auto future = promise->get_future();
                     _flush_waiters.push_back(std::move(promise));
                     lock.unlock();
@@ -455,7 +455,7 @@ namespace springtail {
                 boost::unique_lock lock(_flush_mutex);
                 _is_flushing = false;
                 for (auto &waiter : _flush_waiters) {
-                    waiter->set_value();
+                    waiter->set_value({});
                 }
                 _flush_waiters.clear();
             }
@@ -487,7 +487,7 @@ namespace springtail {
             // the following variables are for handling async flush operations
             boost::mutex _flush_mutex; ///< Protects the flush variables.
             bool _is_flushing = false; ///< Flag indicating if a flush of this page is ongoing.
-            std::vector<std::shared_ptr<std::promise<void>>> _flush_waiters; ///< List of promises that must be set once the flush is complete.
+            std::vector<std::shared_ptr<std::promise<PageVector>>> _flush_waiters; ///< List of promises that must be set once the flush is complete.
         };
 
     private:
@@ -687,7 +687,7 @@ namespace springtail {
          * @param page The page being flushed.
          * @param parent The parent of the page being flushed.
          */
-        std::future<std::vector<PagePtr>> _async_flush_page_internal(PagePtr page, PagePtr parent, std::function<void (const PageVector &)> callback = nullptr);
+        std::future<PageVector> _async_flush_page_internal(PagePtr page, PagePtr parent, std::function<void (const PageVector &)> callback = nullptr);
 
         /**
          * Flushes the provided Page to disk.  Also ensures that any children of the page are
@@ -698,7 +698,12 @@ namespace springtail {
          * @param page The page being flushed.
          * @param parent The parent of the page being flushed.
          */
-        std::future<void> _async_flush_page(PagePtr page, PagePtr parent);
+        std::future<PageVector> _async_flush_page(PagePtr page, PagePtr parent);
+
+        /**
+         * Continuation for _async_flush_page().
+         */
+        void _async_flush_finish(PagePtr page, PagePtr parent, const PageVector &new_pages);
 
         /**
          * Flushes the root of the tree to disk, also ensuring that any childen of the root are also

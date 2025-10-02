@@ -549,6 +549,7 @@ StorageCache::PageCache::background_cleaner()
                 }
             }
         }
+        DCHECK(!_clean_lru.empty());
 
         // evict a page from the LRU
         auto page = _clean_lru.front();
@@ -1266,7 +1267,7 @@ StorageCache::PageCache::background_cleaner()
                             boost::unique_lock lock(_async_flush_mutex);
                             _is_async_flushing = false;
                             for (auto &waiter : _async_flush_waiters) {
-                                waiter->set_value(*result);
+                                waiter->set_value({}); // note: no returned value to secondary waiters
                             }
                             _async_flush_waiters.clear();
                         }
@@ -1293,7 +1294,7 @@ StorageCache::PageCache::background_cleaner()
                 boost::unique_lock lock(_async_flush_mutex);
                 _is_async_flushing = false;
                 for (auto &waiter : _async_flush_waiters) {
-                    waiter->set_value(*result);
+                    waiter->set_value({});
                 }
                 _async_flush_waiters.clear();
             }
@@ -1385,7 +1386,7 @@ StorageCache::PageCache::background_cleaner()
             // note: no one should know about the cache ID except for the owning page, so this
             //       should never return nullptr since there should never be two concurrent readers
             extent = _read_extent(value.second, value.first, [this, cache_id](CacheExtentPtr extent) {
-                // mark it as mutable
+                // mark it as mutable since it comes from the dirty cache
                 extent->_state = CacheExtent::State::MUTABLE;
                 extent->_cache_id = cache_id;
 
@@ -1429,6 +1430,8 @@ StorageCache::PageCache::background_cleaner()
 void
 StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
 {
+    DCHECK_GT(extent->_use_count, 0);
+
     // mark ourselves as a user of the extent to prevent eviction post-flush()
     ++(extent->_use_count);
 
@@ -1524,11 +1527,11 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         boost::unique_lock lock(_mutex);
 
         // note: the extent must be MUTABLE (not DIRTY) and when reinsert()'d
-        CHECK_EQ(extent->_state, CacheExtent::State::MUTABLE);
+        DCHECK_EQ(extent->_state, CacheExtent::State::MUTABLE);
 
         // note: now with async IO, a flush might occur but still be holding the extent when a flush
         //       on the page holding it occurs, causing the use_count to be 2
-        // CHECK_EQ(extent->_use_count, 1);
+        DCHECK_GT(extent->_use_count, 0);
 
         // find the cache extent
         auto dirty_i = _dirty_cache.find(extent->_cache_id);
