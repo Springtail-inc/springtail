@@ -4,11 +4,11 @@
 #include <sys/stat.h>
 #include <chrono>
 
-#include <storage/vacuumer.hh>
+#include <storage/cache.hh>
 #include <storage/interval_tree.hh>
+#include <storage/vacuumer.hh>
 
-#include <xid_mgr/xid_mgr_client.hh>
-#include <common/redis_types.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail {
 
@@ -85,6 +85,11 @@ Vacuumer::_init()
     // Initialize redis hash to save cutoff XIDs
     uint64_t db_instance_id = Properties::get_db_instance_id();
     _vacuum_cutoff_xid_redis_hash = fmt::format(redis::VACUUM_CUTOFF_XID, db_instance_id);
+
+    StorageCache::get_instance()->set_extent_expire_notify_fun(
+        [this](const std::filesystem::path& file, uint64_t extent_id, uint32_t size, uint64_t xid){
+                this->expire_extent(file, extent_id, size, xid);
+        });
 }
 
 void
@@ -420,25 +425,13 @@ Vacuumer::_save_last_seen_cutoff_xid(uint64_t db_id, uint64_t cutoff_xid)
 }
 
 uint64_t
-Vacuumer::get_last_seen_cutoff_xid(uint64_t db_id)
-{
-    RedisClientPtr client = RedisMgr::get_instance()->get_client();
-    auto val = client->hget(_vacuum_cutoff_xid_redis_hash, std::to_string(db_id));
-    if (val) {
-        return std::stoull(*val);
-    } else {
-        return 0;
-    }
-}
-
-uint64_t
 Vacuumer::_get_vacuum_cutoff_xid(uint64_t db_id)
 {
     RedisDDL _redis_ddl;
 
     // Cutoff XID for Vacuum = Minimum XID from (fdw, last_committed, index-build/drop)
     uint64_t min_fdw_xid = _redis_ddl.min_fdw_xid(db_id);
-    uint64_t last_committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+    uint64_t last_committed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
     uint64_t min_index_xid = _redis_ddl.min_index_xid(db_id);
 
     return std::min({min_fdw_xid, last_committed_xid, min_index_xid});
@@ -616,7 +609,7 @@ Vacuumer::_cleanup_global_vacuum_file(uint64_t cleanup_db_id)
             if (db_it != committed_xid_map.end()) {
                 last_committed_xid = db_it->second;
             } else {
-                last_committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+                last_committed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
                 committed_xid_map[db_id] = last_committed_xid;
             }
 
