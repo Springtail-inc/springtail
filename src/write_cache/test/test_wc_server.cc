@@ -104,33 +104,28 @@ namespace {
         _add_extents_with_last_pg_xid(1, {1, 2, 3, 4, 5});
 
         nlohmann::json stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 8704);
         EXPECT_TRUE(stats["store to disk"]);
 
         // 2. Drop one of the tables
         server->drop_table(1, 1, 2);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 7680);
         EXPECT_TRUE(stats["store to disk"]);
 
         server->drop_table(1, 5, _last_pg_xid);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 7680);
         EXPECT_TRUE(stats["store to disk"]);
 
         // 3. Abort transactions (single pg_xid, multiple pg_xid)
         server->abort(1, 2);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 3584);
         EXPECT_FALSE(stats["store to disk"]);
 
         server->abort(1, {3, 4});
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 0);
         EXPECT_FALSE(stats["store to disk"]);
 
@@ -140,7 +135,6 @@ namespace {
         // pg_xid = 8
         _add_extents_with_last_pg_xid(1, {1, 2, 3, 4, 5});
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 8704);
         EXPECT_TRUE(stats["store to disk"]);
 
@@ -151,7 +145,6 @@ namespace {
         // xid = 3
         server->commit(1, ++_last_xid, {7, 8}, md);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 8704);
         EXPECT_TRUE(stats["store to disk"]);
 
@@ -176,21 +169,18 @@ namespace {
         // 8. Evict xid
         server->evict_xid(1, 2);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 8704);
         EXPECT_TRUE(stats["store to disk"]);
 
         // 9. Evict table
         server->evict_table(1, 1, 3);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 6656);
         EXPECT_TRUE(stats["store to disk"]);
 
         // 10. Cleanup
         server->drop_database(1);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 0);
         EXPECT_FALSE(stats["store to disk"]);
     }
@@ -201,23 +191,19 @@ namespace {
         // 1. Populate data in multiple databases
         _add_extents(1, {1, 2, 3, 4, 5}, 5);
         nlohmann::json stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 8704);
 
         _add_extents(2, {1, 2, 3, 4, 5}, 5);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 8704);
 
         // 2. Drop one of the databases
         server->drop_database(2);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 8704);
 
         server->drop_database(1);
         stats = server->get_memory_stats();
-        std::cout << "Stats: " << stats.dump(4) << std::endl;
         EXPECT_EQ(stats["current memory"], 0);
     }
 }
