@@ -1,5 +1,4 @@
 #include <fmt/core.h>
-#include <cassert>
 
 #include <common/init.hh>
 #include <common/timestamp.hh>
@@ -28,10 +27,20 @@ namespace {
 
         void SetUp() override {
             // Initialize WriteCacheIndex with 4 partitions
-            index = std::make_shared<WriteCacheIndex>(4);
+            std::error_code ec;
+            std::filesystem::remove_all(storage_dir, ec);
+            std::filesystem::create_directories(storage_dir, ec);
+
+            index = std::make_shared<WriteCacheIndex>(storage_dir, 4);
+        }
+
+        void TearDown() override {
+            std::error_code ec;
+            std::filesystem::remove_all(storage_dir, ec);
         }
 
         WriteCacheIndexPtr index;
+        std::filesystem::path storage_dir{"/tmp/write_cache/1"};
     };
 
     TEST_F(WriteCacheIndexTest, AddExtent)

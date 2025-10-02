@@ -24,7 +24,7 @@ namespace {
     protected:
         static constexpr char const * const LOG_FILE = "/tmp/test_log_reader.log";
         static constexpr char const * const LOG_FILE_TRUNC = "/tmp/test_log_reader.log.trunc";
-        static constexpr char const * const JSON_FILE = "test_reader.json";
+        static constexpr char const * const JSON_FILE = "src/pg_log_mgr/test/test_reader.json";
 
         static void SetUpTestSuite() {
             std::vector<std::unique_ptr<ServiceRunner>> service_runners;

@@ -22,12 +22,14 @@ namespace springtail {
         /**
          * @brief Construct a new Write Cache Index object with a set of partitions
          *        Each partition holds an index for a set of tables (table_id is hashed to determine partition)
-         * @param partitions
+         * @param db_dir_path - path for extent storage
+         * @param partitions - number of partitions
          */
-        WriteCacheIndex(int partitions=8) : _num_partitions(partitions)
+        explicit WriteCacheIndex(const std::filesystem::path &db_dir_path, int partitions=8) :
+                _db_dir_path(db_dir_path), _num_partitions(partitions)
         {
             for (int i=0; i < partitions; i++) {
-                _partitions.push_back(std::make_shared<WriteCacheTableSet>());
+                _partitions.push_back(std::make_shared<WriteCacheTableSet>(db_dir_path));
             }
         }
 
@@ -41,10 +43,20 @@ namespace springtail {
         void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data);
 
         /**
+         * @brief Add a new extent on disk, not in memory
+         *
+         * @param tid table ID
+         * @param pg_xid Postgres XID
+         * @param lsn LSN of the extent
+         * @param data extent data
+         */
+        void add_extent_on_disk(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data);
+
+        /**
          * @brief Add a mapping from springtail XID to Postgres XID
          * @param pg_xid Postgres XID
          * @param xid springtail XID
-         * @param md Metadata 
+         * @param md Metadata
          */
         void commit(uint64_t pg_xid, uint64_t xid, WriteCacheTableSet::Metadata md);
 
@@ -111,12 +123,31 @@ namespace springtail {
         std::vector<WriteCacheIndexExtentPtr> get_extents(uint64_t tid, uint64_t xid,
                                                           uint32_t count, uint64_t &cursor, WriteCacheTableSet::Metadata &md);
 
+        /**
+         * @brief Get the amount of memory being used by this database
+         *
+         * @return uint64_t
+         */
+        uint64_t get_memory_in_use() { return _memory_in_use; }
+
+        /**
+         * @brief Get json object representing data stored in each partition
+         *
+         * @return nlohmann::json
+         */
+        nlohmann::json get_partition_stats();
     private:
+        /** Path where to store extents on disk */
+        std::filesystem::path _db_dir_path;
+
         /** Set of partitions to hold table data, enables more parallelism */
         std::vector<std::shared_ptr<WriteCacheTableSet>> _partitions;
 
         /** Number of partitions */
         int _num_partitions;
+
+        /** How much memory is being used by the in-memory extents in this database */
+        uint64_t _memory_in_use{0};
 
         /**
          * @brief Get the partition for a specific table ID

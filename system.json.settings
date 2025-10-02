@@ -42,7 +42,9 @@
             "client_key" : "/home/dev/springtail/ca_certs/client_key.pem",
             "client_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem"
         },
-        "io_threads": 1
+        "disk_storage_dir" : "/opt/springtail/data/write_cache",
+        "memory_high_watermark": 8192,
+        "memory_low_watermark": 4096
     },
     "sys_tbl_mgr": {
         "rpc_config" : {

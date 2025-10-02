@@ -1,14 +1,5 @@
 #pragma once
 
-#include <map>
-#include <string>
-#include <memory>
-#include <set>
-#include <mutex>
-#include <shared_mutex>
-#include <cassert>
-#include <vector>
-
 #include <common/timestamp.hh>
 #include <write_cache/write_cache_index_common.hh>
 #include <write_cache/write_cache_index_node.hh>
@@ -30,7 +21,7 @@ namespace springtail {
         /**
          * @brief Construct a new Write Cache Table Set object
          */
-        explicit WriteCacheTableSet(int row_table_paritions=DEFAULT_TABLE_PARTITIONS);
+        explicit WriteCacheTableSet(const std::filesystem::path &db_dir_path, int row_table_paritions=DEFAULT_TABLE_PARTITIONS);
 
         /**
          * @brief Add extent to table set
@@ -40,6 +31,17 @@ namespace springtail {
          * @param data extent data
          */
         void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data);
+
+        /**
+         * @brief Add extent on disk to table set
+         *
+         * @param tid table ID
+         * @param pg_xid Postgres XID
+         * @param lsn LSN
+         * @param extent_offset extent offset
+         * @param extent_size extent size
+         */
+        void add_extent_on_disk(uint64_t tid, uint64_t pg_xid, uint64_t lsn, uint64_t extent_offset, size_t extent_size);
 
         /**
          * @brief Drop table from set
@@ -89,7 +91,7 @@ namespace springtail {
          * @param count number of items to return
          * @param start_offset offset at which to start searching
          * @param cursor out; set to the offset of the last extent returned
-         * @param md out; metadata 
+         * @param md out; metadata
          * @param result reference to result vector
          * @return int number of elements added
          */
@@ -115,7 +117,45 @@ namespace springtail {
          */
         void dump();
 
+        /**
+         * @brief Get the a list of Postgres XIDs for given XID
+         *
+         * @param xid - springtail XID
+         * @return std::set<uint64_t> - list of Postgres XIDs
+         */
+        std::set<uint64_t> get_pg_xids(uint64_t xid) { return _lookup_pgxid(xid); }
+
+        /**
+         * @brief Get the memory size used by the given Postgres XID
+         *
+         * @param pg_xid Postgres XID
+         * @return size_t size in use
+         */
+        size_t get_memory_size(uint64_t pg_xid);
+
+        /**
+         * @brief Get the memory size used by the given springtail XID and table
+         *
+         * @param tid table ID
+         * @param xid springtail XID
+         * @return size_t memory size in use
+         */
+        size_t get_memory_size(uint64_t tid, uint64_t xid);
+
+        /**
+         * @brief Get the memory size used by the given Postgres XID and table
+         *
+         * @param tid table ID
+         * @param pg_xid Postgres XID
+         * @return size_t memory size in use
+         */
+        size_t get_memory_size_for_pg_xid(uint64_t tid, uint64_t pg_xid);
+        nlohmann::json get_stats();
+
     private:
+        /** The name of the path for storing extents on disk */
+        std::filesystem::path _db_dir_path;
+
         /** root of tree, each level points to another set of ids sorted by max xid */
         WriteCacheIndexNodePtr _xid_root;
 
@@ -137,10 +177,10 @@ namespace springtail {
         /**
          * @brief Get pg_xids that map to a springtail XID
          * @param xid Springtail XID
-         * @param md out; metadata 
+         * @param md out; metadata
          * @return std::set<uint64_t> of PG XIDs
          */
-        std::set<uint64_t> lookup_pgxid(uint64_t xid, Metadata *md=nullptr);
+        std::set<uint64_t> _lookup_pgxid(uint64_t xid, Metadata *md=nullptr);
     };
     typedef std::shared_ptr<WriteCacheTableSet> WriteCacheTableSetPtr;
 }

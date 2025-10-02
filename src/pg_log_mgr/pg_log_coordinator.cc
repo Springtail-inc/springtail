@@ -32,6 +32,11 @@ namespace springtail::pg_log_mgr {
         // stop committer thread
         _committer->shutdown();
         _committer_thread.join();
+
+        if (AdminServer::exists()) {
+            std::string path = "/" + std::string(program_invocation_short_name);
+            AdminServer::get_instance()->deregister_get_route(path);
+        }
     }
 
     PgLogCoordinator::PgLogCoordinator() : Singleton<PgLogCoordinator>(ServiceId::PgLogCoordinatorId)
@@ -59,6 +64,16 @@ namespace springtail::pg_log_mgr {
                 }
             }
         );
+        if (AdminServer::exists()) {
+            LOG_INFO("Registering admin server get path {}", program_invocation_short_name);
+
+            std::string path = "/" + std::string(program_invocation_short_name);
+            AdminServer::get_instance()->register_get_route(path,
+                [](const std::string &path, const httplib::Params &params, nlohmann::json &json_response) {
+                    json_response["write_cache"] = WriteCacheServer::get_instance()->get_memory_stats();
+                });
+        }
+
     }
 
     void
@@ -167,5 +182,8 @@ namespace springtail::pg_log_mgr {
 
         // Cleanup from vacuumer
         Vacuumer::get_instance()->cleanup_db(db_id);
+
+        // Cleanup write cache
+        WriteCacheServer::get_instance()->drop_database(db_id);
     }
 }
