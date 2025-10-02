@@ -25,7 +25,7 @@ from otel_logger import init_logging
 BACKUP_FILE = 'stc_py_backup.tgz'
 NEW_FILE = 'stc_py_new.tgz'
 
-class Loader():
+class Loader:
     """
     This class is responsible for reloading the coordinator python files and restaring the coordinator.
     """
@@ -40,10 +40,10 @@ class Loader():
         """
         self.project_root = project_root
         self.install_path = install_path
-        print(f"Loader initialized with install path: {self.install_path}, pid: {os.getpid()}")
+        print(f"Loader initialized with install path: {self.install_path}, project_root: {self.project_root}, pid: {os.getpid()}")
 
         self.props = Properties()
-        init_logging(self.props.get_otel_config(), self.props.get_log_path());
+        init_logging(self.props.get_otel_config(), self.props.get_log_path())
         self.logger = logging.getLogger('springtail')
         self.prod = Production(self.install_path)
 
@@ -120,7 +120,7 @@ class Loader():
             run_command("sudo", ["tar", "cfz", backup_file, self.project_root])
 
             self.logger.info("Deleting old coordinator files...")
-            run_command("sudo", ["rm", "-rf", self.project_root])
+            run_command("sudo", ["rm", "-rf", self.project_root + "/*"])
             recovery.append(["sudo", ["tar", "xfz", backup_file, '-C', '/']])
 
             self.logger.info("Copying coordinator files...")

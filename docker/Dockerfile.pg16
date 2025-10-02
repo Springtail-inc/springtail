@@ -1,0 +1,10 @@
+FROM postgres:16
+COPY ./ca_certs/server_cert.pem /certs/server.crt
+COPY ./ca_certs/server_key.pem /certs/server.key
+COPY ./ca_certs/ca_cert.pem /certs/root.crt
+ENV PGCONF_DIR=/var/lib/postgresql/data
+RUN  chown postgres:postgres "/certs/server.crt" "/certs/server.key" "/certs/root.crt"
+USER postgres
+RUN  chmod 600 "/certs/server.key" && \
+      chmod 644 "/certs/server.crt" && \
+      chmod 644 "/certs/root.crt"
