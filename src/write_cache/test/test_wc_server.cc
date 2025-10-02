@@ -7,7 +7,7 @@
 using namespace springtail;
 
 namespace {
-    class WriteCacheIndexTest : public ::testing::Test {
+    class WriteCacheServerTest : public ::testing::Test {
     public:
         static void SetUpTestSuite() {
             // override directory and watermark settings
@@ -87,7 +87,7 @@ namespace {
         }
     };
 
-    TEST_F(WriteCacheIndexTest, NormalFlowTest)
+    TEST_F(WriteCacheServerTest, NormalFlowTest)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         // 1. Add extents
@@ -195,7 +195,7 @@ namespace {
         EXPECT_FALSE(stats["store to disk"]);
     }
 
-    TEST_F(WriteCacheIndexTest, DropDatabaseTest)
+    TEST_F(WriteCacheServerTest, DropDatabaseTest)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         // 1. Populate data in multiple databases
