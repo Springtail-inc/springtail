@@ -13,6 +13,7 @@ permissions:
   contents: read
   checks: write
 
+
 jobs:
   system-settings-check:
     uses: ./.github/workflows/system-settings-check.yml
@@ -25,8 +26,10 @@ jobs:
     needs: [ system-settings-check ]
     if: ${{ github.event.pull_request.draft == false }}
     with:
-      base_image_tag: ci-debug-202509091508-gold
+      base_image_tag: ${{ vars.IMAGE_TAG_DEBUG }}
       build_type: "debug"
+      num_procs: "6"
+      push: true
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
@@ -40,28 +43,139 @@ jobs:
       s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
+      timeout_minutes: ${{ vars.UNIT_TEST_TIMEOUT_MINUTES  || 20 }}
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
-  integration-test:
+  integration-test-p1:
     uses: ./.github/workflows/rw-run-integration-test.yml
     needs: [ build ]
     if: ${{ github.event.pull_request.draft == false }}
     with:
       image_tag: ${{ needs.build.outputs.output_image_tag }}
-      config_to_run: "github_ci"
+      config_to_run: "github_ci_p1"
       s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
+      timeout_minutes: ${{ vars.INTEGRATION_TEST_TIMEOUT_MINUTES || 20 }}
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
+  integration-test-p2:
+    uses: ./.github/workflows/rw-run-integration-test.yml
+    needs: [ build ]
+    if: ${{ github.event.pull_request.draft == false }}
+    with:
+      image_tag: ${{ needs.build.outputs.output_image_tag }}
+      config_to_run: "github_ci_p2"
+      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
+      build_type: "debug"
+      reuse_code: true
+      timeout_minutes: ${{ vars.INTEGRATION_TEST_TIMEOUT_MINUTES || 20 }}
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
+
+  integration-test-p3:
+    uses: ./.github/workflows/rw-run-integration-test.yml
+    needs: [ build ]
+    if: ${{ github.event.pull_request.draft == false }}
+    with:
+      image_tag: ${{ needs.build.outputs.output_image_tag }}
+      config_to_run: "github_ci_p3"
+      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
+      build_type: "debug"
+      reuse_code: true
+      timeout_minutes: ${{ vars.INTEGRATION_TEST_TIMEOUT_MINUTES || 20 }}
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
+
+  integration-test-p4:
+    uses: ./.github/workflows/rw-run-integration-test.yml
+    needs: [ build ]
+    if: ${{ github.event.pull_request.draft == false }}
+    with:
+      image_tag: ${{ needs.build.outputs.output_image_tag }}
+      config_to_run: "github_ci_p4"
+      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
+      build_type: "debug"
+      reuse_code: true
+      timeout_minutes: ${{ vars.INTEGRATION_TEST_TIMEOUT_MINUTES || 20 }}
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
+
+  integration-test-join:
+    needs: [ unit-test, integration-test-p1, integration-test-p2, integration-test-p3, integration-test-p4 ]
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.draft == false }}
+    outputs:
+      it_test_log_s3_uris: ${{ steps.set_outputs.outputs.it_test_log_s3_uris }}
+      it_springtail_log_s3_uris: ${{ steps.set_outputs.outputs.it_springtail_log_s3_uris }}
+      it_result: ${{ steps.set_outputs.outputs.it_result }}
+      ut_test_log_s3_uri: ${{ needs.unit-test.outputs.test_log_s3_uri }}
+      ut_result: ${{ steps.set_outputs.outputs.ut_result }}
+    env:
+      UNIT_TEST_SKIPPED_THRESHOLD: ${{ vars.UNIT_TEST_SKIPPED_THRESHOLD || 0 }}
+      INTEGRATION_TEST_SKIPPED_THRESHOLD: ${{ vars.INTEGRATION_TEST_SKIPPED_THRESHOLD || 0 }}
+    steps:
+      - name: Set Outputs
+        id: set_outputs
+        run: |
+          echo "it_test_log_s3_uris=${{ needs.integration-test-p1.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p4.outputs.test_log_s3_uri }}" >> $GITHUB_OUTPUT
+          echo "it_springtail_log_s3_uris=${{ needs.integration-test-p1.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p4.outputs.springtail_log_s3_uri }}" >> $GITHUB_OUTPUT
+          echo "ut_test_log_s3_uri=${{ needs.unit-test.outputs.test_log_s3_uri }}" >> $GITHUB_OUTPUT
+          
+          it_result="unknown"
+          ut_result="unknown"
+          
+          if [[ "${{ needs.integration-test-p1.result }}" == "success" && "${{ needs.integration-test-p2.result }}" == "success" && "${{ needs.integration-test-p3.result }}" == "success" && "${{ needs.integration-test-p4.result }}" == "success" ]]; then
+            # All successful
+            # Add up the `skipped_tests` from all the integration test jobs
+            total_skipped_tests=$(( ${{ needs.integration-test-p1.outputs.skipped_tests }} + ${{ needs.integration-test-p2.outputs.skipped_tests }} + ${{ needs.integration-test-p3.outputs.skipped_tests }} + ${{ needs.integration-test-p4.outputs.skipped_tests }} ))
+            if [[ $total_skipped_tests -gt $INTEGRATION_TEST_SKIPPED_THRESHOLD ]]; then
+              it_result="failure (due to $total_skipped_tests skipped)"
+            else
+              it_result=success
+            fi
+          else
+            # If any of the integration test jobs failed, mark the overall result as failure
+            # If any of the integration test jobs were skipped, mark the overall result as skipped
+            any_skipped=false
+            if [[ "${{ needs.integration-test-p1.result }}" == "skipped" || "${{ needs.integration-test-p2.result }}" == "skipped" || "${{ needs.integration-test-p3.result }}" == "skipped" || "${{ needs.integration-test-p4.result }}" == "skipped" ]]; then
+              any_skipped=true
+            fi
+            if [ "$any_skipped" = true ]; then
+              it_result=skipped
+            else
+              it_result=failure
+            fi
+          fi
+          if [[ "${{ needs.unit-test.result }}" == "success" ]]; then
+            if [[ ${{ needs.unit-test.outputs.skipped_tests }} -gt $UNIT_TEST_SKIPPED_THRESHOLD ]]; then
+              ut_result="failure (due to ${{ needs.unit-test.outputs.skipped_tests }} skipped)"
+            else
+              ut_result=success
+            fi
+          else
+            ut_result=${{ needs.unit-test.result }}
+          fi
+          
+          echo "it_result=${it_result}" >> $GITHUB_OUTPUT
+          echo "ut_result=${ut_result}" >> $GITHUB_OUTPUT
+          # Error out if either unit test or integration test not successful
+          if [ "$it_result" != "success" ] || [ "$ut_result" != "success" ]; then
+            exit 1
+          fi
+
   slack-notification:
     uses: ./.github/workflows/rw-notify-slack.yml
-    needs: [ unit-test, integration-test ]
-    if: always()
+    needs: [ integration-test-join ]
+    # Only if none of the tests is skipped
+    if: ${{ always() && !cancelled() }}
     with:
       slack_webhook_url: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       # Need to create a new channel for PR notifications.
@@ -71,16 +185,17 @@ jobs:
         by ${{ github.event.pull_request.user.login }} has completed the CI workflow
       attachment: |
         {
-          "color": "${{ needs.unit-test.result == 'success' && needs.integration-test.result == 'success' && 'good' || 'danger' }}",
+          "mrkdwn_in": ["fields", "text"],
+          "color": "${{ needs.integration-test-join.ut_result == 'success' && needs.integration-test-join.outputs.it_result == 'success' && 'good' || 'danger' }}",
           "fields": [
             {
-              "title": "Unit Test",
-              "value": "${{ needs.unit-test.result }}; logs: <${{ needs.unit-test.outputs.test_log_s3_uri }}|here>",
+              "title": "Unit Test - *${{ needs.integration-test-join.outputs.ut_result }}*",
+              "value": "test logs:\n${{ needs.integration-test-join.outputs.ut_test_log_s3_uri }}",
               "short": false
             },
             {
-              "title": "Integration Test",
-              "value": "${{ needs.integration-test.result }}; logs: <${{ needs.integration-test.outputs.test_log_s3_uri }}|here>; springtail logs: <${{ needs.integration-test.outputs.springtail_log_s3_uri }}|here>",
+              "title": "Integration Test - *${{ needs.integration-test-join.outputs.it_result }}*",
+              "value": "test logs:\n${{ needs.integration-test-join.outputs.it_test_log_s3_uris }}\nspringtail logs:\n${{ needs.integration-test-join.outputs.it_springtail_log_s3_uris }}",
               "short": false
             }
           ]

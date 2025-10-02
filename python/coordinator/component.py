@@ -195,7 +195,7 @@ class Component:
 
             # Wait for process to start
             timeout = time.time() + self.startup_timeout
-            while (time.time() < timeout):
+            while time.time() < timeout:
                 # check for pid file
                 if not os.path.exists(self.pid_path):
                     time.sleep(0.1)

@@ -52,5 +52,5 @@
   become_user: postgres
   ansible.builtin.shell: |
     pg_ctlcluster 16 main start
-    psql -c "CREATE ROLE springtail WITH LOGIN SUPERUSER PASSWORD 'springtail';"
+    psql -c "CREATE ROLE {{ superuser_name }} WITH LOGIN SUPERUSER PASSWORD '{{ superuser_password }}';"
     pg_ctlcluster 16 main stop
