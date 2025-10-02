@@ -52,6 +52,9 @@ on:
       test_log_s3_uri:
         description: "The full S3 prefix where the test logs are stored."
         value: ${{ jobs.test.outputs.test_log_s3_uri }}
+      skipped_tests:
+        description: "The number of skipped tests during the unit test run."
+        value: ${{ jobs.test.outputs.skipped_tests }}
   workflow_dispatch:
 
 jobs:
@@ -69,6 +72,7 @@ jobs:
         -v /var/run/docker.sock:/var/run/docker.sock        
     outputs:
       test_log_s3_uri: ${{ steps.run-test.outputs.test_log_s3_uri }}
+      skipped_tests: ${{ steps.run-test.outputs.skipped_tests }}
     env:
       CI_WORKSPACE: /__w/springtail/springtail
       CI_BUILD_TYPE: ${{ inputs.build_type }}
@@ -87,6 +91,7 @@ jobs:
       NUM_PROCS: ${{ inputs.num_procs }}
       DKR_VOLUME_NAME: pgdata-${{ github.run_id }}-ut
       DKR_NETWORK_NAME: cinet-${{ github.run_id }}-ut
+      UNIT_TEST_SKIPPED_THRESHOLD: ${{ inputs.unit_test_skipped_threshold }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -202,6 +207,10 @@ jobs:
           then 
             _LOG_FLAG="succeeded"
           fi
+          # If there more than (>) ${UNIT_TEST_SKIPPED_THRESHOLD} tests skipped, mark as failed
+          _skipped_count=$(grep -c '\*\*\*Skipped' tmplog)
+          echo "skipped_tests=${_skipped_count}" >> $GITHUB_OUTPUT
+          
           # List the open listening ports and processes info after tests are done
           echo "==== Listening Ports ===="
           netstat -tulnp
