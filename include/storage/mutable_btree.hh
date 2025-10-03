@@ -283,8 +283,12 @@ namespace springtail {
              */
             PageVector flush(uint64_t xid);
 
-            std::future<PageVector> async_flush(uint64_t xid,
-                                                std::function<void (const PageVector &)> callback = nullptr);
+            /**
+             * Async flush call.  Returns a future that can be waited on for completion.
+             */
+            std::future<std::vector<uint64_t>> async_flush(
+                uint64_t xid,
+                std::function<void(const std::vector<uint64_t> &)> callback = nullptr);
 
             /**
              * Specialized case for flushing an empty root page.  Assumes that the caller is holding
@@ -416,16 +420,20 @@ namespace springtail {
                 return _cache_page->header().xid;
             }
 
+            ExtentSchemaPtr schema() const {
+                return _schema;
+            }
+
             /**
              * Handles marking the page as flushing or waiting for a flush to complete if one is ongoing.
              */
-            std::optional<std::future<PageVector>> wait_for_flushing() {
+            std::optional<std::future<std::vector<uint64_t>>> wait_for_flushing() {
                 boost::unique_lock lock(_flush_mutex);
                 if (!_is_flushing) {
                     _is_flushing = true;
                     return std::nullopt;
                 } else {
-                    auto promise = std::make_shared<std::promise<PageVector>>();
+                    auto promise = std::make_shared<std::promise<std::vector<uint64_t>>>();
                     auto future = promise->get_future();
                     _flush_waiters.push_back(std::move(promise));
 
@@ -440,7 +448,7 @@ namespace springtail {
             void try_wait_for_flushing() {
                 boost::unique_lock lock(_flush_mutex);
                 if (_is_flushing) {
-                    auto promise = std::make_shared<std::promise<PageVector>>();
+                    auto promise = std::make_shared<std::promise<std::vector<uint64_t>>>();
                     auto future = promise->get_future();
                     _flush_waiters.push_back(std::move(promise));
                     lock.unlock();
@@ -479,6 +487,10 @@ namespace springtail {
             ExtentSchemaPtr _schema; ///< The schema of the page.
             StoragePagePtr _cache_page; ///< The backing page in the cache for the contents of this BTree page.
 
+            /** The key of each extent in the underlying cache page.  Used at flush time to generate
+                the prev_key for the new pages. */
+            std::vector<ValueTuplePtr> _extent_keys;
+
             // the following are protected by a separate mutex, must be holding the primary mutex at least shared.
             mutable boost::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
             std::map<uint64_t, std::shared_ptr<Page>> _children; ///< The set of children of this page that are part of a modified path through the tree.
@@ -487,7 +499,7 @@ namespace springtail {
             // the following variables are for handling async flush operations
             boost::mutex _flush_mutex; ///< Protects the flush variables.
             bool _is_flushing = false; ///< Flag indicating if a flush of this page is ongoing.
-            std::vector<std::shared_ptr<std::promise<PageVector>>> _flush_waiters; ///< List of promises that must be set once the flush is complete.
+            std::vector<std::shared_ptr<std::promise<std::vector<uint64_t>>>> _flush_waiters; ///< List of promises that must be set once the flush is complete.
         };
 
     private:
@@ -612,19 +624,6 @@ namespace springtail {
                            boost::unique_lock<boost::shared_mutex> &cache_lock, bool release = true);
 
         /**
-         * Updates the size of an entry in the cache.  This may cause an eviction to ensure that the
-         * cache doesn't exceed it's maximum size, thus the exclusive lock held on the cache by the
-         * caller must be provided to this function.  Also, the page being updated must have it's
-         * disk_mutex held, but not it's access mutex.  Otherwise, updating the size of a parent
-         * node could result in a deadlock trying to acquire the parent's lock again while evicting
-         * a child.
-         *
-         * @param page The page to update the size of based on its size currently.
-         * @param cache_lock The exclusive lock on the cache held by the caller.
-         */
-        void _cache_update_size(PagePtr page, boost::unique_lock<boost::shared_mutex> &cache_lock);
-
-        /**
          * Clears pages from the cache until the cache size is <= max.
          */
         void _cache_vacuum(boost::unique_lock<boost::shared_mutex> &cache_lock);
@@ -687,7 +686,7 @@ namespace springtail {
          * @param page The page being flushed.
          * @param parent The parent of the page being flushed.
          */
-        std::future<PageVector> _async_flush_page_internal(PagePtr page, PagePtr parent, std::function<void (const PageVector &)> callback = nullptr);
+        std::future<std::vector<uint64_t>> _async_flush_page_internal(PagePtr page, PagePtr parent, std::function<void (const std::vector<uint64_t> &)> callback = nullptr);
 
         /**
          * Flushes the provided Page to disk.  Also ensures that any children of the page are
@@ -698,12 +697,12 @@ namespace springtail {
          * @param page The page being flushed.
          * @param parent The parent of the page being flushed.
          */
-        std::future<PageVector> _async_flush_page(PagePtr page, PagePtr parent);
+        std::future<std::vector<uint64_t>> _async_flush_page(PagePtr page, PagePtr parent);
 
         /**
          * Continuation for _async_flush_page().
          */
-        void _async_flush_finish(PagePtr page, PagePtr parent, const PageVector &new_pages);
+        void _async_flush_finish(PagePtr page, PagePtr parent, const std::vector<uint64_t> &ids);
 
         /**
          * Flushes the root of the tree to disk, also ensuring that any childen of the root are also
