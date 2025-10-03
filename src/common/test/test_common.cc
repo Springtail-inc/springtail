@@ -142,6 +142,8 @@ TEST(CommonTest, EventFrequency) {
 
         double exp_freq = 15.0 / std::chrono::duration<double>(end - start).count();
         auto f = ef.frequency();
+        // the multipliers are to account for some timing variations of the sleep_for
+        // and clock resolutions
         ASSERT_TRUE(f > exp_freq*0.9 && f < exp_freq*1.1);
 
         start = clock::now();
@@ -172,7 +174,9 @@ TEST(CommonTest, EventFrequency) {
 
         exp_freq = 120.0 / std::chrono::duration<double>(end - start).count();
         f = ef.frequency();
-        ASSERT_TRUE(f > exp_freq*0.9 && f < exp_freq*1.1);
+        // the multipliers are to account for some timing variations of the sleep_for
+        // and clock resolutions
+        ASSERT_TRUE(f > exp_freq*0.8 && f < exp_freq*1.2);
     }
 
     // corner case
