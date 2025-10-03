@@ -328,7 +328,7 @@ namespace springtail
             // Append the value
             xid_stats[std::to_string(key)].push_back(value);
         }
-        _xid_map_mutex.unlock();
+        lock.unlock();
         stats["xid map"] = xid_stats;
 
         nlohmann::json cache_stats = nlohmann::json::object();
