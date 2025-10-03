@@ -68,6 +68,7 @@ springtail_unit_test(test_pg_log_indexer
 )
 
 springtail_unit_test(test_log_repair
+  WORKING_DIR ${CMAKE_SOURCE_DIR}/src/pg_log_mgr/test
   SOURCES test/test_log_repair.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_pglog GTest::gtest_main

@@ -21,3 +21,11 @@ python/**/__pycache__
 .aws
 shared-lib
 python/performance/performance_test_output*
+.venv
+.env
+releases
+node_modules
+dist
+.certs
+.env.bak
+_temp

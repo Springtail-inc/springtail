@@ -1,5 +1,4 @@
 #include <storage/cache.hh>
-#include <storage/vacuumer.hh>
 
 #include <absl/log/log.h>
 #include <absl/log/check.h>
@@ -1730,7 +1729,8 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
 
         // notify the vacuumer of the now-expired extent
         if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
-            Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
+            StorageCache::get_instance()->call_extent_expire_notify_fun(
+                    extent->_file, extent->header().prev_offset,
                     prev_extent_size, extent->header().xid);
         }
 
