@@ -332,7 +332,7 @@ namespace springtail
         stats["xid map"] = xid_stats;
 
         nlohmann::json cache_stats = nlohmann::json::object();
-        std::shared_lock node_lock(_xid_root);
+        std::shared_lock node_lock(_xid_root->mutex);
         for (auto &pg_xid_node: _xid_root->children) {
             std::string pg_xid_name = fmt::format("{}:{}", pg_xid_node->type_to_str(), pg_xid_node->id);
             nlohmann::json pg_xid_node_stats = nlohmann::json::object();
