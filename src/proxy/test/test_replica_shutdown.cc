@@ -43,11 +43,6 @@ namespace {
             _instance = instance;
         }
 
-        /** Get the instance for testing */
-        DatabaseInstancePtr get_instance() const {
-            return _instance;
-        }
-
     private:
         bool _connection_closed;
     };

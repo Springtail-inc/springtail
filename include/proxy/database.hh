@@ -32,7 +32,7 @@ namespace springtail::pg_proxy {
          * @param expiration_interval - session expiration interval in seconds (0 when we do not want for
          *       sessions to expire)
          */
-        DatabasePool(const PoolConfig &config) :
+        explicit DatabasePool(const PoolConfig &config) :
             _size_limit(config.size_limit), _timeout_limit(config.timeout_limit), _expiration_interval(config.expiration_interval)
         {
             DCHECK((_size_limit == 0 ) || (_size_limit > _timeout_limit));
