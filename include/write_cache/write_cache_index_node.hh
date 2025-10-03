@@ -111,7 +111,7 @@ namespace springtail {
         WriteCacheIndexNodePtr _insert_child(WriteCacheIndexNodePtr entry);
 
         /** Get memory stored in the extents under this node */
-        uint64_t _get_memory_size();
+        uint64_t _get_memory_size() const;
 
     };
 }

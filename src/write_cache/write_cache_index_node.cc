@@ -94,7 +94,7 @@ namespace springtail {
     }
 
     uint64_t
-    WriteCacheIndexNode::_get_memory_size()
+    WriteCacheIndexNode::_get_memory_size() const
     {
         uint64_t memory_size = 0;
         switch(type) {

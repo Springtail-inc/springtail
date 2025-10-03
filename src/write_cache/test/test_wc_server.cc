@@ -48,10 +48,9 @@ namespace {
                 256,
                 _field_types
             );
+            // add 2 extents
             new_extent->append();
             new_extent->append();
-            // new_extent->append();
-            // new_extent->append();
             EXPECT_EQ(new_extent->byte_count(), 512);
             return new_extent;
         }
