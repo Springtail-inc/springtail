@@ -81,6 +81,8 @@ jobs:
             r=$(head /dev/urandom | tr -dc a-f0-9 | head -c6)
             output_image_tag="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
           fi
+          # Revert this
+          exit 1
           
           # Logs in ECR
           aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR_REPO_URI}
