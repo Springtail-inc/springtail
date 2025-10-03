@@ -252,11 +252,9 @@ namespace springtail::pg_proxy {
         /**
          * @brief Initiate shutdown of the instance.
          * No new sessions will be allocated.  Shutdown the pool.
-         * @return size_t number of sessions closed
          */
-        size_t initiate_shutdown() {
+        void initiate_shutdown() {
             _state.store(InstanceState::SHUTTING_DOWN);
-            return _pool->shutdown();
         }
 
         /**
@@ -304,13 +302,14 @@ namespace springtail::pg_proxy {
         virtual ~DatabaseSet() = default;
 
         /**
-         * @brief Get a free session from the session pool if possible
+         * @brief Try and get free session from the session pool if possible
          * @param db_id database id
          * @param username username
-         * @return ServerSessionPtr or nullptr if no sessions available
+         * @return ServerSessionPtr or nullptr if no sessions available;
+         *         if nullptr, allocate_session() must be called to create a new session.
          */
-        ServerSessionPtr get_session(uint64_t db_id,
-                                     const std::string &username);
+        ServerSessionPtr get_pooled_session(uint64_t db_id,
+                                            const std::string &username);
 
         /**
          * @brief Remove database from the replica set
@@ -729,10 +728,10 @@ namespace springtail::pg_proxy {
                                             const std::string &username) {
             if (type == Session::Type::PRIMARY) {
                 assert(_primary_set != nullptr);
-                return _primary_set->get_session(db_id, username);
+                return _primary_set->get_pooled_session(db_id, username);
             } else if (type == Session::Type::REPLICA) {
                 assert(_replica_set != nullptr);
-                return _replica_set->get_session(db_id, username);
+                return _replica_set->get_pooled_session(db_id, username);
             }
             assert (0);
             return nullptr;

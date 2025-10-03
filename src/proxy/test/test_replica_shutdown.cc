@@ -339,7 +339,7 @@ namespace {
 
         // Try to get pooled sessions - should only come from replica2
         for (int i = 0; i < 2; ++i) {
-            auto session = replica_set->get_session(1, "test_user");
+            auto session = replica_set->get_pooled_session(1, "test_user");
             ASSERT_NE(session, nullptr);
 
             // Verify session came from replica2, not shutdown-pending replica1

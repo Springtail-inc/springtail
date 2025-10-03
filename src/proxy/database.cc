@@ -322,9 +322,12 @@ namespace springtail::pg_proxy
     }
 
     ServerSessionPtr
-    DatabaseSet::get_session(uint64_t db_id,
-                             const std::string &username)
+    DatabaseSet::get_pooled_session(uint64_t db_id,
+                                    const std::string &username)
     {
+        // called from dbmgr->get_pooled_session()
+        // get a free session from the pool if possible
+
         std::shared_lock lock(_base_mutex);
         if (_instance_sessions.empty()) {
             return nullptr;
@@ -390,6 +393,7 @@ namespace springtail::pg_proxy
 
         std::unique_lock lock(_base_mutex);
 
+        // find the instance
         auto it = _replicas.find(replica_id);
         if (it != _replicas.end()) {
             replica = it->second;
@@ -401,17 +405,24 @@ namespace springtail::pg_proxy
             return;
         }
 
-        LOG_INFO("Initiating shutdown of replica instance with replica id {}", replica_id);
+        // mark instance as shutting down
+        replica->initiate_shutdown();
 
-        // initiate shutdown on the instance; this will shutdown the pool
-        // the instance will be removed from the set once all sessions are closed
-        // in release_session(); no new sessions will be allocated
-        int count = replica->initiate_shutdown();
+        // remove from active replicas
+        _replicas.erase(replica_id);
 
         // add to shutdown pending list
         _shutdown_pending_replicas.insert(replica);
-        // remove from active replicas
-        _replicas.erase(replica_id);
+
+        lock.unlock();
+
+        LOG_INFO("Initiating shutdown of replica instance with replica id {}", replica_id);
+
+        // free the replica's pool, we do this without holding the lock
+        // to avoid blocking
+        int count = replica->get_pool()->shutdown();
+
+        lock.lock();
 
         // update count of sessions for instance
         _instance_sessions[replica] -= count;

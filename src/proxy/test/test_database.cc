@@ -382,14 +382,14 @@ namespace {
         EXPECT_EQ(session->database_id(), 1);
         EXPECT_EQ(session->username(), "user1");
 
-        EXPECT_EQ(db_set->get_session(1, "user1"), nullptr);
+        EXPECT_EQ(db_set->get_pooled_session(1, "user1"), nullptr);
 
         db_set->release_session(session, false);
 
         EXPECT_EQ(instance1->get_pool()->size(), 1);
         EXPECT_EQ(instance1->get_pool()->size(1, "user1"), 1);
 
-        auto retrieved_session = db_set->get_session(1, "user1");
+        auto retrieved_session = db_set->get_pooled_session(1, "user1");
         EXPECT_EQ(retrieved_session, session);
 
         EXPECT_EQ(instance1->get_pool()->size(), 0);
@@ -404,8 +404,8 @@ namespace {
         db_set->release_session(session1, false);
         db_set->release_session(session2, false);
 
-        auto retrieved_session1 = db_set->get_session(1, "user1");
-        auto retrieved_session2 = db_set->get_session(1, "user1");
+        auto retrieved_session1 = db_set->get_pooled_session(1, "user1");
+        auto retrieved_session2 = db_set->get_pooled_session(1, "user1");
         EXPECT_NE(retrieved_session1, retrieved_session2);
         EXPECT_TRUE(retrieved_session1 == session2);
         EXPECT_TRUE(retrieved_session2 == session1);
@@ -415,7 +415,7 @@ namespace {
 
         EXPECT_EQ(instance1->get_pool()->size(), 0);
 
-        auto null_session = db_set->get_session(1, "user1");
+        auto null_session = db_set->get_pooled_session(1, "user1");
         EXPECT_EQ(null_session, nullptr);
     }
 
@@ -427,8 +427,8 @@ namespace {
 
         db_set->remove_database(1);
 
-        auto null_session = db_set->get_session(1, "user1");
-        auto non_null_session = db_set->get_session(2, "user1");
+        auto null_session = db_set->get_pooled_session(1, "user1");
+        auto non_null_session = db_set->get_pooled_session(2, "user1");
         EXPECT_EQ(null_session, nullptr);
         EXPECT_NE(non_null_session, nullptr);
     }
