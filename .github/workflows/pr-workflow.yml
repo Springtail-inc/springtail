@@ -183,7 +183,7 @@ jobs:
       # Need to create a new channel for PR notifications.
       slack_channel: "#github-prs"
       text: >-
-        ${{ needs.integration-test-join.ut_result == 'success' && needs.integration-test-join.outputs.it_result == 'success' && 'good' && needs.integration-test-join.outputs.build_result == 'success' && ':white_check_mark:' || ':x:' }} PR #${{ github.event.pull_request.number }} (<${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>) 
+        ${{ needs.integration-test-join.ut_result == 'success' && needs.integration-test-join.outputs.it_result == 'success' && needs.integration-test-join.outputs.build_result == 'success' && ':white_check_mark:' || ':x:' }} PR #${{ github.event.pull_request.number }} (<${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>) 
         by ${{ github.event.pull_request.user.login }} has completed the CI workflow
       attachment: |
         {
