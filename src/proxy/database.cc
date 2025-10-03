@@ -403,20 +403,17 @@ namespace springtail::pg_proxy
 
         LOG_INFO("Initiating shutdown of replica instance with replica id {}", replica_id);
 
-        // add to shutdown pending list
-        _shutdown_pending_replicas.insert(replica);
-        // remove from active replicas
-        _replicas.erase(replica_id);
-        // initiate shutdown on the instance; release the pool
-        lock.unlock();
-
         // initiate shutdown on the instance; this will shutdown the pool
         // the instance will be removed from the set once all sessions are closed
         // in release_session(); no new sessions will be allocated
         int count = replica->initiate_shutdown();
 
+        // add to shutdown pending list
+        _shutdown_pending_replicas.insert(replica);
+        // remove from active replicas
+        _replicas.erase(replica_id);
+
         // update count of sessions for instance
-        lock.lock();
         _instance_sessions[replica] -= count;
         DCHECK_GE(_instance_sessions[replica], 0);
 
