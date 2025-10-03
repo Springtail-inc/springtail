@@ -434,7 +434,7 @@ namespace springtail::pg_proxy {
 
             case 'X':
                 // terminate
-                LOG_ERROR("Terminate request");
+                LOG_INFO("Terminate request");
                 _state = ERROR;
                 return;
 

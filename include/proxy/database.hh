@@ -17,17 +17,23 @@ namespace springtail::pg_proxy {
      */
     class DatabasePool {
     public:
+
+        struct PoolConfig {
+            size_t size_limit{10};           ///< max sessions in pool (0 means no limit)
+            size_t timeout_limit{5};         ///< max sessions in pool without expiration (0 means all expire)
+            uint64_t expiration_interval{300}; ///< expiration interval in seconds (0 means no expiration)
+        };
+
         /**
          * @brief Construct a new Database Pool object
-         *
          * @param size_limit - maximum number of sessions in the pool (0 means no max limit on the pool)
          * @param timeout_limit - maximum number of sessions that can be stored in the pool
          *      without expiration (0 when we want to apply expiration timeout to all stored sessions)
          * @param expiration_interval - session expiration interval in seconds (0 when we do not want for
          *       sessions to expire)
          */
-        DatabasePool(size_t size_limit, size_t timeout_limit, uint64_t expiration_interval):
-            _size_limit(size_limit), _timeout_limit(timeout_limit), _expiration_interval(expiration_interval)
+        DatabasePool(const PoolConfig &config) :
+            _size_limit(config.size_limit), _timeout_limit(config.timeout_limit), _expiration_interval(config.expiration_interval)
         {
             DCHECK((_size_limit == 0 ) || (_size_limit > _timeout_limit));
             // it is invalid to specify a timeout limit, but not specify expiration interval
@@ -62,6 +68,15 @@ namespace springtail::pg_proxy {
         ServerSessionPtr get_session(uint64_t db_id, const std::string &username);
 
         /**
+         * @brief Check if there is a session in the pool for the given database id and user name
+         * @param db_id - database id
+         * @param username - user name
+         * @return true if there is a session
+         * @return false if there is no session
+         */
+        bool has_session(uint64_t db_id, const std::string &username) const;
+
+        /**
          * @brief Evict all sessions from the pool for the given database id
          *
          * @param db_id - database id
@@ -78,7 +93,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Get the total number of sessions stored in the pool
-         *
          * @return size_t
          */
         size_t size() const
@@ -89,7 +103,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Total number of sessions stored in the pool for the given database id and user
-         *
          * @param db_id - database id
          * @param username - user name
          * @return size_t - number of sessions
@@ -98,17 +111,21 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Get the maximum number of sessions that can be stored in the pool
-         *
          * @return size_t - number of sessions
          */
         size_t get_size_limit() const { return _size_limit; }
 
         /**
          * @brief Get the maximum number of sessions that can be stored in the pool without expiration.
-         *
          * @return size_t - number of sessions
          */
         size_t get_timeout_limit() const { return _timeout_limit; }
+
+        /**
+         * @brief Shutdown the database pool
+         * @return size_t - number of sessions closed
+         */
+        size_t shutdown();
 
     private:
         mutable std::shared_mutex _mutex;                       ///< mutex for pool
@@ -166,25 +183,30 @@ namespace springtail::pg_proxy {
      */
     class DatabaseInstance : public std::enable_shared_from_this<DatabaseInstance> {
     public:
-        DatabaseInstance(size_t pool_size_limit,
-                         size_t pool_timeout_limit,
-                         uint64_t pool_expiration_interval,
+        enum class InstanceState {
+            ACTIVE,           // Normal operation, can accept new sessions
+            SHUTTING_DOWN,    // No new sessions, waiting for active sessions to complete
+        };
+
+        DatabaseInstance(const DatabasePool::PoolConfig &pool_config,
                          const Session::Type type,
                          const std::string &hostname,
+                         int port=5432,
                          std::string db_prefix="",
-                         int port=5432)
+                         std::string replica_id="")
             : _type(type), _hostname(hostname),
               _replica_db_prefix(db_prefix),
+              _replica_id(replica_id),
               _port(port)
         {
-            _pool = std::make_shared<DatabasePool>(pool_size_limit, pool_timeout_limit, pool_expiration_interval);
+            _pool = std::make_shared<DatabasePool>(pool_config);
         }
 
         /**
          * @brief Get hostname
          * @return std::string hostname
          */
-        std::string hostname() const { return _hostname; }
+        const std::string& hostname() const { return _hostname; }
 
         /**
          * @brief Get port
@@ -196,7 +218,13 @@ namespace springtail::pg_proxy {
          * @brief Get prefix
          * @return std::string prefix
          */
-        std::string prefix() const { return _replica_db_prefix; }
+        const std::string& prefix() const { return _replica_db_prefix; }
+
+        /**
+         * @brief Get replica id
+         * @return std::string replica id
+         */
+        const std::string& replica_id() const { return _replica_id; }
 
         /**
          * @brief Create connection to this instance
@@ -210,7 +238,25 @@ namespace springtail::pg_proxy {
          * @brief Dump the instance to string
          */
         std::string to_string() {
-            return fmt::format("type={}, hostname={}, port={}", (_type == Session::Type::PRIMARY ? "PRIMARY" : "REPLICA"), _hostname, _port);
+            return fmt::format("type={}, hostname={}, port={}, replica_id={}", (_type == Session::Type::PRIMARY ? "PRIMARY" : "REPLICA"), _hostname, _port, _replica_id);
+        }
+
+        /**
+         * @brief Is the instance active
+         * @return true if active, false if shutting down
+         */
+        bool is_active() const {
+            return _state.load() == InstanceState::ACTIVE;
+        }
+
+        /**
+         * @brief Initiate shutdown of the instance.
+         * No new sessions will be allocated.  Shutdown the pool.
+         * @return size_t number of sessions closed
+         */
+        size_t initiate_shutdown() {
+            _state.store(InstanceState::SHUTTING_DOWN);
+            return _pool->shutdown();
         }
 
         /**
@@ -227,12 +273,19 @@ namespace springtail::pg_proxy {
             const std::unordered_map<std::string, std::string> &parameters,
             const std::string &database);
 
+        /**
+         * @brief Get the database pool
+         * @return DatabasePoolPtr
+         */
         DatabasePoolPtr get_pool() { return _pool; }
+
     private:
-        DatabasePoolPtr _pool{nullptr};               ///< free connections pool for this instance
+        std::atomic<InstanceState> _state{InstanceState::ACTIVE}; ///< state of instance
+        DatabasePoolPtr _pool{nullptr};      ///< free connections pool for this instance
         Session::Type _type;                 ///< type of instance (primary, replica)
         std::string _hostname;               ///< hostname of instance
         std::string _replica_db_prefix;      ///< prefix to be used for replica database
+        std::string _replica_id;             ///< unique id used for identifying replica (fdw)
         int _port;                           ///< port of instance
     };
     using DatabaseInstancePtr = std::shared_ptr<DatabaseInstance>;
@@ -256,30 +309,8 @@ namespace springtail::pg_proxy {
          * @param username username
          * @return ServerSessionPtr or nullptr if no sessions available
          */
-        ServerSessionPtr get_session(const uint64_t db_id,
-                                     const std::string &username) {
-            std::shared_lock lock(_base_mutex);
-            if (_instance_sessions.empty()) {
-                return nullptr;
-            }
-
-            // find the instance with the least number of sessions
-            DatabaseInstancePtr instance = nullptr;
-            int max_free_sessions = INT_MIN;
-            for (auto &it : _instance_sessions) {
-                DatabasePoolPtr pool = it.first->get_pool();
-                int pool_size = pool->size();
-                if (pool_size > max_free_sessions) {
-                    max_free_sessions = pool_size;
-                    instance = it.first;
-                }
-            }
-            if (instance != nullptr) {
-                return instance->get_pool()->get_session(db_id, username);
-            }
-
-            return nullptr;
-        }
+        ServerSessionPtr get_session(uint64_t db_id,
+                                     const std::string &username);
 
         /**
          * @brief Remove database from the replica set
@@ -323,7 +354,7 @@ namespace springtail::pg_proxy {
          * @param session session to release
          * @param deallocate deallocate session
          */
-        void _release_session(ServerSessionPtr session, int num_instances, bool deallocate=false);
+        void _release_session(ServerSessionPtr session, bool deallocate=false);
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
@@ -375,27 +406,27 @@ namespace springtail::pg_proxy {
      */
     class DatabaseReplicaSet : public DatabaseSet {
     public:
-        explicit DatabaseReplicaSet(int max_sessions_per_instance) :
-            DatabaseSet(max_sessions_per_instance)
+        explicit DatabaseReplicaSet(int max_sessions_per_instance,
+                                    const DatabasePool::PoolConfig& pool_config) :
+            DatabaseSet(max_sessions_per_instance),
+            _pool_config(pool_config)
         {}
 
         /**
          * @brief Add a replica to the replica set
-         * @param replica replica to add
+         * @param replica_id fdw_id to add
          */
-        void
-        add_replica(DatabaseInstancePtr replica)
-        {
-            std::unique_lock lock(_base_mutex);
-            _replicas.insert(replica);
-        }
+        void add_replica(const std::string &replica_id);
 
         /**
          * @brief Remove a replica database instance, and removes
          * all sessions associated with the instance from the pool.
          * @param replica database instance
          */
-        void remove_replica(DatabaseInstancePtr replica);
+        void remove_replica(DatabaseInstancePtr replica) {
+            std::unique_lock lock(_base_mutex);
+            _remove_replica(replica, lock);
+        }
 
         /**
          * @brief Release session back to the db instance (and associated pool).
@@ -424,9 +455,23 @@ namespace springtail::pg_proxy {
             const std::unordered_map<std::string, std::string> &parameters,
             const std::string &database) override;
 
-    private:
-        /** list of database instances */
-        std::set<DatabaseInstancePtr> _replicas;
+        /**
+         * @brief Initiate shutdown of a replica instance.  No new sessions will be allocated
+         * @param replica_id replica id
+         */
+        void initiate_replica_shutdown(const std::string &replica_id);
+
+    protected:
+        /** pool config used for each instance */
+        DatabasePool::PoolConfig _pool_config;
+
+        /** list of database instances indexed by replica_id */
+        std::unordered_map<std::string, DatabaseInstancePtr> _replicas;
+
+        /** list of replicas being shutdown */
+        std::set<DatabaseInstancePtr> _shutdown_pending_replicas;
+
+        void _remove_replica(DatabaseInstancePtr replica, std::unique_lock<std::shared_mutex> &lock);
     };
     using DatabaseReplicaSetPtr = std::shared_ptr<DatabaseReplicaSet>;
 
@@ -587,13 +632,12 @@ namespace springtail::pg_proxy {
     /**
      * @brief Singleton database manager class. Collects all configuration data from Properties and
      * redis instance.
-     * TODO: Missing addition/removal of replica instances (FDWs) via redis pubsub
      */
     class DatabaseMgr final : public Singleton<DatabaseMgr>
     {
         friend class Singleton<DatabaseMgr>;
-    public:
 
+    public:
         static constexpr const int POOL_SESSIONS_PER_INSTANCE=5; ///< max sessions per instance
 
         /**
@@ -655,10 +699,10 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Add replica database instance
-         * @param instance - database instance
+         * @param replica_id - replica id (fdw id)
          */
-        void add_replica(DatabaseInstancePtr instance) {
-            _replica_set->add_replica(instance);
+        void add_replica(const std::string &replica_id) {
+            _replica_set->add_replica(replica_id);
         }
 
         /**
@@ -751,8 +795,9 @@ namespace springtail::pg_proxy {
     private:
         uint64_t _db_instance_id;           ///< primary database instance id
 
-        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_ids; ///< callback for redis cache db ids
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_ids;    ///< callback for redis cache db ids
         RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states; ///< callback for redis cache database replica state
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_fdws;      ///< callback for redis cache foreign data wrapper state
 
         PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database
 
@@ -763,7 +808,8 @@ namespace springtail::pg_proxy {
         std::map<uint64_t, DatabasePtr> _db_id_rep_dbs;      ///< map of database ids to database object
         mutable std::shared_mutex _db_mutex;                 ///< shared mutex for the replicated databases maps
 
-        std::string _db_replica_prefix;     ///< prefix to be used for replica database (for testing)
+        std::string _db_replica_prefix;         ///< prefix to be used for replica database (for testing)
+        DatabasePool::PoolConfig _pool_config;  ///< pool configuration
 
         /**
          * @brief Construct a new Database Mgr object
@@ -807,6 +853,26 @@ namespace springtail::pg_proxy {
          * @param db_id - database id
          */
         void _remove_replicated_database(uint64_t db_id);
+
+        /**
+         * @brief Handle changes to the list of replicated databases
+         * @param new_value - new value
+         */
+        void _redis_dbs_change_cb(const nlohmann::json &new_value);
+
+        /**
+         * @brief Handle changes to the state of a replicated database
+         * @param path - path of the change
+         * @param new_value - new value
+         */
+        void _redis_db_state_change_cb(const std::string &path, const nlohmann::json &new_value);
+
+        /**
+         * @brief Handle changes to the list of FDWs
+         * @param path - path of the change
+         * @param new_value - new value
+         */
+        void _redis_fdw_change_cb(const std::string &path, const nlohmann::json &new_value);
     };
 
 } // namespace springtail:pg_proxy

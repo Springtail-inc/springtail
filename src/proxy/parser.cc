@@ -275,7 +275,7 @@ namespace springtail::pg_proxy {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Parser node: variablesetstmt");
             VariableSetStmt *stmt = (VariableSetStmt*)node;
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Parser node: name {}, is_local={}, kind={}",
-                         stmt->name, stmt->is_local, (int)stmt->kind);
+                         (stmt->name != nullptr) ? stmt->name : "null", stmt->is_local, (int)stmt->kind);
 
             context->has_is_local = stmt->is_local;
 
