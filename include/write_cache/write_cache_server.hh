@@ -64,7 +64,7 @@ namespace springtail {
          * @param pg_xids Postgres XID
          */
         void
-        abort(uint64_t db_id, std::vector<uint64_t> pg_xids);
+        abort(uint64_t db_id, const std::vector<uint64_t> &pg_xids);
 
         /**
          * @brief List tables for a given XID
@@ -138,7 +138,7 @@ namespace springtail {
         _get_index(uint64_t db_id);
 
         /** indexes mutex */
-        std::shared_mutex _mutex;
+        std::shared_mutex _db_mutex;
 
         /** map of indexes by db_id */
         std::map<uint64_t, WriteCacheIndexPtr> _indexes;
@@ -146,10 +146,11 @@ namespace springtail {
         /** top level path for storing extents on disk */
         std::filesystem::path _disk_storage_dir;
 
-        uint64_t _memory_high_watermark;        ///< high watermark level
-        uint64_t _memory_low_watermark;         ///< low watermark level
-        uint64_t _current_memory{0};            ///< current memory size used by in-memory extents
-        bool _store_to_disk{false};             ///< flag indicating storage on disk
+        std::shared_mutex _mem_mutex;                 ///< memory data mutex
+        uint64_t _memory_high_watermark_bytes;        ///< high watermark level
+        uint64_t _memory_low_watermark_bytes;         ///< low watermark level
+        uint64_t _current_memory_bytes{0};            ///< current memory size used by in-memory extents
+        std::atomic<bool> _store_to_disk{false};      ///< flag indicating storage on disk
 
         GrpcServerManager _grpc_server_manager; ///< GRPC server
 

@@ -53,7 +53,7 @@ namespace {
         ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
-        index->add_extent(tid, pg_xid, lsn, data);
+        index->add_extent(tid, pg_xid, lsn, data, false);
         index->commit(pg_xid, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
@@ -77,7 +77,7 @@ namespace {
         ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
-        index->add_extent(tid, pg_xid, lsn, data);
+        index->add_extent(tid, pg_xid, lsn, data, false);
         index->commit(pg_xid, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
@@ -94,8 +94,10 @@ namespace {
         ExtentHeader header(ExtentType(), pg_xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
-        index->add_extent(tid, pg_xid, 200, data);
-        index->drop_table(tid, pg_xid);
+        uint64_t removed_data_size = 0;
+        index->add_extent(tid, pg_xid, 200, data, false);
+        index->drop_table(tid, pg_xid, removed_data_size);
+        EXPECT_EQ(removed_data_size, data->byte_count());
 
         uint64_t cursor = 0;
         WriteCacheTableSet::Metadata md;
@@ -112,8 +114,10 @@ namespace {
         ExtentHeader header(ExtentType(), pg_xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
-        index->add_extent(tid, pg_xid, 200, data);
-        index->abort(pg_xid);
+        uint64_t removed_data_size = 0;
+        index->add_extent(tid, pg_xid, 200, data, false);
+        index->abort(pg_xid, removed_data_size);
+        EXPECT_EQ(removed_data_size, data->byte_count());
 
         uint64_t cursor = 0;
         WriteCacheTableSet::Metadata md;
@@ -132,7 +136,7 @@ namespace {
         ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
-        index->add_extent(tid, pg_xid, 200, data);
+        index->add_extent(tid, pg_xid, 200, data, false);
         index->commit(pg_xid, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
@@ -141,7 +145,9 @@ namespace {
         EXPECT_EQ(extents.size(), 1);
         EXPECT_EQ(md.pg_commit_ts, commit_ts);
 
-        index->evict_table(tid, xid);
+        uint64_t removed_data_size = 0;
+        index->evict_table(tid, xid, removed_data_size);
+        EXPECT_EQ(removed_data_size, data->byte_count());
 
         cursor = 0;
         md = {};
@@ -159,7 +165,7 @@ namespace {
         ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
-        index->add_extent(tid, pg_xid, 200, data);
+        index->add_extent(tid, pg_xid, 200, data, false);
         index->commit(pg_xid, xid, {commit_ts, {}});
 
         uint64_t cursor = 0;
@@ -168,7 +174,9 @@ namespace {
         EXPECT_EQ(extents.size(), 1);
         EXPECT_EQ(md.pg_commit_ts, commit_ts);
 
-        index->evict_xid(xid);
+        uint64_t removed_data_size = 0;
+        index->evict_xid(xid, removed_data_size);
+        EXPECT_EQ(removed_data_size, data->byte_count());
         index->commit(pg_xid, xid, {commit_ts, {}});
 
         cursor = 0;
@@ -183,7 +191,7 @@ namespace {
             ExtentPtr data = std::make_shared<Extent>(header);
             {
                 std::unique_lock<std::mutex> lock(mtx);
-                index->add_extent(tid, pg_xid, lsn_start + i, data);
+                index->add_extent(tid, pg_xid, lsn_start + i, data, false);
             }
         }
     }
@@ -247,7 +255,7 @@ namespace {
             for (uint64_t i = 0; i < count; ++i) {
                 ExtentHeader header(ExtentType(), 200 + i, 100, {});
                 ExtentPtr data = std::make_shared<Extent>(header);
-                index->add_extent(tid, pg_xid, lsn_start + i, data);
+                index->add_extent(tid, pg_xid, lsn_start + i, data, false);
             }
         }
 
@@ -287,7 +295,7 @@ namespace {
 
         std::vector<uint64_t> pg_xids;
         for (int i = 0; i < xid_count; i++) {
-            index->add_extent(tid, pg_xid + i, lsn+i, data);
+            index->add_extent(tid, pg_xid + i, lsn+i, data, false);
             pg_xids.push_back(pg_xid + i);
         }
 
@@ -329,7 +337,7 @@ namespace {
 
         std::vector<uint64_t> pg_xids;
         for (int i = 0; i < xid_count; i++) {
-            index->add_extent(tid + i, pg_xid + i, lsn+i, data);
+            index->add_extent(tid + i, pg_xid + i, lsn+i, data, false);
             pg_xids.push_back(pg_xid + i);
         }
 

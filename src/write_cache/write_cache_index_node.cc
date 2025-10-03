@@ -72,15 +72,15 @@ namespace springtail {
 
     /** Remove child node by ID */
     WriteCacheIndexNodePtr
-    WriteCacheIndexNode::remove(uint64_t id)
+    WriteCacheIndexNode::remove(uint64_t id, uint64_t &memory_removed)
     {
         auto entry = std::make_shared<WriteCacheIndexNode>(id);
-        return remove(entry);
+        return remove(entry, memory_removed);
     }
 
     /** Remove child node by node ptr */
     WriteCacheIndexNodePtr
-    WriteCacheIndexNode::remove(WriteCacheIndexNodePtr entry)
+    WriteCacheIndexNode::remove(WriteCacheIndexNodePtr entry, uint64_t &memory_removed)
     {
         std::unique_lock<std::shared_mutex> write_lock{mutex};
         auto itr = children.find(entry);
@@ -89,7 +89,27 @@ namespace springtail {
         }
         WriteCacheIndexNodePtr p = (*itr);
         children.erase(itr);
+        memory_removed += p->_get_memory_size();
         return p;
+    }
+
+    uint64_t
+    WriteCacheIndexNode::_get_memory_size()
+    {
+        uint64_t memory_size = 0;
+        switch(type) {
+            case EXTENT:
+                memory_size += data->byte_count();
+                break;
+            case EXTENT_ON_DISK:
+                break;
+            default:
+                for (auto &child: children) {
+                    memory_size += child->_get_memory_size();
+                }
+                break;
+        }
+        return memory_size;
     }
 
     WriteCacheIndexNodePtr

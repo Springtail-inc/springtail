@@ -9,7 +9,7 @@
 namespace springtail
 {
 
-    WriteCacheTableSet::WriteCacheTableSet(const std::filesystem::path &db_dir_path, int row_table_partitions) :
+    WriteCacheTableSet::WriteCacheTableSet(const std::filesystem::path &db_dir_path) :
         _db_dir_path(db_dir_path),
         _xid_root(std::make_shared<WriteCacheIndexNode>(-1, WriteCacheIndexNode::IndexType::ROOT))
     {}
@@ -18,9 +18,10 @@ namespace springtail
     WriteCacheTableSet::add_extent(uint64_t tid,
                                    uint64_t pg_xid,
                                    uint64_t lsn,
-                                   const ExtentPtr data)
+                                   const ExtentPtr data,
+                                   bool on_disk)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Inserting: extent for TID: {}, PG XID: {}, LSN: {}", tid, pg_xid, lsn);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Inserting: extent for TID: {}, PG XID: {}, LSN: {}, on disk", tid, pg_xid, lsn, on_disk);
 
         // find the xid node, if not exists, create a node with given ID and return it
         WriteCacheIndexNodePtr xid_node = _xid_root->findAdd(pg_xid, WriteCacheIndexNode::IndexType::XID);
@@ -28,23 +29,28 @@ namespace springtail
         // find the tid node, if not exists, create a node with given ID and return it
         WriteCacheIndexNodePtr tid_node = xid_node->findAdd(tid, WriteCacheIndexNode::IndexType::TABLE);
 
-        // add data to the tid node
-        tid_node->add(std::make_shared<WriteCacheIndexNode>(lsn, data));
+        if (on_disk) {
+            uint64_t extent_offset{0};
+            uint64_t extent_size{0};
+            _add_extent_on_disk(pg_xid, data, extent_offset, extent_size);
+            // add data to the tid node
+            tid_node->add(std::make_shared<WriteCacheIndexNode>(lsn, extent_offset, extent_size));
+        } else {
+            // add data to the tid node
+            tid_node->add(std::make_shared<WriteCacheIndexNode>(lsn, data));
+        }
     }
 
     void
-    WriteCacheTableSet::add_extent_on_disk(uint64_t tid, uint64_t pg_xid, uint64_t lsn, uint64_t extent_offset, size_t extent_size)
+    WriteCacheTableSet::_add_extent_on_disk(uint64_t pg_xid, ExtentPtr data, uint64_t &extent_offset, size_t &extent_size)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Inserting: extent on disk for TID: {}, PG XID: {}, LSN: {}", tid, pg_xid, lsn);
-
-        // find the xid node, if not exists, create a node with given ID and return it
-        WriteCacheIndexNodePtr xid_node = _xid_root->findAdd(pg_xid, WriteCacheIndexNode::IndexType::XID);
-
-        // find the tid node, if not exists, create a node with given ID and return it
-        WriteCacheIndexNodePtr tid_node = xid_node->findAdd(tid, WriteCacheIndexNode::IndexType::TABLE);
-
-        // add data to the tid node
-        tid_node->add(std::make_shared<WriteCacheIndexNode>(lsn, extent_offset, extent_size));
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Inserting: extent on disk");
+        std::filesystem::path file_name = _db_dir_path / std::to_string(pg_xid);
+        auto handle = IOMgr::get_instance()->open(file_name.c_str(), IOMgr::APPEND, false);
+        auto response = data->async_flush(handle);
+        std::shared_ptr<IOResponseAppend> append_data = response.get();
+        extent_offset = append_data->offset;
+        extent_size = append_data->next_offset - append_data->offset;
     }
 
     int
@@ -172,7 +178,7 @@ namespace springtail
     }
 
     void
-    WriteCacheTableSet::evict_xid(uint64_t xid)
+    WriteCacheTableSet::evict_xid(uint64_t xid, uint64_t &memory_removed, std::set<uint64_t> &pg_xids_removed)
     {
         LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Evicting XID: {}", xid);
 
@@ -198,11 +204,15 @@ namespace springtail
         lock.unlock();
 
         // abort all pg_xids
-        std::ranges::for_each(pg_xids, [this](uint64_t pg_xid) { abort(pg_xid); });
+        std::ranges::for_each(pg_xids,
+                              [this, &memory_removed](uint64_t pg_xid) { abort(pg_xid, memory_removed); });
+
+        // add removed pg_xids to pg_xids_removed
+        pg_xids_removed.insert(pg_xids.begin(), pg_xids.end());
     }
 
     void
-    WriteCacheTableSet::abort(uint64_t pg_xid)
+    WriteCacheTableSet::abort(uint64_t pg_xid, uint64_t &memory_removed)
     {
         LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Aborting PG XID: {}", pg_xid);
 
@@ -214,7 +224,7 @@ namespace springtail
         }
 
         // remove xid node
-        _xid_root->remove(xid_node);
+        _xid_root->remove(xid_node, memory_removed);
     }
 
     void
@@ -244,7 +254,7 @@ namespace springtail
     }
 
     void
-    WriteCacheTableSet::evict_table(uint64_t tid, uint64_t xid)
+    WriteCacheTableSet::evict_table(uint64_t tid, uint64_t xid, uint64_t &memory_removed)
     {
         LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Evicting table: TID={} XID={}", tid, xid);
 
@@ -256,14 +266,14 @@ namespace springtail
         }
 
         for (auto &pg_xid: pg_xids) {
-            drop_table(tid, pg_xid);
+            drop_table(tid, pg_xid, memory_removed);
         }
 
         // XXX should we remove xid from xid map if no more tids?
     }
 
     void
-    WriteCacheTableSet::drop_table(uint64_t tid, uint64_t pg_xid)
+    WriteCacheTableSet::drop_table(uint64_t tid, uint64_t pg_xid, uint64_t &memory_removed)
     {
         LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Dropping table: TID={} PG_XID={}", tid, pg_xid);
 
@@ -276,7 +286,7 @@ namespace springtail
         }
 
         LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Removing TID: {}", tid);
-        xid_node->remove(tid);
+        xid_node->remove(tid, memory_removed);
 
         if (xid_node->children.size() == 0) {
             _xid_root->remove_child_if_empty(xid_node);
@@ -303,71 +313,12 @@ namespace springtail
         }
     }
 
-    uint64_t
-    WriteCacheTableSet::get_memory_size(uint64_t pg_xid)
-    {
-        uint64_t memory_size = 0;
-        // find the xid node
-        WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid);
-        if (xid_node == nullptr) {
-            return memory_size;
-        }
-        // iterate over table nodes
-        for (auto &table_node: xid_node->children) {
-            DCHECK(table_node->type == WriteCacheIndexNode::TABLE);
-
-            // iterate over extent nodes
-            for (auto &extent_node: table_node->children) {
-
-                // only add the size of the extents stored in memory
-                if (extent_node->type == WriteCacheIndexNode::EXTENT) {
-                    memory_size += extent_node->data->byte_count();
-                }
-            }
-        }
-        return memory_size;
-    }
-
-    size_t
-    WriteCacheTableSet::get_memory_size(uint64_t tid, uint64_t xid)
-    {
-        uint64_t memory_size = 0;
-        // lookup xid in xid map
-        std::set<uint64_t> pg_xids = _lookup_pgxid(xid);
-        if (pg_xids.empty()) {
-            return memory_size;
-        }
-        for (auto &pg_xid: pg_xids) {
-            memory_size += get_memory_size_for_pg_xid(tid, pg_xid);
-        }
-        return memory_size;
-    }
-
-    size_t
-    WriteCacheTableSet::get_memory_size_for_pg_xid(uint64_t tid, uint64_t pg_xid)
-    {
-        uint64_t memory_size = 0;
-        WriteCacheIndexNodePtr pg_xid_node = _xid_root->find(pg_xid);
-        if (pg_xid_node == nullptr) {
-            return memory_size;
-        }
-        WriteCacheIndexNodePtr tid_node = pg_xid_node->find(tid);
-        if (tid_node == nullptr) {
-            return memory_size;
-        }
-        for (auto &extent_node: tid_node->children) {
-            if (extent_node->type == WriteCacheIndexNode::EXTENT) {
-                memory_size += extent_node->data->byte_count();
-            }
-        }
-        return memory_size;
-    }
-
     nlohmann::json
     WriteCacheTableSet::get_stats()
     {
         nlohmann::json stats = nlohmann::json::object();
         nlohmann::json xid_stats = nlohmann::json::object();
+        std::shared_lock lock(_xid_map_mutex);
         for (const auto& [key, value] : _xid_map) {
             // Ensure an array exists for this key
             if (!xid_stats.contains(std::to_string(key))) {
@@ -377,17 +328,19 @@ namespace springtail
             // Append the value
             xid_stats[std::to_string(key)].push_back(value);
         }
+        _xid_map_mutex.unlock();
         stats["xid map"] = xid_stats;
 
         nlohmann::json cache_stats = nlohmann::json::object();
+        std::shared_lock node_lock(_xid_root);
         for (auto &pg_xid_node: _xid_root->children) {
-            std::string pg_xid_name = pg_xid_node->type_to_str() + ":" + std::to_string(pg_xid_node->id);
+            std::string pg_xid_name = fmt::format("{}:{}", pg_xid_node->type_to_str(), pg_xid_node->id);
             nlohmann::json pg_xid_node_stats = nlohmann::json::object();
             for (auto &tid_node: pg_xid_node->children) {
-                std::string tid_name = tid_node->type_to_str() + ":" + std::to_string(tid_node->id);
+                std::string tid_name = fmt::format("{}:{}", tid_node->type_to_str(), tid_node->id);
                 nlohmann::json tid_node_stats = nlohmann::json::object();
                 for (auto &extent_node: tid_node->children) {
-                    std::string extent_name = extent_node->type_to_str() + ":" + std::to_string(extent_node->id);
+                    std::string extent_name = fmt::format("{}:{}", extent_node->type_to_str(), extent_node->id);
                     nlohmann::json extent_node_stats = nlohmann::json::object();
                     if (extent_node->type == WriteCacheIndexNode::EXTENT) {
                         extent_node_stats["extent size"] = extent_node->data->byte_count();
@@ -401,6 +354,7 @@ namespace springtail
             }
             cache_stats[pg_xid_name] = pg_xid_node_stats;
         }
+        node_lock.unlock();
         stats["cache"] = cache_stats;
         return stats;
     }

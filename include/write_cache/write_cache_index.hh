@@ -39,18 +39,9 @@ namespace springtail {
          * @param pg_xid Postgres XID
          * @param lsn LSN of the extent
          * @param data extent data
+         * @param on_disk a flag to add extent on disk and not in memory
          */
-        void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data);
-
-        /**
-         * @brief Add a new extent on disk, not in memory
-         *
-         * @param tid table ID
-         * @param pg_xid Postgres XID
-         * @param lsn LSN of the extent
-         * @param data extent data
-         */
-        void add_extent_on_disk(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data);
+        void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data, bool on_disk);
 
         /**
          * @brief Add a mapping from springtail XID to Postgres XID
@@ -72,20 +63,23 @@ namespace springtail {
          * @brief Drop a table from the index
          * @param tid table ID
          * @param pg_xid Postgres XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void drop_table(uint64_t tid, uint64_t pg_xid);
+        void drop_table(uint64_t tid, uint64_t pg_xid, uint64_t &memory_removed);
 
         /**
          * @brief Drop all data for a given XID
          * @param pg_xid Postgres XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void abort(uint64_t pg_xid);
+        void abort(uint64_t pg_xid, uint64_t &memory_removed);
 
         /**
          * @brief Drop all data for a given XID
          * @param pg_xids Postgres XIDs
+         * @param memory_removed amount of memory freed by this function
          */
-        void abort(const std::vector<uint64_t>& pg_xids);
+        void abort(const std::vector<uint64_t>& pg_xids, uint64_t &memory_removed);
 
         //// RPC interface
 
@@ -102,14 +96,16 @@ namespace springtail {
          * @brief Evict extent from cache
          * @param tid table ID
          * @param xid springtail XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void evict_table(uint64_t tid, uint64_t xid);
+        void evict_table(uint64_t tid, uint64_t xid, uint64_t &memory_removed);
 
         /**
          * @brief Evict springtail XID from cache (and all data)
          * @param xid springtail XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void evict_xid(uint64_t xid);
+        void evict_xid(uint64_t xid, uint64_t &memory_removed);
 
         /**
          * @brief Get the extents for a table at a given XID
@@ -128,14 +124,14 @@ namespace springtail {
          *
          * @return uint64_t
          */
-        uint64_t get_memory_in_use() { return _memory_in_use; }
+        uint64_t get_memory_in_use() const { return _memory_in_use; }
 
         /**
          * @brief Get json object representing data stored in each partition
          *
          * @return nlohmann::json
          */
-        nlohmann::json get_partition_stats();
+        nlohmann::json get_partition_stats() const;
     private:
         /** Path where to store extents on disk */
         std::filesystem::path _db_dir_path;
@@ -147,7 +143,7 @@ namespace springtail {
         int _num_partitions;
 
         /** How much memory is being used by the in-memory extents in this database */
-        uint64_t _memory_in_use{0};
+        std::atomic<uint64_t> _memory_in_use{0};
 
         /**
          * @brief Get the partition for a specific table ID

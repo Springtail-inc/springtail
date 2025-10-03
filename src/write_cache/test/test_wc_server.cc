@@ -12,9 +12,9 @@ namespace {
         static void SetUpTestSuite() {
             // override directory and watermark settings
             std::string disk_storage_dir = std::format("write_cache.disk_storage_dir={}", "/tmp/write_cache");
-            std::string memory_high_watermark = std::format("write_cache.memory_high_watermark={}", 8192);
-            std::string memory_low_watermark = std::format("write_cache.memory_low_watermark={}", 4096);
-            std::string overrides = disk_storage_dir + ";" + memory_high_watermark + ";" + memory_low_watermark;
+            std::string memory_high_watermark_bytes = std::format("write_cache.memory_high_watermark_bytes={}", 8192);
+            std::string memory_low_watermark_bytes = std::format("write_cache.memory_low_watermark_bytes={}", 4096);
+            std::string overrides = disk_storage_dir + ";" + memory_high_watermark_bytes + ";" + memory_low_watermark_bytes;
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
             // Init springtail

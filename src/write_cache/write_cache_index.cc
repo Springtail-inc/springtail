@@ -7,24 +7,13 @@
 namespace springtail
 {
     void
-    WriteCacheIndex::add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data)
+    WriteCacheIndex::add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data, bool on_disk)
     {
-        _memory_in_use += data->byte_count();
+        if (!on_disk) {
+            _memory_in_use += data->byte_count();
+        }
         WriteCacheTableSetPtr partition = _get_partition(tid);
-        partition->add_extent(tid, pg_xid, lsn, data);
-    }
-
-    void
-    WriteCacheIndex::add_extent_on_disk(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data)
-    {
-        std::filesystem::path file_name = _db_dir_path / std::to_string(pg_xid);
-        auto handle = IOMgr::get_instance()->open(file_name.c_str(), IOMgr::APPEND, false);
-        auto response = data->async_flush(handle);
-        WriteCacheTableSetPtr partition = _get_partition(tid);
-        std::shared_ptr<IOResponseAppend> append_data = response.get();
-        partition->add_extent_on_disk(tid, pg_xid, lsn,
-                append_data->offset,
-                append_data->next_offset - append_data->offset);
+        partition->add_extent(tid, pg_xid, lsn, data, on_disk);
     }
 
     void
@@ -44,45 +33,46 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::drop_table(uint64_t tid, uint64_t pg_xid)
+    WriteCacheIndex::drop_table(uint64_t tid, uint64_t pg_xid, uint64_t &memory_removed)
     {
         WriteCacheTableSetPtr partition = _get_partition(tid);
-        uint64_t table_memory_used = partition->get_memory_size_for_pg_xid(tid, pg_xid);
-        partition->drop_table(tid, pg_xid);
-        _memory_in_use -= table_memory_used;
+        partition->drop_table(tid, pg_xid, memory_removed);
+        _memory_in_use -= memory_removed;
     }
 
     void
-    WriteCacheIndex::abort(uint64_t pg_xid)
+    WriteCacheIndex::abort(uint64_t pg_xid, uint64_t &memory_removed)
     {
         uint64_t stored_size = 0;
 
         for (auto &p: _partitions) {
-            stored_size += p->get_memory_size(pg_xid);
-            p->abort(pg_xid);
+            p->abort(pg_xid, stored_size);
         }
 
         _memory_in_use -= stored_size;
+        memory_removed += stored_size;
         std::filesystem::path file_name = _db_dir_path / std::to_string(pg_xid);
         IOMgr::get_instance()->remove(file_name);
     }
 
     void
-    WriteCacheIndex::abort(const std::vector<uint64_t>& pg_xids)
+    WriteCacheIndex::abort(const std::vector<uint64_t>& pg_xids, uint64_t &memory_removed)
     {
         uint64_t stored_size = 0;
 
         for (auto &p: _partitions) {
             for (auto pg_xid: pg_xids) {
-                stored_size += p->get_memory_size(pg_xid);
-                p->abort(pg_xid);
+                p->abort(pg_xid, stored_size);
             }
         }
 
         _memory_in_use -= stored_size;
+        memory_removed += stored_size;
         for (auto pg_xid: pg_xids) {
             std::filesystem::path file_name = _db_dir_path / std::to_string(pg_xid);
-            IOMgr::get_instance()->remove(file_name);
+            if (std::filesystem::exists(file_name)) {
+                IOMgr::get_instance()->remove(file_name);
+            }
         }
     }
 
@@ -132,48 +122,44 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::evict_table(uint64_t tid, uint64_t xid)
+    WriteCacheIndex::evict_table(uint64_t tid, uint64_t xid, uint64_t &memory_removed)
     {
         std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
-        uint64_t stored_size = partition->get_memory_size(tid, xid);
+        uint64_t stored_size = 0;
+        partition->evict_table(tid, xid, stored_size);
         _memory_in_use -= stored_size;
-        partition->evict_table(tid, xid);
+        memory_removed += stored_size;
     }
 
     void
-    WriteCacheIndex::evict_xid(uint64_t xid)
+    WriteCacheIndex::evict_xid(uint64_t xid, uint64_t &memory_removed)
     {
         uint64_t stored_size = 0;
         std::set<uint64_t> all_pg_xids;
-        for (auto &p: _partitions) {
-            // get all pg_xids from each partition
-            std::set<uint64_t> pg_xids = p->get_pg_xids(xid);
-            all_pg_xids.insert(pg_xids.begin(), pg_xids.end());
 
-            // add up all the memory used by each pg_xid in each partition
-            for (auto pg_xid: pg_xids) {
-                stored_size += p->get_memory_size(pg_xid);
-            }
+        // evict xid in each partition
+        for (auto &p: _partitions) {
+            p->evict_xid(xid, stored_size, all_pg_xids);
         }
 
-        // iterate through partitions building a resultset of desired size
-        for (auto &p: _partitions) {
-            p->evict_xid(xid);
-        }
+        // cleanup files
         for (auto pg_xid: all_pg_xids) {
             std::filesystem::path file_name = _db_dir_path / std::to_string(pg_xid);
-            IOMgr::get_instance()->remove(file_name);
+            if (std::filesystem::exists(file_name)) {
+                IOMgr::get_instance()->remove(file_name);
+            }
         }
 
         // adjust used memory size
         _memory_in_use -= stored_size;
+        memory_removed += stored_size;
     }
 
     nlohmann::json
-    WriteCacheIndex::get_partition_stats()
+    WriteCacheIndex::get_partition_stats() const
     {
         nlohmann::json stats = nlohmann::json::array();
-        for (auto &p: _partitions) {
+        for (const auto &p: _partitions) {
             nlohmann::json partition_stats = p->get_stats();
             stats.push_back(partition_stats);
         }

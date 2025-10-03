@@ -43,8 +43,9 @@
             "client_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem"
         },
         "disk_storage_dir" : "/opt/springtail/data/write_cache",
-        "memory_high_watermark": 8192,
-        "memory_low_watermark": 4096
+        "NOTE": "memory for write cache 640MB and 512MB",
+        "memory_high_watermark_bytes": 671088640,
+        "memory_low_watermark_bytes": 536870912
     },
     "sys_tbl_mgr": {
         "rpc_config" : {

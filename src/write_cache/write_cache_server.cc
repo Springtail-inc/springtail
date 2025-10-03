@@ -11,8 +11,8 @@ WriteCacheServer::WriteCacheServer() : Singleton<WriteCacheServer>(ServiceId::Wr
 
     // find storage directory path name
     Json::get_to(json, "disk_storage_dir", _disk_storage_dir);
-    Json::get_to(json, "memory_high_watermark", _memory_high_watermark);
-    Json::get_to(json, "memory_low_watermark", _memory_low_watermark);
+    Json::get_to(json, "memory_high_watermark_bytes", _memory_high_watermark_bytes);
+    Json::get_to(json, "memory_low_watermark_bytes", _memory_low_watermark_bytes);
 
     // remove storage directory if it exists
     std::error_code ec;
@@ -41,37 +41,34 @@ WriteCacheServer::WriteCacheServer() : Singleton<WriteCacheServer>(ServiceId::Wr
 void
 WriteCacheServer::add_extent(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data)
 {
-    std::unique_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
     uint64_t extent_size = data->byte_count();
     if (!_store_to_disk) {
-        index->add_extent(tid, pg_xid, lsn, data);
+        index->add_extent(tid, pg_xid, lsn, data, false);
 
-        _current_memory += extent_size;
-        _store_to_disk = (_current_memory > _memory_high_watermark);
+        std::unique_lock lock(_mem_mutex);
+        _current_memory_bytes += extent_size;
+        _store_to_disk = (_current_memory_bytes > _memory_high_watermark_bytes);
     } else {
         // add extent on disk
-        index->add_extent_on_disk(tid, pg_xid, lsn, data);
+        index->add_extent(tid, pg_xid, lsn, data, true);
     }
 }
 
 void
 WriteCacheServer::drop_table(uint64_t db_id, uint64_t tid, uint64_t pg_xid)
 {
-    std::unique_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
-    uint64_t index_mem_before = index->get_memory_in_use();
-    index->drop_table(tid, pg_xid);
-    uint64_t index_mem_after = index->get_memory_in_use();
-    _subtract_memory(index_mem_before - index_mem_after);
+    uint64_t memory_removed{0};
+    index->drop_table(tid, pg_xid, memory_removed);
+    _subtract_memory(memory_removed);
 }
 
 void
 WriteCacheServer::commit(uint64_t db_id, uint64_t xid, const std::vector<uint64_t>& pg_xids, WriteCacheTableSet::Metadata md)
 {
-    std::shared_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
     index->commit(pg_xids, xid, std::move(md));
 }
@@ -79,7 +76,6 @@ WriteCacheServer::commit(uint64_t db_id, uint64_t xid, const std::vector<uint64_
 void
 WriteCacheServer::commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid, WriteCacheTableSet::Metadata md)
 {
-    std::shared_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
     index->commit(pg_xid, xid, std::move(md));
 }
@@ -87,31 +83,26 @@ WriteCacheServer::commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid, WriteCac
 void
 WriteCacheServer::abort(uint64_t db_id, uint64_t pg_xid)
 {
-    std::unique_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
-    uint64_t index_mem_before = index->get_memory_in_use();
-    index->abort(pg_xid);
-    uint64_t index_mem_after = index->get_memory_in_use();
-    _subtract_memory(index_mem_before - index_mem_after);
+    uint64_t memory_removed{0};
+    index->abort(pg_xid, memory_removed);
+    _subtract_memory(memory_removed);
 }
 
 void
-WriteCacheServer::abort(uint64_t db_id, std::vector<uint64_t> pg_xids)
+WriteCacheServer::abort(uint64_t db_id, const std::vector<uint64_t> &pg_xids)
 {
-    std::unique_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
-    uint64_t index_mem_before = index->get_memory_in_use();
-    index->abort(pg_xids);
-    uint64_t index_mem_after = index->get_memory_in_use();
-    _subtract_memory(index_mem_before - index_mem_after);
+    uint64_t memory_removed{0};
+    index->abort(pg_xids, memory_removed);
+    _subtract_memory(memory_removed);
 }
 
 std::vector<uint64_t>
 WriteCacheServer::list_tables(uint64_t db_id, uint64_t xid, uint32_t count, uint64_t& cursor)
 {
-    std::shared_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
     std::vector<uint64_t> table_ids;
@@ -128,7 +119,6 @@ WriteCacheServer::list_tables(uint64_t db_id, uint64_t xid, uint32_t count, uint
 std::vector<WriteCacheIndexExtentPtr>
 WriteCacheServer::get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, WriteCacheTableSet::Metadata &md)
 {
-    std::shared_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
     std::vector<WriteCacheIndexExtentPtr> idx_extents =
@@ -140,31 +130,26 @@ WriteCacheServer::get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32
 void
 WriteCacheServer::evict_xid(uint64_t db_id, uint64_t xid)
 {
-    std::unique_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
-    uint64_t index_mem_before = index->get_memory_in_use();
-    index->evict_xid(xid);
-    uint64_t index_mem_after = index->get_memory_in_use();
-    _subtract_memory(index_mem_before - index_mem_after);
+    uint64_t memory_removed{0};
+    index->evict_xid(xid, memory_removed);
+    _subtract_memory(memory_removed);
 }
 
 void
 WriteCacheServer::evict_table(uint64_t db_id, uint64_t tid, uint64_t xid)
 {
-    std::unique_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
-    uint64_t index_mem_before = index->get_memory_in_use();
-    index->evict_table(tid, xid);
-    uint64_t index_mem_after = index->get_memory_in_use();
-    _subtract_memory(index_mem_before - index_mem_after);
+    uint64_t memory_removed{0};
+    index->evict_table(tid, xid, memory_removed);
+    _subtract_memory(memory_removed);
 }
 
 void
 WriteCacheServer::drop_database(uint64_t db_id)
 {
-    std::unique_lock lock(_mutex);
     WriteCacheIndexPtr index = _get_index(db_id);
 
     uint64_t index_mem = index->get_memory_in_use();
@@ -175,15 +160,16 @@ WriteCacheServer::drop_database(uint64_t db_id)
 nlohmann::json
 WriteCacheServer::get_memory_stats()
 {
-    std::shared_lock lock(_mutex);
+    std::shared_lock lock(_mem_mutex);
     nlohmann::json response = {
-        {"high water mark", _memory_high_watermark},
-        {"low water mark", _memory_low_watermark},
-        {"current memory", _current_memory},
-        {"store to disk", _store_to_disk}
+        {"high water mark", _memory_high_watermark_bytes},
+        {"low water mark", _memory_low_watermark_bytes},
+        {"current memory", _current_memory_bytes},
+        {"store to disk", _store_to_disk.load()}
     };
+    lock.unlock();
     response["databases"] = nlohmann::json::array();
-    for (auto [db_id, index]: _indexes) {
+    for (const auto &[db_id, index]: _indexes) {
         nlohmann::json database_data = {
             {"database id", db_id},
             {"current memory", index->get_memory_in_use()},
@@ -197,18 +183,16 @@ WriteCacheServer::get_memory_stats()
 void
 WriteCacheServer::_subtract_memory(uint64_t mem_size)
 {
-    _current_memory -= mem_size;
-    _store_to_disk = !(_current_memory <= _memory_low_watermark);
+    std::unique_lock lock(_mem_mutex);
+    _current_memory_bytes -= mem_size;
+    _store_to_disk = !(_current_memory_bytes <= _memory_low_watermark_bytes);
 }
 
-/**
-    * @brief Get the write cache index object
-    * @return std::shared_ptr<WriteCacheIndex>
-    */
 std::shared_ptr<WriteCacheIndex>
 WriteCacheServer::_get_index(uint64_t db_id)
 {
-    auto it = _indexes.find(db_id);
+    std::unique_lock lock(_db_mutex);
+     auto it = _indexes.find(db_id);
     if (it == _indexes.end()) {
         // create storage directory for the database
         std::filesystem::path db_storage_dir = _disk_storage_dir / std::to_string(db_id);

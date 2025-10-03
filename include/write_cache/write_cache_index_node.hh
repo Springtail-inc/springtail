@@ -79,10 +79,10 @@ namespace springtail {
         void add(WriteCacheIndexNodePtr entry);
 
         /** Remove child node by ID */
-        WriteCacheIndexNodePtr remove(uint64_t id);
+        WriteCacheIndexNodePtr remove(uint64_t id, uint64_t &memory_removed);
 
         /** Remove child node by node ptr */
-        WriteCacheIndexNodePtr remove(WriteCacheIndexNodePtr entry);
+        WriteCacheIndexNodePtr remove(WriteCacheIndexNodePtr entry, uint64_t &memory_removed);
 
         /** Remove child node if empty */
         void remove_child_if_empty(WriteCacheIndexNodePtr entry);
@@ -109,5 +109,9 @@ namespace springtail {
     private:
         /** Insert entry into children set, write lock must be held */
         WriteCacheIndexNodePtr _insert_child(WriteCacheIndexNodePtr entry);
+
+        /** Get memory stored in the extents under this node */
+        uint64_t _get_memory_size();
+
     };
 }

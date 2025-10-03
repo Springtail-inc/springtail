@@ -16,12 +16,10 @@ namespace springtail {
             std::chrono::steady_clock::time_point local_commit_ts; //local commit ts
         };
 
-        static constexpr int DEFAULT_TABLE_PARTITIONS = 8;
-
         /**
          * @brief Construct a new Write Cache Table Set object
          */
-        explicit WriteCacheTableSet(const std::filesystem::path &db_dir_path, int row_table_paritions=DEFAULT_TABLE_PARTITIONS);
+        explicit WriteCacheTableSet(const std::filesystem::path &db_dir_path);
 
         /**
          * @brief Add extent to table set
@@ -30,31 +28,20 @@ namespace springtail {
          * @param lsn LSN
          * @param data extent data
          */
-        void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data);
-
-        /**
-         * @brief Add extent on disk to table set
-         *
-         * @param tid table ID
-         * @param pg_xid Postgres XID
-         * @param lsn LSN
-         * @param extent_offset extent offset
-         * @param extent_size extent size
-         */
-        void add_extent_on_disk(uint64_t tid, uint64_t pg_xid, uint64_t lsn, uint64_t extent_offset, size_t extent_size);
+        void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data, bool on_disk);
 
         /**
          * @brief Drop table from set
          * @param tid table ID
          * @param pg_xid Postgres XID
          */
-        void drop_table(uint64_t tid, uint64_t pg_xid);
+        void drop_table(uint64_t tid, uint64_t pg_xid, uint64_t &memory_removed);
 
         /**
          * @brief Abort a transaction, remove data for pg xid
          * @param pg_xid
          */
-        void abort(uint64_t pg_xid);
+        void abort(uint64_t pg_xid, uint64_t &memory_removed);
 
         /**
          * @brief Add mapping from springtail XID to Postgres XID
@@ -103,14 +90,17 @@ namespace springtail {
          * @brief Evict all data for table, fixup indexes
          * @param tid table ID
          * @param xid springtail XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void evict_table(uint64_t tid, uint64_t xid);
+        void evict_table(uint64_t tid, uint64_t xid, uint64_t &memory_removed);
 
         /**
          * @brief Evict all data for XID, fixup indexes
          * @param xid
+         * @param memory_removed amount of memory freed by this function
+         * @param pg_xids_removed list of removed pg_xids
          */
-        void evict_xid(uint64_t xid);
+        void evict_xid(uint64_t xid, uint64_t &memory_removed, std::set<uint64_t> &pg_xids_removed);
 
         /**
          * @brief Helper utility to dump from _table_root
@@ -118,38 +108,10 @@ namespace springtail {
         void dump();
 
         /**
-         * @brief Get the a list of Postgres XIDs for given XID
+         * @brief Get the json stats object
          *
-         * @param xid - springtail XID
-         * @return std::set<uint64_t> - list of Postgres XIDs
+         * @return nlohmann::json
          */
-        std::set<uint64_t> get_pg_xids(uint64_t xid) { return _lookup_pgxid(xid); }
-
-        /**
-         * @brief Get the memory size used by the given Postgres XID
-         *
-         * @param pg_xid Postgres XID
-         * @return size_t size in use
-         */
-        size_t get_memory_size(uint64_t pg_xid);
-
-        /**
-         * @brief Get the memory size used by the given springtail XID and table
-         *
-         * @param tid table ID
-         * @param xid springtail XID
-         * @return size_t memory size in use
-         */
-        size_t get_memory_size(uint64_t tid, uint64_t xid);
-
-        /**
-         * @brief Get the memory size used by the given Postgres XID and table
-         *
-         * @param tid table ID
-         * @param pg_xid Postgres XID
-         * @return size_t memory size in use
-         */
-        size_t get_memory_size_for_pg_xid(uint64_t tid, uint64_t pg_xid);
         nlohmann::json get_stats();
 
     private:
@@ -167,6 +129,17 @@ namespace springtail {
 
         /** mutex for _xid_map and _xid_ts_map */
         std::shared_mutex _xid_map_mutex;
+
+        /**
+         * @brief Add extent on disk to table set
+         *
+         * @param tid table ID
+         * @param pg_xid Postgres XID
+         * @param lsn LSN
+         * @param extent_offset extent offset
+         * @param extent_size extent size
+         */
+        void _add_extent_on_disk(uint64_t pg_xid, ExtentPtr data, uint64_t &extent_offset, size_t &extent_size);
 
         /**
          * @brief Utility helper to dump tree from provided root
