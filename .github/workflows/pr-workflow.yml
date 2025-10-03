@@ -111,7 +111,7 @@ jobs:
   integration-test-join:
     needs: [ unit-test, integration-test-p1, integration-test-p2, integration-test-p3, integration-test-p4 ]
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.draft == false }}
+    if: ${{ always() && !cancelled() && github.event.pull_request.draft == false }}
     outputs:
       it_test_log_s3_uris: ${{ steps.set_outputs.outputs.it_test_log_s3_uris }}
       it_springtail_log_s3_uris: ${{ steps.set_outputs.outputs.it_springtail_log_s3_uris }}
