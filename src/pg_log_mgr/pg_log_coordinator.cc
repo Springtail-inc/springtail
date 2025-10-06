@@ -31,8 +31,7 @@ namespace springtail::pg_log_mgr {
         _committer_thread.join();
 
         if (AdminServer::exists()) {
-            std::string path = "/" + std::string(program_invocation_short_name);
-            AdminServer::get_instance()->deregister_get_route(path);
+            AdminServer::get_instance()->deregister_get_route("/info");
         }
     }
 

@@ -404,7 +404,9 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::_internal_shutdown()
     {
-        AdminServer::get_instance()->deregister_get_route("/proxy");
+        if (AdminServer::exists()) {
+            AdminServer::get_instance()->deregister_get_route("/info");
+        }
         LOG_INFO("Proxy server shutting down");
         notify_shutdown();
         _proxy_thread.join();
