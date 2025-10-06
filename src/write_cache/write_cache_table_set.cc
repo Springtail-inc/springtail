@@ -147,7 +147,67 @@ namespace springtail
 
         return result_cnt;
     }
+    
+    std::vector<std::vector<WriteCacheIndexExtentPtr>>
+    WriteCacheTableSet::get_all_extents(uint64_t tid, uint64_t xid, Metadata &md)
+    {
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Searching for extents for XID: {}, TID: {}", xid, tid);
 
+        int cursor = 0;
+        int start_offset = 0;
+
+        // lookup pg_xid
+        std::set<uint64_t> pg_xids = lookup_pgxid(xid, &md);
+
+        if (pg_xids.empty()) {
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "XID {} not found", xid);
+            return {};
+        }
+
+        std::vector<std::vector<WriteCacheIndexExtentPtr>> result;
+
+        // iterate through xids exclusive of start
+        for (auto &pg_xid: pg_xids) {
+            start_offset = cursor;
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Finding tids in PG XID: {}", pg_xid);
+
+            // fetch xid node for this xid
+            WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid);
+            if (xid_node == nullptr) {
+                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "PG XID {} not found", pg_xid);
+                return {};
+            }
+
+            WriteCacheIndexNodePtr tid_node = xid_node->find(tid);
+            if (tid_node == nullptr) {
+                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "TID {} not found", tid);
+                return {};
+            }
+
+            std::vector<WriteCacheIndexExtentPtr> extents;
+
+            // iterate through children adding to result set
+            std::shared_lock<std::shared_mutex> read_lock{tid_node->mutex};
+            auto itr = tid_node->children.begin();
+            while (itr != tid_node->children.end()) {
+                cursor++;
+
+                // check cursor offset, decr if above 0 and continue
+                if (start_offset > 0) {
+                    start_offset--;
+                    itr++;
+                    continue;
+                }
+
+                extents.push_back(std::make_shared<WriteCacheIndexExtent>(xid, (*itr)->id, (*itr)->data));
+                itr++;
+            }
+            read_lock.unlock();
+            result.push_back(extents);
+        }
+
+        return result;
+    }
     void
     WriteCacheTableSet::evict_xid(uint64_t xid)
     {

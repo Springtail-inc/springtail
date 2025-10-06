@@ -488,28 +488,22 @@ namespace springtail::committer {
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
 
         // retrieve extents and apply the mutations to them
-        uint64_t extent_cursor = 0;
         std::optional<WriteCacheTableSet::Metadata> min_md;
         time_trace::Trace process_extents_trace;
         TIME_TRACE_START(process_extents_trace);
 
         TxCounters tx_counters;
 
-        while (true) {
-            // XXX would be better if we could perform an async prefetch to reduce IO latency
-            WriteCacheTableSet::Metadata md;
-            auto &&extent_list = WriteCacheFuncImpl::get_extents(db_id, tid, xid, 1, extent_cursor, md);
-            if (!min_md || md.pg_commit_ts < min_md->pg_commit_ts) {
-                min_md = md;
-            }
+        WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
+        WriteCacheTableSet::Metadata md;
+        auto extent_lists = index->get_all_extents(tid, xid, md);
 
-            // if we didn't receive any extents then we're done
-            if (extent_list.empty()) {
-                break;
-            }
+        if (!extent_lists.empty()) {
+            min_md = md;
+        }
 
+        for (auto const& extent_list: extent_lists) {
 
-            // process each extent of ordered mutations
             for (auto &wc_extent : extent_list) {
 
                 // update the coordinator
@@ -519,6 +513,7 @@ namespace springtail::committer {
                 tx_counters += _process_extent(db_id, tid, table, wc_extent);
             }
         }
+
         TIME_TRACE_STOP(process_extents_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_extents-xid_{}", xid), process_extents_trace);
 

@@ -111,6 +111,8 @@ namespace springtail {
         std::vector<WriteCacheIndexExtentPtr> get_extents(uint64_t tid, uint64_t xid,
                                                           uint32_t count, uint64_t &cursor, WriteCacheTableSet::Metadata &md);
 
+        std::vector<std::vector<WriteCacheIndexExtentPtr>> get_all_extents(uint64_t tid, uint64_t xid, WriteCacheTableSet::Metadata &md);
+
     private:
         /** Set of partitions to hold table data, enables more parallelism */
         std::vector<std::shared_ptr<WriteCacheTableSet>> _partitions;

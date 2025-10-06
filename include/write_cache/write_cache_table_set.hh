@@ -97,6 +97,16 @@ namespace springtail {
                         uint64_t start_offset, uint64_t &cursor,
                         std::vector<WriteCacheIndexExtentPtr> &result, Metadata &md);
 
+
+        /**         * @brief Get all extents for a table at a given XID
+         * @param tid table ID
+         * @param xid springtail XID
+         * @param count number of items to return
+         * @param md out; metadata 
+         * @return vector of vectors of extents, one vector per pg_xid
+         */
+        std::vector<std::vector<WriteCacheIndexExtentPtr>> get_all_extents(uint64_t tid, uint64_t xid, Metadata &md);
+
         /**
          * @brief Evict all data for table, fixup indexes
          * @param tid table ID

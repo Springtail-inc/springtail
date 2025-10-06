@@ -99,6 +99,14 @@ namespace springtail
         return extents;
     }
 
+    std::vector<std::vector<WriteCacheIndexExtentPtr>> 
+    WriteCacheIndex::get_all_extents(uint64_t tid, uint64_t xid, WriteCacheTableSet::Metadata &md)
+    {
+        WriteCacheTableSetPtr partition = _get_partition(tid);
+        std::vector<WriteCacheIndexExtentPtr> extents;
+        return partition->get_all_extents(tid, xid, md);
+    }
+
     void
     WriteCacheIndex::evict_table(uint64_t tid, uint64_t xid)
     {
