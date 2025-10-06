@@ -102,28 +102,32 @@ namespace springtail::pg_proxy {
             pthread_setname_np(_keep_alive_thread.native_handle(), "KeepAlive");
         }
 
-        // register "/proxy" route with AdminServer
-        AdminServer::get_instance()->register_get_route(
-            "/proxy",
-            [this]([[maybe_unused]] const std::string &path, [[maybe_unused]] const httplib::Params &params, nlohmann::json &json_response){
-                if (!ProxyServer::_has_instance()) {
-                    json_response =  R"({})";
-                    return;
-                }
-                json_response = {
-                    {"socket_fd", _socket},
-                    {"event_fd", _efd},
-                    {"id", _id},
-                    {"sessions", nlohmann::json::object()}
-                };
-                for (const auto &[fd, session]: _sessions) {
-                    json_response["sessions"][std::to_string(fd)] = {
-                        {"name", session->name() },
-                        {"database", std::format("{}:{}", session->database(),session->database_id())},
-                        {"ready", session->is_ready()}
+        // register "/info" route with AdminServer
+        if (AdminServer::exists()) {
+            AdminServer::get_instance()->register_get_route(
+                "/info",
+                [this]([[maybe_unused]] const std::string &path,
+                        [[maybe_unused]] const httplib::Params &params,
+                        nlohmann::json &json_response) {
+                    if (!ProxyServer::_has_instance()) {
+                        json_response =  R"({})";
+                        return;
+                    }
+                    json_response = {
+                        {"socket_fd", _socket},
+                        {"event_fd", _efd},
+                        {"id", _id},
+                        {"sessions", nlohmann::json::object()}
                     };
-                }
-            });
+                    for (const auto &[fd, session]: _sessions) {
+                        json_response["sessions"][std::to_string(fd)] = {
+                            {"name", session->name() },
+                            {"database", std::format("{}:{}", session->database(),session->database_id())},
+                            {"ready", session->is_ready()}
+                        };
+                    }
+                });
+        }
         LOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
     }
 

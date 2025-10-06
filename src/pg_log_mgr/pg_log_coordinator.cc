@@ -1,6 +1,3 @@
-#include <fmt/format.h>
-#include <cstdint>
-
 #include <common/coordinator.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
@@ -64,13 +61,16 @@ namespace springtail::pg_log_mgr {
                 }
             }
         );
+
+        // register "/info" route with AdminServer
         if (AdminServer::exists()) {
             LOG_INFO("Registering admin server get path {}", program_invocation_short_name);
 
-            std::string path = "/" + std::string(program_invocation_short_name);
-            AdminServer::get_instance()->register_get_route(path,
+            AdminServer::get_instance()->register_get_route(
+                "/info",
                 []([[maybe_unused]] const std::string &path,
-                   [[maybe_unused]] const httplib::Params &params, nlohmann::json &json_response) {
+                   [[maybe_unused]] const httplib::Params &params,
+                   nlohmann::json &json_response) {
                     json_response["write_cache"] = WriteCacheServer::get_instance()->get_memory_stats();
                 });
         }
