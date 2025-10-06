@@ -667,8 +667,6 @@ namespace indexer_helpers {
         if (use_look_aside) {
             std::vector<std::string> look_aside_keys;
             look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
-            look_aside_keys.push_back(constant::INDEX_EID_FIELD);
-            look_aside_keys.push_back(constant::INDEX_RID_FIELD);
 
             _look_aside_schema = _schema->create_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys);
 
