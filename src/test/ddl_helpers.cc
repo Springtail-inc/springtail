@@ -59,25 +59,17 @@ namespace springtail::test::ddl_helpers {
     }
 
     std::shared_ptr<Tuple>
-        _create_key(const std::string &name)
-        {
-            auto k = std::make_shared<ConstTypeField<std::string>>(name);
-            std::vector<ConstFieldPtr> v({ k });
-            return std::make_shared<ValueTuple>(v);
+    _create_value(const std::vector<int32_t> &data)
+    {
+        std::vector<ConstFieldPtr> v;
+        v.reserve(data.size());
+
+        for (auto &d : data) {
+            v.push_back(std::make_shared<ConstTypeField<int32_t>>(d));
         }
 
-    std::shared_ptr<Tuple>
-        _create_value(const std::vector<int32_t> &data)
-        {
-            std::vector<ConstFieldPtr> v;
-            v.reserve(data.size());
-
-            for (auto &d : data) {
-                v.push_back(std::make_shared<ConstTypeField<int32_t>>(d));
-            }
-
-            return std::make_shared<ValueTuple>(v);
-        }
+        return std::make_shared<ValueTuple>(v);
+    }
 
     void populate_table(MutableTablePtr mtable, const std::vector<std::vector<int32_t>>& data, bool is_update)
     {
