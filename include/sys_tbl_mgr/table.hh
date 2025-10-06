@@ -212,6 +212,7 @@ namespace indexer_helpers {
 
             FieldPtr _extent_id_f;
             FieldPtr _row_id_f;
+            FieldPtr _internal_row_id_f;
 
             struct PageMapItem {
                 StorageCache::SafePagePtr page;
@@ -551,6 +552,20 @@ namespace indexer_helpers {
             return _schema;
         }
 
+        /**
+         * Returns the look aside schema of the table.
+         */
+        ExtentSchemaPtr look_aside_schema() const {
+            return _look_aside_schema;
+        }
+
+        /**
+         * Returns the look aside index of the table.
+         */
+        BTreePtr look_aside_index() const {
+            return _look_aside_index;
+        }
+
         std::filesystem::path get_dir_path() const
         {
             return _table_dir;
@@ -605,12 +620,16 @@ namespace indexer_helpers {
         std::filesystem::path _table_dir; ///< The directory holding the table data.
         std::vector<std::string> _primary_key; ///< The primary index key columns.
         ExtentSchemaPtr _schema; ///< The schema of the data extents for this table.
+        ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index for this table.
 
         FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
         FieldPtr _primary_extent_id_f; ///< The field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
         BTreePtr _primary_index;
+
+        /** Look aside index **/
+        BTreePtr _look_aside_index;
 
 
         /** A map of secondary indexes
@@ -645,8 +664,7 @@ namespace indexer_helpers {
                      const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
-                     bool for_gc = false,
-                     bool use_look_aside = true);
+                     bool for_gc = false);
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -941,6 +959,8 @@ namespace indexer_helpers {
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
         MutableFieldPtr _roots_index_id_f; ///< The field accessor for the tree roots index ids stored within each row of the "roots" file.
+        MutableFieldPtr _roots_last_internal_row_id_f; ///< The field accessor for the last_internal_row_id
+                                                       ///stored within each row of the "roots" file
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats; ///< The stats for the table.

@@ -157,9 +157,8 @@ namespace springtail::pg_log_mgr {
 
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
-        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
 
-        std::vector<SchemaColumn> new_columns{op, lsn, internal_row_id};
+        std::vector<SchemaColumn> new_columns{op, lsn};
 
         schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
 
@@ -269,7 +268,7 @@ namespace springtail::pg_log_mgr {
             if (entry.schema == nullptr) {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, true);
+                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, true, false);
                 }
                 entry.update_schema();
             }
@@ -358,7 +357,7 @@ namespace springtail::pg_log_mgr {
                 XidLsn current(current_xid);
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current, true);
+                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current, true, false);
                 }
                 entry.update_schema();
             }
@@ -581,7 +580,7 @@ namespace springtail::pg_log_mgr {
                         });
             }
 
-            entry.table_schema = std::make_shared<ExtentSchema>(columns, true);
+            entry.table_schema = std::make_shared<ExtentSchema>(columns, true, false);
             entry.update_schema();
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set

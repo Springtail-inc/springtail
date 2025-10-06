@@ -225,7 +225,7 @@ Service::_upsert_index_name(uint64_t db_id,
 
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         index_info.namespace_id(), index_info.name(), index_info.table_id(), index_info.id(), xid.xid, xid.lsn,
-        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique);
+        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique, index_names_t->get_next_internal_row_id());
 
     // update the index state
     index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
@@ -633,6 +633,9 @@ Service::_create_table(const proto::TableRequest& request)
     proto::RootInfo* ri = roots_info->add_roots();
     ri->set_index_id(constant::INDEX_PRIMARY);
     ri->set_extent_id(constant::UNKNOWN_EXTENT);
+    proto::RootInfo* la_ri = roots_info->add_roots();
+    la_ri->set_index_id(constant::INDEX_LOOK_ASIDE);
+    la_ri->set_extent_id(constant::UNKNOWN_EXTENT);
     roots_info->set_snapshot_xid(request.snapshot_xid());
 
     _set_roots_info(request.db_id(), request.table().id(), xid, roots_info);
@@ -1066,7 +1069,7 @@ Service::_mutate_namespace(
     // add the namespace to the namespace_names table
     auto table = _get_mutable_system_table(db_id, sys_tbl::NamespaceNames::ID);
     auto tuple =
-        sys_tbl::NamespaceNames::Data::tuple(ns_id, (name) ? *name : "", xid.xid, xid.lsn, exists);
+        sys_tbl::NamespaceNames::Data::tuple(ns_id, (name) ? *name : "", xid.xid, xid.lsn, exists, table->get_next_internal_row_id());
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
@@ -1800,7 +1803,7 @@ Service::_mutate_usertype(uint64_t db_id,
     // add the type to the user types table
     auto table = _get_mutable_system_table(db_id, sys_tbl::UserTypes::ID);
     auto tuple =
-        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists);
+        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists, table->get_next_internal_row_id());
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
@@ -2162,7 +2165,7 @@ Service::_set_table_info(uint64_t db_id, TableCacheRecordPtr table_info)
                                          table_info->xid, table_info->lsn, table_info->exists,
                                          table_info->parent_table_id, table_info->partition_key,
                                          table_info->partition_bound, table_info->rls_enabled,
-                                         table_info->rls_forced);
+                                         table_info->rls_forced, table_names_t->get_next_internal_row_id());
     table_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 }
 
@@ -2370,7 +2373,7 @@ Service::_set_roots_info(uint64_t db_id,
     auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
     for (auto const& r : roots_info->roots()) {
         auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, r.index_id(), xid.xid,
-                                                      r.extent_id(), roots_info->snapshot_xid());
+                                                      r.extent_id(), roots_info->snapshot_xid(), table_roots_t->get_next_internal_row_id());
         table_roots_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
@@ -2382,7 +2385,7 @@ Service::_set_roots_info(uint64_t db_id,
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
     auto tuple =
         sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(),
-                roots_info->stats().end_offset(), roots_info->stats().last_internal_row_id());
+                roots_info->stats().end_offset(), roots_info->stats().last_internal_row_id(), table_stats_t->get_next_internal_row_id());
     table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
@@ -3102,7 +3105,7 @@ Service::_set_schema_info(uint64_t db_id,
             table_id, history.column().position(), history.xid(), history.lsn(), history.exists(),
             history.column().name(), history.column().type(),
             history.column().pg_type(),  // pg type oid
-            history.column().is_nullable(), value, history.update_type());
+            history.column().is_nullable(), value, history.update_type(), schemas_t->get_next_internal_row_id());
         schemas_t->upsert(tuple, constant::UNKNOWN_EXTENT);
     }
 }
@@ -3244,6 +3247,7 @@ Service::_write_index(const XidLsn& xid,
     auto indexes_t = _get_mutable_system_table(db_id, sys_tbl::Indexes::ID);
     auto fields = sys_tbl::Indexes::Data::fields(tab_id, index_id, xid.xid, xid.lsn,
                                                  0,   // empty position; filled below
+                                                 0,   // empty column ID; filled below
                                                  0);  // empty column ID; filled below
 
     for (auto&& entry : keys) {
@@ -3251,6 +3255,10 @@ Service::_write_index(const XidLsn& xid,
             std::make_shared<ConstTypeField<uint32_t>>(entry.first);
         fields->at(sys_tbl::Indexes::Data::COLUMN_ID) =
             std::make_shared<ConstTypeField<uint32_t>>(entry.second);
+
+        auto internal_row_id = indexes_t->get_next_internal_row_id();
+        fields->at(sys_tbl::Indexes::Data::INTERNAL_ROW_ID) =
+            std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
 
         indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr),
                           constant::UNKNOWN_EXTENT);

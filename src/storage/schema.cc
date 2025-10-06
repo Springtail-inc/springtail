@@ -159,11 +159,10 @@ namespace springtail {
         return get_mutable_field(name);
     }
 
-    std::shared_ptr<ExtentSchema>
-    ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
+    std::vector<SchemaColumn>
+    ExtentSchema::_get_all_columns_for_schema(const std::vector<std::string> &old_columns,
                                 const std::vector<SchemaColumn> &new_columns,
-                                const std::vector<std::string> &sort_columns,
-                                bool allow_undefined) const
+                                const std::vector<std::string> &sort_columns) const
     {
         // create SchemaColumn entries for the existing fields
         std::vector<SchemaColumn> all_columns;
@@ -205,6 +204,29 @@ namespace springtail {
             all_columns.back().position = size;
         }
 
+        return all_columns;
+    }
+
+
+    std::shared_ptr<ExtentSchema>
+    ExtentSchema::create_index_schema(const std::vector<std::string> &old_columns,
+                                      const std::vector<SchemaColumn> &new_columns,
+                                      const std::vector<std::string> &sort_columns,
+                                      bool allow_undefined) const
+    {
+        auto&& all_columns = _get_all_columns_for_schema(old_columns, new_columns, sort_columns);
+
+        // create the new ExtentSchema without internal_row_id
+        return std::make_shared<ExtentSchema>(all_columns, allow_undefined, false);
+    }
+
+    std::shared_ptr<ExtentSchema>
+    ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
+                                const std::vector<SchemaColumn> &new_columns,
+                                const std::vector<std::string> &sort_columns,
+                                bool allow_undefined) const
+    {
+        auto&& all_columns = _get_all_columns_for_schema(old_columns, new_columns, sort_columns);
         // create the new ExtentSchema
         return std::make_shared<ExtentSchema>(all_columns, allow_undefined);
     }

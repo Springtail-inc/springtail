@@ -201,6 +201,10 @@ namespace springtail {
         /** The sort column names of the schema. */
         std::vector<std::string> _sort_keys;
 
+        std::vector<SchemaColumn>
+        _get_all_columns_for_schema(const std::vector<std::string> &old_columns,
+                      const std::vector<SchemaColumn> &new_columns,
+                      const std::vector<std::string> &sort_columns) const;
     protected:
         /**
          * Construct the set of column fields based on the column definitions.
@@ -214,13 +218,14 @@ namespace springtail {
          * @param columns Map from column position to the SchemaColumn definition.
          */
         explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false,
-                bool include_internal_row_id = false) {
+                bool include_internal_row_id = true) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
             }
 
             if (include_internal_row_id) {
+                // Add internal_row_id to the extent_schema
                 auto next_key = column_map.empty() ? 0 : column_map.rbegin()->first + 1;
                 SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, next_key, SchemaType::UINT64, 0, false);
                 column_map.try_emplace(next_key, internal_row_id);
@@ -235,13 +240,15 @@ namespace springtail {
          * @param columns Map from column position to the SchemaColumn definition.
          */
         explicit ExtentSchema(std::map<uint32_t, SchemaColumn> columns, bool allow_undefined = false,
-                bool include_internal_row_id = false)
+                bool include_internal_row_id = true)
         {
             if (include_internal_row_id) {
+                // Add internal_row_id to the extent_schema
                 auto next_key = columns.empty() ? 0 : columns.rbegin()->first + 1;
                 SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, next_key, SchemaType::UINT64, 0, false);
                 columns.try_emplace(next_key, internal_row_id);
             }
+
             _populate(columns, allow_undefined);
         }
 
@@ -297,6 +304,11 @@ namespace springtail {
                       const std::vector<std::string> &sort_columns,
                       bool allow_undefined = false) const;
 
+        std::shared_ptr<ExtentSchema>
+        create_index_schema(const std::vector<std::string> &old_columns,
+                      const std::vector<SchemaColumn> &new_columns,
+                      const std::vector<std::string> &sort_columns,
+                      bool allow_undefined = false) const;
         /**
          * Retrieve the list of column pg types.
          * @return std::vector<int32_t, int>

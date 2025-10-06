@@ -39,6 +39,7 @@ public:
         static constexpr uint32_t PARTITION_BOUND = 8; ///< Partition bound expression for partitioned tables
         static constexpr uint32_t RLS_ENABLED = 9; // Row Level Security enabled for this table
         static constexpr uint32_t RLS_FORCED = 10; // Row Level Security force for table owner
+        static constexpr uint64_t INTERNAL_ROW_ID = 11;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -52,9 +53,10 @@ public:
                               const std::optional<std::string> &partition_key,
                               const std::optional<std::string> &partition_bound,
                               bool rls_enabled,
-                              bool rls_forced)
+                              bool rls_forced,
+                              uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(11);
+            auto fields = std::make_shared<FieldArray>(12);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
@@ -78,6 +80,7 @@ public:
             }
             fields->at(RLS_ENABLED) = std::make_shared<ConstTypeField<bool>>(rls_enabled);
             fields->at(RLS_FORCED) = std::make_shared<ConstTypeField<bool>>(rls_forced);
+            fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -128,6 +131,7 @@ public:
         static constexpr uint32_t XID = 2;
         static constexpr uint32_t EXTENT_ID = 3;
         static constexpr uint32_t SNAPSHOT_XID = 4;
+        static constexpr uint64_t INTERNAL_ROW_ID = 5;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -135,14 +139,16 @@ public:
                               uint64_t index_id,
                               uint64_t xid,
                               uint64_t extent_id,
-                              uint64_t snapshot_xid)
+                              uint64_t snapshot_xid,
+                              uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(5);
+            auto fields = std::make_shared<FieldArray>(6);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(EXTENT_ID) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
             fields->at(SNAPSHOT_XID) = std::make_shared<ConstTypeField<uint64_t>>(snapshot_xid);
+            fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -181,6 +187,7 @@ public:
         static constexpr uint32_t LSN = 3;
         static constexpr uint32_t POSITION = 4;
         static constexpr uint32_t COLUMN_ID = 5;
+        static constexpr uint64_t INTERNAL_ROW_ID = 6;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -189,15 +196,17 @@ public:
                                     uint64_t xid,
                                     uint64_t lsn,
                                     uint32_t position,
-                                    uint32_t column_id)
+                                    uint32_t column_id,
+                                    uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(6);
+            auto fields = std::make_shared<FieldArray>(7);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
             fields->at(POSITION) = std::make_shared<ConstTypeField<uint32_t>>(position);
             fields->at(COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(column_id);
+            fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return fields;
         }
     };
@@ -244,6 +253,7 @@ public:
         static constexpr uint32_t NULLABLE = 8;
         static constexpr uint32_t DEFAULT = 9;
         static constexpr uint32_t UPDATE_TYPE = 10;
+        static constexpr uint64_t INTERNAL_ROW_ID = 11;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -257,9 +267,10 @@ public:
                               int32_t pg_type,
                               bool nullable,
                               const std::optional<std::string> &default_value,
-                              uint8_t update_type)
+                              uint8_t update_type,
+                              uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(11);
+            auto fields = std::make_shared<FieldArray>(12);
 
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(POSITION) = std::make_shared<ConstTypeField<uint32_t>>(position);
@@ -276,6 +287,7 @@ public:
                 fields->at(DEFAULT) = std::make_shared<ConstNullField>(SchemaType::TEXT);
             }
             fields->at(UPDATE_TYPE) = std::make_shared<ConstTypeField<uint8_t>>(update_type);
+            fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
 
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
@@ -318,18 +330,21 @@ public:
         static constexpr uint32_t ROW_COUNT = 2;
         static constexpr uint32_t END_OFFSET = 3;
         static constexpr uint32_t LAST_INTERNAL_ROW_ID = 4;
+        static constexpr uint64_t INTERNAL_ROW_ID = 5;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
         static TuplePtr tuple(uint64_t table_id, uint64_t xid, uint64_t row_count,
-                uint64_t end_offset, uint64_t last_internal_row_id)
+                uint64_t end_offset, uint64_t last_internal_row_id,
+                uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(5);
+            auto fields = std::make_shared<FieldArray>(6);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(ROW_COUNT) = std::make_shared<ConstTypeField<uint64_t>>(row_count);
             fields->at(END_OFFSET) = std::make_shared<ConstTypeField<uint64_t>>(end_offset);
             fields->at(LAST_INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(last_internal_row_id);
+            fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -369,6 +384,7 @@ public:
         static constexpr uint32_t NAME = 5;
         static constexpr uint32_t STATE = 6;
         static constexpr uint32_t IS_UNIQUE = 7;
+        static constexpr uint64_t INTERNAL_ROW_ID = 8;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -379,9 +395,10 @@ public:
                               uint64_t xid,
                               uint64_t lsn,
                               State state,
-                              bool is_unique)
+                              bool is_unique,
+                              uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(8);
+            auto fields = std::make_shared<FieldArray>(9);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
@@ -391,6 +408,7 @@ public:
             fields->at(STATE) =
                 std::make_shared<ConstTypeField<uint8_t>>(static_cast<uint8_t>(state));
             fields->at(IS_UNIQUE) = std::make_shared<ConstTypeField<bool>>(is_unique);
+            fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -431,18 +449,21 @@ public:
         static constexpr uint32_t XID = 2;
         static constexpr uint32_t LSN = 3;
         static constexpr uint32_t EXISTS = 4;
+        static constexpr uint64_t INTERNAL_ROW_ID = 5;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
         static TuplePtr tuple(
-            uint64_t namespace_id, const std::string &name, uint64_t xid, uint64_t lsn, bool exists)
+            uint64_t namespace_id, const std::string &name, uint64_t xid, uint64_t lsn, bool exists,
+                              uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(5);
+            auto fields = std::make_shared<FieldArray>(6);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
             fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
+            fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -504,6 +525,7 @@ public:
         static constexpr uint32_t LSN = 5;
         static constexpr uint32_t TYPE = 6;  // 'E'
         static constexpr uint32_t EXISTS = 7;
+        static constexpr uint64_t INTERNAL_ROW_ID = 8;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -515,9 +537,10 @@ public:
             uint64_t xid,
             uint64_t lsn,
             uint8_t type,
-            bool exists)
+            bool exists,
+            uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(8);
+            auto fields = std::make_shared<FieldArray>(9);
             fields->at(TYPE_ID) = std::make_shared<ConstTypeField<uint64_t>>(type_id);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
@@ -526,6 +549,7 @@ public:
             fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
             fields->at(TYPE) = std::make_shared<ConstTypeField<uint8_t>>(type);
             fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
+            fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };

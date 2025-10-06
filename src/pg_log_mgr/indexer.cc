@@ -527,7 +527,7 @@ namespace springtail::committer {
                 // Get the table at the next XID
                 // and fetch the page for the extent
                 auto next_xid = next_extent->header().xid;
-                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid), false, true);
+                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
 
                 // If previous offset exists and not processed before, lets invalidate that first
                 if (auto prev_eid = next_extent->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT
@@ -536,7 +536,7 @@ namespace springtail::committer {
                     // Get the previous extent and its schema
                     auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
                     auto prev_xid = prev_extent->header().xid;
-                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid), false, true);
+                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
                     auto internal_row_id_f = prev_schema->get_field(constant::INTERNAL_ROW_ID);
 
                     // and invalidate index for the rows in the prev page

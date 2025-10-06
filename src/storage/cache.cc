@@ -896,7 +896,8 @@ StorageCache::PageCache::background_cleaner()
 
     bool
     StorageCache::Page::upsert(TuplePtr tuple,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               std::function<void(Extent::Row)> index_mutation_handler)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -911,6 +912,9 @@ StorageCache::PageCache::background_cleaner()
             // insert the tuple into the extent
             auto row = (*extent)->append();
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+
+            // Invoke callback to mutation indexes
+            index_mutation_handler(row);
 
             return true;
         }
@@ -947,11 +951,14 @@ StorageCache::PageCache::background_cleaner()
             // update the existing row
             auto row = *row_i;
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
-            did_insert = true;
         } else {
             // insert the tuple into the extent
             auto &&row = (*extent)->insert(row_i);
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+            did_insert = true;
+
+            // Invoke callback to mutation indexes
+            index_mutation_handler(row);
         }
 
         // check for split
