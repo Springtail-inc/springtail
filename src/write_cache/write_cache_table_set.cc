@@ -365,8 +365,8 @@ namespace springtail
         // use a set to ensure xids are sorted
         std::set<uint64_t> result;
         std::shared_lock<std::shared_mutex> lock(_xid_map_mutex);
-        auto range = _xid_map.equal_range(xid);
-        for (auto itr = range.first; itr != range.second; itr++) {
+        auto [range_begin, range_end] = _xid_map.equal_range(xid);
+        for (auto itr = range_begin; itr != range_end; itr++) {
             result.insert(itr->second);
         }
         if (md != nullptr) {

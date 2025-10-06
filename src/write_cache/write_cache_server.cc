@@ -203,7 +203,7 @@ std::shared_ptr<WriteCacheIndex>
 WriteCacheServer::_get_index(uint64_t db_id)
 {
     // upgrade_lock allows shared read initially, and can be upgraded to unique
-    boost::upgrade_lock<boost::shared_mutex> shared_lock(_db_mutex);
+    boost::upgrade_lock shared_lock(_db_mutex);
 
     // try to find the database and return it if it found
     auto it = _indexes.find(db_id);
@@ -218,7 +218,7 @@ WriteCacheServer::_get_index(uint64_t db_id)
     CHECK(!ec) << ec.message();
 
     // Atomically upgrade to exclusive lock
-    boost::upgrade_to_unique_lock<boost::shared_mutex> unique_lock(shared_lock);
+    boost::upgrade_to_unique_lock unique_lock(shared_lock);
 
     // insert new database
     it = _indexes.emplace(db_id, std::make_shared<WriteCacheIndex>(db_storage_dir)).first;

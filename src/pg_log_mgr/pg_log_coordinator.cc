@@ -69,7 +69,8 @@ namespace springtail::pg_log_mgr {
 
             std::string path = "/" + std::string(program_invocation_short_name);
             AdminServer::get_instance()->register_get_route(path,
-                [](const std::string &path, const httplib::Params &params, nlohmann::json &json_response) {
+                []([[maybe_unused]] const std::string &path,
+                   [[maybe_unused]] const httplib::Params &params, nlohmann::json &json_response) {
                     json_response["write_cache"] = WriteCacheServer::get_instance()->get_memory_stats();
                 });
         }
