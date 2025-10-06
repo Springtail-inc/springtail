@@ -476,10 +476,10 @@ namespace springtail {
         std::pair<std::shared_ptr<Extent>, std::shared_ptr<Extent>> split(ExtentSchemaPtr schema);
 
         std::future<std::shared_ptr<IOResponseAppend>>
-        async_flush(std::shared_ptr<IOHandle> handle)
+        async_flush(std::shared_ptr<IOHandle> handle, io_append_callback_fn callback = {})
         {
             std::shared_ptr<std::vector<char>> header = std::make_shared<std::vector<char>>(_header.pack());
-            return handle->async_append({header, _fixed_data, _variable_data}, nullptr);
+            return handle->async_append({header, _fixed_data, _variable_data}, callback);
         }
 
         std::string serialize()
