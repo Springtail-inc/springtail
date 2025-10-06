@@ -25,6 +25,7 @@ target_link_libraries(springtail_write_cache
     PUBLIC
     springtail_common
     springtail_grpc
+    springtail_storage
     proto_write_cache
     PRIVATE
     nlohmann_json::nlohmann_json
@@ -39,3 +40,10 @@ springtail_unit_test(test_wc_index
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_write_cache GTest::gtest_main
 )
+
+springtail_unit_test(test_wc_server
+  SOURCES test/test_wc_server.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_write_cache GTest::gtest_main
+)
+

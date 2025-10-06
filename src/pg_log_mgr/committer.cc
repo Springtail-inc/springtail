@@ -8,7 +8,7 @@
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-#include <write_cache/write_cache_func.hh>
+#include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_log_mgr/committer.hh>
@@ -161,6 +161,7 @@ namespace springtail::committer {
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true);
                 }
                 _completed_xids[db_id] = completed_xid;
+                WriteCacheServer::get_instance()->evict_xid(db_id, completed_xid);
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // notify everyone that the database is now in the "ready" state
@@ -202,7 +203,7 @@ namespace springtail::committer {
             bool tid_done = false;
             while (!tid_done) {
                 // query the write cache for the tables modified through this XID
-                auto table_list = WriteCacheFuncImpl::list_tables(db_id, xid, 100, table_cursor);
+                auto table_list = WriteCacheServer::get_instance()->list_tables(db_id, xid, 100, table_cursor);
 
                 LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Got {} tables from the write cache", table_list.size());
 
@@ -298,6 +299,7 @@ namespace springtail::committer {
             if (result->type() != XidReady::Type::RECONCILE_INDEX) {
                 result->notify_tracker(xid);
             }
+            WriteCacheServer::get_instance()->evict_xid(db_id, xid);
 
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
         }
@@ -498,7 +500,8 @@ namespace springtail::committer {
         while (true) {
             // XXX would be better if we could perform an async prefetch to reduce IO latency
             WriteCacheTableSet::Metadata md;
-            auto &&extent_list = WriteCacheFuncImpl::get_extents(db_id, tid, xid, 1, extent_cursor, md);
+            auto &&extent_list = WriteCacheServer::get_instance()->get_extents(db_id, tid, xid, 1, extent_cursor, md);
+            // TODO: this should probably be done after we verified that extent_list is not empty
             if (!min_md || md.pg_commit_ts < min_md->pg_commit_ts) {
                 min_md = md;
             }
@@ -562,7 +565,7 @@ namespace springtail::committer {
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration1.count());
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(TRANSACTION_LATENCIES, duration2.count());
 
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Transaction latency: xid={}, transaction_latency={}, finalize_latency={}", 
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Transaction latency: xid={}, transaction_latency={}, finalize_latency={}",
                     xid, duration2, duration1);
         }
 

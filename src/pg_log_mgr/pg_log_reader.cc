@@ -1,6 +1,4 @@
-#include <any>
 #include <chrono>
-#include <codecvt>
 #include <memory>
 #include <thread>
 
@@ -15,7 +13,7 @@
 #include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-#include <write_cache/write_cache_func.hh>
+#include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::pg_log_mgr {
@@ -78,7 +76,7 @@ namespace springtail::pg_log_mgr {
                 if (entry.second.extent == nullptr) {
                     continue;
                 }
-                WriteCacheFuncImpl::add_extent(_db, entry.first, txn_entry.first,
+                WriteCacheServer::get_instance()->add_extent(_db, entry.first, txn_entry.first,
                                                entry.second.start_lsn, entry.second.extent);
             }
 
@@ -98,7 +96,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // assign an XID to the committed transaction and update the mappings in the write cache
-        WriteCacheFuncImpl::commit(_db, xid, pg_xids, std::move(md));
+        WriteCacheServer::get_instance()->commit(_db, xid, pg_xids, std::move(md));
 
         // stop timing for this transaction
         if (_span->IsRecording()) {
@@ -119,7 +117,7 @@ namespace springtail::pg_log_mgr {
         // drop any batches for all active txns
         for (auto &&entry : _txns) {
             auto txn = entry.second;
-            WriteCacheFuncImpl::abort(_db, txn->pg_xid);
+            WriteCacheServer::get_instance()->abort(_db, txn->pg_xid);
         }
 
         // stop timing for this transaction
@@ -142,7 +140,7 @@ namespace springtail::pg_log_mgr {
         assert(itr != _txns.end());
 
         // abort any batches associated with this txn sent to the WriteCache
-        WriteCacheFuncImpl::abort(_db, itr->second->pg_xid);
+        WriteCacheServer::get_instance()->abort(_db, itr->second->pg_xid);
 
         // note: the schema changes will be lost when this txn is removed from the active set
         _txns.erase(itr);
@@ -307,7 +305,7 @@ namespace springtail::pg_log_mgr {
 
         // if the batch has grown to the maximum size, pass it to the WriteCache
         if (entry.extent->byte_count() > MAX_BATCH_SIZE) {
-            WriteCacheFuncImpl::add_extent(_db, tid, pg_xid, entry.start_lsn, entry.extent);
+            WriteCacheServer::get_instance()->add_extent(_db, tid, pg_xid, entry.start_lsn, entry.extent);
             entry.extent = nullptr;
         }
         TIME_TRACE_STOP(add_mutation_trace);
@@ -348,7 +346,7 @@ namespace springtail::pg_log_mgr {
             }
 
             // if we sent any batches to the WriteCache, evict them
-            WriteCacheFuncImpl::drop_table(_db, tid, pg_xid);
+            WriteCacheServer::get_instance()->drop_table(_db, tid, pg_xid);
 
             // XXX if this is a subtxn, then once it's committed, we could also drop any earlier
             //     mutations to the table in it's parent pg xid, but it's not strictly necessary
@@ -557,7 +555,7 @@ namespace springtail::pg_log_mgr {
 
         // push any data mutations into the write cache since the schema is going to change
         if (entry.extent) {
-            WriteCacheFuncImpl::add_extent(_db, oid, pg_xid,
+            WriteCacheServer::get_instance()->add_extent(_db, oid, pg_xid,
                                            entry.start_lsn, entry.extent);
             entry.extent = nullptr;
         }
@@ -625,7 +623,7 @@ namespace springtail::pg_log_mgr {
                 auto &table = entry.second;
 
                 // send the current extent to the WriteCache
-                WriteCacheFuncImpl::add_extent(_db, entry.first, _cur_txn->pg_xid,
+                WriteCacheServer::get_instance()->add_extent(_db, entry.first, _cur_txn->pg_xid,
                                                table.start_lsn, table.extent);
                 table.extent = nullptr;
 
@@ -695,7 +693,7 @@ namespace springtail::pg_log_mgr {
         for ( auto table_oid : table_oids ) {
             // drop any mutations that are in the WriteCache for this TID at this XID
             for (auto pg_xid : pg_xids) {
-                WriteCacheFuncImpl::drop_table(_db, table_oid, pg_xid);
+                WriteCacheServer::get_instance()->drop_table(_db, table_oid, pg_xid);
             }
 
             // Add a message to skip indexes for this table

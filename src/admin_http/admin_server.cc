@@ -1,3 +1,5 @@
+#include <errno.h>
+
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -87,18 +89,13 @@ namespace springtail {
         // get ip and port
         std::string ip_port = _svr.get_bind_ip_port();
 
-        // get process name
-        std::ifstream comm("/proc/self/comm");
-        std::string process_name;
-        std::getline(comm, process_name);
-
         // get instance id and instance key
         uint64_t instance_id = Properties::get_db_instance_id();
         std::string instance_key = Properties::get_instance_key();
 
         // create hash name and hash key
         std::string hash_name = fmt::format(redis::ADMIN_CONSOLE, instance_id);
-        std::string hash_key = fmt::format("{}:{}", instance_key, process_name);
+        std::string hash_key = fmt::format("{}:{}", instance_key, program_invocation_short_name);
 
         // Update redis info
         auto [db_id, redis_client] = RedisMgr::get_instance()->create_client(true);
