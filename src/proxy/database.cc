@@ -101,6 +101,17 @@ namespace springtail::pg_proxy
         _remove_entry(cache_entry.key);
     }
 
+    size_t
+    DatabasePool::shutdown()
+    {
+        std::unique_lock lock(_mutex);
+        size_t num_sessions = _cache.size();
+        while (!_cache.empty()) {
+            _evict_next();
+        }
+        return num_sessions;
+    }
+
     void
     DatabasePool::_insert(const SessionKey &key, ServerSessionWeakPtr value)
     {
@@ -117,13 +128,23 @@ namespace springtail::pg_proxy
             DCHECK(result.second);
             it = result.first;
         }
+
         uint64_t expiration_time = std::numeric_limits<uint64_t>::max();
         if (_expiration_interval != 0) {
             expiration_time = now + _expiration_interval;
         }
+
         SessionEntry entry = {key, value, expiration_time};
         _cache.emplace_front(entry);
         it->second.push_front(_cache.begin());
+    }
+
+    bool
+    DatabasePool::has_session(uint64_t db_id, const std::string &username) const
+    {
+        SessionKey key = std::make_pair(db_id, username);
+        std::shared_lock lock(_mutex);
+        return _lookup.contains(key);
     }
 
     ServerSessionPtr
@@ -133,10 +154,13 @@ namespace springtail::pg_proxy
         if (it == _lookup.end() || it->second.empty()) {
             return nullptr;
         }
+
         auto &&cache_it = it->second.front();
         SessionEntry &entry = *(cache_it);
+
         _cache.erase(cache_it);
         it->second.pop_front();
+
         return entry.value.lock();
     }
 
@@ -145,6 +169,8 @@ namespace springtail::pg_proxy
     void
     DatabaseSet::_remove_instance(DatabaseInstancePtr instance)
     {
+        DCHECK_EQ(instance->is_active(), false);
+
         // remove from sessions map
         auto instance_it = _sessions.find(instance);
         if (instance_it != _sessions.end()) {
@@ -154,11 +180,9 @@ namespace springtail::pg_proxy
         // remove from instance sessions map
         auto session_it = _instance_sessions.find(instance);
         if (session_it != _instance_sessions.end()) {
+            DCHECK(session_it->second == 0);
             _instance_sessions.erase(session_it);
         }
-
-        // XXX Not handling removing instance with in-use sessions
-        // those should be handled by the session release
     }
 
     void
@@ -205,13 +229,14 @@ namespace springtail::pg_proxy
 
     void
     DatabaseSet::_release_session(ServerSessionPtr session,
-                                  int num_instances,
                                   bool deallocate)
     {
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Session being released: [S:{:d}]", session->id());
+        LOG_INFO("Session being released: [S:{:d}]", session->id());
 
-        // deallocate if connection is closed or database id is invalid
-        if (session->is_connection_closed() || session->database_id() == constant::INVALID_DB_ID) {
+        // deallocate if connection is closed or database id is invalid, or instance is not active
+        if (session->is_connection_closed() ||
+            session->database_id() == constant::INVALID_DB_ID ||
+            session->get_instance()->is_active() == false) {
             deallocate = true;
         }
 
@@ -281,6 +306,11 @@ namespace springtail::pg_proxy
         DatabaseInstancePtr instance = nullptr;
         int min_sessions = INT_MAX;
         for (auto &it : _instance_sessions) {
+            // skip those shutting down
+            if (!it.first->is_active()) {
+                continue;
+            }
+
             int num_sessions = it.second;
             if (num_sessions < min_sessions) {
                 min_sessions = num_sessions;
@@ -291,15 +321,167 @@ namespace springtail::pg_proxy
         return instance;
     }
 
+    ServerSessionPtr
+    DatabaseSet::get_pooled_session(uint64_t db_id,
+                                    const std::string &username)
+    {
+        // called from dbmgr->get_pooled_session()
+        // get a free session from the pool if possible
+
+        std::shared_lock lock(_base_mutex);
+        if (_instance_sessions.empty()) {
+            return nullptr;
+        }
+
+        // track instances that have a session for this db_id and user in the pool
+        // map ordered by number of active sessions
+        std::map<int, DatabaseInstancePtr> candidates;
+
+        // track least loaded instance in case no sessions in pool
+        DatabaseInstancePtr instance = nullptr;
+        int max_free_sessions = INT_MIN;
+
+        // find the instance with the least number of sessions
+        for (auto &it : _instance_sessions) {
+            auto db_instance = it.first;
+
+            // skip those shutting down
+            if (!db_instance->is_active()) {
+                continue;
+            }
+
+            // if the pool has a session for this db_id and user, add to candidates
+            DatabasePoolPtr pool = db_instance->get_pool();
+            if (pool->has_session(db_id, username)) {
+                // get number of active sessions for this instance
+                int active_sessions = 0;
+                if (_instance_sessions.find(db_instance) != _instance_sessions.end()) {
+                    active_sessions = _instance_sessions[db_instance];
+                }
+                candidates[active_sessions] = db_instance;
+                continue;
+            }
+
+            // no free sessions, track instance with most free sessions
+            int pool_size = pool->size();
+            if (pool_size > max_free_sessions) {
+                max_free_sessions = pool_size;
+                instance = db_instance;
+            }
+        }
+
+        // if there are candidates, get the one with the least active sessions
+        // if there are no instances we go with the instance with the most free sessions
+        if (!candidates.empty()) {
+            instance = candidates.begin()->second;
+        }
+
+        if (instance != nullptr) {
+            return instance->get_pool()->get_session(db_id, username);
+        }
+
+        return nullptr;
+    }
+
+
     /*********** Database Replica Set *************/
 
     void
-    DatabaseReplicaSet::remove_replica(DatabaseInstancePtr replica)
+    DatabaseReplicaSet::initiate_replica_shutdown(const std::string &replica_id)
     {
+        DatabaseInstancePtr replica = nullptr;
+
         std::unique_lock lock(_base_mutex);
 
-        // Remove from list of replicas
-        _replicas.erase(replica);
+        // find the instance
+        auto it = _replicas.find(replica_id);
+        if (it != _replicas.end()) {
+            replica = it->second;
+        }
+
+        if (replica == nullptr) {
+            LOG_ERROR("Could not find replica instance with replica id {}", replica_id);
+            DCHECK_NE(replica, nullptr);
+            return;
+        }
+
+        // mark instance as shutting down
+        replica->initiate_shutdown();
+
+        // remove from active replicas
+        _replicas.erase(replica_id);
+
+        // add to shutdown pending list
+        _shutdown_pending_replicas.insert(replica);
+
+        lock.unlock();
+
+        LOG_INFO("Initiating shutdown of replica instance with replica id {}", replica_id);
+
+        // free the replica's pool, we do this without holding the lock
+        // to avoid blocking
+        int count = replica->get_pool()->shutdown();
+
+        lock.lock();
+
+        // update count of sessions for instance
+        _instance_sessions[replica] -= count;
+        DCHECK_GE(_instance_sessions[replica], 0);
+
+        if (_instance_sessions[replica] == 0) {
+            // if no active sessions, we can remove the instance now
+            _remove_replica(replica, lock);
+        }
+    }
+
+    void
+    DatabaseReplicaSet::add_replica(const std::string &replica_id)
+    {
+        // create new instance; fetch config from properties (redis)
+        nlohmann::json fdw_config = Properties::get_fdw_config(replica_id);
+        auto host = Json::get<std::string>(fdw_config, "host");
+        auto port = Json::get<uint16_t>(fdw_config, "port");
+        auto db_prefix = Json::get<std::string>(fdw_config, "db_prefix");
+        auto state = Json::get<std::string>(fdw_config, "state");
+
+        if (!host.has_value() || !port.has_value() ||
+            !state.has_value() || state.value() != Properties::FDW_STATE_RUNNING) {
+            return;
+        }
+
+        // add replica
+        if (!db_prefix.has_value()) {
+            db_prefix = "";
+        }
+
+        LOG_INFO("Added replica instance with replica id {}", replica_id);
+
+        std::unique_lock lock(_base_mutex);
+
+        if (_replicas.contains(replica_id)) {
+            // already exists
+            return;
+        }
+
+        _replicas[replica_id] = std::make_shared<DatabaseInstance>(
+            _pool_config,
+            Session::Type::REPLICA,
+            host.value(),
+            port.value(),
+            db_prefix.value(),
+            replica_id);
+    }
+
+    void
+    DatabaseReplicaSet::_remove_replica(DatabaseInstancePtr replica, std::unique_lock<std::shared_mutex> &lock)
+    {
+        DCHECK(lock.owns_lock());
+
+        // Remove from list of replicas pending shutdown
+        DCHECK_EQ(replica->is_active(), false) << "Removing active replica";
+        DCHECK(_shutdown_pending_replicas.contains(replica)) << "Removing replica that is not shutdown";
+        DCHECK(!_replicas.contains(replica->replica_id())) << "Removing replica that is not shutdown";
+        _shutdown_pending_replicas.erase(replica);
 
         // remove from the database set
         DatabaseSet::_remove_instance(replica);
@@ -314,19 +496,39 @@ namespace springtail::pg_proxy
         std::shared_lock lock(_base_mutex);
 
         // check if replica instance is still alive, if so try to add back to pool
-        if (_replicas.find(session->get_instance()) == _replicas.end()) {
+        if (!deallocate && !_replicas.contains(session->get_instance()->replica_id())) {
             deallocate = true;
         }
 
-        DatabaseSet::_release_session(session, _replicas.size(), deallocate);
+        auto instance = session->get_instance();
+        DatabaseSet::_release_session(session, deallocate);
+
+        // if instance is shutting down, check if we can remove it
+        if (!instance->is_active()) {
+            // get instance count of sessions
+            int instance_sessions = 0;
+            auto it = _instance_sessions.find(instance);
+            if (it != _instance_sessions.end()) {
+                instance_sessions = it->second;
+            }
+
+            if (instance_sessions <= 0) {
+                // if no more sessions, we can complete shutdown
+                // release shared lock and acquire unique lock
+                lock.unlock();
+                LOG_INFO("Completing shutdown of replica instance with replica id {}", instance->replica_id());
+                remove_replica(instance);
+            }
+        }
     }
 
     void
     DatabaseReplicaSet::release_expired_sessions()
     {
         std::shared_lock lock(_base_mutex);
-        for (auto &replica : _replicas) {
-            auto pool = replica->get_pool();
+        // iterate over all replicas and evict expired sessions
+        for (auto &&it : _replicas) {
+            auto pool = it.second->get_pool();
             pool->evict_expired_sessions();
         }
     }
@@ -341,7 +543,8 @@ namespace springtail::pg_proxy
 
         auto instance = _get_least_loaded_instance();
         if (instance == nullptr && !_replicas.empty()) {
-            instance = *_replicas.begin();
+            // shouldn't happen, but just in case, get first instance
+            instance = _replicas.begin()->second;
         }
 
         if (instance == nullptr) {
@@ -366,7 +569,7 @@ namespace springtail::pg_proxy
             deallocate = true;
         }
 
-        DatabaseSet::_release_session(session, 1, deallocate);
+        DatabaseSet::_release_session(session, deallocate);
     }
 
     void
@@ -482,70 +685,11 @@ namespace springtail::pg_proxy
     DatabaseMgr::DatabaseMgr() :
         Singleton<DatabaseMgr>(ServiceId::DatabaseMgrId),
         _data_sub_thread(1, false),
-        _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE)),
-        _replica_set(std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE))
+        _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE))
     {
-        _cache_watcher_db_ids = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
-                CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
-                // get a vector of old database ids from _log_mgrs
-                std::shared_lock<std::shared_mutex> lock(_db_mutex);
-                auto keys = std::views::keys(_db_id_rep_dbs);
-                lock.unlock();
-                std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
-                // get a vector of new database ids from new_value
-                std::vector<uint64_t> new_db_ids = Properties::get_instance()->get_database_ids(new_value);
-                // diff the vectors
-                RedisCache::array_diff(old_db_ids, new_db_ids, true, true);
-                // everything in old_db_ids needs to be removed
-                for (auto db_id: old_db_ids) {
-                    _remove_replicated_database(db_id);
-                }
-                // everything in new_db_ids needs to be added
-                for (auto db_id: new_db_ids) {
-                    _add_replicated_database(db_id);
-                }
-            }
-        );
-        _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Replicated database state change; path: {}, state: {}",
-                    path, new_value.dump(4));
-                CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
-                // extract database id
-                std::vector<std::string> path_parts;
-                common::split_string("/", path, path_parts);
-                CHECK_EQ(path_parts.size(), 2);
-                uint64_t db_id = stoull(path_parts[1]);
-
-                // if we ever get in here, this means that this database will be deleted
-                if (new_value.type() == nlohmann::json::value_t::null) {
-                    return;
-                }
-
-                // extract state
-                CHECK(new_value.type() == nlohmann::json::value_t::string);
-                std::string state_str = new_value.get<std::string>();
-                redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
-
-                // shared lock for lookup
-                std::shared_lock lock(_db_mutex);
-                auto iter = _db_id_rep_dbs.find(db_id);
-                if (iter == _db_id_rep_dbs.end()) {
-                    return;
-                }
-
-                iter->second->set_state(state);
-            }
-        );
-        _init();
-    }
-
-    void
-    DatabaseMgr::_init()
-    {
+        // get pool parameters
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
+
         size_t pool_size_limit = Json::get_or<size_t>(json, "pool_size_limit", 0);
         size_t pool_timeout_limit = Json::get_or<size_t>(json, "pool_timeout_limit", 0);
         uint64_t pool_expiration_interval = Json::get_or<size_t>(json, "pool_expiration_interval_secs", 0);
@@ -554,33 +698,148 @@ namespace springtail::pg_proxy
             throw ProxyServerError();
         }
 
+        _pool_config = {pool_size_limit, pool_timeout_limit, pool_expiration_interval};
+
+        // create replica set with pool config
+        _replica_set = std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE, _pool_config);
+
+        // redis cache watcher to handle changes to the list of replicated databases
+        _cache_watcher_db_ids = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
+                CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
+                _redis_dbs_change_cb(new_value);
+            }
+        );
+
+        // redis cache watcher to handle changes to the list of replicated database states
+        _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Replicated database state change; path: {}, state: {}",
+                    path, new_value.dump(4));
+                CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
+                _redis_db_state_change_cb(path, new_value);
+            }
+        );
+
+        // redis cache watcher to handle changes to the list of FDWs and their states
+        _cache_watcher_fdws = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "FDW configurations changed: {}", new_value.dump(4));
+                CHECK(path.starts_with(Properties::FDW_CONFIG_PATH));
+                _redis_fdw_change_cb(path, new_value);
+            }
+        );
+
+        _init();
+    }
+
+    void
+    DatabaseMgr::_redis_dbs_change_cb(const nlohmann::json &new_value)
+    {
+        // get a vector of old database ids from _log_mgrs
+        std::shared_lock<std::shared_mutex> lock(_db_mutex);
+        auto keys = std::views::keys(_db_id_rep_dbs);
+        lock.unlock();
+
+        std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
+        // get a vector of new database ids from new_value
+        std::vector<uint64_t> new_db_ids = Properties::get_instance()->get_database_ids(new_value);
+
+        // diff the vectors
+        RedisCache::array_diff(old_db_ids, new_db_ids, true, true);
+
+        // everything in old_db_ids needs to be removed
+        for (auto db_id: old_db_ids) {
+            _remove_replicated_database(db_id);
+        }
+
+        // everything in new_db_ids needs to be added
+        for (auto db_id: new_db_ids) {
+            _add_replicated_database(db_id);
+        }
+    }
+
+    void
+    DatabaseMgr::_redis_db_state_change_cb(const std::string &path,
+                                           const nlohmann::json &new_value)
+    {
+        // extract database id from path
+        std::vector<std::string> path_parts;
+        common::split_string("/", path, path_parts);
+        DCHECK_EQ(path_parts.size(), 2);
+        uint64_t db_id = stoull(path_parts[1]);
+
+        // if we ever get in here, this means that this database will be deleted
+        if (new_value.type() == nlohmann::json::value_t::null) {
+            return;
+        }
+
+        // extract state
+        DCHECK(new_value.type() == nlohmann::json::value_t::string);
+        std::string state_str = new_value.get<std::string>();
+        redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
+
+        // shared lock for lookup
+        std::shared_lock lock(_db_mutex);
+        auto iter = _db_id_rep_dbs.find(db_id);
+        if (iter == _db_id_rep_dbs.end()) {
+            return;
+        }
+
+        iter->second->set_state(state);
+    }
+
+    void
+    DatabaseMgr::_redis_fdw_change_cb(const std::string &path,
+                                      const nlohmann::json &new_value)
+    {
+        // extract database id from path
+        std::vector<std::string> path_parts;
+        common::split_string("/", path, path_parts);
+        DCHECK_EQ(path_parts.size(), 2);
+        auto replica_id = path_parts[1];
+
+        DCHECK(new_value.type() != nlohmann::json::value_t::null);
+
+        // extract fdw state
+        // see: https://www.notion.so/springtail-hq/Database-Schema-1273ea3f343c8098bf95d78b6a3741aa
+        // states: initialize->running->draining->stopped
+        auto state = Json::get<std::string>(new_value, "state");
+
+        if (state == Properties::FDW_STATE_DRAINING) {
+            // initiate shutdown of the replica instance
+            _replica_set->initiate_replica_shutdown(replica_id);
+            return;
+        }
+
+        if (state == Properties::FDW_STATE_RUNNING) {
+            // add the replica instance if not already present
+            add_replica(replica_id);
+            return;
+        }
+    }
+
+    void
+    DatabaseMgr::_init()
+    {
         // add primary
         uint64_t primary_instance_id = Properties::get_db_instance_id();
         std::string host, user, password;
         int port;
         Properties::get_primary_db_config(host, port, user, password);
-        set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(pool_size_limit, pool_timeout_limit, pool_expiration_interval, Session::Type::PRIMARY, host, "", port));
+        set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(_pool_config, Session::Type::PRIMARY, host, port));
 
+        // iterate through fdws and add replicas
         std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
         for (const auto & fdw_id: fdw_id_list) {
-            nlohmann::json fdw_config = Properties::get_fdw_config(fdw_id);
-            auto host = Json::get<std::string>(fdw_config, "host");
-            auto port = Json::get<uint16_t>(fdw_config, "port");
-            auto db_prefix = Json::get<std::string>(fdw_config, "db_prefix");
-            if (host.has_value() && port.has_value()) {
-                // add replica
-                if (!db_prefix.has_value()) {
-                    db_prefix = "";
-                }
-                add_replica(std::make_shared<DatabaseInstance>(pool_size_limit, pool_timeout_limit, pool_expiration_interval, Session::Type::REPLICA, host.value(), db_prefix.value(), port.value()));
-            } else {
-                LOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
-                throw ProxyServerError();
-            }
+            add_replica(fdw_id);
         }
 
+        // add redis cache watchers
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher_db_ids);
+        redis_cache->add_callback(Properties::FDW_CONFIG_PATH, _cache_watcher_fdws);
 
         _init_replicated_dbs();
 

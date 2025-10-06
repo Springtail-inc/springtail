@@ -104,7 +104,9 @@ namespace springtail::common {
          *
          * @param max_threads - number of threads to use for thread pool
          */
-        MultiQueueThreadManager(int max_threads, const std::string &name) : _thread_pool(max_threads, name) {}
+        MultiQueueThreadManager(int max_threads, const std::string &name)
+            : _thread_pool(max_threads, name)
+        { }
 
         /**
          * @brief Multi Queue Thread Manager object destructor.
