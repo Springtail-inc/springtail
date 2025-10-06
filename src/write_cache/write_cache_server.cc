@@ -1,3 +1,5 @@
+#include <boost/thread/locks.hpp>
+
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <write_cache/write_cache_server.hh>
@@ -46,10 +48,7 @@ WriteCacheServer::add_extent(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint
     uint64_t extent_size = data->byte_count();
     if (!_store_to_disk) {
         index->add_extent(tid, pg_xid, lsn, data, false);
-
-        std::unique_lock lock(_mem_mutex);
-        _current_memory_bytes += extent_size;
-        _store_to_disk = (_current_memory_bytes > _memory_high_watermark_bytes);
+        _add_memory(extent_size);
     } else {
         // add extent on disk
         index->add_extent(tid, pg_xid, lsn, data, true);
@@ -185,24 +184,45 @@ WriteCacheServer::_subtract_memory(uint64_t mem_size)
 {
     std::unique_lock lock(_mem_mutex);
     _current_memory_bytes -= mem_size;
-    _store_to_disk = !(_current_memory_bytes <= _memory_low_watermark_bytes);
+    if (_current_memory_bytes <= _memory_low_watermark_bytes) {
+        _store_to_disk = false;
+    }
+}
+
+void
+WriteCacheServer::_add_memory(uint64_t mem_size)
+{
+    std::unique_lock lock(_mem_mutex);
+    _current_memory_bytes += mem_size;
+    if (_current_memory_bytes > _memory_high_watermark_bytes) {
+        _store_to_disk = true;
+    }
 }
 
 std::shared_ptr<WriteCacheIndex>
 WriteCacheServer::_get_index(uint64_t db_id)
 {
-    std::unique_lock lock(_db_mutex);
-     auto it = _indexes.find(db_id);
-    if (it == _indexes.end()) {
-        // create storage directory for the database
-        std::filesystem::path db_storage_dir = _disk_storage_dir / std::to_string(db_id);
-        std::error_code ec;
-        std::filesystem::create_directories(db_storage_dir, ec);
-        CHECK(!ec) << ec.message();
+    // upgrade_lock allows shared read initially, and can be upgraded to unique
+    boost::upgrade_lock<boost::shared_mutex> shared_lock(_db_mutex);
 
-        // insert new database
-        it = _indexes.insert({db_id, std::make_shared<WriteCacheIndex>(db_storage_dir)}).first;
+    // try to find the database and return it if it found
+    auto it = _indexes.find(db_id);
+    if (it != _indexes.end()) {
+        return it->second;
     }
+
+    // create storage directory for the database
+    std::filesystem::path db_storage_dir = _disk_storage_dir / std::to_string(db_id);
+    std::error_code ec;
+    std::filesystem::create_directories(db_storage_dir, ec);
+    CHECK(!ec) << ec.message();
+
+    // Atomically upgrade to exclusive lock
+    boost::upgrade_to_unique_lock<boost::shared_mutex> unique_lock(shared_lock);
+
+    // insert new database
+    it = _indexes.emplace(db_id, std::make_shared<WriteCacheIndex>(db_storage_dir)).first;
+
     return it->second;
 }
 

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <boost/thread/shared_mutex.hpp>
 #include <grpc/grpc_server_manager.hh>
+
 #include <common/init.hh>
 #include <write_cache/write_cache_index.hh>
 
@@ -123,12 +125,21 @@ namespace springtail {
 
         /**
          * @brief Subtract the given memory size from current memory variable and adjust
-         *  store to disk flag if appropriate.s
+         *  store to disk flag appropriately.
          *
          * @param mem_size
          */
         void
         _subtract_memory(uint64_t mem_size);
+
+        /**
+         * @brief Add the given memory size to the current memory variable and adjust
+         *  store to disk flag appropriately.
+         *
+         * @param mem_size
+         */
+        void
+        _add_memory(uint64_t mem_size);
 
         /**
          * @brief Get the write cache index object
@@ -138,7 +149,7 @@ namespace springtail {
         _get_index(uint64_t db_id);
 
         /** indexes mutex */
-        std::shared_mutex _db_mutex;
+        boost::shared_mutex _db_mutex;
 
         /** map of indexes by db_id */
         std::map<uint64_t, WriteCacheIndexPtr> _indexes;
@@ -152,7 +163,7 @@ namespace springtail {
         uint64_t _current_memory_bytes{0};            ///< current memory size used by in-memory extents
         std::atomic<bool> _store_to_disk{false};      ///< flag indicating storage on disk
 
-        GrpcServerManager _grpc_server_manager; ///< GRPC server
+        GrpcServerManager _grpc_server_manager;       ///< GRPC server
 
         /**
          * @brief Internal shutdown function called by Singleton
