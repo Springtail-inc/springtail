@@ -721,6 +721,10 @@ namespace springtail
                     break; // saw footer, finished with the COPY
                 }
 
+                // Append internal_row_id
+                fields->push_back(std::make_shared<ConstTypeField<uint64_t>>(
+                            table->get_next_internal_row_id()));
+
                 // construct a tuple from the row
                 auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
 
@@ -747,6 +751,7 @@ namespace springtail
         auto* stats = roots_req->mutable_stats();
         stats->set_row_count(metadata.stats.row_count);
         stats->set_end_offset(metadata.stats.end_offset);
+        stats->set_last_internal_row_id(metadata.stats.last_internal_row_id);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
         copy_info->set_is_table_dropped(_is_table_dropped(_schema.schema_oid, table_oid));
