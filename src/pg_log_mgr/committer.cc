@@ -530,11 +530,11 @@ namespace springtail::committer {
         TIME_TRACE_STOP(finalize_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("finalize-xid_{}", xid), finalize_trace);
 
-        // XXX see above comment, need to change this
-        Coordinator::get_instance()->register_thread(daemon_type, thread_name);
-
         // update the system table roots
         sys_tbl_mgr::Server::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
+
+        // XXX see above comment, need to change this
+        Coordinator::get_instance()->register_thread(daemon_type, thread_name);
 
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_MESSAGES, tx_counters.messages);
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_INSERTS, tx_counters.inserts);

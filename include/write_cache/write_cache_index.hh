@@ -119,6 +119,12 @@ namespace springtail {
         std::vector<WriteCacheIndexExtentPtr> get_extents(uint64_t tid, uint64_t xid,
                                                           uint32_t count, uint64_t &cursor, WriteCacheTableSet::Metadata &md);
 
+        /** * @brief Get all extents for a table at a given XID
+         * @param tid table ID
+         * @param xid springtail XID
+         * @param md out; metadata
+         * @return vector of vectors of extents, one vector per pg_xid
+         */
         std::vector<std::vector<WriteCacheIndexExtentPtr>> get_all_extents(uint64_t tid, uint64_t xid, WriteCacheTableSet::Metadata &md);
 
         /**
