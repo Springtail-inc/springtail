@@ -75,29 +75,54 @@ The container names are:
    $ systemctl start springtail-coordinator
    ```
 
-
 ## Internals
 
 This section explains what happens under the hood when you run the above commands.
 
 ### Build Package
+
 The `./cluster build-package <out-dir>` command does the following:
-Start a temporary build container from the image identified by `BASE_BUILDER_IMAGE_TAG` in the `cluster` script, which resides in the DevSupport ECR repo.
-If the BASE_BUILDER_IMAGE_TAG is not available locally it will try to pull from the remote repo, thus requiring AWS SSO configured.
+Start a temporary build container from the image identified by `BASE_BUILDER_IMAGE_TAG` in the `cluster` script, which
+resides in the DevSupport ECR repo.
+If the BASE_BUILDER_IMAGE_TAG is not available locally it will try to pull from the remote repo, thus requiring AWS SSO
+configured.
 It saves the package into the `<out-dir>` directory on the host machine.
 The package is a tarball file named `springtail-<date-version>-<system-settings-gitsha>.tar.gz`.
 
 ### Start Cluster
+
 The `./cluster up <full-package-path>` command does the following:
-It sets the <full-package-path> to the `PACKAGE_FILE_NAME` environment variable, making it available to the build process of all the containers.
-Then it starts the supporting local services, like the AWS mock, Redis, and a local PostgreSQL database serving as primary DB. Then it uploads the package to the local mock S3 service.
-Then it launches a bootstrap container that sets up shared environment files, secrets, and Redis configuration. Specifically, the bootstrap process will add new env vars into `./env/.env` file.
-Finally, it launches the main service containers: `proxy`, `ingestion`, and `fdw`, picking up all the env files in the `./env` directory.
+It sets the <full-package-path> to the `PACKAGE_FILE_NAME` environment variable, making it available to the build
+process of all the containers.
+Then it starts the supporting local services, like the AWS mock, Redis, and a local PostgreSQL database serving as
+primary DB. Then it uploads the package to the local mock S3 service.
+Then it launches a bootstrap container that sets up shared environment files, secrets, and Redis configuration.
+Specifically, the bootstrap process will add new env vars into `./env/.env` file.
+Finally, it launches the main service containers: `proxy`, `ingestion`, and `fdw`, picking up all the env files in the
+`./env` directory.
 
 ### Service Initializations
-For each service container, upon startup, it runs a `init-services` script that does the following:
-1. Download S3 package and extract it, moving the coordinator to the `/opt/springtail` directory as the bootstrap coordinator;
+
+#### local-cluster-bootstrap
+
+This runs *before* any service container is started. It does the following:
+
+1. Set up shared environment files in the `./env` directory, which will be picked up by all service containers;
+2. Set up Redis configuration, creating a default user and password, and saving the config to `./env/redis.env`;
+3. Set up secrets, creating a self-signed certificate for HTTPS, and saving the secrets to `./env/secrets.env`;
+
+In summary, this is setting up the supporting environment for the service containers to run.
+
+#### "CloudInit" Script
+
+For each service container, upon startup, it runs a `init-services` script, managed by supervisord, that does the
+following:
+
+1. Download S3 package and extract it, moving the coordinator to the `/opt/springtail` directory as the bootstrap
+   coordinator;
 2. Make sure all necessary directories exist, creating them if needed;
 3. For `fdw` specifically, it triggers an Ansible script to customize the PostgreSQL;
+   This is akin to the EC2's `userdata` script (CloudInit), which is used to initialize a container.
+
 
 
