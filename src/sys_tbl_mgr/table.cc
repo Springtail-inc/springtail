@@ -1190,21 +1190,11 @@ namespace indexer_helpers {
                     StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
-        auto index_mutation_handler = [this](Extent::Row row) {
-
-            auto internal_row_id_f = _schema->get_field(constant::INTERNAL_ROW_ID);
-            auto internal_row_id = internal_row_id_f->get_uint64(&row);
-            auto value_fields = std::make_shared<FieldArray>(1);
-
-            for (auto const& [index_id, idx]: _secondary_indexes) {
-                auto idx_col_fields = _schema->get_fields(_schema->get_column_names(idx.second));
-                (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
-                auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-                idx.first->insert(svalue);
-            }
-        };
         // add the row to the page
-        return (*_empty_page)->upsert(value, _schema, index_mutation_handler);
+        return (*_empty_page)->upsert(value, _schema, [this](Extent::Row& row) {
+                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                        this->_schema, this->_secondary_indexes, row);
+                });
     }
 
     bool
