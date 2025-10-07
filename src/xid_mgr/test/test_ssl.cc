@@ -21,7 +21,7 @@ namespace {
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
             springtail_init_test();
-            
+
             // get xid_mgr properties check for cert files
             nlohmann::json json = Properties::get(Properties::LOG_MGR_CONFIG);
             if (json.empty() || !json.contains("rpc_config") || !json["rpc_config"].contains("server_cert")) {

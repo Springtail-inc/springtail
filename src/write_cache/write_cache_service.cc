@@ -27,11 +27,11 @@ grpc::Status WriteCacheService::GetExtents(grpc::ServerContext* context,
 {
     ServerSpan span(context, "WriteCacheService", "GetExtents");
     WriteCacheServer* server = WriteCacheServer::get_instance();
-    WriteCacheIndexPtr index = server->get_index(request->db_id());
 
     uint64_t cursor = request->cursor();
     WriteCacheTableSet::Metadata md;
-    std::vector<WriteCacheIndexExtentPtr> extents = index->get_extents(
+    std::vector<WriteCacheIndexExtentPtr> extents = server->get_extents(
+        request->db_id(),
         request->table_id(), request->xid(), request->count(), cursor, md);
 
     for (const auto& e : extents) {
@@ -55,9 +55,8 @@ grpc::Status WriteCacheService::EvictTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "WriteCacheService", "EvictTable");
     WriteCacheServer* server = WriteCacheServer::get_instance();
-    WriteCacheIndexPtr index = server->get_index(request->db_id());
 
-    index->evict_table(request->table_id(), request->xid());
+    server->evict_table(request->db_id(), request->table_id(), request->xid());
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
@@ -69,9 +68,8 @@ grpc::Status WriteCacheService::EvictXid(grpc::ServerContext* context,
 {
     ServerSpan span(context, "WriteCacheService", "EvictXid");
     WriteCacheServer* server = WriteCacheServer::get_instance();
-    WriteCacheIndexPtr index = server->get_index(request->db_id());
 
-    index->evict_xid(request->xid());
+    server->evict_xid(request->db_id(), request->xid());
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
@@ -83,11 +81,10 @@ grpc::Status WriteCacheService::ListTables(grpc::ServerContext* context,
 {
     ServerSpan span(context, "WriteCacheService", "ListTables");
     WriteCacheServer* server = WriteCacheServer::get_instance();
-    WriteCacheIndexPtr index = server->get_index(request->db_id());
 
     uint64_t cursor = request->cursor();
 
-    auto&& tids = index->get_tids(request->xid(), request->count(), cursor);
+    auto&& tids = server->list_tables(request->db_id(), request->xid(), request->count(), cursor);
     for (auto tid : tids) {
         response->add_table_ids(tid);
     }

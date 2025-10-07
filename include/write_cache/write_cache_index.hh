@@ -22,12 +22,14 @@ namespace springtail {
         /**
          * @brief Construct a new Write Cache Index object with a set of partitions
          *        Each partition holds an index for a set of tables (table_id is hashed to determine partition)
-         * @param partitions
+         * @param db_dir_path - path for extent storage
+         * @param partitions - number of partitions
          */
-        WriteCacheIndex(int partitions=8) : _num_partitions(partitions)
+        explicit WriteCacheIndex(const std::filesystem::path &db_dir_path, int partitions=8) :
+                _db_dir_path(db_dir_path), _num_partitions(partitions)
         {
             for (int i=0; i < partitions; i++) {
-                _partitions.push_back(std::make_shared<WriteCacheTableSet>());
+                _partitions.push_back(std::make_shared<WriteCacheTableSet>(db_dir_path));
             }
         }
 
@@ -37,14 +39,15 @@ namespace springtail {
          * @param pg_xid Postgres XID
          * @param lsn LSN of the extent
          * @param data extent data
+         * @param on_disk a flag to add extent on disk and not in memory
          */
-        void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data);
+        void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data, bool on_disk);
 
         /**
          * @brief Add a mapping from springtail XID to Postgres XID
          * @param pg_xid Postgres XID
          * @param xid springtail XID
-         * @param md Metadata 
+         * @param md Metadata
          */
         void commit(uint64_t pg_xid, uint64_t xid, WriteCacheTableSet::Metadata md);
 
@@ -60,20 +63,23 @@ namespace springtail {
          * @brief Drop a table from the index
          * @param tid table ID
          * @param pg_xid Postgres XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void drop_table(uint64_t tid, uint64_t pg_xid);
+        void drop_table(uint64_t tid, uint64_t pg_xid, uint64_t &memory_removed);
 
         /**
          * @brief Drop all data for a given XID
          * @param pg_xid Postgres XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void abort(uint64_t pg_xid);
+        void abort(uint64_t pg_xid, uint64_t &memory_removed);
 
         /**
          * @brief Drop all data for a given XID
          * @param pg_xids Postgres XIDs
+         * @param memory_removed amount of memory freed by this function
          */
-        void abort(const std::vector<uint64_t>& pg_xids);
+        void abort(const std::vector<uint64_t>& pg_xids, uint64_t &memory_removed);
 
         //// RPC interface
 
@@ -90,14 +96,16 @@ namespace springtail {
          * @brief Evict extent from cache
          * @param tid table ID
          * @param xid springtail XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void evict_table(uint64_t tid, uint64_t xid);
+        void evict_table(uint64_t tid, uint64_t xid, uint64_t &memory_removed);
 
         /**
          * @brief Evict springtail XID from cache (and all data)
          * @param xid springtail XID
+         * @param memory_removed amount of memory freed by this function
          */
-        void evict_xid(uint64_t xid);
+        void evict_xid(uint64_t xid, uint64_t &memory_removed);
 
         /**
          * @brief Get the extents for a table at a given XID
@@ -113,12 +121,32 @@ namespace springtail {
 
         std::vector<std::vector<WriteCacheIndexExtentPtr>> get_all_extents(uint64_t tid, uint64_t xid, WriteCacheTableSet::Metadata &md);
 
+        /**
+         * @brief Get the amount of memory being used by this database
+         *
+         * @return uint64_t
+         */
+        uint64_t get_memory_in_use() const { return _memory_in_use; }
+
+        /**
+         * @brief Get json object representing data stored in each partition
+         *
+         * @return nlohmann::json
+         */
+        nlohmann::json get_partition_stats() const;
+
     private:
+        /** Path where to store extents on disk */
+        std::filesystem::path _db_dir_path;
+
         /** Set of partitions to hold table data, enables more parallelism */
         std::vector<std::shared_ptr<WriteCacheTableSet>> _partitions;
 
         /** Number of partitions */
         int _num_partitions;
+
+        /** How much memory is being used by the in-memory extents in this database */
+        std::atomic<uint64_t> _memory_in_use{0};
 
         /**
          * @brief Get the partition for a specific table ID

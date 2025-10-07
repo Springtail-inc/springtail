@@ -8,7 +8,7 @@
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-#include <write_cache/write_cache_func.hh>
+#include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_log_mgr/committer.hh>
@@ -161,6 +161,7 @@ namespace springtail::committer {
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true);
                 }
                 _completed_xids[db_id] = completed_xid;
+                WriteCacheServer::get_instance()->evict_xid(db_id, completed_xid);
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // notify everyone that the database is now in the "ready" state
@@ -202,7 +203,7 @@ namespace springtail::committer {
             bool tid_done = false;
             while (!tid_done) {
                 // query the write cache for the tables modified through this XID
-                auto table_list = WriteCacheFuncImpl::list_tables(db_id, xid, 100, table_cursor);
+                auto table_list = WriteCacheServer::get_instance()->list_tables(db_id, xid, 100, table_cursor);
 
                 LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Got {} tables from the write cache", table_list.size());
 
@@ -298,6 +299,7 @@ namespace springtail::committer {
             if (result->type() != XidReady::Type::RECONCILE_INDEX) {
                 result->notify_tracker(xid);
             }
+            WriteCacheServer::get_instance()->evict_xid(db_id, xid);
 
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
         }
@@ -494,17 +496,16 @@ namespace springtail::committer {
 
         TxCounters tx_counters;
 
-        WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
         WriteCacheTableSet::Metadata md;
+        WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
         auto extent_lists = index->get_all_extents(tid, xid, md);
 
         if (!extent_lists.empty()) {
             min_md = md;
         }
-
         for (auto const& extent_list: extent_lists) {
 
-            for (auto &wc_extent : extent_list) {
+            for (auto const &wc_extent : extent_list) {
 
                 // update the coordinator
                 Coordinator::mark_alive(keep_alive);
@@ -557,7 +558,7 @@ namespace springtail::committer {
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration1.count());
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(TRANSACTION_LATENCIES, duration2.count());
 
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Transaction latency: xid={}, transaction_latency={}, finalize_latency={}", 
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Transaction latency: xid={}, transaction_latency={}, finalize_latency={}",
                     xid, duration2, duration1);
         }
 
@@ -570,6 +571,15 @@ namespace springtail::committer {
                                const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent)
     {
         TxCounters tx_counters;
+
+
+        if (!wc_extent->data) {
+            // get extent from disk
+            auto handle = IOMgr::get_instance()->open(wc_extent->file_name, IOMgr::READ, false);
+            auto response = handle->read(wc_extent->data_offset);
+            CHECK(response->status == SUCCESS);
+            wc_extent->data = std::make_shared<Extent>(response->data);
+        }
 
         // get the schema at the given XID/LSN
         // note: we are guaranteed that the entire batch will utilize the same schema

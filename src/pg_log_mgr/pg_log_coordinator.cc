@@ -1,6 +1,3 @@
-#include <fmt/format.h>
-#include <cstdint>
-
 #include <common/coordinator.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
@@ -32,6 +29,10 @@ namespace springtail::pg_log_mgr {
         // stop committer thread
         _committer->shutdown();
         _committer_thread.join();
+
+        if (AdminServer::exists()) {
+            AdminServer::get_instance()->deregister_get_route("/info");
+        }
     }
 
     PgLogCoordinator::PgLogCoordinator() : Singleton<PgLogCoordinator>(ServiceId::PgLogCoordinatorId)
@@ -59,6 +60,20 @@ namespace springtail::pg_log_mgr {
                 }
             }
         );
+
+        // register "/info" route with AdminServer
+        if (AdminServer::exists()) {
+            LOG_INFO("Registering admin server get path {}", program_invocation_short_name);
+
+            AdminServer::get_instance()->register_get_route(
+                "/info",
+                []([[maybe_unused]] const std::string &path,
+                   [[maybe_unused]] const httplib::Params &params,
+                   nlohmann::json &json_response) {
+                    json_response["write_cache"] = WriteCacheServer::get_instance()->get_memory_stats();
+                });
+        }
+
     }
 
     void
@@ -167,5 +182,8 @@ namespace springtail::pg_log_mgr {
 
         // Cleanup from vacuumer
         Vacuumer::get_instance()->cleanup_db(db_id);
+
+        // Cleanup write cache
+        WriteCacheServer::get_instance()->drop_database(db_id);
     }
 }

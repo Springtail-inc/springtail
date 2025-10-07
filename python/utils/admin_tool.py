@@ -74,6 +74,9 @@ def parse_arguments() -> argparse.Namespace:
                                 ],
                                 type=str, help="Toggle module masks")
 
+    # info
+    info = subparsers.add_parser("info", help="Get internal process information", formatter_class=parser.formatter_class)
+
     # Parse the arguments and return them
     args = parser.parse_args()
 
@@ -138,11 +141,15 @@ def main():
                     response_json = resp.json()
                     print("POST response: ", json.dumps(response_json, indent=4))
 
-        case _:
-            resp = requests.get("http://" + ip_port + "/" + args.daemon)
+        case "info":
+            resp = requests.get("http://" + ip_port + "/info")
             print("GET response status code: ", resp.status_code)
             response_json = resp.json()
             print("GET response: ", json.dumps(response_json, indent=4))
+
+        case _:
+            raise SystemExit(f"Unsupported path")
+
 
 
 if __name__ == "__main__":

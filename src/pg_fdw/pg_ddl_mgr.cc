@@ -172,6 +172,8 @@ namespace springtail::pg_fdw {
         _pg_ddl_mgr_thread.join();
         _sync_thread.join();
         PgXidCollector::shutdown();
+
+        Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_STOPPED);
     }
 
     void
