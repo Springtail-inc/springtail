@@ -801,14 +801,15 @@ StorageCache::PageCache::background_cleaner()
 
     void
     StorageCache::Page::insert(TuplePtr tuple,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               std::function<void(Extent::Row&)> index_mutation_handler)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // if the page is empty, do an _append() which handles the empty extent case
         if (_empty()) {
-            _append(tuple, schema);
+            _append(tuple, schema, index_mutation_handler);
             return;
         }
 
@@ -847,24 +848,32 @@ StorageCache::PageCache::background_cleaner()
         auto row = (*extent)->insert(row_i);
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
+        // Apply index mutations
+        if (index_mutation_handler) {
+            index_mutation_handler(row);
+        }
+
         // check for split
         _check_split(extent_i, *extent, schema);
     }
 
     void
     StorageCache::Page::append(TuplePtr tuple,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               std::function<void(Extent::Row&)> index_mutation_handler)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // perform the internal append
-        _append(tuple, schema);
+        _append(tuple, schema, index_mutation_handler);
     }
 
     void
     StorageCache::Page::_append(TuplePtr tuple,
-                                ExtentSchemaPtr schema)
+                                ExtentSchemaPtr schema,
+                                std::function<void(Extent::Row&)> index_mutation_handler)
+
     {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
@@ -876,6 +885,11 @@ StorageCache::PageCache::background_cleaner()
             // insert the tuple into the extent
             auto row = (*extent)->append();
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+
+            if (index_mutation_handler) {
+                index_mutation_handler(row);
+            }
+
             return;
         }
 
@@ -890,6 +904,11 @@ StorageCache::PageCache::background_cleaner()
         // set the value
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
+        // Apply index mutation
+        if (index_mutation_handler) {
+            index_mutation_handler(row);
+        }
+
         // check for split
         _check_split(extent_i, *extent, schema);
     }
@@ -897,7 +916,7 @@ StorageCache::PageCache::background_cleaner()
     bool
     StorageCache::Page::upsert(TuplePtr tuple,
                                ExtentSchemaPtr schema,
-                               std::function<void(Extent::Row)> index_mutation_handler)
+                               std::function<void(Extent::Row&)> index_mutation_handler)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -971,7 +990,8 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::Page::update(TuplePtr tuple,
                                ExtentSchemaPtr schema,
-                               std::function<void(Extent::Row)> invalidate_index_callback)
+                               std::function<void(Extent::Row&)> index_invalidation_handler,
+                               std::function<void(Extent::Row&)> index_population_handler)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -1012,15 +1032,20 @@ StorageCache::PageCache::background_cleaner()
         // update the existing row
         auto row = *row_i;
 
-        if (invalidate_index_callback) {
-            // callback function to invalidate the indexes
-            invalidate_index_callback(row);
+        if (index_invalidation_handler) {
+            // callback function to remove entry from the indexes
+            index_invalidation_handler(row);
         }
 
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
         // update the original internal row id back to the row
         internal_row_id_f->set_uint64(&row, existing_internal_row_id);
+
+        if (index_population_handler) {
+            // callback function to insert updated entry to the indexes
+            index_population_handler(row);
+        }
 
         // check for split
         _check_split(extent_i, *extent, schema);
@@ -1029,7 +1054,7 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::Page::remove(TuplePtr key,
                                ExtentSchemaPtr schema,
-                               std::function<void(Extent::Row)> invalidate_index_callback)
+                               std::function<void(Extent::Row&)> index_mutation_handler)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -1059,9 +1084,10 @@ StorageCache::PageCache::background_cleaner()
         // note: row's key should match the tuple's key
         DCHECK(FieldTuple(schema->get_sort_fields(), const_cast<Extent::Row *>(&*row_i)).equal_strict(*key));
 
-        if (invalidate_index_callback) {
+        auto row = *row_i;
+        if (index_mutation_handler) {
             // callback function to invalidate the indexes
-            invalidate_index_callback(*row_i);
+            index_mutation_handler(row);
         }
 
         // remove the row

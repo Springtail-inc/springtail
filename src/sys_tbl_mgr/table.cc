@@ -81,6 +81,28 @@ namespace indexer_helpers {
             row_id);
     }
 
+    template <IndexOperation op>            // Operation on the index - insert/remove
+    void index_mutation_handler(
+            const ExtentSchemaPtr schema,
+            const std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>>& secondary_indexes,
+            Extent::Row& row)
+    {
+        auto internal_row_id_f = schema->get_field(constant::INTERNAL_ROW_ID);
+        auto internal_row_id = internal_row_id_f->get_uint64(&row);
+        auto value_fields = std::make_shared<FieldArray>(1);
+
+        for (auto const& [index_id, idx]: secondary_indexes) {
+            auto idx_col_fields = schema->get_fields(schema->get_column_names(idx.second));
+            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+            auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
+            if constexpr (op == IndexOperation::Insert) {
+                idx.first->insert(svalue);
+            } else { /* op == IndexOperation::Remove */
+                idx.first->remove(svalue);
+            }
+        }
+    }
+
     /* ------------------------------  PAGE  ----------------------------------- */
     void populate_index_for_page(uint64_t extent_id,
             const StorageCache::SafePagePtr &page,
@@ -750,20 +772,6 @@ namespace indexer_helpers {
         if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             ++_stats.row_count;
         }
-
-        // XXX: Move this as a callback to cache insert
-        // Add entries to the secondary indexes
-        // internal_row_id will be the last in the fields array
-        auto&& internal_row_id_f = value->fields()->back();
-        auto internal_row_id = internal_row_id_f->get_uint64(value->row());
-        auto value_fields = std::make_shared<FieldArray>(1);
-
-        for (auto const& [index_id, idx]: _secondary_indexes) {
-            auto idx_col_fields = _schema->get_fields(_schema->get_column_names(idx.second));
-            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
-            auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, value->row());
-            idx.first->insert(svalue);
-        }
     }
 
     void
@@ -1059,7 +1067,10 @@ namespace indexer_helpers {
         _check_convert_page(page);
 
         // add the row to the page
-        page->insert(value, _schema);
+        page->insert(value, _schema, [this](Extent::Row& row) {
+                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                        this->_schema, this->_secondary_indexes, row);
+                });
     }
 
     void
@@ -1072,7 +1083,10 @@ namespace indexer_helpers {
         }
 
         // add the row to the page
-        (*_empty_page)->insert(value, _schema);
+        (*_empty_page)->insert(value, _schema, [this](Extent::Row& row) {
+                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                        this->_schema, this->_secondary_indexes, row);
+                });
     }
 
     void
@@ -1085,7 +1099,10 @@ namespace indexer_helpers {
         }
 
         // add the row to the page
-        (*_empty_page)->append(value, _schema);
+        (*_empty_page)->append(value, _schema, [this](Extent::Row& row) {
+                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                        this->_schema, this->_secondary_indexes, row);
+                });
     }
 
     void
@@ -1114,7 +1131,10 @@ namespace indexer_helpers {
         _check_convert_page(page);
 
         // append the value to the extent
-        page->append(value, _schema);
+        page->append(value, _schema, [this](Extent::Row& row) {
+                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                        this->_schema, this->_secondary_indexes, row);
+                });
     }
 
     void
@@ -1142,19 +1162,6 @@ namespace indexer_helpers {
     {
         // Callback to insert entries into secondary indexes
         // XXX: Need upsert equivalent callback
-        auto index_mutation_handler = [this](Extent::Row row) {
-
-            auto internal_row_id_f = _schema->get_field(constant::INTERNAL_ROW_ID);
-            auto internal_row_id = internal_row_id_f->get_uint64(&row);
-            auto value_fields = std::make_shared<FieldArray>(1);
-
-            for (auto const& [index_id, idx]: _secondary_indexes) {
-                auto idx_col_fields = _schema->get_fields(_schema->get_column_names(idx.second));
-                (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
-                auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-                idx.first->insert(svalue);
-            }
-        };
 
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
@@ -1166,7 +1173,10 @@ namespace indexer_helpers {
         _check_convert_page(page);
 
         // add the row to the page
-        bool did_insert = page->upsert(value, _schema, index_mutation_handler);
+        bool did_insert = page->upsert(value, _schema, [this](Extent::Row& row) {
+                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                        this->_schema, this->_secondary_indexes, row);
+                });
 
         return did_insert;
     }
@@ -1228,28 +1238,12 @@ namespace indexer_helpers {
         // check if we need to convert the page contents to a new schema
         _check_convert_page(page);
 
-        // invalidate the secondary indexes if any of the updated fields are part of the index
-        auto invalidate_index_callback = [this](Extent::Row existing_row) {
-            // get the internal row id from the existing row
-            auto internal_row_id_f = _schema->get_field(constant::INTERNAL_ROW_ID);
-            auto internal_row_id = internal_row_id_f->get_uint64(&existing_row);
-
-            for (auto const& [index_id, idx]: _secondary_indexes) {
-                const auto column_names = _schema->get_column_names(idx.second);
-                const auto key_fields = _schema->get_fields(column_names);
-
-                auto value_fields = std::make_shared<FieldArray>(1);
-                (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
-
-                // remove the old row from the index
-                auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, &existing_row);
-                idx.first->remove(kv);
-            }
-        };
-
         // remove the row from the page
         // note: this can only be used when a primary key is present, otherwise use _remove_by_scan()
-        page->remove(value, _schema, invalidate_index_callback);
+        page->remove(value, _schema, [this](Extent::Row& row) {
+                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
+                        this->_schema, this->_secondary_indexes, row);
+                });
     }
 
     void
@@ -1370,46 +1364,17 @@ namespace indexer_helpers {
         // check if we need to convert the page contents to a new schema
         _check_convert_page(page);
 
-        std::vector<uint64_t> updated_index_ids;
-        uint64_t internal_row_id;
-
-        // invalidate the secondary indexes if any of the updated fields are part of the index
-        auto invalidate_index_callback = [this, &updated_index_ids, &internal_row_id, value](Extent::Row existing_row) {
-            updated_index_ids = _find_updated_secondary_indexes(existing_row, value);
-
-            // Get the internal row id from the existing row
-            auto internal_row_id_f = _schema->get_field(constant::INTERNAL_ROW_ID);
-            internal_row_id = internal_row_id_f->get_uint64(&existing_row);
-
-            for (auto const &index_id : updated_index_ids) {
-                const auto column_names = _schema->get_column_names(_secondary_indexes[index_id].second);
-                const auto key_fields = _schema->get_fields(column_names);
-
-                auto value_fields = std::make_shared<FieldArray>(1);
-                (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
-
-                // remove the old row from the index
-                auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, &existing_row);
-                _secondary_indexes[index_id].first->remove(kv);
-            }
-        };
-
         // update the row in the page
         // note: this can only be used when a primary key is present, otherwise update should have been split
-        page->update(value, _schema, invalidate_index_callback);
-
-        // after the page update is done, insert the updated row into the secondary indexes
-        for (auto const &index_id : updated_index_ids) {
-            const auto column_names = _schema->get_column_names(_secondary_indexes[index_id].second);
-            const auto key_fields = _schema->get_fields(column_names);
-
-            auto value_fields = std::make_shared<FieldArray>(1);
-            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
-
-            // insert the new row into the index
-            auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, value->row());
-            _secondary_indexes[index_id].first->insert(kv);
-        }
+        page->update(value, _schema,
+                [this, value](Extent::Row& row) {
+                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
+                            _schema, _secondary_indexes, row);
+                },
+                [this, value](Extent::Row& row) {
+                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                            _schema, _secondary_indexes, row);
+                });
     }
 
     void
