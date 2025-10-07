@@ -2,6 +2,8 @@
 
 #include <pg_ext/common.hh>
 #include <pg_ext/export.hh>
+#include <pg_ext/varatt.hh>
+
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
@@ -48,15 +50,6 @@ extern "C" PGEXT_API void resetStringInfo(StringInfo str);
 extern "C" PGEXT_API int parser_errposition(ParseState *pstate, int location);
 extern "C" PGEXT_API bool scanner_isspace(char ch);
 extern "C" PGEXT_API char *pg_strerror_r(int errnum, char *buf, size_t buflen);
-
-extern "C" PGEXT_API uint32_t pq_getmsgint(StringInfo str, int size);
-extern "C" PGEXT_API char *pq_getmsgtext(StringInfo msg, int rawbytes, int *nbytes);
-extern "C" PGEXT_API double pq_getmsgfloat8(StringInfo msg);
-
-extern "C" PGEXT_API void pq_begintypsend(StringInfo str);
-extern "C" PGEXT_API void pq_sendfloat8(StringInfo str, double value);
-extern "C" PGEXT_API bytea *pq_endtypsend(StringInfo buf);
-extern "C" PGEXT_API void pq_sendtext(StringInfo buf, const char *str, int slen);
 
 extern "C" PGEXT_API text *cstring_to_text_with_len(const char *s, int len);
 

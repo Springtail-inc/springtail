@@ -28,6 +28,23 @@ typedef struct List
 	/* If elements == initial_elements, it's not a separate allocation */
 } List;
 
+
+typedef struct ForEachState
+{
+	const List *l;				/* list we're looping through */
+	int			i;				/* current element index */
+} ForEachState;
+
+#define lfirst(lc) ((lc)->ptr_value)
+
+#define foreach(cell, lst)	\
+	for (ForEachState cell##__state = {(lst), 0}; \
+		 (cell##__state.l != NULL && \
+		  cell##__state.i < cell##__state.l->length) ? \
+		 (cell = &cell##__state.l->elements[cell##__state.i], true) : \
+		 (cell = NULL, false); \
+		 cell##__state.i++)
+
 //// EXPORTED INTERFACES
 extern "C" PGEXT_API List *lappend(List *list, void *datum);
 extern "C" PGEXT_API List *list_concat(List *list1, List *list2);

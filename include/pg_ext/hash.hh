@@ -43,6 +43,29 @@ typedef struct HASH_SEQ_STATUS {
     size_t position;
 } HASH_SEQ_STATUS;
 
+#define UINT32_ALIGN_MASK (sizeof(uint32_t) - 1)
+#define rot(x,k) (x << k) | (x >> (32 - k))
+
+#define mix(a,b,c) \
+{ \
+  a -= c;  a ^= rot(c, 4);	c += b; \
+  b -= a;  b ^= rot(a, 6);	a += c; \
+  c -= b;  c ^= rot(b, 8);	b += a; \
+  a -= c;  a ^= rot(c,16);	c += b; \
+  b -= a;  b ^= rot(a,19);	a += c; \
+  c -= b;  c ^= rot(b, 4);	b += a; \
+}
+#define final(a,b,c) \
+{ \
+  c ^= b; c -= rot(b,14); \
+  a ^= c; a -= rot(c,11); \
+  b ^= a; b -= rot(a,25); \
+  c ^= b; c -= rot(b,16); \
+  a ^= c; a -= rot(c, 4); \
+  b ^= a; b -= rot(a,14); \
+  c ^= b; c -= rot(b,24); \
+}
+
 //// EXPORTED INTERFACES
 extern "C" PGEXT_API HTAB *hash_create(const char *tabname, int nelem, const HASHCTL *info);
 extern "C" PGEXT_API void *hash_search(HTAB *htab, const void *key, HASHACTION action, bool *found);

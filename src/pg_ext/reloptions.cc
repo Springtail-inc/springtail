@@ -26,6 +26,10 @@ IntReloption* get_local_int_reloption(const char *name) {
     return nullptr;
 }
 
-void init_local_reloptions(void) {
-    // XXX Stubbed for now
+void
+init_local_reloptions(local_relopts *relopts, Size relopt_struct_size)
+{
+    relopts->options = nullptr;
+    relopts->validators = nullptr;
+    relopts->relopt_struct_size = relopt_struct_size;
 }

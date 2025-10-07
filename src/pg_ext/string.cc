@@ -12,12 +12,16 @@
 #include <cwchar>
 #include <new>
 #include <stdexcept>
-#include <arpa/inet.h>
 
 #include <common/logging.hh>
 
 #define HIGHBIT (0x80)
 #define IS_HIGHBIT_SET(ch) ((unsigned char)(ch) & HIGHBIT)
+
+#define appendStringInfoCharMacro(str, ch) \
+    (((str)->len + 1 >= (str)->maxlen)     \
+         ? appendStringInfoChar(str, ch)   \
+         : (void)((str)->data[(str)->len] = (ch), (str)->data[++(str)->len] = '\0'))
 
 char *lowerstr(const char *str) {
     return lowerstr_with_len(str, std::strlen(str));
@@ -217,11 +221,6 @@ char *str_toupper(const char *buff, size_t nbytes, Oid collid) {
     return upperstr_with_len(buff, nbytes);
 }
 
-char *pq_getmsgtext(StringInfo msg, int rawbytes, int *nbytes) {
-    // XXX Stubbed for now
-    return strdup(msg->data + msg->cursor);
-}
-
 char *pstrdup(const char *in) {
     return strdup(in);
 }
@@ -368,58 +367,6 @@ pg_strerror_r(int errnum, char *buf, size_t buflen)
     return strerror_r(errnum, buf, buflen);
 }
 
-static inline uint16_t pg_ntoh16(uint16_t x) {
-    return ntohs(x);
-}
-
-static inline uint32_t pg_ntoh32(uint32_t x) {
-    return ntohl(x);
-}
-
-static inline uint64_t pg_ntoh64(uint64_t x) {
-    return be64toh(x);
-}
-
-void
-pq_copymsgbytes(StringInfo msg, char *buf, int datalen)
-{
-	if (datalen < 0 || datalen > (msg->len - msg->cursor))
-		LOG_ERROR("Insufficient data left in message");
-
-	memcpy(buf, &msg->data[msg->cursor], datalen);
-	msg->cursor += datalen;
-}
-
-uint32_t
-pq_getmsgint(StringInfo msg, int b)
-{
-	uint32_t result;
-	char n8;
-	uint16_t n16;
-	uint32_t n32;
-
-	switch (b)
-	{
-		case 1:
-			pq_copymsgbytes(msg, (char *) &n8, 1);
-			result = n8;
-			break;
-		case 2:
-			pq_copymsgbytes(msg, (char *) &n16, 2);
-			result = pg_ntoh16(n16);
-			break;
-		case 4:
-			pq_copymsgbytes(msg, (char *) &n32, 4);
-			result = pg_ntoh32(n32);
-			break;
-		default:
-			LOG_WARN("Unsupported integer size {}", b);
-			result = 0;
-			break;
-	}
-	return result;
-}
-
 void appendStringInfoChar(StringInfo str, char ch) {
     if (str->len + 1 > str->maxlen) {
         enlargeStringInfo(str, 1);
@@ -432,41 +379,6 @@ void pq_begintypsend(StringInfo str) {
     initStringInfo(str);
 }
 
-int64_t
-pq_getmsgint64(StringInfo msg)
-{
-	uint64_t n64;
-
-	pq_copymsgbytes(msg, (char *) &n64, sizeof(n64));
-
-	return pg_ntoh64(n64);
-}
-
-double pq_getmsgfloat8(StringInfo msg) {
-    union
-	{
-		double f;
-		uint64_t i;
-	} swap;
-
-	swap.i = pq_getmsgint64(msg);
-
-	return swap.f;
-}
-
-void pq_sendfloat8(StringInfo str, double value) {
-    // XXX Stubbed for now
-}
-
-void pq_sendtext(StringInfo buf, const char *str, int slen) {
-    // XXX Stubbed for now
-}
-
-bytea *pq_endtypsend(StringInfo buf) {
-    // XXX Stubbed for now
-    return nullptr;
-}
-
 void appendStringInfoString(StringInfo str, const char *s) {
     if (str->len + strlen(s) + 1 > str->maxlen) {
         enlargeStringInfo(str, strlen(s) + 1);
@@ -475,8 +387,17 @@ void appendStringInfoString(StringInfo str, const char *s) {
     str->len += strlen(s);
 }
 
-int parser_errposition(ParseState *pstate, int location) {
-    int pos = 0;
+int
+errposition(int cursorpos)
+{
+    // XXX Stubbed for now
+    return 0; /* return value does not matter */
+}
+
+int
+parser_errposition(ParseState *pstate, int location)
+{
+    int pos;
 
     /* No-op if location was not provided */
     if (location < 0) {
@@ -489,9 +410,7 @@ int parser_errposition(ParseState *pstate, int location) {
     /* Convert offset to character number */
     pos = pg_mbstrlen_with_len(pstate->p_sourcetext, location) + 1;
     /* And pass it to the ereport mechanism */
-    // return errposition(pos);
-    // XXX Stubbed
-    return pos;
+    return errposition(pos);
 }
 
 bool
@@ -543,4 +462,33 @@ pg_strcasecmp(const char *s1, const char *s2)
         }
     }
     return 0;
+}
+
+int
+strncasecmp(const char *s1, const char *s2, size_t n)
+{
+	while (n-- > 0)
+	{
+		unsigned char ch1 = (unsigned char) *s1++;
+		unsigned char ch2 = (unsigned char) *s2++;
+
+		if (ch1 != ch2)
+		{
+			if (ch1 >= 'A' && ch1 <= 'Z')
+				ch1 += 'a' - 'A';
+			else if (IS_HIGHBIT_SET(ch1) && isupper(ch1))
+				ch1 = tolower(ch1);
+
+			if (ch2 >= 'A' && ch2 <= 'Z')
+				ch2 += 'a' - 'A';
+			else if (IS_HIGHBIT_SET(ch2) && isupper(ch2))
+				ch2 = tolower(ch2);
+
+			if (ch1 != ch2)
+				return (int) ch1 - (int) ch2;
+		}
+		if (ch1 == 0)
+			break;
+	}
+	return 0;
 }
