@@ -247,7 +247,7 @@ namespace springtail {
         std::shared_ptr<std::vector<char>> _variable_data; ///< Storage for the variable-sized column data, referenced by the fixed data columns.
 
         /** Hash table for the variable data, used for duplicate detection. */
-        std::unordered_map<uint64_t, std::vector<uint32_t>> _variable_hash;
+        std::unordered_map<std::string_view, uint32_t> _variable_hash;
 
         void _populate_vhash() {
             // fill the hash with the variable data
@@ -257,11 +257,9 @@ namespace springtail {
                 // retrieve the size
                 size = recvint32(_variable_data->data() + offset);
 
-                // calculate the hash
-                uint64_t hash = XXH64(_variable_data->data() + offset + sizeof(uint32_t), size, 0);
-
                 // store the hash
-                _variable_hash[hash].push_back(offset);
+                std::string_view value(_variable_data->data() + offset + sizeof(uint32_t), size);
+                _variable_hash[value] = offset;
 
                 // move to the next entry
                 offset += size + sizeof(uint32_t);
@@ -434,26 +432,12 @@ namespace springtail {
         /** Add variable-sized data to the extent. */
         uint32_t add_variable(const char *buffer, uint32_t size)
         {
-            // hash the string value
-            uint64_t hash = XXH64(buffer, size, 0);
+            std::string_view value(buffer, size);
 
             // check if the value already exists
-            auto i = _variable_hash.find(hash);
+            auto i = _variable_hash.find(value);
             if (i != _variable_hash.end()) {
-                for (uint32_t offset : i->second) {
-                    // check size
-                    uint32_t vsize = recvint32(_variable_data->data() + offset);
-
-                    if (size == vsize) {
-                        // check the actual data
-                        if (std::equal(_variable_data->data() + offset + 4,
-                                       _variable_data->data() + offset + 4 + vsize,
-                                       buffer)) {
-                            // if already exists, return the existing location
-                            return offset;
-                        }
-                    }
-                }
+                return i->second;
             }
 
             // if doesn't exist, append and return the new location
@@ -463,7 +447,8 @@ namespace springtail {
             std::copy_n(buffer, size, _variable_data->data() + new_offset + 4);
 
             // store the new offset into the hash table
-            _variable_hash[hash].push_back(new_offset);
+            std::string_view new_value(_variable_data->data() + new_offset + 4, size);
+            _variable_hash[new_value] = new_offset;
 
             return new_offset;
         }
