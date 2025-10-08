@@ -38,48 +38,7 @@ bool errstart_cold(int elevel, const char *domain) {
 }
 
 void errfinish(int dummy, ...) {
-    if (!error_in_progress) {
-        return;
-    }
-
-    // Log the final error message
-    if (current_error_message[0] != '\0') {
-        switch (current_elevel) {
-            case 20: // DEBUG5
-            case 15: // DEBUG4
-            case 14: // DEBUG3
-            case 13: // DEBUG2
-            case 12: // DEBUG1
-                fprintf(stderr, "%s", current_error_message);
-                break;
-            case 10: // LOG
-                fprintf(stderr, "%s", current_error_message);
-                break;
-            case 11: // COMMERROR
-            case 8:  // WARNING
-                fprintf(stderr, "%s", current_error_message);
-                break;
-            case 7:  // NOTICE
-                fprintf(stderr, "%s", current_error_message);
-                break;
-            case 6:  // INFO
-                fprintf(stderr, "%s", current_error_message);
-                break;
-            case 5:  // ERROR
-                fprintf(stderr, "%s", current_error_message);
-                break;
-            case 4:  // FATAL
-            case 3:  // PANIC
-                fprintf(stderr, "%s", current_error_message);
-                break;
-            default:
-                fprintf(stderr, "%s", current_error_message);
-        }
-    }
-
-    // Reset error state
-    error_in_progress = false;
-    current_error_message[0] = '\0';
+    // XXX Stubbed for now
 }
 
 void errsave_start(int dummy, ...) {
