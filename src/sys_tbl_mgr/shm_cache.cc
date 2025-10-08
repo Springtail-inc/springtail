@@ -8,14 +8,13 @@ using namespace springtail::sys_tbl_mgr;
 ShmCache::ShmCache(std::string name, size_t size)
     :_name{std::move(name)},
     _created{true},
-    _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str(),
-        []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
     _shm{ipc::create_only, _name.c_str(), size, nullptr,
-        []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
+        []{ipc::permissions  p; p.set_unrestricted(); return p;}()},
+    _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str(), []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
     _messages_alloc{_shm.get_segment_manager()},
-    _string_alloc{_shm.get_segment_manager()}
+    _string_alloc{_shm.get_segment_manager()},
+    _msg_cache(_mutex, _messages_alloc, _string_alloc)
 {
-
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {} - {}", _name, size);
     auto free_size = _shm.get_free_memory();
     CHECK(free_size <=  size);
@@ -25,10 +24,11 @@ ShmCache::ShmCache(std::string name, size_t size)
 ShmCache::ShmCache(std::string name)
     :_name{std::move(name)},
     _created{false},
-    _mutex{ipc::open_only, (_name + std::string(".mutex")).c_str()},
     _shm{ipc::open_only, _name.c_str()},
+    _mutex{ipc::open_only, (_name + std::string(".mutex")).c_str()},
     _messages_alloc{_shm.get_segment_manager()},
-    _string_alloc{_shm.get_segment_manager()}
+    _string_alloc{_shm.get_segment_manager()},
+    _msg_cache(_mutex, _messages_alloc, _string_alloc)
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {}", _name);
     _init();
@@ -47,12 +47,12 @@ ShmCache::_init()
 {
     CHECK(_shm.check_sanity());
 
-    _cache = _shm.find_or_construct<Cache>("cache")(
-            Cache::allocator_type(_shm.get_segment_manager()));
-    CHECK(_cache);
-    _lru = _shm.find_or_construct<Lru>("lru")(
-            Lru::allocator_type(_shm.get_segment_manager()));
-    CHECK(_lru);
+    _msg_cache.set_containers(
+            _shm.find_or_construct<CacheContainer>("cache")(
+                CacheContainer::allocator_type(_shm.get_segment_manager())),
+            _shm.find_or_construct<Lru>("lru")(
+                    Lru::allocator_type(_shm.get_segment_manager()))
+            );
 
     _xid_commit_time = _shm.find_or_construct<Time>("commit_time")();
     CHECK(_xid_commit_time);
@@ -130,201 +130,6 @@ ShmCache::get_committed_xid(DbId db)
     return it->second;
 }
 
-size_t
-ShmCache::size() const
-{
-    ipc::sharable_lock<Mutex> lock(_mutex,
-            std::chrono::system_clock::now() + std::chrono::seconds(5)
-            );
-
-    CHECK(lock.owns());
-
-    return _lru->size();
-}
-
-std::vector<TableId>
-ShmCache::get_db_tables(DbId db, bool exclude_dropped)
-{
-    std::vector<TableId> r;
-
-    ipc::sharable_lock<Mutex> lock(_mutex,
-            std::chrono::system_clock::now() + std::chrono::seconds(5)
-            );
-
-    CHECK(lock.owns());
-
-    auto& seq_idx = _lru->get<0>();
-    for (auto const& v: seq_idx) {
-        if (v.db == db && std::ranges::find(r, v.tid) == r.end()) {
-            if (exclude_dropped) {
-                // check if the table was dropped
-                const auto& it = _cache->find({db, v.tid});
-                CHECK(it != _cache->end());
-                CHECK(!it->second.empty());
-                auto msg_it = it->second.end();
-                --msg_it;
-                if (!msg_it->dropped) {
-                    r.push_back(v.tid);
-                } else {
-                    CHECK(msg_it->msg.empty());
-                }
-            } else {
-                r.push_back(v.tid);
-            }
-        }
-    }
-    // least used tables are at the front of the list
-    std::ranges::reverse(r);
-
-    return r;
-}
-
-bool
-ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg, bool drop_table)
-{
-    Key k{db, tid};
-
-    Message item(_string_alloc);
-    item.xid = xid;
-    item.dropped = drop_table;
-
-    auto cmp = [](const auto& a, const auto& b) {return a.xid < b.xid;};
-
-    ipc::scoped_lock<Mutex> lock(_mutex,
-            std::chrono::system_clock::now() + std::chrono::seconds(5)
-            );
-
-    CHECK(lock.owns());
-
-    auto it = _cache->find(k);
-    if (it != _cache->end() && std::ranges::binary_search(it->second, item, cmp)) {
-        return false;
-    }
-
-    bool key_exists = it != _cache->end();
-
-    // get the last cached message for the table
-    // and make sure that it wasn't dropped
-    if (!drop_table && key_exists && !it->second.empty()) {
-        auto msg_it = it->second.end();
-        --msg_it;
-        if (msg_it->xid < xid) {
-            // we don't resurrect tables
-            DCHECK(!msg_it->dropped);
-        }
-    }
-
-    check_free_space_locked();
-
-    while (true) {
-        try {
-            if (!key_exists) {
-                it = (*_cache).emplace(k, Messages(_messages_alloc)).first;
-                key_exists = true;
-            }
-
-            CHECK(it != _cache->end());
-
-            item.msg.insert(item.msg.end(), msg.data(), msg.data() + msg.size());
-
-            if (!it->second.empty() && (--it->second.end())->xid < xid) {
-                it->second.push_back(item);
-            } else {
-                it->second.push_back(item);
-                std::ranges::sort(it->second, cmp);
-            }
-            LruKey lk{db, tid, xid};
-            _lru->push_front(lk);
-            break;
-        } catch (const boost::interprocess::bad_alloc&) {
-
-            // restore invariants
-            if (key_exists) {
-                auto itt = std::ranges::lower_bound(it->second, item,
-                        [](const auto& a, const auto& b) { return a.xid < b.xid; } );
-                if (itt != it->second.end()) {
-                    it->second.erase(itt);
-                }
-            }
-
-            auto it_lru = _lru->get<1>().find(LruKey{db, tid, xid});
-            if (it_lru != _lru->get<1>().end()) {
-                _lru->get<1>().erase(it_lru);
-            }
-
-            // if it fails the memory is probably too small.
-            CHECK(!_lru->empty());
-
-            evict_locked();
-        }
-    }
-    return true;
-}
-
-std::optional<std::string>
-ShmCache::find(DbId db, TableId tid, Xid xid)
-{
-    std::string ret;
-    LruKey lk{db, tid, xid};
-
-    { //read-only portion
-        ipc::sharable_lock<Mutex> lock(_mutex,
-                std::chrono::system_clock::now() + std::chrono::seconds(5)
-                );
-        CHECK(lock.owns());
-
-        auto it = _cache->find({db, tid});
-        if (it == _cache->end()) {
-            return {};
-        }
-
-        Message item(_string_alloc);
-        item.xid = xid;
-
-        auto itt = std::ranges::lower_bound(it->second, item,
-                [](const auto& a, const auto& b) { return a.xid < b.xid; } );
-        if (itt == it->second.end()) {
-            return {};
-        }
-
-        if (itt->xid != xid) {
-            return {};
-        }
-        ret = std::string(itt->msg.data(), itt->msg.size());
-
-        //check if the item is near the top of LRU
-        size_t top_cnt = static_cast<double>(_lru->size())*0.1; //in the top 10%
-        //Note: if the number of items in LRU "too small" (<10 elements) then
-        //top_cnt=0 and we'll move to the top. It should be fine actually.
-
-        auto& seq_idx = _lru->get<0>();
-        size_t i = 0;
-        for (auto it=seq_idx.begin(); i != top_cnt && it != seq_idx.end(); ++it, ++i)
-        {
-            if (*it == lk) {
-                return ret;
-            }
-        }
-    }
-
-    // this will move the element to the LRU front
-    // preserving the insertion sequence.
-    {
-        ipc::scoped_lock<Mutex> lock(_mutex,
-                std::chrono::system_clock::now() + std::chrono::seconds(5)
-                );
-        CHECK(lock.owns());
-
-        auto it_lru = _lru->get<1>().find(lk);
-        if (it_lru != _lru->get<1>().end()) {
-            auto& seq_idx = _lru->get<0>();
-            seq_idx.relocate(seq_idx.begin(), _lru->project<0>(it_lru));
-        }
-    }
-
-    return ret;
-}
-
 void
 ShmCache::check_free_space_locked()
 {
@@ -339,30 +144,7 @@ ShmCache::check_free_space_locked()
             break;
         }
 
-        evict_locked();
+        _msg_cache.evict();
     }
-}
-
-void
-ShmCache::evict_locked()
-{
-    auto key = _lru->back();
-    auto it = _cache->find({key.db, key.tid});
-    CHECK(it != _cache->end());
-
-    Message msg(_string_alloc);
-    msg.xid = key.xid;
-
-    auto itt = std::ranges::lower_bound(it->second, msg,
-            [](const auto& a, const auto& b) { return a.xid < b.xid; } );
-    CHECK(itt != it->second.end());
-    it->second.erase(itt);
-    it->second.shrink_to_fit();
-
-    if (it->second.empty()) {
-        _cache->erase(it);
-    }
-
-    _lru->pop_back();
 }
 

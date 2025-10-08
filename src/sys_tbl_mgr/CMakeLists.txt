@@ -7,21 +7,22 @@ set(SYS_TBL_MGR_SOURCES
     server.cc
     service.cc
     schema_cache.cc
-    schema_mgr.cc
     system_tables.cc
     system_table_mgr.cc
+    table_mgr_base.cc
+    table_mgr.cc
     table.cc
 )
 
 set(SYS_TBL_MGR_CLIENT_SOURCES
     client.cc
     schema_cache.cc
-    schema_mgr.cc
     shm_cache.cc
     system_tables.cc
     system_table_mgr.cc
     table.cc
-    table_mgr.cc
+    table_mgr_base.cc
+    table_mgr_client.cc
 )
 
 set(SCH_MEM_CACHE_SOURCES
@@ -51,15 +52,6 @@ target_link_libraries(springtail_sch_mem_cache
   PUBLIC springtail_common
   PRIVATE Boost::thread)
 
-# daemon executable
-add_executable(sys_tbl_mgr_daemon daemon.cc)
-target_include_directories(sys_tbl_mgr_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
-target_link_libraries(sys_tbl_mgr_daemon
-  PUBLIC springtail_sys_tbl_mgr
-  PRIVATE Boost::program_options
-)
-add_dsymutil_command(sys_tbl_mgr_daemon)
-
 # file system check utility
 add_executable(file_system_check test/file_system_check.cc)
 target_include_directories(file_system_check PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
@@ -88,7 +80,5 @@ springtail_unit_test(test_shm_cache
   LIBS springtail_sch_mem_cache GTest::gtest_main
 )
 
-# install daemon to install directory
-install(TARGETS sys_tbl_mgr_daemon RUNTIME DESTINATION bin/system)
 # install file system validation utility to install directory
 install(TARGETS file_system_check RUNTIME DESTINATION bin/system)

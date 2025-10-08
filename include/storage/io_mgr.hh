@@ -10,6 +10,7 @@
 #include <common/singleton.hh>
 #include <common/thread_pool.hh>
 #include <common/object_cache.hh>
+#include <common/json.hh>
 #include <storage/compressors.hh>
 #include <storage/io_request.hh>
 
@@ -33,6 +34,7 @@ namespace springtail {
         static const int NUM_THREADS = 1;             ///< initial thread count
         static const int MAX_FILE_OBJECTS = 32;       ///< initial file object in file cache, use resize to change
         static const int MAX_FILE_HANDLES_PER_FILE=4; ///< number of read file handles per file object
+        static const int IO_REQUEST_QUEUE_SIZE = 16;  ///< Queue size for IO requests operated by thread pool
 
         /**
          * @brief Open a file, retrieve virtual FH from IOMgr singleton instance
@@ -121,7 +123,29 @@ namespace springtail {
          */
         IOMgr() : Singleton<IOMgr>(ServiceId::IOMgrId)
         {
-            _init(IOMgr::NUM_THREADS, IOMgr::MAX_FILE_OBJECTS);
+            // get the configs for threads, filehandles and Queue size
+            nlohmann::json storage_json = Properties::get(Properties::STORAGE_CONFIG);
+            nlohmann::json io_pool_config_json = Properties::get(Properties::IOPOOL_CONFIG);
+
+            int num_threads = IOMgr::NUM_THREADS;
+            int max_filehandles = IOMgr::MAX_FILE_OBJECTS;
+            int io_request_queue_size = IOMgr::IO_REQUEST_QUEUE_SIZE;
+            // Threads count
+            if (io_pool_config_json.contains("threads")) {
+                Json::get_to<int>(io_pool_config_json, "threads", num_threads);
+            }
+
+            // File handles count
+            if (io_pool_config_json.contains("filehandles")) {
+                Json::get_to<int>(io_pool_config_json, "filehandles", max_filehandles);
+            }
+
+            // IO requests queue size
+            if (storage_json.contains("io_request_queue_size")) {
+                Json::get_to<int>(storage_json, "io_request_queue_size", io_request_queue_size);
+            }
+
+            _init(num_threads, max_filehandles, io_request_queue_size);
         }
 
         /**
@@ -131,10 +155,11 @@ namespace springtail {
 
         /**
          * @brief Initialize IOMgr object
-         * @param num_threads     Initial number of threads for thread pool (NUM_THREADS)
-         * @param max_filehandles Initial size of file handle cache (MAX_FILE_OBJECTS)
+         * @param num_threads           Initial number of threads for thread pool (NUM_THREADS)
+         * @param max_filehandles       Initial size of file handle cache (MAX_FILE_OBJECTS)
+         * @param io_request_queue_size Size of the IO requests queue (IO_REQUEST_QUEUE_SIZE)
          */
-        void _init(int num_threads, int max_filehandles);
+        void _init(int num_threads, int max_filehandles, int io_request_queue_size);
 
         /**
          * @brief Shuts down the IOMgr instance by deleting _instance.  It causes the thread pool and LRU cache

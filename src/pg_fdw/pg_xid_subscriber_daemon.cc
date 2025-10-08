@@ -29,12 +29,12 @@ int main(int argc, char *argv[])
     po::notify(vm);
 
     // initialize the springtail subsystems
-    std::optional<std::string> pidfile;
+    bool daemonize = false;
     if (vm.count("daemonize")) {
-        pidfile = "pg_xid_subscriber.pid";
+        daemonize = true;
     }
 
-    springtail::springtail_init_daemon("pg_xid_subscriber", pidfile);
+    springtail::springtail_init_daemon(argv[0], daemonize);
     PgXidSubscriberMgr::start();
 
     springtail_daemon_run();

@@ -1,4 +1,6 @@
 // springtail includes
+#include <common/json.hh>
+
 #include <pg_log_mgr/sync_tracker.hh>
 
 #include <pg_repl/exception.hh>
@@ -6,7 +8,7 @@
 #include <storage/schema.hh>
 #include <storage/field.hh>
 
-#include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
@@ -581,8 +583,8 @@ namespace springtail
         // set the schema
         _set_schema(table_oid);
 
-        LOG_INFO("Copying table {}.{} with oid {} and schema oid {}",
-                 _schema.schema_name, _schema.table_name, table_oid, _schema.schema_oid);
+        LOG_INFO("Copying table {}.{} with oid {} and schema oid {} at xid {}",
+                 _schema.schema_name, _schema.table_name, table_oid, _schema.schema_oid, xid.xid);
 
         // validate the columns to see if there are invalid columns
         auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns,
@@ -763,8 +765,8 @@ namespace springtail
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
         copy_info->set_is_table_dropped(_is_table_dropped(_schema.schema_oid, table_oid));
-        LOG_INFO("Copied table {}.{} with oid {} and schema oid {}",
-                 _schema.schema_name, _schema.table_name, table_oid, _schema.schema_oid);
+        LOG_INFO("Copied table {}.{} with oid {} and schema oid {} and xid {}",
+                 _schema.schema_name, _schema.table_name, table_oid, _schema.schema_oid, xid.xid);
 
         return std::make_shared<PgCopyResult::TableInfo>(table_oid, copy_info, schema);
     }
@@ -1072,7 +1074,7 @@ namespace springtail
     std::vector<PgCopyResultPtr>
     PgCopyTable::copy_tables(uint64_t db_id,
                              uint64_t xid,
-                             const std::set<uint32_t> &table_oids)
+                             const std::unordered_set<uint32_t> &table_oids)
     {
         return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids);
     }
@@ -1132,7 +1134,7 @@ namespace springtail
 
             PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>(target_xid);
 
-            LOG_INFO("Copy table start: oid {}", request->table_oid);
+            LOG_INFO("Copy table start: oid {}, xid {}", request->table_oid, xid.xid);
 
             // create copy table object and connect to db
             PgCopyTable copy_table;
@@ -1161,11 +1163,24 @@ namespace springtail
                                                    request->table_oid,
                                                    copy_result);
 
+                bool is_partition_table = false;
+                if (info->info != nullptr) {
+                    // Get the details about the table to find out if its a partitioned tables
+                    // If the partition_keys is not empty or partition_bound is not empty, then it is a partitioned table
+                    auto table_req_info = info->info->table_req().table();
+                    is_partition_table = !table_req_info.partition_bound().empty() || !table_req_info.partition_key().empty();
+                }
+
                 // add the table oid to the result
                 copy_result->add_table(info);
                 if (copy_result->tids.size() > 0) {
                     result.push_back(copy_result);
-                    copy_table._send_sync_msg(copy_result);
+                    // If the table is not a partitioned table, send sync message
+                    // If it is a partitioned table, wait for all partition tables to be processed,
+                    //                               i.e., all the tables in the current copy_queue are processed
+                    if (!is_partition_table || copy_queue->empty()) {
+                        copy_table._send_sync_msg(copy_result);
+                    }
                 }
             } catch (PgRetryError &e) {
                 LOG_ERROR("Unexpected error, will retry table copy: {}", request->table_oid);
@@ -1182,7 +1197,7 @@ namespace springtail
             copy_table._end_copy();
             copy_table.disconnect();
 
-            LOG_INFO("Copy table complete: oid {}", request->table_oid);
+            LOG_INFO("Copy table complete: oid {}, xid: {}", request->table_oid, xid.xid);
 
             // reset schema object for next table
             copy_table._reset_schema();
@@ -1288,7 +1303,7 @@ namespace springtail
             return;
         }
 
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
         // iterate through the results and get the user defined types
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t enum_type_oid = copy_table._connection.get_int32(i, 0);
@@ -1297,20 +1312,19 @@ namespace springtail
             std::string enum_type_name = copy_table._connection.get_string(i, 3);
             std::string enum_value_json = copy_table._connection.get_string(i, 4);
 
-            proto::UserTypeRequest udt_req;
-            udt_req.set_db_id(db_id);
-            udt_req.set_xid(xid);
-            udt_req.set_lsn(0);
-            udt_req.set_name(enum_type_name);
-            udt_req.set_type_id(enum_type_oid);
-            udt_req.set_namespace_id(namespace_oid);
-            udt_req.set_namespace_name(namespace_name);
-            udt_req.set_value_json(enum_value_json);
-            udt_req.set_type(constant::USER_TYPE_ENUM); // only support enum types
-
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Creating user defined type: {}, values: {}", enum_type_name, enum_value_json);
 
-            client->create_usertype(udt_req);
+            PgMsgUserType msg;
+            msg.lsn = 0;
+            msg.oid = enum_type_oid;
+            msg.xid = xid;
+            msg.namespace_id = namespace_oid;
+            msg.type = constant::USER_TYPE_ENUM; // only support enum types
+            msg.namespace_name = namespace_name;
+            msg.name = enum_type_name;
+            msg.value_json = enum_value_json;
+
+            server->create_usertype(db_id, {xid, 0}, msg);
         }
 
         // disconnect from the database
@@ -1459,20 +1473,17 @@ namespace springtail
         // disconnect from the database
         copy_table.disconnect();
 
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
         // create the namespaces
         for (const auto &namespace_info : namespaces) {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Creating namespace: {}", namespace_info.second);
 
-            proto::NamespaceRequest ns_req;
-            ns_req.set_db_id(db_id);
-            ns_req.set_namespace_id(namespace_info.first);
-            ns_req.set_name(namespace_info.second);
-            ns_req.set_xid(xid);
-            ns_req.set_lsn(0);
+            PgMsgNamespace msg;
+            msg.oid = namespace_info.first;
+            msg.name = namespace_info.second;
 
             // create the namespace
-            client->create_namespace(ns_req);
+            server->create_namespace(db_id, {xid, 0}, msg);
         }
     }
 
@@ -1510,7 +1521,7 @@ namespace springtail
                                 uint64_t target_xid,
                                 std::optional<std::string> schema_name,
                                 std::optional<std::pair<std::string, std::string>> schema_table,
-                                std::optional<std::set<uint32_t>> table_tids,
+                                std::optional<std::unordered_set<uint32_t>> table_tids,
                                 std::optional<nlohmann::json> include_json)
     {
         CopyQueuePtr copy_queue = std::make_shared<CopyQueue>();
@@ -1550,6 +1561,9 @@ namespace springtail
         copy_table._end_copy();
         copy_table.disconnect();
 
+        auto token_init = open_telemetry::OpenTelemetry::get_instance()->set_context_variables(
+            {{"db_id", std::to_string(db_id)}, {"xid", std::to_string(target_xid)}});
+
         // create a worker thread to copy the tables
         std::vector<std::thread> workers;
         int worker_count = std::min(static_cast<std::size_t>(WORKER_THREADS), table_oids.size());
@@ -1563,7 +1577,7 @@ namespace springtail
 
         // iterate through the tables and copy them
         for (const auto &table_oid : table_oids) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Queueing copy for table_oid: {}", table_oid);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Queueing copy for table_oid: {}, target_xid: {}", table_oid, target_xid);
 
             // add the table to the copy queue
             copy_queue->push(std::make_shared<CopyRequest>(table_oid));

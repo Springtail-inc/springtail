@@ -155,6 +155,10 @@ namespace springtail {
         /** The default maximum number of extents in an in-memory page before we automatically flush it to disk. */
         static const uint32_t MAX_EXTENT_COUNT = 16;
 
+
+        class Page;
+        using PageVector = std::vector<std::shared_ptr<Page>>;
+
         /**
          * The Page objects represent a virtual Extent, which may hold either a single Extent
          * object, or potentially multiple Extent objects which are the result of split() operations
@@ -250,7 +254,7 @@ namespace springtail {
              * @param offset_f The field accessor for the child offset within a branch.
              */
             void update_branch(std::shared_ptr<Page> old_page,
-                               std::vector<std::shared_ptr<Page>> new_pages,
+                               const PageVector &new_pages,
                                MutableFieldPtr offset_f);
 
             /**
@@ -278,7 +282,14 @@ namespace springtail {
              * @param handle The file handle for access to write data.
              * @param xid The XID at which the page is being written.
              */
-            std::vector<std::shared_ptr<Page>> flush(uint64_t xid);
+            PageVector flush(uint64_t xid);
+
+            /**
+             * Async flush call.  Returns a future that can be waited on for completion.
+             */
+            std::future<std::vector<uint64_t>> async_flush(
+                uint64_t xid,
+                std::function<void(const std::vector<uint64_t> &)> callback = nullptr);
 
             /**
              * Specialized case for flushing an empty root page.  Assumes that the caller is holding
@@ -287,7 +298,7 @@ namespace springtail {
              * @param handle The file handle for access to write data.
              * @param xid The XID at which the page is being written.
              */
-            std::vector<std::shared_ptr<Page>> flush_empty_root(uint64_t xid);
+            PageVector flush_empty_root(uint64_t xid);
 
             /**
              * Set the contents of the page to the provided extent.  Stores the key of the final row
@@ -372,6 +383,16 @@ namespace springtail {
                 return _children.begin()->second;
             }
 
+            std::vector<std::shared_ptr<Page>> children() const {
+                std::vector<std::shared_ptr<Page>> children;
+
+                boost::unique_lock lock(_children_mutex);
+                for (auto &entry : _children) {
+                    children.push_back(entry.second);
+                }
+                return children;
+            }
+
             /**
              * Check if the page should be flushed based on the number of extents it contains.
              */
@@ -400,6 +421,54 @@ namespace springtail {
                 return _cache_page->header().xid;
             }
 
+            ExtentSchemaPtr schema() const {
+                return _schema;
+            }
+
+            /**
+             * Handles marking the page as flushing or waiting for a flush to complete if one is ongoing.
+             */
+            std::optional<std::future<std::vector<uint64_t>>> wait_for_flushing() {
+                boost::unique_lock lock(_flush_mutex);
+                if (!_is_flushing) {
+                    _is_flushing = true;
+                    return std::nullopt;
+                } else {
+                    auto promise = std::make_shared<std::promise<std::vector<uint64_t>>>();
+                    auto future = promise->get_future();
+                    _flush_waiters.push_back(std::move(promise));
+
+                    return future;
+                }
+            }
+
+            /**
+             * Tries to wait for any ongoing flushing.  If there's no ongoing flush, then returns
+             * immediately.  Used when constructing Node objects during tree traversal.
+             */
+            void try_wait_for_flushing() {
+                boost::unique_lock lock(_flush_mutex);
+                if (_is_flushing) {
+                    auto promise = std::make_shared<std::promise<std::vector<uint64_t>>>();
+                    auto future = promise->get_future();
+                    _flush_waiters.push_back(std::move(promise));
+                    lock.unlock();
+                    future.get();
+                }
+            }
+
+            /**
+             * Notify anyone waiting for flushing.
+             */
+            void notify_flush_wait() {
+                boost::unique_lock lock(_flush_mutex);
+                _is_flushing = false;
+                for (auto &waiter : _flush_waiters) {
+                    waiter->set_value({});
+                }
+                _flush_waiters.clear();
+            }
+
         public:
             uint64_t extent_id; ///< The offset of the previous extent this page is based on.  Won't change once the page is fully constructed.
             ExtentType type; ///< The type of this page.  Won't change once the page is fully constructed, so safe to read without holding the mutex.
@@ -419,10 +488,19 @@ namespace springtail {
             ExtentSchemaPtr _schema; ///< The schema of the page.
             StoragePagePtr _cache_page; ///< The backing page in the cache for the contents of this BTree page.
 
+            /** The key of each extent in the underlying cache page.  Used at flush time to generate
+                the prev_key for the new pages. */
+            std::vector<ValueTuplePtr> _extent_keys;
+
             // the following are protected by a separate mutex, must be holding the primary mutex at least shared.
             mutable boost::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
             std::map<uint64_t, std::shared_ptr<Page>> _children; ///< The set of children of this page that are part of a modified path through the tree.
             std::shared_ptr<Page> _parent; ///< Pointer to the parent page.  Won't change once the page is fully constructed.
+
+            // the following variables are for handling async flush operations
+            boost::mutex _flush_mutex; ///< Protects the flush variables.
+            bool _is_flushing = false; ///< Flag indicating if a flush of this page is ongoing.
+            std::vector<std::shared_ptr<std::promise<std::vector<uint64_t>>>> _flush_waiters; ///< List of promises that must be set once the flush is complete.
         };
 
     private:
@@ -487,7 +565,10 @@ namespace springtail {
                 : parent(parent),
                   page(page),
                   lock(page->disk_mutex)
-            { }
+            {
+                // if the page is flushing, we need to wait for flushing to complete
+                page->try_wait_for_flushing();
+            }
 
             /**
              * Constructor for the Node.  Downgrades an existing exclusive lock on the Page object's
@@ -547,17 +628,9 @@ namespace springtail {
                            boost::unique_lock<boost::shared_mutex> &cache_lock, bool release = true);
 
         /**
-         * Updates the size of an entry in the cache.  This may cause an eviction to ensure that the
-         * cache doesn't exceed it's maximum size, thus the exclusive lock held on the cache by the
-         * caller must be provided to this function.  Also, the page being updated must have it's
-         * disk_mutex held, but not it's access mutex.  Otherwise, updating the size of a parent
-         * node could result in a deadlock trying to acquire the parent's lock again while evicting
-         * a child.
-         *
-         * @param page The page to update the size of based on its size currently.
-         * @param cache_lock The exclusive lock on the cache held by the caller.
+         * Clears pages from the cache until the cache size is <= max.
          */
-        void _cache_update_size(PagePtr page, boost::unique_lock<boost::shared_mutex> &cache_lock);
+        void _cache_vacuum(boost::unique_lock<boost::shared_mutex> &cache_lock);
 
         /**
          * Evicts an entry from the cache.  Can only be safely called on pages that have been
@@ -617,7 +690,7 @@ namespace springtail {
          * @param page The page being flushed.
          * @param parent The parent of the page being flushed.
          */
-        std::vector<PagePtr> _flush_page_internal(PagePtr page, PagePtr parent);
+        std::future<std::vector<uint64_t>> _async_flush_page_internal(PagePtr page, PagePtr parent, std::function<void (const std::vector<uint64_t> &)> callback = nullptr);
 
         /**
          * Flushes the provided Page to disk.  Also ensures that any children of the page are
@@ -628,7 +701,12 @@ namespace springtail {
          * @param page The page being flushed.
          * @param parent The parent of the page being flushed.
          */
-        void _flush_page(PagePtr page, PagePtr parent);
+        std::future<std::vector<uint64_t>> _async_flush_page(PagePtr page, PagePtr parent);
+
+        /**
+         * Continuation for _async_flush_page().
+         */
+        void _async_flush_finish(PagePtr page, PagePtr parent, const std::vector<uint64_t> &ids);
 
         /**
          * Flushes the root of the tree to disk, also ensuring that any childen of the root are also

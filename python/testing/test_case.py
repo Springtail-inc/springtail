@@ -21,7 +21,10 @@ import common
 _GLOBAL_CONFIG_FILE = '__config.sql'
 
 # In verify, don't fetch results for sql statements that begin with the following tokens
-_GLOBAL_NO_FETCH_STATEMENT = ["prepare"];
+_GLOBAL_NO_FETCH_STATEMENT = ["prepare"]
+
+# Tolerance for benchmark timing comparisons. The measured time can be up to 2% higher than the expected time.
+_BENCHMARK_TOLERANCE = 0.02
 
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
@@ -1234,7 +1237,7 @@ class TestCase:
                 else:
                     expected_time = float(command['query_time_release'])
 
-                if replica_time > expected_time:
+                if replica_time > expected_time * ( 1.0 + _BENCHMARK_TOLERANCE ):
                     self._raise_failure(
                             f"Benchmark verification failed for {self._name}:\n"
                             f"Statement: {command}\n"

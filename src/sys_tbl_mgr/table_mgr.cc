@@ -1,45 +1,25 @@
-#include <common/constants.hh>
-#include <common/json.hh>
-#include <common/properties.hh>
-
-#include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
-#include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/system_table_mgr.hh>
-#include <sys_tbl_mgr/user_table.hh>
-
 #include <storage/vacuumer.hh>
+#include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/system_table_mgr.hh>
 
 namespace springtail {
-
-    TableMgr::TableMgr() : Singleton<TableMgr>(ServiceId::TableMgrId)
-    {
-        // get the base directory for table data
-        nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-        Json::get_to<std::filesystem::path>(json, "table_dir", _table_base);
-        _table_base = Properties::make_absolute_path(_table_base);
-    }
 
     TablePtr
     TableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, ComparatorFunc comparator_func)
     {
-        boost::shared_lock lock(_mutex);
-
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_system_table(db_id, table_id, xid);
+            return SystemTableMgr::get_instance()->get_table(db_id, table_id, xid);
         }
 
         // retrieve the roots and stats of the table
-        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, xid);
+        auto &&tbl_meta = sys_tbl_mgr::Server::get_instance()->get_roots(db_id, table_id, xid);
 
         // construct the table and return it
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id,
-                                                                {xid, constant::MAX_LSN},
-                                                                comparator_func);
+        auto schema = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN}, comparator_func);
 
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
+        auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
         auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
@@ -50,21 +30,14 @@ namespace springtail {
                                         *tbl_meta, schema, comparator_func);
     }
 
-    std::filesystem::path
+    std::optional<std::filesystem::path>
     TableMgr::get_table_data_dir(uint64_t db_id, uint64_t table_id, uint64_t xid)
     {
-        auto&& table_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, xid);
+        auto&& table_meta = sys_tbl_mgr::Server::get_instance()->get_roots(db_id, table_id, xid);
+        if (table_meta == nullptr) {
+            return std::nullopt;
+        }
         return table_helpers::get_table_dir(_table_base, db_id, table_id, table_meta->snapshot_xid);
-    }
-
-    bool
-    TableMgr::exists(uint64_t db_id,
-                     uint64_t table_id,
-                     uint64_t xid,
-                     uint64_t lsn)
-    {
-        boost::shared_lock lock(_mutex);
-        return sys_tbl_mgr::Client::get_instance()->exists(db_id, table_id, { xid, lsn });
     }
 
     MutableTablePtr
@@ -75,21 +48,22 @@ namespace springtail {
                                 bool for_gc,
                                 ComparatorFunc comparator_func)
     {
-        boost::shared_lock lock(_mutex);
-
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
             return SystemTableMgr::get_instance()->get_mutable_system_table(db_id, table_id, access_xid, target_xid);
         }
 
         // retrieve the roots and stats of the table
-        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, access_xid);
+        auto &&tbl_meta = sys_tbl_mgr::Server::get_instance()->get_roots(db_id, table_id, access_xid);
+        if (tbl_meta == nullptr) {
+            tbl_meta = std::make_shared<TableMetadata>();
+        }
 
         // construct the mutable table and return it
         XidLsn xid(target_xid);
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid, comparator_func);
+        auto schema = get_extent_schema(db_id, table_id, xid, comparator_func);
 
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
+        auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
         auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
@@ -116,10 +90,10 @@ namespace springtail {
                                  const std::vector<Index>& secondary_keys,
                                  ComparatorFunc comparator_func)
     {
-        TableMetadata tbl_meta;
+        TableMetadata tbl_meta{};
         tbl_meta.snapshot_xid = snapshot_xid;
 
-        // note: in the case of a failure, there may be a partially copied table already present in
+        // NOTE: in the case of a failure, there may be a partially copied table already present in
         //       the directory structure, so we need to make sure to delete it before we try to
         //       create it below
         auto table_dir = table_helpers::get_table_dir(_table_base, db_id, table_id, snapshot_xid);
@@ -133,43 +107,80 @@ namespace springtail {
                                                   tbl_meta, schema, false, comparator_func);
     }
 
-    void
-    TableMgr::create_table(uint64_t db_id,
-                           const XidLsn &xid,
-                           const PgMsgTable &msg)
+    std::map<uint32_t, SchemaColumn>
+    TableMgr::get_columns(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
     {
-        sys_tbl_mgr::Client::get_instance()->create_table(db_id, xid, msg);
+        // handle system tables
+        if (table_id <= constant::MAX_SYSTEM_TABLE_ID) {
+            return SystemTableMgr::get_instance()->get_columns(db_id, table_id, xid);
+        }
+
+        // non-system tables
+        auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, xid);
+        return _convert_columns(meta->columns);
+    }
+
+    std::shared_ptr<Schema>
+    TableMgr::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid)
+    {
+        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
+            return SystemTableMgr::get_instance()->get_schema(db_id, table_id, access_xid, target_xid);
+        }
+
+        // XXX keep some kind of local cache?
+
+        // call into the SysTblMgr to get the schema at the given XID/LSN
+        auto &&meta = sys_tbl_mgr::Server::get_instance()->get_target_schema(db_id, table_id, access_xid, target_xid);
+
+        // construct the schema object
+        if (meta->history.empty()) {
+            return std::make_shared<ExtentSchema>(meta->columns);
+        }
+
+        return std::make_shared<VirtualSchema>(*meta);
+    }
+
+    std::shared_ptr<ExtentSchema>
+    TableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id,
+                                const XidLsn &xid, bool allow_undefined)
+    {
+        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
+            return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, allow_undefined);
+        }
+
+        // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
+
+        // call into the SysTblMgr to get the schema at the given XID/LSN
+        auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, xid);
+
+        // construct the schema from the provided schema metadata
+        return std::make_shared<ExtentSchema>(meta->columns, allow_undefined);
     }
 
     void
-    TableMgr::alter_table(uint64_t db_id,
-                          const XidLsn &xid,
-                          const PgMsgTable &msg)
+    UserMutableTable::truncate()
     {
-        sys_tbl_mgr::Client::get_instance()->alter_table(db_id, xid, msg);
-    }
+        // remove any dirty cached pages for this table since they don't need to be written
+        StorageCache::get_instance()->drop_for_truncate(_data_file);
 
-    void
-    TableMgr::drop_table(uint64_t db_id,
-                         const XidLsn &xid,
-                         const PgMsgDropTable &msg)
-    {
-        sys_tbl_mgr::Client::get_instance()->drop_table(db_id, xid, msg);
-    }
+        // clear the indexes
+        TableMetadata metadata;
+        metadata.snapshot_xid = _snapshot_xid;
+        metadata.roots = {{ constant::INDEX_PRIMARY, constant::UNKNOWN_EXTENT }};
+        _primary_index->truncate();
+        for (auto& [index_id, idx]: _secondary_indexes) {
+            idx.first->truncate();
+            metadata.roots.emplace_back(index_id, constant::UNKNOWN_EXTENT);
+        }
 
-    void
-    TableMgr::finalize_metadata(uint64_t db_id,
-                                uint64_t xid)
-    {
-        sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
-    }
+        // update the roots and stats
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
 
-    void
-    TableMgr::update_roots(uint64_t db_id,
-                           uint64_t table_id,
-                           uint64_t target_xid,
-                           const TableMetadata &metadata)
-    {
-        sys_tbl_mgr::Client::get_instance()->update_roots(db_id, table_id, target_xid, metadata);
+        // Smart vacuum if data exists
+        if (std::filesystem::exists(_data_file)) {
+            Vacuumer::get_instance()->expire_extent(_data_file, 0, std::filesystem::file_size(_data_file), _target_xid);
+        } else {
+            LOG_INFO("TRUNCATE: File: {} doesn't exist to report to vacuum", _data_file);
+        }
     }
 }

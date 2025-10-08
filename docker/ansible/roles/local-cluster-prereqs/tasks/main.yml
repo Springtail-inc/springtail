@@ -1,0 +1,95 @@
+- name: Update APT cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install required utilities
+  ansible.builtin.apt:
+    name:
+      - python3-venv
+      - supervisor
+    state: present
+
+- name: Add 'springtail' group
+  ansible.builtin.group:
+    name: springtail                 # group name
+    state: present
+    system: no
+
+- name: Add 'springtail` user
+  ansible.builtin.user:
+    name: springtail
+    group: springtail
+    shell: /bin/bash
+    create_home: yes  # Note: this is to make sure `snap` based tools work properly. They need a home directory for the current user.
+    system: no
+
+- name: Add springtail to sudoers
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/springtail
+    owner: root
+    group: root
+    mode: "0440"
+    content: |
+      springtail ALL=(ALL) NOPASSWD:ALL
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Make the installation directory for Springtail service
+  ansible.builtin.file:
+    path: "{{ springtail_installation_dir }}"
+    state: directory
+    owner: springtail
+    group: springtail
+    mode: '0755'
+
+- name: Make SSH idle timeout 1 hour
+  ansible.builtin.shell: |
+    sed -i 's/^#\?ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config
+    sed -i 's/^#\?ClientAliveCountMax.*/ClientAliveCountMax 12/' /etc/ssh/sshd_config
+
+- name: Make the mount point at /fsx
+  ansible.builtin.file:
+    path: /fsx
+    state: directory
+    owner: springtail
+    group: springtail
+    mode: '0755'
+
+- name: Make the dbus and supervisor directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /var/run/dbus
+      mode: '0755'
+    - path: /var/log/supervisor
+      mode: '0755'
+    - path: /var/run/ganesha
+      mode: '0777'
+
+- name: Install the Virtualenv for the Coordinator
+  become: yes
+  ansible.builtin.shell: |
+    python3 -m venv {{ springtail_installation_dir }}/venv
+    . {{ springtail_installation_dir }}/venv/bin/activate
+    pip install --upgrade pip
+    pip install boto3==1.35.81 botocore==1.35.81 certifi==2024.8.30 \
+      charset-normalizer==3.4.0 Deprecated==1.2.18 googleapis-common-protos==1.69.0 \
+      grpcio==1.70.0 idna==3.10 importlib_metadata==8.5.0 jmespath==1.0.1 lxml==5.3.0 \
+      opentelemetry-api==1.30.0 opentelemetry-exporter-otlp==1.30.0 opentelemetry-exporter-otlp-proto-common==1.30.0 \
+      opentelemetry-exporter-otlp-proto-grpc==1.30.0 opentelemetry-exporter-otlp-proto-http==1.30.0 \
+      opentelemetry-proto==1.30.0 opentelemetry-sdk==1.30.0 opentelemetry-semantic-conventions==0.51b0 \
+      protobuf==5.29.5 psutil==6.1.0 psycopg2-binary==2.9.10 python-dateutil==2.9.0.post0 PyYAML==6.0.2 \
+      redis==5.2.1 requests==2.32.3 s3transfer==0.10.4 six==1.17.0 thrift==0.21.0 typing_extensions==4.12.2 \
+      urllib3==2.2.3 wrapt==1.17.2 zipp==3.21.0
+
+- name: Copy over the systemctl shim
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /usr/local/bin/
+    mode: '0755'
+  loop:
+    - systemctl

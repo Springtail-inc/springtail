@@ -24,7 +24,7 @@ target_link_libraries(springtail_pglog
            springtail_redis
            springtail_xid_mgr
            springtail_storage
-           springtail_sys_tbl_mgr_client
+           springtail_sys_tbl_mgr
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt)
 
@@ -69,6 +69,7 @@ springtail_unit_test(test_pg_log_indexer
 )
 
 springtail_unit_test(test_log_repair
+  WORKING_DIR ${CMAKE_SOURCE_DIR}/src/pg_log_mgr/test
   SOURCES test/test_log_repair.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_pglog GTest::gtest_main

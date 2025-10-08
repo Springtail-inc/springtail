@@ -29,6 +29,7 @@ class PostgresComponent(Component):
         version_str = run_command('pg_config', ['--version']).strip()
         self.version = version_str.split(' ')[1].split('.')[0]
         self.props = props
+        self.maint_db = self.props.get_maint_db()
 
         # check the environment to see if we are in production
         environment = os.environ.get('IS_DEPLOYED', 'false')
@@ -155,7 +156,7 @@ class PostgresComponent(Component):
             user = 'postgres'
             if self.is_production:
                 user = self.fdw_user[0]
-            run_command('sudo', ['-u', user, 'psql', '-d', 'postgres', '-c', 'select 1'])
+            run_command('sudo', ['-u', user, 'psql', '-d', self.maint_db, '-c', 'select 1'])
         except Exception as e:
             self.logger.error(f"Failed to connect to Postgres: {str(e)}")
             return False

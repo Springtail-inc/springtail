@@ -1,0 +1,14 @@
+#!/bin/bash
+# Builds a package off the current code base and store it under the given $OUTPUT_DIR.
+# This runs in a building container, so we assume all the build deps are present.
+ci_workspace="${CI_WORKSPACE:-/__w/springtail/springtail}"
+set -e
+set -o pipefail
+cd $ci_workspace
+./debug.sh
+cd debug
+make install
+cd ..
+./package.sh
+n=$(ls -t releases | head -n 1)
+mv "releases/$n" "$OUTPUT_DIR/"

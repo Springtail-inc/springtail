@@ -1,13 +1,5 @@
 #pragma once
 
-#include <set>
-#include <map>
-#include <memory>
-#include <variant>
-#include <mutex>
-#include <shared_mutex>
-#include <cassert>
-
 #include <common/tracking_allocator.hh>
 #include <common/logging.hh>
 
@@ -37,11 +29,18 @@ namespace springtail {
             ROOT=1,
             XID=2,
             TABLE=3,
-            EXTENT=4
+            EXTENT=4,
+            EXTENT_ON_DISK=5
         };
 
         /** ID of entry, uint64_t for table and extent or XID, RowID for row */
         uint64_t id;
+
+        /** For extent on disk extent offset in file */
+        uint64_t data_offset{0};
+
+        /** For extent on disk size of extent in file */
+        size_t data_size{0};
 
         /** Data stored in node */
         ExtentPtr data;
@@ -61,6 +60,9 @@ namespace springtail {
         /** Constructor for integer id, extent */
         WriteCacheIndexNode(uint64_t id, const ExtentPtr extent) : id(id), data(extent), type(IndexType::EXTENT) {}
 
+        /** Constructor for integer id, extent on disk*/
+        WriteCacheIndexNode(uint64_t id, uint64_t offset, size_t size) : id(id), data_offset(offset), data_size(size), type(IndexType::EXTENT_ON_DISK) {}
+
         /** Find child node by int id, return nullptr if not exists */
         WriteCacheIndexNodePtr find(uint64_t id) const;
 
@@ -77,10 +79,10 @@ namespace springtail {
         void add(WriteCacheIndexNodePtr entry);
 
         /** Remove child node by ID */
-        WriteCacheIndexNodePtr remove(uint64_t id);
+        WriteCacheIndexNodePtr remove(uint64_t id, uint64_t &memory_removed);
 
         /** Remove child node by node ptr */
-        WriteCacheIndexNodePtr remove(WriteCacheIndexNodePtr entry);
+        WriteCacheIndexNodePtr remove(WriteCacheIndexNodePtr entry, uint64_t &memory_removed);
 
         /** Remove child node if empty */
         void remove_child_if_empty(WriteCacheIndexNodePtr entry);
@@ -93,6 +95,7 @@ namespace springtail {
                 case IndexType::XID: return "XID";
                 case IndexType::TABLE: return "TABLE";
                 case IndexType::EXTENT: return "EXTENT";
+                case IndexType::EXTENT_ON_DISK: return "EXTENT_ON_DISK";
                 default: return "INVALID";
             }
         }
@@ -106,5 +109,9 @@ namespace springtail {
     private:
         /** Insert entry into children set, write lock must be held */
         WriteCacheIndexNodePtr _insert_child(WriteCacheIndexNodePtr entry);
+
+        /** Get memory stored in the extents under this node */
+        uint64_t _get_memory_size() const;
+
     };
 }

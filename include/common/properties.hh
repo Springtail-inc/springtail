@@ -57,6 +57,8 @@ namespace springtail {
         static inline constexpr char DATABASE_IDS_PATH[] = "instance_config/database_ids";
         /** Redis notification path for database states */
         static inline constexpr char DATABASE_STATE_PATH[] = "instance_state";
+        /** Redis notification path for FDW configurations */
+        static inline constexpr char FDW_CONFIG_PATH[] = "fdw";
 
         /* Secrets mgr roles */
         /** FDW secrets mgr role */

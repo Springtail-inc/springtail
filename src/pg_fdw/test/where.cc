@@ -8,7 +8,7 @@
 #include <storage/extent.hh>
 
 #include <sys_tbl_mgr/table.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/table_mgr_client.hh>
 
 using namespace springtail;
 
@@ -48,7 +48,7 @@ bool check_row(const std::any &row, FieldArrayPtr fields, FieldPtr key_field, Qu
 
 void search(uint64_t db_id, int val, QualOpName op)
 {
-    TablePtr table = TableMgr::get_instance()->get_table(db_id, 57455, 8);
+    TablePtr table = TableMgrClient::get_instance()->get_table(db_id, 57455, 8);
     std::optional<Table::Iterator> iter_start = std::nullopt;
     std::optional<Table::Iterator> iter_end = std::nullopt;
 

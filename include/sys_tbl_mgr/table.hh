@@ -894,7 +894,7 @@ namespace indexer_helpers {
 
         uint64_t _access_xid; ///< The access XID for this set of mutations.
         uint64_t _target_xid; ///< The final target XID for this set of mutations.
-        uint64_t _snapshot_xid; ///< The XID of the snapshot that this version of the table started from.
+        uint64_t _snapshot_xid{0}; ///< The XID of the snapshot that this version of the table started from.
         std::filesystem::path _table_dir; ///< The directory containing the table data.
         std::filesystem::path _data_file; ///< The file containing the table data extents.
 
@@ -919,7 +919,7 @@ namespace indexer_helpers {
         MutableFieldPtr _roots_index_id_f; ///< The field accessor for the tree roots index ids stored within each row of the "roots" file.
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
-        TableStats _stats; ///< The stats for the table.
+        TableStats _stats{}; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
         ComparatorFunc _comparator_func; ///< The comparator function for this table.

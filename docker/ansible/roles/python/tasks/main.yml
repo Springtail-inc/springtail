@@ -2,8 +2,10 @@
   ansible.builtin.pip:
     name:
       - grpcio
-      - protobuf
+      - "protobuf==5.29.5"
       - opentelemetry-sdk
       - opentelemetry-exporter-otlp-proto-http
       - opentelemetry-api
     extra_args: --break-system-packages
+    state: latest
+

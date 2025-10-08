@@ -1,18 +1,21 @@
 #pragma once
 
+#include <condition_variable>
 #include <list>
 #include <map>
 #include <thread>
 
 #include <common/filesystem.hh>
-#include <common/singleton.hh>
-#include <redis/redis_ddl.hh>
-#include <storage/schema.hh>
-#include <common/properties.hh>
 #include <common/json.hh>
-#include <storage/io_mgr.hh>
+#include <common/redis_types.hh>
+#include <common/properties.hh>
+#include <common/singleton.hh>
+
+#include <redis/redis_ddl.hh>
 #include <storage/cache.hh>
 #include <storage/extent.hh>
+#include <storage/io_mgr.hh>
+#include <storage/schema.hh>
 
 namespace springtail {
 
@@ -31,6 +34,63 @@ namespace springtail {
         constexpr char PARTIAL_RUNFILE_SUFFIX[] = "_partials.vcm.run";
     }
 
+/**
+ * @brief This class is used for getting information about the Vacuumer
+ *      without having to create a Vacuumer object.
+ *
+ */
+class VacuumerUtils {
+public:
+    /**
+     * @brief Construct a VacuumerUtils object
+     *
+     */
+    VacuumerUtils() {
+        // Initialize redis hash to save cutoff XIDs
+        uint64_t db_instance_id = Properties::get_db_instance_id();
+        _vacuum_cutoff_xid_redis_hash = fmt::format(redis::VACUUM_CUTOFF_XID, db_instance_id);
+
+        // get the configs for vacuum - size threshold, block size and base dir
+        nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
+
+        nlohmann::json vacuum_config_json;
+        Json::get_to<nlohmann::json>(json, "vacuum_config", vacuum_config_json);
+
+        // Vacuum enabled - true/false
+        Json::get_to<bool>(vacuum_config_json, "enabled", _vacuum_start_enabled);
+    }
+
+    /**
+     * @brief Return whether the vacuumer is enabled
+     *
+     * @return true - enabled
+     * @return false - disabled
+     */
+    bool is_enabled() const { return _vacuum_start_enabled; }
+
+    /**
+     * @brief Get last seen cutoff XID for the DB
+     *
+     * @param db_id Database ID
+     * @return cutoff_xid for the DB, or 0 if nothing found
+     */
+    uint64_t
+    get_last_seen_cutoff_xid(uint64_t db_id)
+    {
+        RedisClientPtr client = RedisMgr::get_instance()->get_client();
+        auto val = client->hget(_vacuum_cutoff_xid_redis_hash, std::to_string(db_id));
+        if (val) {
+            return std::stoull(*val);
+        } else {
+            return 0;
+        }
+    }
+
+private:
+    bool _vacuum_start_enabled{false};          ///< Flag indicating if the vacuumer is enabled
+    std::string _vacuum_cutoff_xid_redis_hash;  ///< Name of the redis hash holding last seen vacuum cutoff XIDs
+
+};
 /**
  * Vacuumer to clear dead extents and table snapshots.
  */
@@ -93,28 +153,12 @@ public:
     }
 
     /**
-     * @brief Return whether the vacuumer is enabled
-     *
-     * @return true - enabled
-     * @return false - disabled
-     */
-    bool is_enabled() const { return _vacuum_start_enabled; }
-
-    /**
      * @brief Cleanup DB's entries from vacuum storage
      *        - memory, global vacuum file and partials
      *
      * @param cleanup_db_id DB to be cleaned up
      */
     void cleanup_db(uint64_t cleanup_db_id);
-
-    /**
-     * @brief Get last seen cutoff XID for the DB
-     *
-     * @param db_id Database ID
-     * @return cutoff_xid for the DB, or 0 if nothing found
-     */
-    uint64_t get_last_seen_cutoff_xid(uint64_t db_id);
 
 protected:
     /**
@@ -205,6 +249,7 @@ private:
     std::mutex _mutex; ///< Protects the internal maps
     ExtentMap _extent_map; ///< Maps File -> XID -> list of expired extent
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
+    std::condition_variable _cv; ///< Condition variable to wake up the vacuumer thread
 
     /**
      * Schema to create global and partial vacuum files
@@ -219,10 +264,12 @@ private:
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
-    std::thread _vacuumer_thread;           ///< Vacuumer thread
-
-    std::atomic<bool> _shutdown{false};   ///< shutdown flag
     std::atomic<int64_t> _entries_count_in_memory = 0;  ///< To track count of entries in the memory
+
+    /**
+     * @brief Vacuumer thread shutdown
+     */
+    void _internal_thread_shutdown() override;
 
     /**
      * @brief Round a value up to the nearest multiple of `align`

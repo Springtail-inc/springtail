@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+#
+# Local cluster management CLI
+#
+# Usage:
+#  cluster build-package <output-dir>    Build package into <output-dir> (delegates to ./build-package if present)
+#  cluster up [args...]                  Bring the cluster up
+#  cluster down                          Tear the cluster down, will remove the data volumes as well
+#  cluster status                        Show docker compose ps with env files
+#  cluster sh|shell|exec <service>       Exec into a service container (interactive shell by default)
+#  cluster restart <service>             Restart a service container (stop + start)
+#  cluster logs <service>                Show logs for a service (passes args to docker compose logs)
+#  cluster ls                            List all service container names you can refer to with other commands, concise mode.
+# Note:
+# - Docker Compose is auto-detected (supports both `docker compose` and `docker-compose`)
+set -Eeuo pipefail
+
+# This Base image should be updated and committed when a new version is available.
+BASE_BUILDER_IMAGE_TAG="ci-debug-202509091508-gold"
+ACCOUNT_ID="381492230138"
+REPO_URI="${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/devsupport"
+BASE_BUILDER_IMAGE_FULL_URI="${REPO_URI}:${BASE_BUILDER_IMAGE_TAG}"
+
+export COMPOSE_PROJECT_NAME=springtail_local_cluster
+# ---- helpers ----
+
+log() { printf "\033[1;34m[cluster]\033[0m %s\n" "$*"; }
+err() { printf "\033[1;31m[cluster]\033[0m %s\n" "$*" >&2; }
+die() { err "$*"; exit 1; }
+
+detect_compose() {
+  if [[ -n "${COMPOSE_BIN:-}" ]]; then
+    echo "$COMPOSE_BIN"; return 0
+  fi
+  if command -v docker &>/dev/null; then
+    # Prefer modern `docker compose` if the subcommand exists
+    if docker compose version &>/dev/null; then
+      echo "docker compose"; return 0
+    fi
+  fi
+  if command -v docker-compose &>/dev/null; then
+    echo "docker-compose"; return 0
+  fi
+  die "Neither 'docker compose' nor 'docker-compose' found. Please install Docker Compose."
+}
+
+run_compose() {
+  local compose_cmd; compose_cmd="$(detect_compose)"
+  # shellcheck disable=SC2048,SC2086
+  ${compose_cmd} --env-file ./env/env.setup --env-file ./env/env.host-ports --env-file ./env/.env $*
+}
+
+need_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
+
+# ---- subcommands ----
+
+sub_build_package() {
+
+  local output_dir="${1:-}"
+
+  if [ -z "$output_dir" ]; then
+    echo "Usage: $0 <output-dir>"
+    exit 1
+  fi
+  set -e
+  set -o pipefail
+
+  fetch_base_image
+
+  log "Build package using base image $BASE_BUILDER_IMAGE_FULL_URI"
+
+  if [ ! -d "$output_dir" ]; then
+    echo "Creating output directory $output_dir"
+    mkdir -p "$output_dir"
+  fi
+
+  # Mount the parent directory of the current repo as /__w/springtail/springtail in the container
+  # and run packaging flow.
+  docker run --rm -it -e OUTPUT_DIR="/output" \
+    -v "$output_dir":/output \
+    -v "$(dirname "$(pwd)")":/__w/springtail/springtail \
+    -v ./builder/container-build-package:/container-build-package \
+    "$BASE_BUILDER_IMAGE_FULL_URI" /bin/bash -lc '/container-build-package ${OUTPUT_DIR}'
+  pkg_name="${output_dir}/$(ls -t "$output_dir" | head -n 1)"
+  log "Package $pkg_name built."
+  # Give a clean output for scripting
+  echo -n "$pkg_name"
+}
+
+sub_up() {
+  # Check number of arguments need at least 1
+  if [ "$#" -lt 1 ]; then
+    die "Usage: cluster up <package-file-name> [--disable-ssl]"
+  fi
+  # 1. Ensure the docker network exists, only create if not present
+  if ! docker network inspect springtail_local_cluster_network > /dev/null 2>&1; then
+    log "Creating docker network springtail_local_cluster_network"
+    docker network create --driver bridge springtail_local_cluster_network
+  fi
+
+  # 2. Check if the package file exists if not, build the package if user agrees
+  local package_file_name="${1:-}"; shift || true
+  local disable_ssl="${1:-}"; shift || true
+  if [ ! -f "$package_file_name" ]; then
+    log "Provided package file name is not found "
+    log "Do you want to build the package now? (y/n)"
+    read -r answer
+    if [ "$answer" != "${answer#[Yy]}" ]; then
+      output=$(./cluster build-package ${TMPDIR:-/tmp} | tee -a /dev/tty)
+      if [ $? -ne 0 ]; then
+        die "Failed to build package."
+      fi
+      log $output
+      # Extract the package file name from the output
+      # The last line of output should be the package file path
+      if [[ $output =~ ([^[:space:]]+\.tgz) ]]; then
+        package_file_name="${BASH_REMATCH[1]}"
+        log "Using built package: $package_file_name"
+      else
+        die "Failed to extract package file name from build output."
+      fi
+    else
+      die "Aborted by user"
+    fi
+  fi
+
+  # Check existence of the package file
+  if [ ! -f "$package_file_name" ]; then
+    die "Package file $package_file_name does not exist!"
+  fi
+
+  # 3. Make this available in .env for all services down the road
+  # Updating the dynamic env vars in ./env/.env
+  sed -i.bak -e '/^PACKAGE_FILE_NAME=/d' ./env/.env && rm -f ./env/.env.bak
+  sed -i.bak -e '/^DISABLE_SSL_FLAG=/d' ./env/.env && rm -f ./env/.env.bak
+  sed -i.bak -e '/^PRIMARY_SSL_FLAG=/d' ./env/.env && rm -f ./env/.env.bak
+  # Append the new PACKAGE_FILE_NAME line
+  echo "PACKAGE_FILE_NAME=$package_file_name" >> ./env/.env
+  # Append the new ENABLE_SSL_FLAG line if provided
+  if [ -n "$disable_ssl" ]; then
+    log "Disabling SSL for connections as requested."
+    echo "DISABLE_SSL_FLAG=--disable-ssl" >> ./env/.env
+    echo "PRIMARY_SSL_FLAG=off" >> ./env/.env
+  else
+    echo "PRIMARY_SSL_FLAG=on" >> ./env/.env
+  fi
+  # Sources the updated .env file
+  set -a
+  . ./env/.env
+  set +a
+
+  # 4. Ensure the supporting images ( controller, custom primary PG etc ) are available
+  # 4.1 Rebuild controller image
+  # This image is expected to be rebuilt often during development
+  pushd ../
+  if docker buildx version > /dev/null 2>&1; then
+    docker buildx build -f docker/Dockerfile.controller -t "local-cluster-controller:latest" --load .
+  else
+    docker build -f docker/Dockerfile.controller -t "local-cluster-controller:latest" --load .
+  fi
+  # 4.2 Build the PG Custom postgres-custom:16 if it does not exist
+  # This image carries the Certificates for SSL connections
+  if ! docker image inspect "postgres-custom:16" > /dev/null 2>&1; then
+    log "Building custom postgres image postgres-custom:16"
+    if docker buildx version > /dev/null 2>&1; then
+      docker buildx build -f docker/Dockerfile.pg16 -t "postgres-custom:16" --load .
+    else
+      docker build -f docker/Dockerfile.pg16 -t "postgres-custom:16" --load .
+    fi
+  fi
+
+  # 5. Check if the cluster base image (for Springtail Service) exists, if not build it
+  if [ -z "$IMAGE" ]; then
+    echo "IMAGE variable not set in env.setup"
+    exit 1
+  fi
+  if ! docker image inspect "$IMAGE" > /dev/null 2>&1; then
+    echo "Docker image '$IMAGE' not found locally. Will build it now."
+    # Check if Dockerfile.local-cluster exists
+    if [ ! -f docker/Dockerfile.local-cluster ]; then
+      echo "Dockerfile 'docker/Dockerfile.local-cluster' not found!"
+      exit 1
+    fi
+    # Checks if docker buildx is available, if not fallback to docker build
+    if docker buildx version > /dev/null 2>&1; then
+      docker buildx build -f docker/Dockerfile.local-cluster -t "$IMAGE" --load .
+    else
+      docker build -f docker/Dockerfile.local-cluster -t "$IMAGE" .
+    fi
+  fi
+  popd # back to local-cluster dir
+
+  # 6. Wait for aws-mock to be ready, give it 30 seconds timeout
+  # Then upload the built package into S3
+  if [ -z "$S3_BUCKET" ]; then
+    echo "S3_BUCKET variable not set in env.setup"
+    exit 1
+  fi
+  run_compose up -d aws-mock
+  log "Waiting for aws-mock to be ready..."
+  timeout=30
+  elapsed=0
+  while ! curl -s http://localhost:${HOST_PORT_MOTO} > /dev/null;
+  do
+    sleep 1
+    elapsed=$((elapsed + 1))
+    if [ $elapsed -ge $timeout ]; then
+      die "aws-mock did not become ready in time."
+    fi
+  done
+  log "aws-mock is ready."
+  aws --endpoint-url http://localhost:${HOST_PORT_MOTO} s3 mb "s3://$S3_BUCKET" > /dev/null 2>&1 || true
+  log "S3 bucket $S3_BUCKET is ready."
+  # Only cp the package if it does not already exist
+  PACKAGE_FILE_BASE_NAME=$(basename "$PACKAGE_FILE_NAME")
+  if aws --endpoint-url http://localhost:${HOST_PORT_MOTO} s3 ls "s3://$S3_BUCKET/packages/$PACKAGE_FILE_BASE_NAME" > /dev/null 2>&1; then
+    log "Package $PACKAGE_FILE_BASE_NAME already exists in S3 bucket $S3_BUCKET"
+  else
+    log "Uploading the $package_file_name to S3 bucket $S3_BUCKET"
+    aws --endpoint-url http://localhost:${HOST_PORT_MOTO} s3 cp "$PACKAGE_FILE_NAME" "s3://$S3_BUCKET/packages/$PACKAGE_FILE_BASE_NAME"
+    if [ $? -ne 0 ]; then
+      die "Failed to upload package $PACKAGE_FILE_BASE_NAME to S3 bucket $S3"
+    fi
+  fi
+
+  # 7. compose up the local cluster (check either `docker-compose` or `docker compose` is available)
+  run_compose up -d primary redis controller-bootstrap controller proxy ingestion fdw --remove-orphans --build --wait controller ingestion proxy fdw --timeout 150
+  ./cluster status
+}
+
+sub_down() {
+  run_compose down proxy ingestion fdw controller redis aws-mock -v
+  run_compose down primary -v
+  docker network rm springtail_local_cluster_network > /dev/null 2>&1 || true
+  docker network prune -f
+  docker image prune -f
+}
+
+sub_status() {
+  printf '%s %s\n' "$(tput setaf 2)●$(tput sgr0)" "Service Endpoint Configs"
+  PYTHONUNBUFFERED=1 python3 pp.py
+  printf '%s %s\n' "$(tput setaf 2)●$(tput sgr0)" "Container Details"
+  run_compose ps
+}
+
+sub_sh() {
+  local svc="${1:-}"; shift || true
+  [[ -z "$svc" ]] && die "Usage: cluster sh <service> [command...]"
+  local compose_cmd; compose_cmd="$(detect_compose)"
+  # If no custom command provided, try to open an interactive shell.
+  if [[ "$#" -eq 0 ]]; then
+    # Prefer user's shell, else bash, else sh
+    local shell_to_use="/bin/bash"
+    run_compose exec -it "$svc" "$shell_to_use"
+  else
+    # Run the provided command inside the service
+    run_compose exec "$svc" "$@"
+  fi
+}
+
+
+restart() {
+  local svc="${1:-}"; shift || true
+  [[ -z "$svc" ]] && die "Usage: cluster restart <service>"
+  run_compose restart --no-deps "$svc"
+}
+
+logs() {
+  local svc="${1:-}"; shift || true
+  [[ -z "$svc" ]] && die "Usage: cluster logs <service> [args...]"
+  run_compose logs "$svc" "$@"
+}
+
+ls() {
+  run_compose ps --services
+}
+
+usage() {
+  cat <<'EOF'
+cluster - manage the local cluster
+
+USAGE
+  cluster build-package <output-dir>    Build package into <output-dir> (delegates to ./build-package if present)
+  cluster up [args...]                  Bring the cluster up
+  cluster down [args...]                Tear the cluster down, will remove the data volumes as well
+  cluster status                        Show docker compose ps with env files
+  cluster sh|shell|exec <service>       Exec into a service container (interactive shell by default)
+  cluster restart <service>             Restart a service container (stop + start)
+  cluster logs <service>                Show logs for a service (passes args to docker compose logs)
+  cluster ls                            List all service container names you can refer to with other commands, concise mode.
+
+ENV
+  COMPOSE_BIN       Override docker compose binary, e.g., 'docker compose' or 'docker-compose'
+
+EOF
+}
+
+fetch_base_image() {
+  # Docker image ls to check if $BASE_BUILDER_IMAGE_FULL_URI is present at local
+  if ! docker image inspect "$BASE_BUILDER_IMAGE_FULL_URI" > /dev/null 2>&1 ; then
+    log "Base builder image $BASE_BUILDER_IMAGE_FULL_URI not found locally."
+    # Check if user is SSO'd into the correct ACCOUNT_ID
+    log "Checking AWS SSO login for account $ACCOUNT_ID"
+    if [ "$(aws sts get-caller-identity --query Account --output text | tr -d '\r\n[:space:]')" != "$ACCOUNT_ID" ]; then
+      die "You are not logged into the correct AWS account. Please run 'aws sso login --profile <your dev profile>' and try again. Then make sure the AWS_PROFILE env var is set correctly."
+    fi
+    log "Pulling base builder image $BASE_BUILDER_IMAGE_FULL_URI"
+    aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$REPO_URI"
+    docker pull "$BASE_BUILDER_IMAGE_FULL_URI"
+  fi
+}
+
+# ---- main ----
+
+main() {
+
+  need_cmd docker
+  need_cmd aws
+  local cmd="${1:-}"; shift || true
+  # Load env vars from env files only if the cmd is not `build-package`
+  # because build-package need real AWS access
+  if [ "$cmd" != "build-package" ]; then
+    set -a               # auto-export all variables that get set
+    . ./env/env.setup
+    . ./env/env.host-ports
+    . ./env/env.postgres
+    set +a
+    # Ensure env directory and .env file exist. This file is not version controlled.
+    # it contains dynamic env vars that are set during runtime.
+    if [ ! -f ./env/.env ] ; then
+        touch ./env/.env
+    fi
+  fi
+  case "${cmd}" in
+    build-package) sub_build_package "$@";;
+    up)            sub_up "$@";;
+    down)          sub_down "$@";;
+    status)        sub_status "$@";;
+    sh|shell|exec) sub_sh "$@";;
+    start)         start "$@";;
+    stop)          stop "$@";;
+    restart)       restart "$@";;
+    logs)          logs "$@";;
+    ls)            ls "$@";;
+    -h|--help|"")  usage;;
+    *)             err "Unknown subcommand: ${cmd}"; usage; exit 2;;
+  esac
+}
+
+main "$@"

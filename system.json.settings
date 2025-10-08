@@ -42,7 +42,10 @@
             "client_key" : "/home/dev/springtail/ca_certs/client_key.pem",
             "client_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem"
         },
-        "io_threads": 1
+        "disk_storage_dir" : "/opt/springtail/data/write_cache",
+        "NOTE": "memory for write cache 640MB and 512MB",
+        "memory_high_watermark_bytes": 671088640,
+        "memory_low_watermark_bytes": 536870912
     },
     "sys_tbl_mgr": {
         "rpc_config" : {
@@ -73,7 +76,8 @@
             "hole_punch_block_size": 4096,
             "max_entries_in_memory": 100000
         },
-        "metrics_update_freq_sec": 10
+        "metrics_update_freq_sec": 10,
+        "io_request_queue_size": 16
     },
     "log_mgr": {
         "replication_log_path": "repl_logs",

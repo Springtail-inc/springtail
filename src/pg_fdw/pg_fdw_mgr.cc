@@ -27,6 +27,7 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr_client.hh>
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
@@ -420,8 +421,7 @@ namespace springtail::pg_fdw {
                                                             const std::span<const char> &rhval) -> bool {
             return _comparator_function(tr.db_id, tr.xid, type_oid, op_str, lhval, rhval);
         };
-
-        TablePtr table = TableMgr::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, comparator_func);
+        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, comparator_func);
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
@@ -1941,7 +1941,7 @@ namespace springtail::pg_fdw {
         std::unordered_map<uint64_t, std::string> user_types;
 
         // get the user types table to iterate over
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID,
+        auto table = TableMgrClient::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID,
                                                          schema_xid);
         // get field array
         auto fields = table->extent_schema()->get_fields();
@@ -2223,7 +2223,7 @@ namespace springtail::pg_fdw {
         UserTypePtr utp = _user_type_cache.get(oid);
         if (utp == nullptr) {
             XidLsn xidlsn{xid};
-            utp = SchemaMgr::get_instance()->get_usertype(db_id, oid, xidlsn);
+            utp = sys_tbl_mgr::Client::get_instance()->get_usertype(db_id, oid, xidlsn);
             CHECK_NE(utp, nullptr);
             _user_type_cache.insert(oid, utp);
         }
@@ -2234,7 +2234,7 @@ namespace springtail::pg_fdw {
     PgFdwState::PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid)
             : table(table), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
-        columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
+        columns = TableMgrClient::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
         for (const auto &entry : columns) {
             name_map[entry.second.name] = entry.second.position;
         }

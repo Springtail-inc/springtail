@@ -324,7 +324,7 @@ namespace springtail
             uint64_t target_xid,
             std::optional<std::string> schema_name = std::nullopt,
             std::optional<std::pair<std::string, std::string>> table_name = std::nullopt,
-            std::optional<std::set<uint32_t>> table_oids = std::nullopt,
+            std::optional<std::unordered_set<uint32_t>> table_oids = std::nullopt,
             std::optional<nlohmann::json> include_json = std::nullopt);
 
     public:
@@ -435,7 +435,7 @@ namespace springtail
          */
         static std::vector<PgCopyResultPtr>
             copy_tables(uint64_t db_id, uint64_t xid,
-                        const std::set<uint32_t> &table_oids);
+                        const std::unordered_set<uint32_t> &table_oids);
 
         /**
          * @brief Copy a single table from remote system

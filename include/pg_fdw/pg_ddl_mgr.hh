@@ -11,7 +11,6 @@
 #include <redis/redis_ddl.hh>
 
 #include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
 #include <pg_fdw/pg_fdw_ddl_common.hh>

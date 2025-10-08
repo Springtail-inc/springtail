@@ -1,9 +1,9 @@
+import json
 import logging
 import os
+import shutil
 import sys
 import tempfile
-import json
-import shutil
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
@@ -27,7 +27,7 @@ from properties import Properties
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp/'
 
-SPRINGTAIL_LIB_DIR = 'shared-lib' # relative to the install path
+SPRINGTAIL_LIB_DIR = 'shared-lib'  # relative to the install path
 
 # NOTE: this should match the environment variables in common/environment.hh
 ENV_VARS = [
@@ -74,20 +74,25 @@ class Production:
         if not arn:
             raise ValueError("SNS_TOPIC_ARN environment variable not set")
 
-        self.topic_arn : str = arn
+        self.topic_arn: str = arn
         self.install_path: str = install_path
 
         self.logger = logging.getLogger('springtail')
-        self.aws = AwsHelper()
+        self.aws = AwsHelper(
+            region=os.environ.get('AWS_REGION', 'us-east-1'),
+            # Override endpoints for local testing below
+            s3_endpoint=os.environ.get('AWS_S3_ENDPOINT', None),
+            sns_endpoint=os.environ.get('AWS_SNS_ENDPOINT', None),
+            secretsmanager_endpoint=os.environ.get('AWS_SECRETSMANAGER_ENDPOINT', None)
+        )
 
-        self.sns_attributes : Dict[str, Any] = self._extract_attributes()
+        self.sns_attributes: Dict[str, Any] = self._extract_attributes()
 
         logging.getLogger('boto3').setLevel(logging.CRITICAL)
         logging.getLogger('botocore').setLevel(logging.CRITICAL)
         logging.getLogger('nose').setLevel(logging.CRITICAL)
         logging.getLogger('s3transfer').setLevel(logging.CRITICAL)
         logging.getLogger('urllib3').setLevel(logging.CRITICAL)
-
 
     def install_binaries(self, config_gitsha: str) -> None:
         """
@@ -103,7 +108,7 @@ class Production:
         global S3_DOWNLOAD_PATH, S3_BIN_FOLDER
 
         # Download the springtail binaries
-        s3_bucket = os.environ.get('S3_BUCKET',"data-share.springtail.internal")
+        s3_bucket = os.environ.get('S3_BUCKET', "data-share.springtail.internal")
         if not s3_bucket:
             raise ValueError("S3_BUCKET environment variable not set")
 
@@ -257,7 +262,6 @@ class Production:
 
         return pid_file
 
-
     def _extract_attributes(self) -> Dict[str, Any]:
         """
         Extract attributes from environment variables.
@@ -283,11 +287,11 @@ class Production:
         return {k.lower(): v for k, v in attributes.items()}
 
     def send_sns(
-        self,
-        type: str,
-        component: str = "",
-        version: str = "",
-        attrs: dict = {}
+            self,
+            type: str,
+            component: str = "",
+            version: str = "",
+            attrs: dict = {}
     ) -> None:
         """
         Send a message to the SNS topic.
@@ -353,5 +357,3 @@ class Production:
         self.logger.info(f"SNS message: {subject}")
 
         self.aws.send_sns_notification(self.topic_arn, subject, message, attributes)
-
-
