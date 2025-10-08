@@ -8,12 +8,10 @@
 #include <map>
 #include <absl/container/flat_hash_map.h>
 
-#define MaxAllocSize	((Size) 0x3fffffff) /* 1 gigabyte - 1 */
-
 //// EXPORTED INTERFACES
 
 // Context management
-// extern "C" PGEXT_API void *CurrentMemoryContext;
+extern "C" PGEXT_API void *CurrentMemoryContext;
 
 extern "C" PGEXT_API void *AllocSetContextCreateInternal(void *parent,
                                                          const char *name,

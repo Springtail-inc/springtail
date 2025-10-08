@@ -1,30 +1,31 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
-#define FLEXIBLE_ARRAY_MEMBER
 typedef uint32_t Oid;
 typedef uintptr_t Datum;
+typedef size_t Size;
+
 #define InvalidOid (Oid(0))
+#define FLEXIBLE_ARRAY_MEMBER
 
-typedef union {
-    struct /* Normal varlena (4-byte length) */
-    {
-        uint32_t va_header;
-        char va_data[FLEXIBLE_ARRAY_MEMBER];
-    } va_4byte;
-    struct /* Compressed-in-line format */
-    {
-        uint32_t va_header;
-        uint32_t va_tcinfo;                    /* Original data size (excludes header) and
-                                              * compression method; see va_extinfo */
-        char va_data[FLEXIBLE_ARRAY_MEMBER]; /* Compressed data */
-    } va_compressed;
-} varattrib_4b;
+#define TYPEALIGN(ALIGNVAL,LEN)  \
+(((uintptr_t) (LEN) + ((ALIGNVAL) - 1)) & ~((uintptr_t) ((ALIGNVAL) - 1)))
 
-#define VARHDRSZ ((int32_t)sizeof(int32_t))
-#define SET_VARSIZE_4B(PTR, len) (((varattrib_4b *)(PTR))->va_4byte.va_header = (len) & 0x3FFFFFFF)
-#define SET_VARSIZE(PTR, len) SET_VARSIZE_4B(PTR, len)
+#define NAMEDATALEN 64
+#define MAXDIM 6
+#define MAXIMUM_ALIGNOF 8
+#define ALIGNOF_DOUBLE 8
+#define ALIGNOF_INT 4
+#define ALIGNOF_LONG 8
+#define ALIGNOF_PG_INT128_TYPE 16
+#define ALIGNOF_SHORT 2
 
-#define VARDATA_4B(PTR) (((varattrib_4b *)(PTR))->va_4byte.va_data)
-#define VARDATA(PTR) VARDATA_4B(PTR)
+#define SHORTALIGN(LEN)			TYPEALIGN(ALIGNOF_SHORT, (LEN))
+#define INTALIGN(LEN)			TYPEALIGN(ALIGNOF_INT, (LEN))
+#define LONGALIGN(LEN)			TYPEALIGN(ALIGNOF_LONG, (LEN))
+#define DOUBLEALIGN(LEN)		TYPEALIGN(ALIGNOF_DOUBLE, (LEN))
+#define MAXALIGN(LEN)			TYPEALIGN(MAXIMUM_ALIGNOF, (LEN))
+
+#define AssertMacro(condition)	((void)true)
