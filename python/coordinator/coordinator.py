@@ -41,6 +41,7 @@ class Coordinator:
     def __init__(self,
                  props: Properties,
                  debug: bool,
+                 manual: bool,
                  is_production: bool,
                  install_path: str,
                  service_name: str):
@@ -59,6 +60,7 @@ class Coordinator:
         self.scheduler = None
         self.logger = logging.getLogger('springtail')
         self.debug = debug
+        self.manual = manual
 
         # if running in a production environment set deployed env var
         if is_production:
@@ -72,12 +74,10 @@ class Coordinator:
             if not sn_env:
                 self.logger.error("Service name not provided")
                 raise ValueError("Service name not provided")
+            if not sn_env in ['ingestion', 'fdw', 'proxy']:
+                self.logger.error(f"Invalid service name in environment variable SERVICE_NAME: {sn_env}")
+                raise ValueError(f"Invalid service name in environment variable SERVICE_NAME: {sn_env}")
             self.service_name = sn_env
-
-        # Check the service name
-        if not self.service_name in ['ingestion', 'fdw', 'proxy']:
-            self.logger.error(f"Invalid service name: {self.service_name}")
-            raise ValueError(f"Invalid service name: {self.service_name}")
 
         # Check the install path
         if not install_path or not os.path.exists(install_path):
@@ -112,12 +112,13 @@ class Coordinator:
                     # Install binaries
                     self.logger.debug("Installing binaries")
                     self.production.install_binaries(config_gitsha)
-                    self.logger.debug("Re-installing coordinator")
-                    loader.startup(self.install_path, project_root)
+                    if not self.manual:
+                        self.logger.debug("Re-installing coordinator")
+                        loader.startup(self.install_path, project_root)
                     self.props.set_coordinator_state(CoordinatorState.RELOADING)
 
                     # loader will restart the coordinator when ready
-                    if state == CoordinatorState.STARTUP:
+                    if state == CoordinatorState.STARTUP and not self.manual:
                         sys.exit(0)
             except Exception as e:
                 raise ValueError("Failed to install binaries: " + str(e))
@@ -289,8 +290,10 @@ def parse_arguments():
     # Add arguments -f for config file and -b for build directory
     parser.add_argument('-c', '--config-file', type=str, default='config.yaml', help='Path to the configuration file')
     parser.add_argument('-s', '--service', type=str, required=False,
+                        choices=["ingestion", "fdw", "proxy"],
                         help='Name of the service: ingestion, fdw, or proxy')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    parser.add_argument('--manual', action='store_true', help='Enable manual mode for running from command line')
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -349,7 +352,7 @@ if __name__ == "__main__":
 
     logger = logging.getLogger('springtail')
 
-    coordinator = Coordinator(props, args.debug, yaml_config.get('production'),
+    coordinator = Coordinator(props, args.debug, args.manual, yaml_config.get('production'),
                               yaml_config.get('install_dir'), args.service)
 
 
