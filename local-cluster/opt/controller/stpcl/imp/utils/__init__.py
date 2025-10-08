@@ -47,7 +47,6 @@ class DockerCli:
                 }
             )
         }
-        print(1)
 
     def restart_container(self, container_name: str) -> None:
         if container_name not in self.containers:
