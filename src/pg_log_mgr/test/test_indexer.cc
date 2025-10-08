@@ -111,7 +111,7 @@ namespace {
             auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
 
             // insert a number of rows
-            populate_table(mtable, _data, is_update);
+            populate_table(mtable, _data, is_update, start_value);
 
             // finalize the table and update roots
             auto &&metadata = mtable->finalize();

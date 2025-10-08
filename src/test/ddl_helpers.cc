@@ -67,7 +67,7 @@ namespace springtail::test::ddl_helpers {
         }
 
     std::shared_ptr<Tuple>
-        _create_value(const std::vector<int32_t> &data)
+        _create_value(const std::vector<int32_t> &data, std::optional<uint64_t> internal_row_id_opt = std::nullopt)
         {
             std::vector<ConstFieldPtr> v;
 
@@ -75,17 +75,22 @@ namespace springtail::test::ddl_helpers {
                 v.push_back(std::make_shared<ConstTypeField<int32_t>>(d));
             }
 
+            if (internal_row_id_opt) {
+                v.push_back(std::make_shared<ConstTypeField<uint64_t>>(*internal_row_id_opt));
+            }
+
             return std::make_shared<ValueTuple>(v);
         }
 
-    void populate_table(MutableTablePtr mtable, const std::vector<std::vector<int32_t>>& data, bool is_update)
+    void populate_table(MutableTablePtr mtable, const std::vector<std::vector<int32_t>>& data, bool is_update,
+            uint64_t start_internal_row_id)
     {
         // insert data to the tree
         for (int i = 0; i < data.size(); i++) {
             if (is_update) {
                 mtable->update(_create_value(data[i]), constant::UNKNOWN_EXTENT);
             } else {
-                mtable->insert(_create_value(data[i]), constant::UNKNOWN_EXTENT);
+                mtable->insert(_create_value(data[i], start_internal_row_id + i), constant::UNKNOWN_EXTENT);
             }
         }
     }

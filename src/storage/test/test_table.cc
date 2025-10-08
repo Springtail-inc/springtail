@@ -94,7 +94,8 @@ namespace {
 
             _fields = _schema->get_fields();
             _csv_fields = std::make_shared<FieldArray>();
-            for (int i = 0; i < _fields->size(); i++) {
+            // Skip last column as internal_row_id will not be in the input csv
+            for (int i = 0; i < _fields->size() - 1; i++) {
                 auto &&field = _fields->at(i);
                 _csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
             }
@@ -104,9 +105,6 @@ namespace {
             csv::CSVReader reader("test_btree_simple.csv");
 
             _last_internal_row_id = 0;
-            for (csv::CSVRow& row : reader) {
-                _last_internal_row_id = row[constant::INTERNAL_ROW_ID].get<uint64_t>();
-            }
         }
 
         void TearDown() override {
@@ -221,7 +219,10 @@ namespace {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
                 // insert data to the tree
-                mtable->insert(std::make_shared<FieldTuple>(_csv_fields, &r), constant::UNKNOWN_EXTENT);
+                auto internal_row_id_field = std::make_shared<FieldArray>();
+                internal_row_id_field->push_back(std::make_shared<ConstTypeField<uint64_t>>(++_last_internal_row_id));
+
+                mtable->insert(std::make_shared<KeyValueTuple>(_csv_fields, internal_row_id_field, &r), constant::UNKNOWN_EXTENT);
             }
         }
 
