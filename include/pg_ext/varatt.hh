@@ -1,3 +1,5 @@
+#pragma once
+
 #include <pg_ext/export.hh>
 #include <pg_ext/common.hh>
 

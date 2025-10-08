@@ -436,5 +436,7 @@ namespace springtail::pg_fdw {
 
         /** Helper function to get the last xid */
         uint64_t _update_last_xid(uint64_t schema_xid);
+
+        std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows);
     };
 } // namespace springtail::pg_fdw

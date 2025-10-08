@@ -406,14 +406,22 @@ namespace springtail::pg_fdw {
         return quals;
     }
 
-    std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows)
+    std::unique_ptr<PgFdwState>
+    PgFdwMgr::_create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows)
     {
         // we create a temporary scan state here because for historical reasons
         // it has some API's needed by this function. The state will be deleted
         // when the function exits.
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
 
-        TablePtr table = TableMgr::get_instance()->get_table(tr.db_id, tr.tid, tr.xid);
+        auto comparator_func = [tr, this](uint64_t type_oid,
+                                                            std::string_view op_str,
+                                                            const std::span<const char> &lhval,
+                                                            const std::span<const char> &rhval) -> bool {
+            return _comparator_function(tr.db_id, tr.xid, type_oid, op_str, lhval, rhval);
+        };
+
+        TablePtr table = TableMgr::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, comparator_func);
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 

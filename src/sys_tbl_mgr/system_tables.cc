@@ -3,11 +3,6 @@
 
 // note: these are hard-coded from the postgres type OIDs to avoid having to include all of the
 // postgres headers here
-constexpr int32_t BOOLOID = 16;
-constexpr int32_t INT8OID = 20;
-constexpr int32_t INT4OID = 23;
-constexpr int32_t TEXTOID = 25;
-constexpr int32_t CHAROID = 18;
 
 namespace springtail::sys_tbl {
 

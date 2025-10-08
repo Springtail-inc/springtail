@@ -4,6 +4,8 @@
 #include <pg_ext/export.hh>
 #include <pg_ext/memory.hh>
 #include <pg_ext/type.hh>
+#include <pg_ext/toast.hh>
+#include <pg_ext/varatt.hh>
 
 #define PG_FUNCTION_ARGS pgext::FunctionCallInfo fcinfo
 
@@ -27,6 +29,24 @@ DatumGetCString(Datum X)
     return (char *)DatumGetPointer(X);
 }
 
+static inline char
+DatumGetChar(Datum X)
+{
+	return (char) X;
+}
+
+static inline int16_t
+DatumGetInt16(Datum X)
+{
+	return (int16_t) X;
+}
+
+static inline int32_t
+DatumGetInt32(Datum X)
+{
+	return (int32_t) X;
+}
+
 static inline Datum
 PointerGetDatum(const void *X)
 {
@@ -34,7 +54,19 @@ PointerGetDatum(const void *X)
 }
 
 static inline Datum
+Int64GetDatum(uint64_t X)
+{
+    return (Datum)X;
+}
+
+static inline Datum
 Int32GetDatum(uint32_t X)
+{
+    return (Datum)X;
+}
+
+static inline Datum
+Int16GetDatum(uint16_t X)
 {
     return (Datum)X;
 }
@@ -57,7 +89,44 @@ CStringGetDatum(const char *str)
     return (Datum)str;
 }
 
+static inline Datum
+CharGetDatum(char X)
+{
+	return (Datum) X;
+}
+
+#define att_addlength_pointer(cur_offset, attlen, attptr) \
+( \
+	((attlen) > 0) ? \
+	( \
+		(cur_offset) + (attlen) \
+	) \
+	: (((attlen) == -1) ? \
+	( \
+		(cur_offset) + VARSIZE_ANY(attptr) \
+	) \
+	: \
+	( \
+		AssertMacro((attlen) == -2), \
+		(cur_offset) + (strlen((char *) (attptr)) + 1) \
+	)) \
+)
+
+#define att_addlength_datum(cur_offset, attlen, attdatum) \
+	att_addlength_pointer(cur_offset, attlen, pgext::DatumGetPointer(attdatum))
+#define att_align_nominal(cur_offset, attalign) \
+( \
+    ((attalign) == TYPALIGN_INT) ? INTALIGN(cur_offset) : \
+        (((attalign) == TYPALIGN_CHAR) ? (uintptr_t) (cur_offset) : \
+        (((attalign) == TYPALIGN_DOUBLE) ? DOUBLEALIGN(cur_offset) : \
+        ( \
+            AssertMacro((attalign) == TYPALIGN_SHORT), \
+            SHORTALIGN(cur_offset) \
+        ))) \
+)
+
 typedef struct {
+    // XXX Stubbed for now
 } FormData_pg_attribute;
 
 typedef int16_t AttrNumber;

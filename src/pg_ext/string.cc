@@ -375,10 +375,6 @@ void appendStringInfoChar(StringInfo str, char ch) {
     str->data[str->len] = '\0';
 }
 
-void pq_begintypsend(StringInfo str) {
-    initStringInfo(str);
-}
-
 void appendStringInfoString(StringInfo str, const char *s) {
     if (str->len + strlen(s) + 1 > str->maxlen) {
         enlargeStringInfo(str, strlen(s) + 1);
