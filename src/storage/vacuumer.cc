@@ -393,8 +393,8 @@ Vacuumer::expire_snapshot(uint64_t db_id,
 }
 
 std::vector<Vacuumer::HoleInfo>
-Vacuumer::hole_punch_file(const std::string& file,
-                          const std::vector<Vacuumer::HoleInfo>& input_extents)
+Vacuumer::_hole_punch_file(const std::string& file,
+                           const std::vector<Vacuumer::HoleInfo>& input_extents)
 {
     // Before punching, check if the file is operable
     std::vector<HoleInfo> not_punched;
@@ -795,14 +795,19 @@ Vacuumer::_do_vacuum_run()
         _flush_all_expired_entries();
     }
 
-    ExtentMap expired_extents_map;
-    SnapshotMap expired_snapshots_map;
-
-    // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
+    if (!std::filesystem::exists(_global_vacuum_file)) {
+        // No global vacuum file, return
+        return;
+    }
 
     auto global_vacuum_filesize = fs::get_file_size(_global_vacuum_file);
+
+    // Lets read from global vacuum file and do vacuum if the size has crossed the threshold
     if (global_vacuum_filesize != -1 && global_vacuum_filesize > _global_file_size_threshold) {
         LOG_INFO("Running vacuum as the global log crossed threshold: {}", _global_vacuum_file);
+
+        ExtentMap expired_extents_map;
+        SnapshotMap expired_snapshots_map;
 
         /* --------------------------------- Populate maps from global vacuum log -------------------------- */
         auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
@@ -879,8 +884,8 @@ Vacuumer::_do_vacuum_run()
             std::vector<Vacuumer::HoleInfo> new_partials;
 
             for (const auto& [start, end] : itree.to_vector()) {
-                uint64_t aligned_start = align_up(start, _hole_punch_block_size);
-                uint64_t aligned_end = align_down(end, _hole_punch_block_size);
+                uint64_t aligned_start = _align_up(start, _hole_punch_block_size);
+                uint64_t aligned_end = _align_down(end, _hole_punch_block_size);
 
                 if (aligned_start < aligned_end) {
                     punchable.emplace_back(aligned_start, aligned_end - aligned_start);
@@ -896,7 +901,7 @@ Vacuumer::_do_vacuum_run()
             }
 
             // Step 4: Punch and detect failures
-            auto not_punched_extents = hole_punch_file(file, punchable);
+            auto not_punched_extents = _hole_punch_file(file, punchable);
 
             // Insert failed extents back to the partials
             // so that it will be attempted in the next run
