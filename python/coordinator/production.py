@@ -59,16 +59,19 @@ SNS_ENV_VARS = [
     'AWS_REGION'
 ]
 
+
 class Production:
     """
     Production class to install and manage the production environment.
     """
 
-    def __init__(self, install_path: str):
+    def __init__(self, install_path: str, postgres_pid_file: Optional[str] = None):
         """Initialize the production environment.
 
         Args:
             install_path (str): The path where the springtail binaries will be installed
+            postgres_pid_file (Optional[str]): Optional path to the postgres pid file. If not provided, will be the default file, which
+                            is determined based on the postgres version and user.
         """
         arn = os.environ.get('SNS_TOPIC_ARN')
         if not arn:
@@ -76,6 +79,7 @@ class Production:
 
         self.topic_arn: str = arn
         self.install_path: str = install_path
+        self.postgres_pid_file: Optional[str] = postgres_pid_file
 
         self.logger = logging.getLogger('springtail')
         self.aws = AwsHelper(
@@ -232,11 +236,13 @@ class Production:
 
         env_file = f'/etc/postgresql/{version}/{fdw_user}/environment'
         hba_file = f'/var/lib/postgresql/{version}/{fdw_user}/pg_hba.conf'
-        pid_file = f'/var/lib/postgresql/{version}/{fdw_user}/postmaster.pid'
+        pid_file = self.postgres_pid_file or  f'/var/lib/postgresql/{version}/{fdw_user}/postmaster.pid'
 
         # Update the localhost socket connection to use scram-sha-256
         self.logger.info("Setting up pg_hba.conf")
-        run_command('sudo', ['sed', '-i', 's/^local[[:space:]]\\+all[[:space:]]\\+all[[:space:]]\\+\\(md5\\|peer\\)/local   all   all   scram-sha-256/', hba_file])
+        run_command('sudo', ['sed', '-i',
+                             's/^local[[:space:]]\\+all[[:space:]]\\+all[[:space:]]\\+\\(md5\\|peer\\)/local   all   all   scram-sha-256/',
+                             hba_file])
 
         # Write the environment variables to a temporary file
         with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:

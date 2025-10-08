@@ -229,11 +229,32 @@ sub_up() {
 }
 
 sub_down() {
-  run_compose down proxy ingestion fdw controller redis aws-mock -v
-  run_compose down primary -v
-  docker network rm springtail_local_cluster_network > /dev/null 2>&1 || true
-  docker network prune -f
-  docker image prune -f
+  service="${1:-}"; shift || true
+  case "$service" in
+    springtail|"")
+      log "Stopping and removing all Springtail services but keeping primary and other dependencies"
+      run_compose down proxy ingestion fdw -v
+      ;;
+    proxy|ingestion|fdw|controller|redis|aws-mock)
+      log "Stopping and removing service $service and its dependencies"
+      run_compose down "$service" -v
+      ;;
+    primary)
+      log "Stopping and removing primary and its dependencies"
+      run_compose down primary
+      ;;
+    all)
+      log "Stopping and removing all services and their dependencies"
+      run_compose down proxy ingestion fdw controller redis aws-mock -v
+      run_compose down primary -v
+      docker network rm springtail_local_cluster_network > /dev/null 2>&1 || true
+      docker network prune -f
+      docker image prune -f
+      ;;
+    *)
+      die "Usage: cluster down [all|primary|proxy|ingestion|fdw|controller|redis|aws-mock]"
+      ;;
+  esac
 }
 
 sub_status() {

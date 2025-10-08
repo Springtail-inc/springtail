@@ -44,7 +44,8 @@ class Coordinator:
                  manual: bool,
                  is_production: bool,
                  install_path: str,
-                 service_name: str):
+                 service_name: str,
+                 postgres_pid_file: Optional[str] = None):
         """
         Initialize the Coordinator.
         Arguments:
@@ -53,6 +54,7 @@ class Coordinator:
             is_production -- the production flag from config (deployed env)
             install_path -- the installation path
             service_name -- the name of the service
+            postgres_pid_file -- the Postgres PID file (for fdw service only) to look for.
         """
         self.props = props
         self._check_properties(props)
@@ -61,6 +63,7 @@ class Coordinator:
         self.logger = logging.getLogger('springtail')
         self.debug = debug
         self.manual = manual
+        self.postgres_pid_file = postgres_pid_file
 
         # if running in a production environment set deployed env var
         if is_production:
@@ -75,14 +78,16 @@ class Coordinator:
                 self.logger.error("Service name not provided")
                 raise ValueError("Service name not provided")
             if not sn_env in ['ingestion', 'fdw', 'proxy']:
-                self.logger.error(f"Invalid service name in environment variable SERVICE_NAME: {sn_env}")
-                raise ValueError(f"Invalid service name in environment variable SERVICE_NAME: {sn_env}")
+                msg = f"Invalid service name in environment variable SERVICE_NAME: {sn_env}"
+                self.logger.error(msg)
+                raise ValueError(msg)
             self.service_name = sn_env
 
         # Check the install path
         if not install_path or not os.path.exists(install_path):
-            self.logger.error(f"Invalid install path: {install_path}")
-            raise ValueError(f"Invalid install path: {install_path}")
+            msg = f"Invalid install path: {install_path}"
+            self.logger.error(msg)
+            raise ValueError(msg)
 
         self.install_path = install_path
 
@@ -90,7 +95,7 @@ class Coordinator:
         self.production = None
         if is_production:
             self.logger.debug("Checking properties for production")
-            self.production = Production(self.install_path)
+            self.production = Production(self.install_path, self.postgres_pid_file)
 
     def startup(self):
         """
@@ -114,7 +119,7 @@ class Coordinator:
                     self.production.install_binaries(config_gitsha)
                     if not self.manual:
                         self.logger.debug("Re-installing coordinator")
-                        loader.startup(self.install_path, project_root)
+                        loader.startup(self.install_path, project_root, self.postgres_pid_file)
                     self.props.set_coordinator_state(CoordinatorState.RELOADING)
 
                     # loader will restart the coordinator when ready
@@ -126,8 +131,9 @@ class Coordinator:
         # Get the installation path and setup bin dir
         self.bin_dir = os.path.join(self.install_path, 'bin/system')
         if not os.path.exists(self.bin_dir):
-            self.logger.error(f"Invalid binary directory: {self.bin_dir}")
-            raise ValueError(f"Invalid binary directory: {self.bin_dir}")
+            msg = f"Invalid binary directory: {self.bin_dir}"
+            self.logger.error(msg)
+            raise ValueError(msg)
 
         if self.shutdown_event.is_set():
             return
@@ -294,6 +300,8 @@ def parse_arguments():
                         help='Name of the service: ingestion, fdw, or proxy')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     parser.add_argument('--manual', action='store_true', help='Enable manual mode for running from command line')
+    parser.add_argument('-f', '--postgres-pid-file', type=str, default=None,
+                        help='Full path name to the Postgres PID file (for fdw service only)')
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -353,8 +361,12 @@ if __name__ == "__main__":
     logger = logging.getLogger('springtail')
 
     coordinator = Coordinator(props, args.debug, args.manual, yaml_config.get('production'),
-                              yaml_config.get('install_dir'), args.service)
-
+                              yaml_config.get('install_dir'),
+                              args.service,
+                              args.postgres_pid_file)
+    logger.info("Starting Springtail Coordinator with parameters: %s", ' '.join(
+        [f"{k}={v}" for k, v in vars(args).items()]
+    ))
 
     # Set up signal handlers
     def signal_handler(signum, frame):

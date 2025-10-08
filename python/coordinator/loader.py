@@ -30,7 +30,7 @@ class Loader:
     This class is responsible for reloading the coordinator python files and restaring the coordinator.
     """
 
-    def __init__(self, install_path: str, project_root: str):
+    def __init__(self, install_path: str, project_root: str, postgres_pid_file: Optional[str] = None) -> None:
         """
         Initialize the Loader
 
@@ -40,12 +40,13 @@ class Loader:
         """
         self.project_root = project_root
         self.install_path = install_path
-        print(f"Loader initialized with install path: {self.install_path}, project_root: {self.project_root}, pid: {os.getpid()}")
+        print(f"Loader initialized with install path: {self.install_path}, project_root: {self.project_root}, pid: {os.getpid()},"
+              f" postgres_pid_file: {postgres_pid_file}")
 
         self.props = Properties()
         init_logging(self.props.get_otel_config(), self.props.get_log_path())
         self.logger = logging.getLogger('springtail')
-        self.prod = Production(self.install_path)
+        self.prod = Production(self.install_path, postgres_pid_file)
 
 
     def find_and_copy_file(self, src_dir: str, file_name: str, dest_dir: str) -> Optional[tuple[str, str]]:
@@ -162,7 +163,7 @@ class Loader:
                 self.logger.error(f"Error during recovery: {e}")
 
 
-def startup(install_path : str, project_root: str) -> None:
+def startup(install_path : str, project_root: str, postgres_pid_file: Optional[str] = None) -> None:
     """
     'Static' function to start the loader process.
     """
@@ -170,13 +171,15 @@ def startup(install_path : str, project_root: str) -> None:
     if not os.path.exists(script_path):
         raise FileNotFoundError(f"Install path does not exist: {install_path}")
 
+    cmds = [sys.executable, script_path, '-i', install_path, '-p', project_root]
+    if postgres_pid_file:
+        cmds += ['-f', postgres_pid_file]
     subprocess.Popen(
-        [sys.executable, script_path, '-i', install_path, '-p', project_root],
+        cmds,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True
     )
-    return
 
 
 def parse_args():
@@ -196,6 +199,13 @@ def parse_args():
         default='/home/ubuntu/stc',
         help="Path to the project root directory."
     )
+    parser.add_argument(
+        '-f', '--postgres-pid-file',
+        type=str,
+        default=None,
+        help='Full path name to the Postgres PID file (for fdw service only)'
+    )
+
 
     return parser.parse_args()
 
@@ -212,7 +222,7 @@ def main():
         sys.stdout = open(os.path.join(log_path, 'loader_stdout.log'), 'a+')
 
     print(f"Loader started with pid: {os.getpid()}")
-    loader = Loader(args.install_path, args.project_root)
+    loader = Loader(args.install_path, args.project_root, args.postgres_pid_file)
     loader.run()
 
 

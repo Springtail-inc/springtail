@@ -96,7 +96,7 @@
         mode: "0644"
         content: |
           [program:{{ service_name }}]
-          command=/bin/bash -lc 'set -a; exec {{ pg_bin_path }}/postgres -D {{ pg_data_location }}'
+          command=/bin/bash -lc 'set -a; exec {{ pg_bin_path }}/postgres -D {{ pg_data_location }} -c external_pid_file=/opt/springtail/pids/postmaster.pid'
           ; ↑ load env file, export vars (set -a), then exec postgres in foreground
           
           user={{ username }}
