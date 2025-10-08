@@ -189,15 +189,17 @@ typedef struct FmgrInfo {
     fmNodePtr fn_expr;            /* expression parse tree for call, or NULL */
 } FmgrInfo;
 
+constexpr int32_t FIELDNO_FUNCTIONCALLINFODATA_ISNULL = 4;
+constexpr int32_t FIELDNO_FUNCTIONCALLINFODATA_ARGS = 6;
+constexpr int32_t FIELDNO_HEAPTUPLEDATA_DATA = 3;
+
 typedef struct FunctionCallInfoBaseData {
     FmgrInfo *flinfo;     /* ptr to lookup info used for this call */
     fmNodePtr context;    /* pass info about context of call */
     fmNodePtr resultinfo; /* pass or return extra info about result */
     Oid fncollation;      /* collation for function to use */
-#define FIELDNO_FUNCTIONCALLINFODATA_ISNULL 4
     bool isnull; /* function must set true if result is NULL */
     short nargs; /* # arguments actually passed */
-#define FIELDNO_FUNCTIONCALLINFODATA_ARGS 6
     pgext::NullableDatum args[FLEXIBLE_ARRAY_MEMBER];
 } FunctionCallInfoBaseData;
 
@@ -316,7 +318,6 @@ struct HeapTupleData {
     uint32_t t_len;         /* length of *t_data */
     ItemPointerData t_self; /* SelfItemPointer */
     Oid t_tableOid;         /* table the tuple came from */
-#define FIELDNO_HEAPTUPLEDATA_DATA 3
     HeapTupleHeader t_data; /* -> tuple header and data */
 };
 typedef struct HeapTupleData *HeapTuple;

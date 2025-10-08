@@ -11,7 +11,7 @@ DirectFunctionCall1(pgext::PGFunction func, Datum arg1)
 {
     LOCAL_FCINFO(fcinfo, 1);
 
-    InitFunctionCallInfoData(*fcinfo, NULL, 1, 0, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 1, 0, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
@@ -24,7 +24,7 @@ DirectFunctionCall1Coll(pgext::PGFunction func, Oid collation, Datum arg1)
 {
     LOCAL_FCINFO(fcinfo, 1);
 
-    InitFunctionCallInfoData(*fcinfo, NULL, 1, collation, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 1, collation, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
@@ -39,7 +39,7 @@ DirectFunctionCall2(pgext::PGFunction func, Datum arg1, Datum arg2)
 {
     LOCAL_FCINFO(fcinfo, 2);
 
-    InitFunctionCallInfoData(*fcinfo, NULL, 2, 0, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 2, 0, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
@@ -54,7 +54,7 @@ DirectFunctionCall2Coll(pgext::PGFunction func, Oid collation, Datum arg1, Datum
 {
     LOCAL_FCINFO(fcinfo, 2);
 
-    InitFunctionCallInfoData(*fcinfo, NULL, 2, collation, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 2, collation, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
@@ -77,7 +77,7 @@ Datum DirectFunctionCall3(pgext::PGFunction func, Datum arg1, Datum arg2, Datum 
 {
     LOCAL_FCINFO(fcinfo, 2);
 
-    InitFunctionCallInfoData(*fcinfo, NULL, 2, 0, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 2, 0, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
@@ -92,7 +92,7 @@ DirectFunctionCall3Coll(pgext::PGFunction func, Oid collation, Datum arg1, Datum
 {
     LOCAL_FCINFO(fcinfo, 2);
 
-    InitFunctionCallInfoData(*fcinfo, NULL, 2, collation, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 2, collation, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
@@ -136,7 +136,7 @@ FunctionCall1(pgext::FmgrInfo *flinfo, Datum arg1)
     LOCAL_FCINFO(fcinfo, 1);
     Datum result;
 
-    InitFunctionCallInfoData(*fcinfo, flinfo, 1, 0, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, flinfo, 1, 0, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
@@ -157,11 +157,11 @@ InputFunctionCall(pgext::FmgrInfo *flinfo, char *str, Oid typioparam, int32_t ty
     LOCAL_FCINFO(fcinfo, 3);
     Datum result;
 
-    if (str == NULL && flinfo->fn_strict) {
+    if (str == nullptr && flinfo->fn_strict) {
         return (Datum)0; /* just return null result */
     }
 
-    InitFunctionCallInfoData(*fcinfo, flinfo, 3, InvalidOid, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, flinfo, 3, InvalidOid, nullptr, nullptr);
 
     fcinfo->args[0].value = pgext::CStringGetDatum(str);
     fcinfo->args[0].isnull = false;
@@ -173,7 +173,7 @@ InputFunctionCall(pgext::FmgrInfo *flinfo, char *str, Oid typioparam, int32_t ty
     result = FunctionCallInvoke(fcinfo);
 
     /* Should get null result if and only if str is NULL */
-    if (str == NULL) {
+    if (str == nullptr) {
         if (!fcinfo->isnull) {
             LOG_ERROR("input function {} returned non-NULL", flinfo->fn_oid);
         }

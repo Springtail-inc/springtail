@@ -60,7 +60,7 @@ store_att_byval(void *T, Datum newdatum, int attlen)
 void
 ArrayCheckBounds(int ndim, const int *dims, const int *lb)
 {
-    (void)ArrayCheckBoundsSafe(ndim, dims, lb, NULL);
+    (void)ArrayCheckBoundsSafe(ndim, dims, lb, nullptr);
 }
 
 int
@@ -226,7 +226,7 @@ construct_array(Datum *elems, int nelems, Oid elmtype, int elmlen, bool elmbyval
     dims[0] = nelems;
     lbs[0] = 1;
 
-    return construct_md_array(elems, NULL, 1, dims, lbs, elmtype, elmlen, elmbyval, elmalign);
+    return construct_md_array(elems, nullptr, 1, dims, lbs, elmtype, elmlen, elmbyval, elmalign);
 }
 
 ArrayType *
@@ -365,7 +365,7 @@ deconstruct_array(ArrayType *array,
 	if (nullsp)
 		*nullsp = nulls = (bool *) palloc0(nelems * sizeof(bool));
 	else
-		nulls = NULL;
+		nulls = nullptr;
 	*nelemsp = nelems;
 
 	p = ARR_DATA_PTR(array);

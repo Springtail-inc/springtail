@@ -39,10 +39,10 @@ typedef struct ForEachState
 
 #define foreach(cell, lst)	\
 	for (ForEachState cell##__state = {(lst), 0}; \
-		 (cell##__state.l != NULL && \
+		 (cell##__state.l != nullptr && \
 		  cell##__state.i < cell##__state.l->length) ? \
 		 (cell = &cell##__state.l->elements[cell##__state.i], true) : \
-		 (cell = NULL, false); \
+		 (cell = nullptr, false); \
 		 cell##__state.i++)
 
 //// EXPORTED INTERFACES

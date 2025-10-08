@@ -28,7 +28,7 @@ typedef struct ArrayType {
 
 #define ARR_NULLBITMAP(a)                                                                          \
     (ARR_HASNULL(a) ? (uint8_t *)(((char *)(a)) + sizeof(ArrayType) + 2 * sizeof(int) * ARR_NDIM(a)) \
-                    : (uint8_t *)NULL)
+                    : (uint8_t *)nullptr)
 
 #define ARR_OVERHEAD_NONULLS(ndims) MAXALIGN(sizeof(ArrayType) + 2 * sizeof(int) * (ndims))
 #define ARR_OVERHEAD_WITHNULLS(ndims, nitems) MAXALIGN(sizeof(ArrayType) + 2 * sizeof(int) * (ndims) + ((nitems) + 7) / 8)

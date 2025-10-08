@@ -47,13 +47,8 @@ pq_sendint64(StringInfo buf, uint64_t i)
 void
 pq_sendfloat8(StringInfo buf, double f)
 {
-    union {
-        double f;
-        int64_t i;
-    } swap;
-
-    swap.f = f;
-    pq_sendint64(buf, swap.i);
+    int64_t bits = std::bit_cast<int64_t>(f);
+    pq_sendint64(buf, bits);
 }
 
 char *
@@ -145,14 +140,10 @@ pq_getmsgint64(StringInfo msg)
 double
 pq_getmsgfloat8(StringInfo msg)
 {
-    union {
-        double f;
-        uint64_t i;
-    } swap;
-
-    swap.i = pq_getmsgint64(msg);
-
-    return swap.f;
+    uint64_t bits = pq_getmsgint64(msg);
+    double f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
 }
 
 bytea *

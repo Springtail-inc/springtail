@@ -228,9 +228,9 @@ void init_trgm(double similarity_threshold, double word_similarity_threshold, do
         1.0,
         pgext::PGC_USERSET,
         0,
-        NULL,
-        NULL,
-        NULL);
+        nullptr,
+        nullptr,
+        nullptr);
     DefineCustomRealVariable("pg_trgm.word_similarity_threshold",
             "Sets the threshold used by the <% operator.",
             "Valid range is 0.0 .. 1.0.",
@@ -240,9 +240,9 @@ void init_trgm(double similarity_threshold, double word_similarity_threshold, do
             1.0,
             pgext::PGC_USERSET,
             0,
-            NULL,
-            NULL,
-            NULL);
+            nullptr,
+            nullptr,
+            nullptr);
     DefineCustomRealVariable("pg_trgm.strict_word_similarity_threshold",
             "Sets the threshold used by the <<% operator.",
             "Valid range is 0.0 .. 1.0.",
@@ -252,9 +252,9 @@ void init_trgm(double similarity_threshold, double word_similarity_threshold, do
             1.0,
             pgext::PGC_USERSET,
             0,
-            NULL,
-            NULL,
-            NULL);
+            nullptr,
+            nullptr,
+            nullptr);
 
     MarkGUCPrefixReserved("pg_trgm");
 }

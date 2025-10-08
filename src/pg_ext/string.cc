@@ -54,7 +54,7 @@ char *lowerstr_with_len(const char *str, int len) {
     }
 
     char *buf = (char *)palloc((size_t)len + 1);  // +1 for null terminator
-    if (!buf) return NULL;
+    if (!buf) return nullptr;
 
     int i = 0, o = 0;
 
@@ -290,7 +290,7 @@ appendStringInfoVA(StringInfo str, const char *fmt, va_list args)
     int avail;
     size_t nprinted;
 
-    assert(str != NULL);
+    assert(str != nullptr);
 
     avail = str->maxlen - str->len;
     if (avail < 16) {
@@ -336,7 +336,7 @@ appendStringInfo(StringInfo str, const char *fmt, ...)
 void
 appendBinaryStringInfo(StringInfo str, const void *data, int datalen)
 {
-    assert(str != NULL);
+    assert(str != nullptr);
 
     /* Make more room if needed */
     enlargeStringInfo(str, datalen);
@@ -351,7 +351,7 @@ appendBinaryStringInfo(StringInfo str, const void *data, int datalen)
 void
 appendBinaryStringInfoNT(StringInfo str, const void *data, int datalen)
 {
-	assert(str != NULL);
+	assert(str != nullptr);
 
 	/* Make more room if needed */
 	enlargeStringInfo(str, datalen);
@@ -400,7 +400,7 @@ parser_errposition(ParseState *pstate, int location)
         return 0;
     }
     /* Can't do anything if source text is not available */
-    if (pstate == NULL || pstate->p_sourcetext == NULL) {
+    if (pstate == nullptr || pstate->p_sourcetext == nullptr) {
         return 0;
     }
     /* Convert offset to character number */
