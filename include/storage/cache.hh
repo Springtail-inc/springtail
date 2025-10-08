@@ -857,37 +857,38 @@ namespace springtail {
             /**
              * Inserts the provided tuple into the Page using the provided ExtentSchema.
              */
-            void insert(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(Extent::Row&)> index_mutation_handler = nullptr);
+            void insert(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_mutation_handler = nullptr);
 
             /**
              * Appends the provided tuple to the Page using the provided ExtentSchema.
              */
-            void append(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(Extent::Row&)> index_mutation_handler = nullptr);
+            void append(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_mutation_handler = nullptr);
 
             /**
              * Upserts the provided tuple to the Page using the provided ExtentSchema.
              * @return True if the upsert() resulted in an insert()
              */
-            bool upsert(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(Extent::Row&)> index_mutation_handler = nullptr);
+            bool upsert(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_mutation_handler = nullptr);
 
             /**
              * Updates the row in the Page with a matching key as the provided tuple to fully match
              * the tuple, using the provided ExtentSchema.
              */
             void update(TuplePtr tuple, ExtentSchemaPtr schema,
-                    std::function<void(Extent::Row&)> index_invalidation_handler = nullptr,
-                    std::function<void(Extent::Row&)> index_population_handler = nullptr);
+                    std::function<void(const Extent::Row&)> index_invalidation_handler = nullptr,
+                    std::function<void(const Extent::Row&)> index_population_handler = nullptr);
 
             /**
              * Removes a row with the provided key from the Page using the provided ExtentSchema.
              */
-            void remove(TuplePtr key, ExtentSchemaPtr schema, std::function<void(Extent::Row&)> index_mutation_handler = nullptr);
+            void remove(TuplePtr key, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_mutation_handler = nullptr);
 
             /**
              * Tries to remove a row by scanning the Page for the given value.
              * @return true if the row was found and removed, false otherwise.
              */
-            bool try_remove_by_scan(TuplePtr value, ExtentSchemaPtr schema);
+            bool try_remove_by_scan(TuplePtr value, ExtentSchemaPtr schema, 
+                    std::function<void(const Extent::Row&)> index_mutation_handler = nullptr);
 
             /**
              * Converts the page to the provided target_schema.  It reads rows from the existing
@@ -935,7 +936,7 @@ namespace springtail {
             /**
              * Internal implementation of append.  Page must be locked when called.
              */
-            void _append(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(Extent::Row&)> index_mutation_handler = nullptr);
+            void _append(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_mutation_handler = nullptr);
 
             /**
              * Checks if the provided extent needs to be split and performs the split if needed.

@@ -100,6 +100,13 @@ namespace {
             }
 
             _primary_keys = std::vector<std::string>({"name"});
+
+            csv::CSVReader reader("test_btree_simple.csv");
+
+            _last_internal_row_id = 0;
+            for (csv::CSVRow& row : reader) {
+                _last_internal_row_id = row[constant::INTERNAL_ROW_ID].get<uint64_t>();
+            }
         }
 
         void TearDown() override {
@@ -109,6 +116,7 @@ namespace {
 
         ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;
+        uint64_t _last_internal_row_id;
 
         std::vector<std::string> _primary_keys;
 
@@ -142,7 +150,7 @@ namespace {
             int i = 0;
             std::vector<Index> keys;
             for (auto const& v: roots) {
-                if (v.index_id == constant::INDEX_PRIMARY) {
+                if (v.index_id == constant::INDEX_PRIMARY || v.index_id == constant::INDEX_LOOK_ASIDE) {
                     continue;
                 }
 
@@ -202,7 +210,8 @@ namespace {
             auto t = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             auto n = std::make_shared<ConstTypeField<std::string>>(name);
             auto o = std::make_shared<ConstTypeField<uint64_t>>(offset);
-            std::vector<ConstFieldPtr> v({ t, n, o });
+            auto i = std::make_shared<ConstTypeField<uint64_t>>(++_last_internal_row_id);
+            std::vector<ConstFieldPtr> v({ t, n, o, i });
             return std::make_shared<ValueTuple>(v);
         };
 
@@ -263,7 +272,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1000, target_xid, metadata.roots);
 
         // finalize the empty table
@@ -297,7 +306,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
 
         auto mtable = _create_mtable(1001, target_xid, metadata.roots);
 
@@ -353,7 +362,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = {{0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}};
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1002, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -470,7 +479,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -840,7 +849,8 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
+
         auto mtable = _create_mtable(1004, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -942,7 +952,7 @@ namespace {
         TableMetadata metadata;
 
         // this will create two indexes on the first and second columns
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {2, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {2, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
 
         auto mtable = _create_mtable(1005, target_xid, metadata.roots);
 
@@ -1127,7 +1137,8 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
+
         auto mtable = _create_mtable(1006, target_xid, metadata.roots);
 
         // insert initial rows
@@ -1194,7 +1205,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(table_id, target_xid, metadata.roots);
 
         // insert initial rows
@@ -1273,7 +1284,7 @@ namespace {
 
         // create a mutable table with very small cache to force multiple extents
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1008, target_xid, metadata.roots);
 
         // insert a number of rows to create multiple extents

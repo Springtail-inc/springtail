@@ -49,7 +49,7 @@ namespace {
                     { "offset", 2, SchemaType::UINT64, 0, false },
                     { "index", 3, SchemaType::UINT16, 0, false, 2 }
                 });
-            _schema = std::make_shared<ExtentSchema>(columns);
+            _schema = std::make_shared<ExtentSchema>(columns, false, false);
             _keys = std::vector<std::string>({"name", "table_id", "index"});
 
             _base_dir = std::filesystem::temp_directory_path() / "test_btree";
