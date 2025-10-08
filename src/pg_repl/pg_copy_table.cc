@@ -1350,7 +1350,7 @@ namespace springtail
             return;
         }
 
-        auto client = sys_tbl_mgr::Client::get_instance();
+        auto server = sys_tbl_mgr::Server::get_instance();
         // iterate through the results and get the user defined types
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t enum_type_oid = copy_table._connection.get_int32(i, 0);
@@ -1359,20 +1359,19 @@ namespace springtail
             std::string namespace_name = copy_table._connection.get_string(i, 3);
             std::string extn_type_name = copy_table._connection.get_string(i, 4);
 
-            proto::UserTypeRequest udt_req;
-            udt_req.set_db_id(db_id);
-            udt_req.set_xid(xid);
-            udt_req.set_lsn(0);
-            udt_req.set_name(extn_type_name);
-            udt_req.set_type_id(enum_type_oid);
-            udt_req.set_namespace_id(namespace_oid);
-            udt_req.set_namespace_name(namespace_name);
-            udt_req.set_value_json("{}"); // set an empty JSON
-            udt_req.set_type(constant::USER_TYPE_EXTENSION); // only support enum types
+            PgMsgUserType msg;
+            msg.lsn = 0;
+            msg.oid = enum_type_oid;
+            msg.xid = xid;
+            msg.namespace_id = namespace_oid;
+            msg.namespace_name = namespace_name;
+            msg.name = extn_type_name;
+            msg.value_json = "{}";
+            msg.type = constant::USER_TYPE_EXTENSION;
 
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Creating extension type: {}", extn_type_name);
 
-            client->create_usertype(udt_req);
+            server->create_usertype(db_id, {xid, 0}, msg);
         }
 
         // disconnect from the database

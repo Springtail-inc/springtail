@@ -142,10 +142,10 @@ namespace springtail {
 
     std::shared_ptr<ExtentSchema>
     TableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id,
-                                const XidLsn &xid, bool allow_undefined)
+                                const XidLsn &xid, ComparatorFunc compartor_func, bool allow_undefined)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, allow_undefined);
+            return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, compartor_func, allow_undefined);
         }
 
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
@@ -154,7 +154,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta->columns, allow_undefined);
+        return std::make_shared<ExtentSchema>(meta->columns, compartor_func, allow_undefined);
     }
 
     void

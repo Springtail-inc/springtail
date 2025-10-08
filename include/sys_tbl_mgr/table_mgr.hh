@@ -69,7 +69,7 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, bool allow_undefined = false) override;
+                          const XidLsn &xid, ComparatorFunc compartor_func = nullptr, bool allow_undefined = false) override;
 
     private:
         /**
@@ -98,8 +98,9 @@ namespace springtail {
                   const std::vector<std::string> &primary_key,
                   const std::vector<Index> &secondary,
                   const TableMetadata &metadata,
-                  ExtentSchemaPtr schema) :
-            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema) {}
+                  ExtentSchemaPtr schema,
+                  ComparatorFunc comparator_func = nullptr) :
+            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, comparator_func) {}
 
         /**
          * Retrieves the schema for the table at a given XID.
@@ -139,9 +140,10 @@ namespace springtail {
                          const std::vector<Index> &secondary,
                          const TableMetadata &metadata,
                          ExtentSchemaPtr schema,
-                         bool for_gc = false) :
+                         bool for_gc = false,
+                         ComparatorFunc compartor_func = nullptr) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, for_gc) {}
+                         secondary, metadata, schema, for_gc, compartor_func) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing
