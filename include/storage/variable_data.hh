@@ -56,7 +56,7 @@ public:
             pos += chunk_info.data.size();
         }
 
-        _chunks.push_back({std::move(consolidated), total_size});
+        _chunks.emplace_back(std::move(consolidated), total_size);
     }
 
     VariableData(VariableData &&other) = default;
@@ -64,11 +64,13 @@ public:
     /**
      * Allows for variable data read from disk to be utilized directly as the first chunk.
      */
-    VariableData(std::vector<char> &&data)
+    explicit VariableData(std::vector<char> &&data)
     {
         uint32_t size = data.size();
-        _chunks.push_back({std::move(data), size});
+        _chunks.emplace_back(std::move(data), size);
     }
+
+    ~VariableData() = default;
 
     /**
      * Adds a new variable data to the data structure.  Always appended to the end.  Returns a
@@ -101,7 +103,7 @@ public:
                 offset_in_chunk = 0;
                 global_offset = last_chunk.cumulative_end;
                 dest = new_chunk.data();
-                _chunks.push_back({std::move(new_chunk), global_offset + total_size});
+                _chunks.emplace_back(std::move(new_chunk), global_offset + total_size);
             }
         } else {
             // First chunk
@@ -112,7 +114,7 @@ public:
             offset_in_chunk = 0;
             global_offset = 0;
             dest = new_chunk.data();
-            _chunks.push_back({std::move(new_chunk), total_size});
+            _chunks.emplace_back(std::move(new_chunk), total_size);
         }
 
         // Write data
@@ -126,7 +128,7 @@ public:
      * Finds the chunk containing the provided global offset and then creates a pointer to the
      * specific point in the chunk that represents the global offset.
      */
-    const char *data(uint32_t offset) {
+    const char *data(uint32_t offset) const {
         // Binary search for the chunk containing this offset
         auto it = std::lower_bound(_chunks.begin(), _chunks.end(), offset,
                                    [](const ChunkInfo &chunk, uint32_t value) {
@@ -151,7 +153,7 @@ public:
      * Copies the chunks into a provided continuous buffer.  Assumes that the buffer has enough
      * space to fit the full size() of the data.
      */
-    void copy_into(char *buffer) {
+    void copy_into(char *buffer) const {
         auto pos = 0;
         for (auto &chunk : _chunks) {
             std::memcpy(buffer + pos, chunk.data.data(), chunk.data.size());
@@ -163,7 +165,7 @@ public:
      * Populates an unordered_map that hashes the variable data to it's global offset.  Used by the
      * Extent class to perform de-duplication of variable data.
      */
-    void populate_hash(std::unordered_map<std::string_view, uint32_t> &hash) {
+    void populate_hash(std::unordered_map<std::string_view, uint32_t> &hash) const {
         uint32_t global_offset = 0;
 
         // go through each chunk

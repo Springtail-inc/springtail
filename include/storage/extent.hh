@@ -304,6 +304,7 @@ namespace springtail {
 
         Extent() = delete;
         Extent& operator=(const Extent&) = delete;
+        ~Extent() = default;
 
         ExtentHeader &header() {
             return _header;
