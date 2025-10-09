@@ -767,7 +767,7 @@ class TestCase:
         query = """
             SELECT count(DISTINCT index_id)
             FROM __pg_springtail_catalog.index_names
-            WHERE index_id <> 0 AND (
+            WHERE index_id <> 0 AND index_id <> -1 AND (
                 -- Rule 1 violation: index_id in state 0 but not in 1 or 2
                 (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 0)
                  AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state IN (1, 2)))
@@ -812,7 +812,7 @@ class TestCase:
 
 
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
-        index_cond = 'AND n.index_id <> 0' if is_index_query is True else 'AND n.index_id = 0'
+        index_cond = 'AND n.index_id <> 0 AND n.index_id <> -1' if is_index_query is True else 'AND n.index_id = 0'
 
         xid_sql = f"""SELECT distinct on (n.index_id) index_id, n.xid, n.lsn,n.state
             FROM "__pg_springtail_catalog"."index_names" n

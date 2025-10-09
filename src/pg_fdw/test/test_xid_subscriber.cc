@@ -98,7 +98,7 @@ namespace {
         xid_mgr_server->commit_xid(db, 1, _xid.xid, true);
 
         ++_xid.xid;
-        _server->update_roots(db, tid, _xid.xid, {{{0, 1234}}, {17}});
+        _server->update_roots(db, tid, _xid.xid, {{{constant::INDEX_PRIMARY, 1234}, {constant::INDEX_LOOK_ASIDE, 1234}}, {17}});
         // commit new xid
         xid_mgr_server->commit_xid(db, 1, _xid.xid, true);
 

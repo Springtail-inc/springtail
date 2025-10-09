@@ -195,7 +195,7 @@ namespace indexer_helpers {
         }
 
         // store the roots schema / field
-        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
+        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA, false, false);
         _roots_root_f = _roots_schema->get_field("root");
         _roots_index_id_f = _roots_schema->get_field("index_id");
 
@@ -626,7 +626,7 @@ namespace indexer_helpers {
         std::filesystem::create_directories(_table_dir);
 
         // store the roots schema / field
-        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
+        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA, false, false);
         _roots_root_f = _roots_schema->get_mutable_field("root");
         _roots_index_id_f = _roots_schema->get_mutable_field("index_id");
         _roots_last_internal_row_id_f = _roots_schema->get_mutable_field("last_internal_row_id");
