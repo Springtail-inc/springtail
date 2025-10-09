@@ -610,6 +610,7 @@ namespace springtail::committer {
         columns.push_back(constant::INTERNAL_ROW_ID);
         auto wc_fields = wc_schema->get_fields(columns);
         auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
+        // Get the mutable field to set it in the row for INSERTs
         auto internal_row_id_f = wc_schema->get_mutable_field(constant::INTERNAL_ROW_ID);
 
         TIME_TRACE_STOP(process_extent_trace);
@@ -628,7 +629,6 @@ namespace springtail::committer {
             switch (op) {
             case INSERT:
                 {
-                    // Get the mutable field to set it in the row for INSERTs
                     internal_row_id_f->set_uint64(const_cast<Extent::Row *>(&row), table->get_next_internal_row_id());
                     ++tx_counters.inserts;
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);

@@ -181,18 +181,26 @@ namespace {
     SysTblMgr_Test::_verify_schema(uint64_t tid, uint64_t index_id)
     {
         auto schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[1].columns.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
+        // Must have primary, look-aside and the index
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
+
+        auto it = std::ranges::find_if(schema_meta->indexes,
+                               [&](const auto& index) { return index.id == index_id; });
+
+        ASSERT_NE(it, schema_meta->indexes.end());
+
+        auto idx = *it;
+        ASSERT_EQ(idx.columns.size(), 2);
+        ASSERT_EQ(idx.state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
 
         // note: column positions start with 1
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].idx_position, 0);
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].position, 2);
+        ASSERT_EQ(idx.columns[0].idx_position, 0);
+        ASSERT_EQ(idx.columns[0].position, 2);
 
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].idx_position, 1);
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].position, 1);
+        ASSERT_EQ(idx.columns[1].idx_position, 1);
+        ASSERT_EQ(idx.columns[1].position, 1);
 
-        ASSERT_EQ(schema_meta->indexes[1].id, index_id);
+        ASSERT_EQ(idx.id, index_id);
     }
 
     void
@@ -232,38 +240,62 @@ namespace {
         // create the table
         _create_table(tid, "x");
         auto &&schema_meta = _client->get_schema(_db, tid, _xid);
-        // should get the cached (hasn't been finalized) primary index
-        ASSERT_EQ(schema_meta->indexes.size(), 1);
+        // should get the cached (hasn't been finalized) primary index and look aside index
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
         ASSERT_EQ(schema_meta->indexes[0].columns.size(), 1);
         ASSERT_EQ(schema_meta->indexes[0].state, (uint8_t)sys_tbl::IndexNames::State::READY);
-
+        ASSERT_EQ(schema_meta->indexes[1].columns.size(), 1);
+        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
         _finalize();
 
         schema_meta = _client->get_schema(_db, tid, _xid);
         // must have a primary index
-        ASSERT_EQ(schema_meta->indexes.size(), 1);
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
         ASSERT_EQ(schema_meta->indexes[0].columns.size(), 1);
+        ASSERT_EQ(schema_meta->indexes[1].columns.size(), 1);
 
         PgMsgIndex &&msg = _create_index(tid, "x", index_id);
 
         schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[0].columns.size(), 1);
-        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].idx_position, 0);
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].position, 2);
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].idx_position, 1);
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].position, 1);
+        auto it = std::ranges::find_if(schema_meta->indexes,
+                [&](const auto& index) { return index.id == index_id; });
+        ASSERT_NE(it, schema_meta->indexes.end());
+        auto idx = *it;
+
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
+
+        it = std::ranges::find_if(schema_meta->indexes,
+                [&](const auto& index) { return index.id == constant::INDEX_PRIMARY; });
+        ASSERT_NE(it, schema_meta->indexes.end());
+        auto primary_idx = *it;
+
+        it = std::ranges::find_if(schema_meta->indexes,
+                [&](const auto& index) { return index.id == constant::INDEX_LOOK_ASIDE; });
+        ASSERT_NE(it, schema_meta->indexes.end());
+        auto la_idx = *it;
+
+
+        ASSERT_EQ(primary_idx.columns.size(), 1);
+        ASSERT_EQ(la_idx.columns.size(), 1);
+        ASSERT_EQ(idx.state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
+        ASSERT_EQ(idx.columns[0].idx_position, 0);
+        ASSERT_EQ(idx.columns[0].position, 2);
+        ASSERT_EQ(idx.columns[1].idx_position, 1);
+        ASSERT_EQ(idx.columns[1].position, 1);
 
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
         schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
+        it = std::ranges::find_if(schema_meta->indexes,
+                [&](const auto& index) { return index.id == index_id; });
+        ASSERT_NE(it, schema_meta->indexes.end());
+        idx = *it;
+        ASSERT_EQ(idx.state, (uint8_t)sys_tbl::IndexNames::State::READY);
 
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::NOT_READY);
 
         auto info = _server->get_index_info(_db, index_id, _xid);
         ASSERT_EQ(info.id(), index_id);
-        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
+        ASSERT_EQ(idx.state, (uint8_t)sys_tbl::IndexNames::State::READY);
 
         _finalize();
 
@@ -284,19 +316,25 @@ namespace {
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
         _finalize();
         schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[1].columns.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].idx_position, 0);
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].position, 2);
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].idx_position, 1);
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].position, 1);
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
+
+        it = std::ranges::find_if(schema_meta->indexes,
+                [&](const auto& index) { return index.id == index_id; });
+        ASSERT_NE(it, schema_meta->indexes.end());
+        idx = *it;
+
+        ASSERT_EQ(idx.columns.size(), 2);
+        ASSERT_EQ(idx.state, (uint8_t)sys_tbl::IndexNames::State::READY);
+        ASSERT_EQ(idx.columns[0].idx_position, 0);
+        ASSERT_EQ(idx.columns[0].position, 2);
+        ASSERT_EQ(idx.columns[1].idx_position, 1);
+        ASSERT_EQ(idx.columns[1].position, 1);
 
         // delete the index
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::DELETED);
         _finalize();
         schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 1);
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
     }
 
     // Tests index drop
@@ -311,9 +349,13 @@ namespace {
 
         auto &&schema_meta = _client->get_schema(_db, tid, _xid);
 
-        // must have a primary index
-        ASSERT_EQ(schema_meta->indexes.size(), 1);
+        // must have a primary index and look-aside index
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
+
+        // Both primary and look aside will have single column
+        // Look aside entry has dummy column as its based on internal_row_id
         ASSERT_EQ(schema_meta->indexes[0].columns.size(), 1);
+        ASSERT_EQ(schema_meta->indexes[1].columns.size(), 1);
 
         PgMsgIndex &&msg = _create_index(tid, "x", index_id);
         _finalize();
@@ -321,7 +363,7 @@ namespace {
         _verify_schema(tid, index_id);
 
         schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
 
         // drop index
         _drop_index(index_id);
@@ -332,7 +374,7 @@ namespace {
         // as the deleted index will still be present with
         // the state BEING_DELETED
         //
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
 
         auto it = std::ranges::find_if(schema_meta->indexes,
                                [&](const auto& index) { return index.id == index_id; });
@@ -343,7 +385,7 @@ namespace {
         _finalize();
 
         schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
         it = std::ranges::find_if(schema_meta->indexes,
                                [&](const auto& index) { return index.id == index_id; });
 
@@ -388,8 +430,11 @@ namespace {
         ASSERT_TRUE(exists);
 
         metadata = _client->get_roots(_db, tid, start_xid);
-        ASSERT_EQ(metadata->roots.size(), 1);
+
+        // Roots for both Primary and look aside index
+        ASSERT_EQ(metadata->roots.size(), 2);
         ASSERT_EQ(metadata->roots[0].extent_id, constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata->roots[1].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata->stats.row_count, 0);
 
         schema_meta = _client->get_schema(_db, tid, {start_xid - 1, constant::MAX_LSN});
@@ -409,8 +454,9 @@ namespace {
 
         // verify system table correctness before finalize
         metadata = _client->get_roots(_db, tid, start_xid);
-        ASSERT_EQ(metadata->roots.size(), 1);
+        ASSERT_EQ(metadata->roots.size(), 2);
         ASSERT_EQ(metadata->roots[0].extent_id, constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata->roots[1].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata->stats.row_count, 0);
 
         schema_meta = _client->get_schema(_db, tid, {start_xid - 1, constant::MAX_LSN});
@@ -438,8 +484,9 @@ namespace {
         ASSERT_EQ(schema_meta->columns.size(), 0);
 
         metadata = _client->get_roots(_db, tid, start_xid);
-        ASSERT_EQ(metadata->roots.size(), 1);
+        ASSERT_EQ(metadata->roots.size(), 2);
         ASSERT_EQ(metadata->roots[0].extent_id, constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata->roots[1].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata->stats.row_count, 0);
 
         metadata = _client->get_roots(_db, tid, start_xid + 1);
@@ -516,8 +563,12 @@ namespace {
 
         // XID 1
         auto &&metadata = _client->get_roots(_db, tid, check_xid);
-        ASSERT_EQ(metadata->roots.size(), 1);
-        ASSERT_EQ(metadata->roots[0].index_id, 0);
+        ASSERT_EQ(metadata->roots.size(), 2);
+        auto root_it = std::ranges::find_if(metadata->roots,
+                [&](const auto& index_root) { return index_root.index_id == constant::INDEX_PRIMARY; });
+        ASSERT_NE(root_it, metadata->roots.end());
+
+        ASSERT_EQ(root_it->index_id, 0);
         ASSERT_EQ(metadata->stats.row_count, 15);
 
         ASSERT_EQ(cache->size(), 1);
@@ -529,14 +580,20 @@ namespace {
         ASSERT_EQ(schema_meta->columns.size(), 2);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "col2");
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        // Includes primary, look-aside and secondary index
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
 
         // XID 2
         ++check_xid;
 
         metadata = _client->get_roots(_db, tid, check_xid);
-        ASSERT_EQ(metadata->roots.size(), 1);
-        ASSERT_EQ(metadata->roots[0].extent_id, 100);
+        ASSERT_EQ(metadata->roots.size(), 2);
+
+        root_it = std::ranges::find_if(metadata->roots,
+                [&](const auto& index_root) { return index_root.index_id == constant::INDEX_PRIMARY; });
+        ASSERT_NE(root_it, metadata->roots.end());
+
+        ASSERT_EQ(root_it->extent_id, 100);
         ASSERT_EQ(metadata->stats.row_count, 30);
 
         ASSERT_EQ(cache->size(), 2);
@@ -547,7 +604,7 @@ namespace {
         ASSERT_EQ(schema_meta->columns.size(), 2);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "col2");
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
 
         // remove the cache now
         _client->use_roots_cache({});
@@ -557,22 +614,28 @@ namespace {
         ++check_xid;
 
         metadata = _client->get_roots(_db, tid, check_xid);
-        ASSERT_EQ(metadata->roots.size(), 1);
-        ASSERT_EQ(metadata->roots[0].extent_id, 100);
+        ASSERT_EQ(metadata->roots.size(), 2);
+        root_it = std::ranges::find_if(metadata->roots,
+                [&](const auto& index_root) { return index_root.index_id == constant::INDEX_PRIMARY; });
+        ASSERT_NE(root_it, metadata->roots.end());
+        ASSERT_EQ(root_it->extent_id, 100);
         ASSERT_EQ(metadata->stats.row_count, 30);
 
         schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
 
         // XID 4
         ++check_xid;
 
         metadata = _client->get_roots(_db, tid, check_xid);
-        ASSERT_EQ(metadata->roots.size(), 1);
-        ASSERT_EQ(metadata->roots[0].extent_id, 100);
+        ASSERT_EQ(metadata->roots.size(), 2);
+        root_it = std::ranges::find_if(metadata->roots,
+                [&](const auto& index_root) { return index_root.index_id == constant::INDEX_PRIMARY; });
+        ASSERT_NE(root_it, metadata->roots.end());
+        ASSERT_EQ(root_it->extent_id, 100);
         ASSERT_EQ(metadata->stats.row_count, 30);
 
         schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
@@ -581,12 +644,12 @@ namespace {
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
         ASSERT_EQ(schema_meta->columns[2].name, "col3");
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
 #else
         ASSERT_EQ(schema_meta->columns.size(), 2);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes.size(), 3);
 #endif
 
         // XID 5

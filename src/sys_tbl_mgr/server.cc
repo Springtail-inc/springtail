@@ -1415,6 +1415,12 @@ Server::_find_index(uint64_t db_id,
         if (id < index_id) {
             continue;
         }
+
+        // Skip look aside index entry only if we are not looking for it
+        if (id == constant::INDEX_LOOK_ASIDE && index_id != constant::INDEX_LOOK_ASIDE) {
+            continue;
+        }
+
         if (index_id != id) {
             LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No data found for index {} -- {}", db_id, index_id);
             break;

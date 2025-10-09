@@ -59,7 +59,7 @@ SchemaCache::_populate_index_map_locked(uint64_t db,
                                         const std::vector<Index> &indexes)
 {
     for (const auto &index : indexes) {
-        if (index.id == constant::INDEX_PRIMARY) {
+        if (index.id == constant::INDEX_PRIMARY || index.id == constant::INDEX_LOOK_ASIDE) {
             continue;  // skip
         }
         auto key = std::make_pair(db, index.id);
@@ -209,7 +209,7 @@ SchemaCache::_remove_locked(SchemaMap::iterator schema_i)
 
         // clear any associated entries from the index map
         for (const auto &index : schema_i->second->schema->indexes) {
-            if (index.id == constant::INDEX_PRIMARY) {
+            if (index.id == constant::INDEX_PRIMARY || index.id == constant::INDEX_LOOK_ASIDE) {
                 continue;  // skip
             }
 
