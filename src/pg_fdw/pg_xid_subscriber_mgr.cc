@@ -103,9 +103,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     if (subscriber) {
         // GRPC is supposed to delete it after cancel()
         auto p = subscriber.release();
-        if (connected) {
-            p->cancel();
-        }
+        p->cancel();
     }
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
     workers.clear();
