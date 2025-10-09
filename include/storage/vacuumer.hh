@@ -274,14 +274,14 @@ private:
     /**
      * @brief Round a value up to the nearest multiple of `align`
      */
-    inline uint64_t align_up(uint64_t val, uint64_t align) {
+    inline uint64_t _align_up(uint64_t val, uint64_t align) {
         return ((val + align - 1) / align) * align;
     }
 
     /**
      * @brief Round a value down to the nearest multiple of `align`
      */
-    inline uint64_t align_down(uint64_t val, uint64_t align) {
+    inline uint64_t _align_down(uint64_t val, uint64_t align) {
         return (val / align) * align;
     }
 
@@ -292,8 +292,8 @@ private:
      * @param input_extents Aligned extents to punch
      * @return List of extents which is not punched
      */
-    std::vector<HoleInfo> hole_punch_file(const std::string& file,
-                                          const std::vector<HoleInfo>& input_extents);
+    std::vector<HoleInfo> _hole_punch_file(const std::string& file,
+                                           const std::vector<HoleInfo>& input_extents);
 
     /**
      * @brief Get vacuum-safe XID for a DB

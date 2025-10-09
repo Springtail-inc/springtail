@@ -38,7 +38,11 @@
       "ssl": true,
       "client_connections": 8
     },
-    "io_threads": 8
+    "disk_storage_dir" : "/opt/springtail/data/write_cache",
+    "NOTE": "memory for write cache 2.5GB and 2GB",
+    "memory_high_watermark_bytes": 2684354560,
+    "memory_low_watermark_bytes": 2147483648
+
   },
   "sys_tbl_mgr": {
     "rpc_config": {

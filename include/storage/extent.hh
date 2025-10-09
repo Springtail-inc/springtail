@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 #include <cassert>
@@ -13,6 +14,7 @@
 #include <storage/compressors.hh>
 #include <storage/io.hh>
 #include <storage/schema.hh>
+#include <storage/variable_data.hh>
 
 namespace springtail {
     // pre-declare classes to avoid circular dependencies
@@ -244,28 +246,13 @@ namespace springtail {
         // The underlying raw data of this extent.
         ExtentHeader _header; ///< Header data for the extent.
         std::shared_ptr<std::vector<char>> _fixed_data; ///< Storage for the fixed column data.
-        std::shared_ptr<std::vector<char>> _variable_data; ///< Storage for the variable-sized column data, referenced by the fixed data columns.
+        std::shared_ptr<VariableData> _variable_data;
 
         /** Hash table for the variable data, used for duplicate detection. */
-        std::unordered_map<uint64_t, std::vector<uint32_t>> _variable_hash;
+        std::unordered_map<std::string_view, uint32_t> _variable_hash;
 
         void _populate_vhash() {
-            // fill the hash with the variable data
-            uint32_t size;
-            uint32_t offset = 0;
-            while (offset < _variable_data->size()) {
-                // retrieve the size
-                size = recvint32(_variable_data->data() + offset);
-
-                // calculate the hash
-                uint64_t hash = XXH64(_variable_data->data() + offset + sizeof(uint32_t), size, 0);
-
-                // store the hash
-                _variable_hash[hash].push_back(offset);
-
-                // move to the next entry
-                offset += size + sizeof(uint32_t);
-            }
+            _variable_data->populate_hash(_variable_hash);
         }
 
     public:
@@ -277,13 +264,13 @@ namespace springtail {
         {
             // empty extent
             _fixed_data = std::make_shared<std::vector<char>>();
-            _variable_data = std::make_shared<std::vector<char>>();
+            _variable_data = std::make_shared<VariableData>();
         }
 
         explicit Extent(const std::vector<std::shared_ptr<std::vector<char>>> &data)
             : _header(data[0]),
               _fixed_data(data[1]),
-              _variable_data(data[2])
+              _variable_data(std::make_shared<VariableData>(std::move(*data[2])))
         {
             _populate_vhash();
         }
@@ -293,7 +280,7 @@ namespace springtail {
         {
             // empty extent
             _fixed_data = std::make_shared<std::vector<char>>();
-            _variable_data = std::make_shared<std::vector<char>>();
+            _variable_data = std::make_shared<VariableData>();
         }
 
         Extent(const Extent &extent)
@@ -301,23 +288,23 @@ namespace springtail {
         {
             // copy the data
             _fixed_data = std::make_shared<std::vector<char>>(*extent._fixed_data);
-            _variable_data = std::make_shared<std::vector<char>>(*extent._variable_data);
+            _variable_data = std::make_shared<VariableData>(*extent._variable_data);
 
             _populate_vhash();
         }
 
         Extent(Extent &&other)
             : _header(other._header),
-              _fixed_data(other._fixed_data),
-              _variable_data(other._variable_data)
+              _fixed_data(std::move(other._fixed_data)),
+              _variable_data(std::move(other._variable_data))
         {
             other._fixed_data.reset();
-            other._variable_data.reset();
             _populate_vhash();
         }
 
         Extent() = delete;
         Extent& operator=(const Extent&) = delete;
+        ~Extent() = default;
 
         ExtentHeader &header() {
             return _header;
@@ -414,58 +401,47 @@ namespace springtail {
 
         /** Retrieve text from the variable data at a given offset. */
         std::string_view get_text(uint32_t offset) const {
+            auto data = _variable_data->data(offset);
+
             // first 4 bytes are the length of the string
-            uint32_t size = recvint32(_variable_data->data() + offset);
+            uint32_t size;
+            std::memcpy(&size, data, 4);
 
             // remainder is the string
-            return std::string_view(reinterpret_cast<const char *>(_variable_data->data() + offset + 4), size);
+            return std::string_view(reinterpret_cast<const char *>(data + 4), size);
         }
 
         /** Retrieve binary data from the variable data at a given offset. */
         const std::span<const char> get_binary(uint32_t offset) const {
+            auto data = _variable_data->data(offset);
+
             // first 4 bytes are the length of the data
-            uint32_t size = recvint32(_variable_data->data() + offset);
+            uint32_t size;
+            std::memcpy(&size, data, 4);
 
             // remainder is the binary data
-            return std::span<const char>(_variable_data->data() + offset + 4,
-                                         _variable_data->data() + offset + 4 + size);
+            return std::span<const char>(data + 4, data + 4 + size);
         }
 
         /** Add variable-sized data to the extent. */
         uint32_t add_variable(const char *buffer, uint32_t size)
         {
-            // hash the string value
-            uint64_t hash = XXH64(buffer, size, 0);
+            std::string_view value(buffer, size);
 
             // check if the value already exists
-            auto i = _variable_hash.find(hash);
+            auto i = _variable_hash.find(value);
             if (i != _variable_hash.end()) {
-                for (uint32_t offset : i->second) {
-                    // check size
-                    uint32_t vsize = recvint32(_variable_data->data() + offset);
-
-                    if (size == vsize) {
-                        // check the actual data
-                        if (std::equal(_variable_data->data() + offset + 4,
-                                       _variable_data->data() + offset + 4 + vsize,
-                                       buffer)) {
-                            // if already exists, return the existing location
-                            return offset;
-                        }
-                    }
-                }
+                return i->second;
             }
 
             // if doesn't exist, append and return the new location
-            uint32_t new_offset = _variable_data->size();
-            _variable_data->resize(new_offset + size + 4);
-            sendint32(size, _variable_data->data() + new_offset);
-            std::copy_n(buffer, size, _variable_data->data() + new_offset + 4);
+            auto data_pos = _variable_data->push_back(buffer, size);
 
             // store the new offset into the hash table
-            _variable_hash[hash].push_back(new_offset);
+            std::string_view new_value(data_pos.data + 4, size);
+            _variable_hash[new_value] = data_pos.offset;
 
-            return new_offset;
+            return data_pos.offset;
         }
 
         /**
@@ -479,7 +455,11 @@ namespace springtail {
         async_flush(std::shared_ptr<IOHandle> handle, io_append_callback_fn callback = {})
         {
             std::shared_ptr<std::vector<char>> header = std::make_shared<std::vector<char>>(_header.pack());
-            return handle->async_append({header, _fixed_data, _variable_data}, callback);
+
+            std::shared_ptr<std::vector<char>> vdata = std::make_shared<std::vector<char>>(_variable_data->size());
+            _variable_data->copy_into(vdata->data());
+
+            return handle->async_append({header, _fixed_data, vdata}, callback);
         }
 
         std::string serialize()
@@ -494,7 +474,7 @@ namespace springtail {
             std::copy_n(_fixed_data->data(), fsize, data.data() + 4);
 
             sendint32(vsize, data.data() + 4 + fsize);
-            std::copy_n(_variable_data->data(), vsize, data.data() + 4 + fsize + 4);
+            _variable_data->copy_into(data.data() + 4 + fsize + 4);
 
             return data;
         }
@@ -506,8 +486,9 @@ namespace springtail {
             std::copy_n(data.data() + 4, fsize, _fixed_data->data());
 
             uint32_t vsize = recvint32(data.data() + 4 + fsize);
-            _variable_data->resize(vsize);
-            std::copy_n(data.data() + 4 + fsize + 4, vsize, _variable_data->data());
+            std::vector<char> vdata(vsize);
+            std::memcpy(vdata.data(), data.data() + 4 + fsize + 4, vsize);
+            _variable_data = std::make_shared<VariableData>(std::move(vdata));
         }
     };
 

@@ -11,11 +11,11 @@ COPY ./ca_certs /certs
 # Run Ansible playbook to install additional dependencies
 RUN ansible-playbook /var/ansible/playbook.local-cluster.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
 RUN chown -R springtail:springtail /certs && \
-    chmod 600 /certs/server_key.pem && \
-    chmod 644 /certs/server_cert.pem && \
-    chmod 600 /certs/client_key.pem && \
-    chmod 644 /certs/client_cert.pem && \
-    chmod 644 /certs/ca_cert.pem
+    chmod 444 /certs/server_key.pem && \
+    chmod 444 /certs/server_cert.pem && \
+    chmod 444 /certs/client_key.pem && \
+    chmod 444 /certs/client_cert.pem && \
+    chmod 444 /certs/ca_cert.pem
 
 # Set tini as the container's entrypoint
 ENTRYPOINT ["/tini", "--"]

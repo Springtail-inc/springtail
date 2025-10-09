@@ -228,7 +228,7 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
                                             ServiceId::SystemTableMgrId}},
     {ServiceId::SysTblMgrClientId,     {ServiceId::ServiceRegisterId}},
     {ServiceId::WriteCacheServerId,    {ServiceId::ServiceRegisterId,
-                                            ServiceId::SysTblMgrServerId}},
+                                            ServiceId::IOMgrId}},
     {ServiceId::WriteCacheClientId,    {ServiceId::ServiceRegisterId,
                                             ServiceId::WriteCacheServerId}},
     {ServiceId::IOMgrId,               {ServiceId::ServiceRegisterId}},

@@ -78,7 +78,7 @@ class ComponentFactory:
         return Component(
             name="pg_xid_subscriber_daemon",
             id=self.XID_SUBSCRIBER_ID,
-            args=["--daemon"],
+            args=["--daemonize"],
             path=self.install_dir,
-            pid_path=os.path.join(self.pid_dir, 'pg_xid_subscriber.pid')
+            pid_path=os.path.join(self.pid_dir, 'pg_xid_subscriber_daemon.pid')
         )
