@@ -54,11 +54,13 @@ void XidMgrSubscriber::OnReadDone(bool ok)
 void XidMgrSubscriber::OnDone(const grpc::Status& s)
 {
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::OnDone");
-    boost::upgrade_lock lock(_cb_mutex);
-    if (_cb.has_value()) {
-        _cb->disconnect();
-        boost::upgrade_to_unique_lock unique_lock(lock);
-        _cb = {};
+    {
+        boost::upgrade_lock lock(_cb_mutex);
+        if (_cb.has_value()) {
+            _cb->disconnect();
+            boost::upgrade_to_unique_lock unique_lock(lock);
+            _cb = {};
+        }
     }
     delete this; //NOSONAR reason: The object lifetime is controlled by GRPC
 }
