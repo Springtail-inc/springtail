@@ -162,3 +162,22 @@ class PostgresComponent(Component):
             return False
 
         return True
+
+    def get_connection_count(self) -> int:
+        if not self.is_running():
+            return 0
+
+        try:
+            user = 'postgres'
+            if self.is_production:
+                user = self.fdw_user[0]
+            result = run_command('sudo',
+                        ['-u', user, 'psql', '-d', self.maint_db, '-t', '-c', 'select count(client_port) from pg_stat_activity where client_port != -1'])
+            if result is None:
+                self.logger.error(f"Returned no result from Postgres")
+            else:
+                self.logger.debug(f"Postgres has '{result}' connection(s)")
+                return int(result)
+        except Exception as e:
+            self.logger.error(f"Failed to connect to Postgres: {str(e)}")
+            return 0

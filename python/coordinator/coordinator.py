@@ -204,28 +204,6 @@ class Coordinator:
         self.logger.debug("Scheduler entering monitor loop")
         self.scheduler.monitor_timeouts()
 
-        # shutdown all components
-        self.logger.info("Shutting down all components")
-        self.scheduler.shutdown()
-
-    def shutdown(self, signum: int = 0):
-        """
-        Shutdown the coordinator.
-        """
-        # set shutdown flag
-        self.shutdown_event.set()
-
-        # shutdown scheduler
-        if self.scheduler:
-            self.logger.info(f"Received signal {signum}, shutting down...")
-            self.scheduler.shutdown()
-
-        # make sure everything is shutdown
-        stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
-
-        if self.production:
-            self.production.send_sns('shutdown')
-
     def _check_properties(self, props: Properties) -> None:
         """
         Check the properties; check paths exist.
@@ -370,14 +348,29 @@ if __name__ == "__main__":
 
     # Set up signal handlers
     def signal_handler(signum, frame):
-        coordinator.shutdown(signum)
+        """
+        Shutdown the coordinator.
+        """
+        logger.info(f"Received signal {signum}, shutting down...")
 
+        # set shutdown flag
+        coordinator.shutdown_event.set()
+
+        if coordinator.scheduler:
+            coordinator.scheduler.shutdown()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
         coordinator.startup()
+
+        # make sure everything is shutdown
+        stop_daemons(coordinator.props.get_pid_path(), ALL_DAEMONS)
+
+        if coordinator.production:
+            coordinator.production.send_sns('shutdown')
+
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error(f"An error occurred during startup: {e}")
