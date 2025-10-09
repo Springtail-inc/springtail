@@ -607,6 +607,7 @@ namespace springtail::committer {
 
         // process the rows
         auto op_f = wc_schema->get_field("__springtail_op");
+        auto actual_table_fields = wc_schema->get_fields(columns);
         columns.push_back(constant::INTERNAL_ROW_ID);
         auto wc_fields = wc_schema->get_fields(columns);
         auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
@@ -649,7 +650,7 @@ namespace springtail::committer {
                     ++tx_counters.deletes;
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
-                        auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
+                        auto tuple = std::make_shared<FieldTuple>(actual_table_fields, &row);
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     } else {
