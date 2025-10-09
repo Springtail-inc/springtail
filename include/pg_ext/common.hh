@@ -6,6 +6,7 @@
 typedef uint32_t Oid;
 typedef uintptr_t Datum;
 typedef size_t Size;
+typedef uint32_t CommandId;
 
 #define InvalidOid (Oid(0))
 #define FLEXIBLE_ARRAY_MEMBER
@@ -28,4 +29,34 @@ constexpr int32_t ALIGNOF_SHORT = 2;
 #define DOUBLEALIGN(LEN)		TYPEALIGN(ALIGNOF_DOUBLE, (LEN))
 #define MAXALIGN(LEN)			TYPEALIGN(MAXIMUM_ALIGNOF, (LEN))
 
+#define MaxAllocSize ((Size) 0x3fffffff)
+
 #define AssertMacro(condition)	((void)true)
+
+/*
+ * Make a const pointer appear non-const when needed (e.g., for lexer APIs
+ * that require mutable char*). In C++, use const_cast to satisfy the parser
+ * and avoid GCC C-only builtins. In C, fall back to a plain cast.
+ */
+#ifdef __cplusplus
+#define unconstify(underlying_type, expr) \
+    (const_cast<underlying_type>(expr))
+#else
+#define unconstify(underlying_type, expr) \
+    ((underlying_type) (expr))
+#endif
+
+#define HIGHBIT					(0x80)
+#define IS_HIGHBIT_SET(ch)		((unsigned char)(ch) & HIGHBIT)
+
+/*
+ * Max
+ *		Return the maximum of two numbers.
+ */
+ #define Max(x, y)		((x) > (y) ? (x) : (y))
+
+ /*
+  * Min
+  *		Return the minimum of two numbers.
+  */
+ #define Min(x, y)		((x) < (y) ? (x) : (y))

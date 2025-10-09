@@ -23,7 +23,6 @@ typedef struct ArrayType {
 		((int *) (((char *) (a)) + sizeof(ArrayType) + \
 				  sizeof(int) * ARR_NDIM(a)))
 
-#define MaxAllocSize ((Size) 0x3fffffff)
 #define AllocSizeIsValid(size) ((Size) (size) <= MaxAllocSize)
 
 #define ARR_NULLBITMAP(a)                                                                          \

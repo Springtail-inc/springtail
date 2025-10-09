@@ -7,25 +7,6 @@
 
 namespace springtail
 {
-    constexpr int32_t BOOLOID = 16;
-    constexpr int32_t CHAROID = 18;
-    constexpr int32_t NAMEOID = 19;
-    constexpr int32_t INT8OID = 20;
-    constexpr int32_t INT2OID = 21;
-    constexpr int32_t INT4OID = 23;
-    constexpr int32_t TEXTOID = 25;
-    constexpr int32_t OIDOID = 26;
-    constexpr int32_t TIDOID = 27;
-    constexpr int32_t FLOAT4OID = 700;
-    constexpr int32_t FLOAT8OID = 701;
-    constexpr int32_t REGTYPEOID = 2206;
-    constexpr int32_t CSTRINGOID = 2275;
-
-    constexpr char TYPALIGN_CHAR = 'c'; /* char alignment (i.e. unaligned) */
-    constexpr char TYPALIGN_SHORT = 's'; /* short alignment (typically 2 bytes) */
-    constexpr char TYPALIGN_INT = 'i'; /* int alignment (typically 4 bytes) */
-    constexpr char TYPALIGN_DOUBLE = 'd'; /* double alignment (often 8 bytes) */
-
     /** Defined by CMake pass in with -D */
     #if !defined(CXX_BYTE_ORDER)
     #error Error CXX_BYTE_ORDER not defined

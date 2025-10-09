@@ -75,9 +75,11 @@ int pg_reg_getnumcolors(const regex_t *regex) {
 }
 
 bool pg_reg_colorisbegin(const regex_t *regex, regcolor_t color) {
-    return false; // XXX Stubbed for now
+    // Used in the console. No implementation required
+    return false;
 }
 
 bool pg_reg_colorisend(const regex_t *regex, regcolor_t color) {
-    return false; // XXX Stubbed for now
+    // Used in the console. No implementation required
+    return false;
 }
