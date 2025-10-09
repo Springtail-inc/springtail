@@ -64,7 +64,7 @@ namespace springtail::pg_proxy {
             : Session(type, id, db_id, database, username)
         {}
 
-        ~ServerSession() { LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session being deallocated", _id); }
+        ~ServerSession();
 
         /** Entry point from server */
         void run(std::set<int> &fds) override;

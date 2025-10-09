@@ -63,9 +63,9 @@ namespace {
 
 
     /** Mock database set derived class */
-    class TestableDatabaseSet : public DatabaseSet {
+    class TestableDatabaseSet : public DatabaseInstanceSet {
     public:
-        TestableDatabaseSet() : DatabaseSet(5) {}
+        TestableDatabaseSet() : DatabaseInstanceSet(5) {}
 
         /** override abstract method */
         ServerSessionPtr allocate_session(UserPtr user,
@@ -92,7 +92,7 @@ namespace {
         release_session(ServerSessionPtr session, bool deallocate) override
         {
             std::shared_lock lock(_base_mutex);
-            DatabaseSet::_release_session(session, deallocate);
+            DatabaseInstanceSet::_release_session(session, deallocate);
         }
 
         /** make public for testing */
@@ -103,21 +103,13 @@ namespace {
             return _get_least_loaded_instance();
         }
 
-        /** make public for testing */
-        void
-        remove_instance(DatabaseInstancePtr instance)
-        {
-            std::shared_lock lock(_base_mutex);
-            _remove_instance(instance);
-        }
-
         /** override abstract method */
         void
         release_expired_sessions() override
         {
             std::unique_lock lock(_base_mutex);
-            for (auto instance_item: _instance_sessions) {
-                instance_item.first->get_pool()->evict_expired_sessions();
+            for (auto instance: _active_instances) {
+                instance->get_pool()->evict_expired_sessions();
             }
         }
 

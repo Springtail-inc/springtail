@@ -82,6 +82,16 @@ namespace {
     public:
         TestableReplicaSet() : DatabaseReplicaSet(5, DatabasePool::PoolConfig({10, 5, 300})) {}
 
+        DatabaseInstancePtr find_replica(const std::string &replica_id) {
+            std::shared_lock lock(_base_mutex);
+            for (const auto &instance : _active_instances) {
+                if (instance->replica_id() == replica_id) {
+                    return instance;
+                }
+            }
+            return nullptr;
+        }
+
         // override allocate_session to always use replica1 for testing
         // also allocate using the TestDatabaseInstance
         ServerSessionPtr allocate_session_on_replica(UserPtr user,
@@ -91,19 +101,13 @@ namespace {
             const std::string &replica_id)
         {
             // try to use replica1 first, then replica2 if not found
-            auto it = _replicas.find(replica_id);
-            if (it == _replicas.end()) {
+            auto it = find_replica(replica_id);
+            if (!it) {
                 return nullptr;
             }
 
-            TestDatabaseInstancePtr replica = std::dynamic_pointer_cast<TestDatabaseInstance>(it->second);
+            TestDatabaseInstancePtr replica = std::dynamic_pointer_cast<TestDatabaseInstance>(it);
             auto session = replica->allocate_session(user, db_id, parameters, database);
-
-            // add session to instance map
-            _sessions[replica][db_id].push_back(session);
-
-            // incr count of sessions for instance
-            _instance_sessions[replica]++;
 
             return session;
         }
@@ -118,59 +122,55 @@ namespace {
 
         /** Add a test replica instance directly */
         void add_test_replica(const std::string &replica_id, TestDatabaseInstancePtr instance) {
-            std::unique_lock lock(_base_mutex);
-            _replicas[replica_id] = instance;
-            _instance_sessions[instance] = 0; // Initialize session count
+            add_instance(instance);
         }
 
         /** Get replica count for testing */
         size_t get_replica_count() const {
             std::shared_lock lock(_base_mutex);
-            return _replicas.size();
+            return _active_instances.size();
         }
 
         /** Get shutdown pending count for testing */
         size_t get_shutdown_pending_count() const {
             std::shared_lock lock(_base_mutex);
-            return _shutdown_pending_replicas.size();
+            return _shutdown_pending_instances.size();
         }
 
         /** Check if replica is in active set */
         bool has_active_replica(const std::string &replica_id) const {
             std::shared_lock lock(_base_mutex);
-            return _replicas.contains(replica_id);
+            for (const auto &instance : _active_instances) {
+                if (instance->replica_id() == replica_id) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /** Check if replica is in shutdown pending set */
         bool has_shutdown_pending_replica(DatabaseInstancePtr replica) const {
             std::shared_lock lock(_base_mutex);
-            return _shutdown_pending_replicas.contains(replica);
+            return _shutdown_pending_instances.contains(replica);
         }
 
         /** Get instance session count for testing */
         int get_instance_session_count(DatabaseInstancePtr instance) const {
             std::shared_lock lock(_base_mutex);
-            auto it = _instance_sessions.find(instance);
-            return (it != _instance_sessions.end()) ? it->second : 0;
+            return instance->all_session_count();
         }
 
         /** Check if instance exists in tracking maps */
         bool has_instance_in_tracking(DatabaseInstancePtr instance) const {
             std::shared_lock lock(_base_mutex);
-            return _instance_sessions.contains(instance) || _sessions.contains(instance);
-        }
-
-        /** Get sessions map for testing */
-        std::map<DatabaseInstancePtr, std::map<uint64_t, std::list<ServerSessionWeakPtr>>> get_sessions_map() const {
-            std::shared_lock lock(_base_mutex);
-            return _sessions;
+            return _active_instances.contains(instance);
         }
 
         /** Manually remove instance for testing cleanup scenarios */
         void test_remove_instance(DatabaseInstancePtr instance) {
             std::unique_lock lock(_base_mutex);
             instance->initiate_shutdown(); // Ensure instance is marked inactive
-            DatabaseSet::_remove_instance(instance);
+            DatabaseInstanceSet::_remove_instance(instance, lock);
         }
     };
     using TestableReplicaSetPtr = std::shared_ptr<TestableReplicaSet>;

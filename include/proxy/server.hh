@@ -111,13 +111,20 @@ namespace springtail::pg_proxy {
         /** Log disconnect */
         void log_disconnect(SessionPtr session);
 
+        /** Notify server to shutdown */
         void notify_shutdown()
         {
             _shutdown = true;
             _wake_event_loop();
         }
 
+        /** Notify server of pending message for session, via its socket */
+        void notify(int socket);
+
+        /** Start the proxy server singleton */
         static void start();
+
+
     protected:
         ProxyServer() : Singleton<ProxyServer>(ServiceId::ProxyServerId) {}
         virtual ~ProxyServer() override = default;
@@ -136,6 +143,10 @@ namespace springtail::pg_proxy {
         std::mutex _waiting_sessions_mutex;   ///< mutex for _waiting_sessions set and _sessions map
         std::set<int> _waiting_sessions;      ///< set of connection sockets waiting for read data
         std::map<int, SessionPtr> _sessions;  ///< map of connection socket to session object
+
+        std::set<int> _notification_queue;    ///< set of sockets with notifications to process
+        bool _notification_pending = false;   ///< true if notification is pending
+        std::mutex _notification_mutex;       ///< mutex for _notification_queue
 
         /** map of session to connection socket */
         std::unordered_map<SessionPtr, std::vector<int>, Session::SessionHash, Session::SessionEqual> _session_sockets;
@@ -165,6 +176,9 @@ namespace springtail::pg_proxy {
 
         /** Start keep alive thread */
         void _start_keep_alive(int port);
+
+        /** Helper to add a runnable fd, and remove its associated fds from the waiting sessions */
+        void _add_runnable_fd(int fd, std::set<SessionPtr, Session::SessionComparator> &runnable_fds);
 
         /** Main server thread */
         std::thread _proxy_thread;

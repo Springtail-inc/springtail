@@ -65,6 +65,17 @@ namespace springtail::pg_proxy {
             ERROR=99          ///< fatal error state
         };
 
+        /** Out-of-band notification message sent to a session via the server */
+        struct NotificationMsg {
+            enum Type : int8_t {
+                NOTIFY_NONE=0,      ///< no notification; used for return type of peek
+                NOTIFY_FAILOVER=1,  ///< failover notification for replica (sent to client)
+            };
+
+            Type type;                                   ///< type of notification
+            // keep it simple for now, no need for data variant at this time
+        };
+
         // max number of iterations to read packets on single socket
         // before giving thread up
         constexpr static int    PKT_ITER_MAX_COUNT = 5;
@@ -271,6 +282,14 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Enqueue a failover notification message to this session
+         */
+        void queue_failover_notification() {
+            std::lock_guard<std::mutex> lock(_notification_mutex);
+            _notification_queue.emplace(NotificationMsg{NotificationMsg::NOTIFY_FAILOVER});
+        }
+
+        /**
          * @brief Does this session have a closed connection
          * @return true if connection is closed
          * @return false if connection is open
@@ -348,6 +367,9 @@ namespace springtail::pg_proxy {
         DatabaseInstancePtr _instance;     ///< database instance associated with this session
 
         std::unordered_map<std::string, std::string> _parameters; ///< startup parameters
+
+        std::mutex _notification_mutex;   ///< mutex for server notifications
+        std::queue<NotificationMsg> _notification_queue;  ///< out-of-band notifications
 
         uint64_t _id;                      ///< unique id for session
 

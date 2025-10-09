@@ -34,6 +34,12 @@ namespace springtail::pg_proxy {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
     }
 
+    ServerSession::~ServerSession()
+    {
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session being deallocated", _id);
+        _instance->remove_session(_id);
+    }
+
     void
     ServerSession::run(std::set<int> &fds)
     {

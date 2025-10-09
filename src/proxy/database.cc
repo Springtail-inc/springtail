@@ -101,15 +101,13 @@ namespace springtail::pg_proxy
         _remove_entry(cache_entry.key);
     }
 
-    size_t
+    void
     DatabasePool::shutdown()
     {
         std::unique_lock lock(_mutex);
-        size_t num_sessions = _cache.size();
         while (!_cache.empty()) {
             _evict_next();
         }
-        return num_sessions;
     }
 
     void
@@ -167,154 +165,99 @@ namespace springtail::pg_proxy
     /*********** Database Set *************/
 
     void
-    DatabaseSet::_remove_instance(DatabaseInstancePtr instance)
+    DatabaseInstanceSet::_remove_instance(DatabaseInstancePtr instance, std::unique_lock<std::shared_mutex> &lock)
     {
+        // remove an inactive instance from the set
+        DCHECK(lock.owns_lock());
         DCHECK_EQ(instance->is_active(), false);
 
-        // remove from sessions map
-        auto instance_it = _sessions.find(instance);
-        if (instance_it != _sessions.end()) {
-            _sessions.erase(instance_it);
-        }
+        // remove from internal maps/sets
+        _shutdown_pending_instances.erase(instance);
 
-        // remove from instance sessions map
-        auto session_it = _instance_sessions.find(instance);
-        if (session_it != _instance_sessions.end()) {
-            DCHECK(session_it->second == 0);
-            _instance_sessions.erase(session_it);
+        // remove from db instance map
+        for (auto it = _db_instances.begin(); it != _db_instances.end(); ) {
+            if (it->second == instance) {
+                it = _db_instances.erase(it);  // erase returns the next iterator
+            } else {
+                ++it;
+            }
         }
     }
 
     void
-    DatabaseSet::remove_database(uint64_t db_id)
+    DatabaseInstanceSet::remove_database(uint64_t db_id)
     {
         std::unique_lock lock(_base_mutex);
 
-        // remove from the session map, iterate over instances
-        for (auto instance_it = _sessions.begin(); instance_it != _sessions.end();) {
-            // evict database from the pool
-            instance_it->first->get_pool()->evict(db_id);
+        // get range of instances for this db_id
+        auto range = _db_instances.equal_range(db_id);
 
-            // cleanup the rest
-            auto& db_map = instance_it->second;
-
-            // Find the database ID in the inner map and remove
-            auto db_it = db_map.find(db_id);
-            int num_sessions = db_it->second.size();
-            if (db_it != db_map.end()) {
-                db_map.erase(db_it);
-            }
-
-            // If the db map is empty after removal, erase the instance entry
-            if (db_map.empty()) {
-                // first remove the instance from the instance sessions map (count)
-                auto session_itr = _instance_sessions.find(instance_it->first);
-                if (session_itr != _instance_sessions.end()) {
-                    _instance_sessions.erase(session_itr);
-                }
-
-                // then remove the instance from the sessions map
-                instance_it = _sessions.erase(instance_it);
-            } else {
-                // decrement the session count for the instance
-                auto session_itr = _instance_sessions.find(instance_it->first);
-                if (session_itr != _instance_sessions.end()) {
-                    session_itr->second -= num_sessions;
-                }
-                // move to the next instance
-                ++instance_it;
-            }
+        // evict pooled sessions for this db_id
+        for (auto it = range.first; it != range.second; ++it) {
+            auto instance = it->second;
+            instance->get_pool()->evict(db_id);
         }
+        _db_instances.erase(db_id);
     }
 
     void
-    DatabaseSet::_release_session(ServerSessionPtr session,
-                                  bool deallocate)
+    DatabaseInstanceSet::_release_session(ServerSessionPtr session,
+                                          bool deallocate)
     {
         LOG_INFO("Session being released: [S:{:d}]", session->id());
+
+        auto instance = session->get_instance();
 
         // deallocate if connection is closed or database id is invalid, or instance is not active
         if (session->is_connection_closed() ||
             session->database_id() == constant::INVALID_DB_ID ||
-            session->get_instance()->is_active() == false) {
+            instance->is_active() == false ||
+            !_active_instances.contains(instance)) {
             deallocate = true;
         }
 
-        if (!deallocate) {
-            DatabasePoolPtr pool = session->get_instance()->get_pool();
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Adding session back to pool: [S:{:d}]", session->id());
-            pool->add_session(session);
+        if (deallocate) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Deallocating session: [S:{:d}]", session->id());
             return;
         }
 
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Deallocating session: [S:{:d}]", session->id());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Adding session back to pool: [S:{:d}]", session->id());
+        DatabasePoolPtr pool = session->get_instance()->get_pool();
+        pool->add_session(session);
 
-        // otherwise, remove from the internal maps and deallocate
-        auto instance_it = _sessions.find(session->get_instance());
-        if (instance_it != _sessions.end()) {
-            // remove from the db session map; get the list of sessions for the db_id
-            auto db_it = instance_it->second.find(session->database_id());
-
-            // remove from list if it exists
-            if (db_it != instance_it->second.end()) {
-                auto &list = db_it->second;
-                list.remove_if([session](const ServerSessionWeakPtr &s) {
-                    auto s_ptr = s.lock();
-                    return (s_ptr == nullptr) || (session == s_ptr);
-                });
-            }
-        }
-
-        // update count in _instance_sessions map
-        auto session_itr = _instance_sessions.find(session->get_instance());
-        if (session_itr != _instance_sessions.end()) {
-            session_itr->second--;
-        }
-
-        session.reset();
+        return;
     }
 
     ServerSessionPtr
-    DatabaseSet::_allocate_session(UserPtr user,
-                                   uint64_t db_id,
-                                   const std::unordered_map<std::string, std::string> &parameters,
-                                   DatabaseInstancePtr instance,
-                                   const std::string &database)
+    DatabaseInstanceSet::_allocate_session(UserPtr user,
+        uint64_t db_id,
+        const std::unordered_map<std::string, std::string> &parameters,
+        DatabaseInstancePtr instance,
+        const std::string &database)
     {
         // create a new session from instance
         auto session = instance->allocate_session(user, db_id, parameters, database);
-
-        // add session to instance map
-        _sessions[instance][db_id].push_back(session);
-
-        // incr count of sessions for instance
-        _instance_sessions[instance]++;
 
         return session;
     }
 
     DatabaseInstancePtr
-    DatabaseSet::_get_least_loaded_instance()
+    DatabaseInstanceSet::_get_least_loaded_instance()
     {
         std::shared_lock lock(_base_mutex);
 
-        if (_instance_sessions.empty()) {
+        if (_active_instances.empty()) {
             return nullptr;
         }
 
         // find the instance with the least number of sessions
         DatabaseInstancePtr instance = nullptr;
         int min_sessions = INT_MAX;
-        for (auto &it : _instance_sessions) {
-            // skip those shutting down
-            if (!it.first->is_active()) {
-                continue;
-            }
-
-            int num_sessions = it.second;
+        for (auto &it : _active_instances) {
+            int num_sessions = it->active_session_count();
             if (num_sessions < min_sessions) {
                 min_sessions = num_sessions;
-                instance = it.first;
+                instance = it;
             }
         }
 
@@ -322,14 +265,13 @@ namespace springtail::pg_proxy
     }
 
     ServerSessionPtr
-    DatabaseSet::get_pooled_session(uint64_t db_id,
-                                    const std::string &username)
+    DatabaseInstanceSet::get_pooled_session(uint64_t db_id,
+                                            const std::string &username)
     {
         // called from dbmgr->get_pooled_session()
         // get a free session from the pool if possible
-
         std::shared_lock lock(_base_mutex);
-        if (_instance_sessions.empty()) {
+        if (_active_instances.empty()) {
             return nullptr;
         }
 
@@ -337,52 +279,30 @@ namespace springtail::pg_proxy
         // map ordered by number of active sessions
         std::map<int, DatabaseInstancePtr> candidates;
 
-        // track least loaded instance in case no sessions in pool
-        DatabaseInstancePtr instance = nullptr;
-        int max_free_sessions = INT_MIN;
-
-        // find the instance with the least number of sessions
-        for (auto &it : _instance_sessions) {
-            auto db_instance = it.first;
-
-            // skip those shutting down
+        // first look for a free pooled session
+        auto itr = _db_instances.equal_range(db_id);
+        for (auto it = itr.first; it != itr.second; ++it) {
+            auto db_instance = it->second;
             if (!db_instance->is_active()) {
                 continue;
             }
 
-            // if the pool has a session for this db_id and user, add to candidates
-            DatabasePoolPtr pool = db_instance->get_pool();
-            if (pool->has_session(db_id, username)) {
-                // get number of active sessions for this instance
-                int active_sessions = 0;
-                if (_instance_sessions.find(db_instance) != _instance_sessions.end()) {
-                    active_sessions = _instance_sessions[db_instance];
-                }
-                candidates[active_sessions] = db_instance;
+            // check if a user for the db id exists in the pool
+            if (!db_instance->get_pool()->has_session(db_id, username)) {
                 continue;
             }
 
-            // no free sessions, track instance with most free sessions
-            int pool_size = pool->size();
-            if (pool_size > max_free_sessions) {
-                max_free_sessions = pool_size;
-                instance = db_instance;
-            }
+            // get number of active sessions for this instance
+            int active_sessions = db_instance->active_session_count();
+            candidates[active_sessions] = db_instance;
         }
 
-        // if there are candidates, get the one with the least active sessions
-        // if there are no instances we go with the instance with the most free sessions
         if (!candidates.empty()) {
-            instance = candidates.begin()->second;
-        }
-
-        if (instance != nullptr) {
-            return instance->get_pool()->get_session(db_id, username);
+            return candidates.begin()->second->get_pool()->get_session(db_id, username);
         }
 
         return nullptr;
     }
-
 
     /*********** Database Replica Set *************/
 
@@ -393,10 +313,13 @@ namespace springtail::pg_proxy
 
         std::unique_lock lock(_base_mutex);
 
-        // find the instance
-        auto it = _replicas.find(replica_id);
-        if (it != _replicas.end()) {
-            replica = it->second;
+        // find the instance, a little heavy handed but doesn't happen often
+        // better than keeping another map that needs to be kept in sync
+        for (auto &it : _active_instances) {
+            if (it->replica_id() == replica_id) {
+                replica = it;
+                break;
+            }
         }
 
         if (replica == nullptr) {
@@ -407,31 +330,6 @@ namespace springtail::pg_proxy
 
         // mark instance as shutting down
         replica->initiate_shutdown();
-
-        // remove from active replicas
-        _replicas.erase(replica_id);
-
-        // add to shutdown pending list
-        _shutdown_pending_replicas.insert(replica);
-
-        lock.unlock();
-
-        LOG_INFO("Initiating shutdown of replica instance with replica id {}", replica_id);
-
-        // free the replica's pool, we do this without holding the lock
-        // to avoid blocking
-        int count = replica->get_pool()->shutdown();
-
-        lock.lock();
-
-        // update count of sessions for instance
-        _instance_sessions[replica] -= count;
-        DCHECK_GE(_instance_sessions[replica], 0);
-
-        if (_instance_sessions[replica] == 0) {
-            // if no active sessions, we can remove the instance now
-            _remove_replica(replica, lock);
-        }
     }
 
     void
@@ -458,33 +356,23 @@ namespace springtail::pg_proxy
 
         std::unique_lock lock(_base_mutex);
 
-        if (_replicas.contains(replica_id)) {
-            // already exists
-            return;
+        // check if replica with this id already exists
+        for (auto &it : _active_instances) {
+            if (it->replica_id() == replica_id) {
+                LOG_WARN("Replica instance with replica id {} already exists, ignoring add", replica_id);
+                return;
+            }
         }
 
-        _replicas[replica_id] = std::make_shared<DatabaseInstance>(
+        auto instance = std::make_shared<DatabaseInstance>(
             _pool_config,
             Session::Type::REPLICA,
             host.value(),
             port.value(),
             db_prefix.value(),
             replica_id);
-    }
 
-    void
-    DatabaseReplicaSet::_remove_replica(DatabaseInstancePtr replica, std::unique_lock<std::shared_mutex> &lock)
-    {
-        DCHECK(lock.owns_lock());
-
-        // Remove from list of replicas pending shutdown
-        DCHECK_EQ(replica->is_active(), false) << "Removing active replica";
-        DCHECK(_shutdown_pending_replicas.contains(replica)) << "Removing replica that is not shutdown";
-        DCHECK(!_replicas.contains(replica->replica_id())) << "Removing replica that is not shutdown";
-        _shutdown_pending_replicas.erase(replica);
-
-        // remove from the database set
-        DatabaseSet::_remove_instance(replica);
+        DatabaseInstanceSet::_add_instance(instance, lock);
     }
 
     void
@@ -494,32 +382,7 @@ namespace springtail::pg_proxy
         assert(session->type() == Session::Type::REPLICA);
 
         std::shared_lock lock(_base_mutex);
-
-        // check if replica instance is still alive, if so try to add back to pool
-        if (!deallocate && !_replicas.contains(session->get_instance()->replica_id())) {
-            deallocate = true;
-        }
-
-        auto instance = session->get_instance();
-        DatabaseSet::_release_session(session, deallocate);
-
-        // if instance is shutting down, check if we can remove it
-        if (!instance->is_active()) {
-            // get instance count of sessions
-            int instance_sessions = 0;
-            auto it = _instance_sessions.find(instance);
-            if (it != _instance_sessions.end()) {
-                instance_sessions = it->second;
-            }
-
-            if (instance_sessions <= 0) {
-                // if no more sessions, we can complete shutdown
-                // release shared lock and acquire unique lock
-                lock.unlock();
-                LOG_INFO("Completing shutdown of replica instance with replica id {}", instance->replica_id());
-                remove_replica(instance);
-            }
-        }
+        DatabaseInstanceSet::_release_session(session, deallocate);
     }
 
     void
@@ -527,8 +390,8 @@ namespace springtail::pg_proxy
     {
         std::shared_lock lock(_base_mutex);
         // iterate over all replicas and evict expired sessions
-        for (auto &&it : _replicas) {
-            auto pool = it.second->get_pool();
+        for (auto instance : _active_instances) {
+            auto pool = instance->get_pool();
             pool->evict_expired_sessions();
         }
     }
@@ -542,11 +405,6 @@ namespace springtail::pg_proxy
         std::shared_lock lock(_base_mutex);
 
         auto instance = _get_least_loaded_instance();
-        if (instance == nullptr && !_replicas.empty()) {
-            // shouldn't happen, but just in case, get first instance
-            instance = _replicas.begin()->second;
-        }
-
         if (instance == nullptr) {
             return nullptr;
         }
@@ -569,7 +427,7 @@ namespace springtail::pg_proxy
             deallocate = true;
         }
 
-        DatabaseSet::_release_session(session, deallocate);
+        _release_session(session, deallocate);
     }
 
     void
@@ -599,7 +457,7 @@ namespace springtail::pg_proxy
         }
 
         // allocate session
-        auto session = DatabaseSet::_allocate_session(user, db_id, parameters, instance, database);
+        auto session = _allocate_session(user, db_id, parameters, instance, database);
 
         return session;
     }
@@ -614,7 +472,51 @@ namespace springtail::pg_proxy
     {
         auto db_name = DatabaseMgr::get_instance()->get_database_name(db_id);
         // create a new session; this is a blocking activity as it requires creating a connection
-        return ServerSession::create(user, db_name.value_or(database), prefix(), shared_from_this(), _type, parameters);
+        auto session = ServerSession::create(user, db_name.value_or(database), prefix(), shared_from_this(), _type, parameters);
+
+        // add to active sessions map; removed in ServerSession destructor
+        {
+            std::unique_lock lock(_active_sessions_mutex);
+            _active_sessions[session->id()] = session;
+        }
+        return session;
+    }
+
+    void
+    DatabaseInstance::remove_session(uint64_t session_id)
+    {
+        // callback from ServerSession destructor
+        std::unique_lock lock(_active_sessions_mutex);
+
+        _active_sessions.erase(session_id);
+
+        if (_state.load() == InstanceState::SHUTTING_DOWN && _active_sessions.empty()) {
+            LOG_INFO("[DB:{}] All sessions completed, shutting down instance", to_string());
+            lock.unlock();
+            if (_shutdown_callback) {
+                _shutdown_callback(shared_from_this());
+            }
+        }
+    }
+
+    void
+    DatabaseInstance::initiate_shutdown()
+    {
+        _state.store(InstanceState::SHUTTING_DOWN);
+        _pool->shutdown();
+
+        std::unique_lock lock(_active_sessions_mutex);
+        // go through active sessions and notify client sessions of failover
+        for (auto &[_, session_weak] : _active_sessions) {
+            auto session = session_weak.lock();
+            if (session != nullptr) {
+                auto client_session = session->get_client_session();
+                if (client_session != nullptr) {
+                    // enqueue a failover notification to the client session, this is non-blocking
+                    client_session->queue_failover_notification();
+                }
+            }
+        }
     }
 
     /*********** Database *************/

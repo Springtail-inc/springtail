@@ -65,6 +65,11 @@ namespace springtail::pg_proxy {
         // wrap with error handler to catch any exceptions
         _wrap_error_handler([this, &fds] {
             do {
+                // handle any pending notifications
+                if (_state == READY) {
+                    _process_notifications();
+                }
+
                 // go through fds and check if we have any pending data
                 // first check client session
                 if (fds.contains(_connection->get_socket())) {
@@ -107,6 +112,32 @@ namespace springtail::pg_proxy {
     }
 
     void
+    ClientSession::_process_notifications()
+    {
+        // if we are in ready state, check for any server notifications
+        std::unique_lock<std::mutex> lock(_notification_mutex);
+        while (_state == READY && !_notification_queue.empty()) {
+            // pop notification
+            NotificationMsg notify(std::move(_notification_queue.front()));
+            _notification_queue.pop();
+            lock.unlock();
+
+            // process notification
+            switch (notify.type) {
+                case NotificationMsg::Type::NOTIFY_FAILOVER:
+                    LOG_INFO("[C:{}] Client session received failover notification", _id);
+                    _handle_failover_notification();
+                    break;
+
+                default:
+                    LOG_ERROR("[C:{}] Client session received unknown notification type: {}", _id, (int8_t)notify.type);
+                    break;
+            }
+            lock.lock();
+        }
+    }
+
+    void
     ClientSession::_process_connection()
     {
         // entry point for network connection message
@@ -135,6 +166,25 @@ namespace springtail::pg_proxy {
                 _state = ERROR;
                 break;
         }
+    }
+
+    void
+    ClientSession::_handle_failover_notification()
+    {
+        // handle failover notification
+        LOG_INFO("[C:{}] Client session handling failover notification", _id);
+
+        // allocate a new replica session if possible
+        _create_server_session(Session::Type::REPLICA, _gen_seq_id(), true);
+
+    }
+
+    void
+    ClientSession::_handle_failover_auth_done()
+    {
+        // failover replica session auth is done
+        LOG_INFO("[C:{}] Client session handling failover auth done", _id);
+        DCHECK_NE(_pending_replica_session, nullptr);
     }
 
     void
@@ -249,6 +299,9 @@ namespace springtail::pg_proxy {
     {
         // if primary create login error
         if (session->type() != Session::Type::PRIMARY) {
+            // XXX need to handle replica auth errors
+            LOG_ERROR("[C:{}] Client session received auth error from non-primary server session",
+                       _id);
             return;
         }
 
@@ -263,12 +316,25 @@ namespace springtail::pg_proxy {
     ClientSession::server_auth_done(ServerSessionPtr session,
                                     const std::unordered_map<std::string, std::string> &parameters)
     {
+        // called from server session when auth is done
+
+        if (session == _pending_replica_session) {
+            LOG_INFO("[C:{}] Client session server auth done (failover)", _id);
+            // this is the failover replica session; complete the failover
+            _handle_failover_auth_done();
+            return;
+        }
+
         if (_state != AUTH_SERVER) {
+            LOG_INFO("[C:{}] Client session server auth done (replica)", _id);
+            DCHECK_EQ(session->type(), Session::Type::REPLICA);
             DCHECK_EQ(_state, READY);
             return;
         }
 
-        // this is the primary server session
+        LOG_INFO("[C:{}] Client session server auth done (primary)", _id);
+
+        // this is the primary server session since state is AUTH_SERVER
         CHECK_EQ(session->type(), Session::Type::PRIMARY);
         _state = READY;
         _auth->send_auth_done(_gen_seq_id(), parameters);
@@ -883,7 +949,7 @@ namespace springtail::pg_proxy {
     }
 
     ServerSessionPtr
-    ClientSession::_create_server_session(Session::Type type, uint64_t seq_id)
+    ClientSession::_create_server_session(Session::Type type, uint64_t seq_id, bool failover_session)
     {
         DatabaseMgr *db_mgr = DatabaseMgr::get_instance();
 
@@ -917,9 +983,18 @@ namespace springtail::pg_proxy {
         if (type == PRIMARY) {
             // store reference to primary session
             _primary_session = session;
+            DCHECK(!failover_session);
         } else {
             // store reference to replica session
-            _replica_session = session;
+            if (failover_session) {
+                // this is a failover session, we should already have a replica session
+                DCHECK(_replica_session != nullptr);
+                DCHECK_NE(_replica_session, session);
+                _pending_replica_session = session;
+            } else {
+                DCHECK(_replica_session == nullptr);
+                _replica_session = session;
+            }
 
             // if client is in shadow mode, then the replica session
             // becomes a shadow session, not returning results to the client
