@@ -406,6 +406,9 @@ class Scheduler:
                 return
 
     def _process_fdw_state_change(self):
+        """
+        Check if there was FDW state change to 'draining' and there was, process it accordingly.
+        """
         # get FDW state
         fdw_config = self.props.get_fdw_config(True)
         fdw_state = fdw_config['state']
@@ -444,14 +447,14 @@ class Scheduler:
         redis.delete(f"{instance_id}:queue:ddl:fdw:{fdw_id}")
 
         ddl_hash_name = f"{instance_id}:hash:ddl:fdw"
-        # Get all matching keyss of the hash
+        # Get all matching keys of the hash
         keys = [k for k in redis.hkeys(ddl_hash_name) if k.endswith(f":{fdw_id}")]
         # Remove matching keys
         if keys:
             redis.hdel(ddl_hash_name, *keys)
 
         fdw_min_xids_hash_name = f"{instance_id}:fdw_min_xids"
-        # Get all matching keyss of the hash
+        # Get all matching keys of the hash
         keys = [k for k in redis.hkeys(fdw_min_xids_hash_name) if k.startswith(f"{fdw_id}:")]
         # Remove matching keys
         if keys:
