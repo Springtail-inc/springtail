@@ -175,6 +175,7 @@ class PostgresComponent(Component):
                         ['-u', user, 'psql', '-d', self.maint_db, '-t', '-c', 'select count(client_port) from pg_stat_activity where client_port != -1'])
             if result is None:
                 self.logger.error(f"Returned no result from Postgres")
+                return 0
             else:
                 self.logger.debug(f"Postgres has '{result}' connection(s)")
                 return int(result)

@@ -310,6 +310,21 @@ def setup_props(yaml_config: dict) -> Properties:
 
     return props
 
+def make_signal_handler(coordinator):
+    """
+    Create signal handler function and return it.
+    """
+    def signal_handler(signum, frame):
+        """
+        Shutdown the coordinator.
+        """
+        logger.info(f"Received signal {signum}, shutting down...")
+        coordinator.shutdown_event.set()
+
+        if coordinator.scheduler:
+            coordinator.scheduler.shutdown()
+    return signal_handler
+
 
 if __name__ == "__main__":
     """Main entry point for the coordinator script."""
@@ -346,21 +361,9 @@ if __name__ == "__main__":
         [f"{k}={v}" for k, v in vars(args).items()]
     ))
 
-    # Set up signal handlers
-    def signal_handler(signum, frame):
-        """
-        Shutdown the coordinator.
-        """
-        logger.info(f"Received signal {signum}, shutting down...")
-
-        # set shutdown flag
-        coordinator.shutdown_event.set()
-
-        if coordinator.scheduler:
-            coordinator.scheduler.shutdown()
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    handler = make_signal_handler(coordinator)
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
 
     try:
         coordinator.startup()
