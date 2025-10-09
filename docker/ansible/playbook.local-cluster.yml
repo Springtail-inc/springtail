@@ -1,0 +1,14 @@
+- name: Setup Springtail Deployment Image for Local Cluster
+  hosts: localhost
+  become: true
+  roles:
+    - role: common
+      install_additional_packages: true
+    - role: python
+    - role: custom-pg
+    - role: postgres-config
+    - role: local-cluster-prereqs
+      superuser_name: fdw_user
+      superuser_password: fdw_user_password
+    - role: post-launch
+    - role: entrypoint

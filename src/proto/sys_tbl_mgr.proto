@@ -287,42 +287,6 @@ service SysTblMgr {
   // Health check
   rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty) {}
 
-  // Create a new index
-  rpc CreateIndex(IndexRequest) returns (IndexProcessRequest) {}
-
-  // Drop an existing index
-  rpc DropIndex(DropIndexRequest) returns (IndexProcessRequest) {}
-
-  // Set index state
-  rpc SetIndexState(SetIndexStateRequest) returns (google.protobuf.Empty) {}
-
-  // Get index info
-  rpc GetIndexInfo(GetIndexInfoRequest) returns (IndexInfo) {}
-
-  // Create a new table
-  rpc CreateTable(TableRequest) returns (DDLStatement) {}
-
-  // Alter existing table
-  rpc AlterTable(TableRequest) returns (DDLStatement) {}
-
-  // Drop existing table
-  rpc DropTable(DropTableRequest) returns (DDLStatement) {}
-
-  // Create namespace
-  rpc CreateNamespace(NamespaceRequest) returns (DDLStatement) {}
-
-  // Alter namespace
-  rpc AlterNamespace(NamespaceRequest) returns (DDLStatement) {}
-
-  // Drop namespace
-  rpc DropNamespace(NamespaceRequest) returns (DDLStatement) {}
-
-  // Update root pointers and stats
-  rpc UpdateRoots(UpdateRootsRequest) returns (google.protobuf.Empty) {}
-
-  // Finalize system tables
-  rpc Finalize(FinalizeRequest) returns (google.protobuf.Empty) {}
-
   // Get root pointers and stats
   rpc GetRoots(GetRootsRequest) returns (GetRootsResponse) {}
 
@@ -335,31 +299,6 @@ service SysTblMgr {
   // Check if table exists -- returns grpc::Status::NOT_FOUND if table does not exist
   rpc Exists(ExistsRequest) returns (google.protobuf.Empty) {}
 
-  // Swap sync table operation
-  rpc SwapSyncTable(SwapSyncTableRequest) returns (DDLStatement) {}
-
-  // Revert the system tables to a given XID
-  rpc Revert(RevertRequest) returns (google.protobuf.Empty) {}
-
-  // Create user defined type
-  rpc CreateUserType(UserTypeRequest) returns (DDLStatement) {}
-
-  // Alter user defined type
-  rpc AlterUserType(UserTypeRequest) returns (DDLStatement) {}
-
-  // Drop user defined type
-  rpc DropUserType(UserTypeRequest) returns (DDLStatement) {}
-
   // Get user defined type
   rpc GetUserType(GetUserTypeRequest) returns (GetUserTypeResponse) {}
-
-  // Attach partition
-  rpc AttachPartition(AttachPartitionRequest) returns (DDLStatement) {}
-
-  // Detach partition
-  rpc DetachPartition(DetachPartitionRequest) returns (DDLStatement) {}
-
-  // Get unfinished indexs info to be recovered
-  rpc GetUnfinishedIndexesInfo(GetUnfinishedIndexesInfoRequest) returns (IndexesInfo) {}
-
 }

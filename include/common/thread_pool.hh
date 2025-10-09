@@ -101,7 +101,10 @@ namespace springtail {
          * @brief Construct a new Thread Pool object
          * @param max_threads number of threads to create
          */
-        ThreadPool(int max_threads, std::optional<std::string> thread_name = std::nullopt)
+        ThreadPool(int max_threads,
+                   std::optional<std::string> thread_name = std::nullopt,
+                   int io_request_queue_size=-1)
+            : _queue(ConcurrentQueue<ThreadRequest>(io_request_queue_size))
         {
             std::string thread_name_base;
             if (thread_name.has_value()) {

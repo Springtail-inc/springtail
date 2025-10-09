@@ -19,7 +19,8 @@ FSCheck::FSCheck( std::optional<uint64_t> db_id, uint64_t max_xid, bool all_xids
     _table_base = Properties::make_absolute_path(_table_base);
     LOG_INFO("Verifying tables at table_base = {}, max_xid = {}", _table_base.string(), _max_xid);
 
-    bool vacuumer_enabled = Vacuumer::get_instance()->is_enabled();
+    VacuumerUtils vacuumer_utils;
+    bool vacuumer_enabled = vacuumer_utils.is_enabled();
     for (const auto &[db_id, db_name]: _databases) {
         if (_db_id && _db_id != db_id) {
             continue;
@@ -27,7 +28,7 @@ FSCheck::FSCheck( std::optional<uint64_t> db_id, uint64_t max_xid, bool all_xids
 
         uint64_t cutoff_xid = 0;
         if (vacuumer_enabled) {
-            cutoff_xid = Vacuumer::get_instance()->get_last_seen_cutoff_xid(db_id);
+            cutoff_xid = vacuumer_utils.get_last_seen_cutoff_xid(db_id);
         }
         if (!vacuumer_enabled || _max_xid >= cutoff_xid) {
             _db_id_to_cutoff_xid.insert(std::make_pair(db_id, cutoff_xid));
@@ -69,7 +70,7 @@ FSCheck::_get_table_and_fields(uint64_t db_id)
         }
         secondary_keys.push_back(idx);
     }
-    TableMetadata tbl_meta;
+    TableMetadata tbl_meta{};
     tbl_meta.snapshot_xid = 1;
 
     uint64_t xid = constant::LATEST_XID;
@@ -626,15 +627,16 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
 
     // 5. Create table
     auto schema = std::make_shared<ExtentSchema>(columns);
-    auto tbl_meta = std::make_shared<TableMetadata>();
-    tbl_meta->roots = roots;
 
-    tbl_meta->stats.row_count = row_count;
-    tbl_meta->stats.end_offset = end_offset;
-    tbl_meta->snapshot_xid = root_sxid;
+    TableMetadata tbl_meta{};
+    tbl_meta.roots = roots;
+
+    tbl_meta.stats.row_count = row_count;
+    tbl_meta.stats.end_offset = end_offset;
+    tbl_meta.snapshot_xid = root_sxid;
 
     auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
-                                schema->get_sort_keys(), secondary_indexes, *tbl_meta, schema);
+                                schema->get_sort_keys(), secondary_indexes, tbl_meta, schema);
 
     LOG_INFO("\tValidata Table indexes for table {}, dir: {}, row_count: {}, end_offset: {}, sxid: {}",
             table->id(), table->get_dir_path().c_str(), row_count, end_offset, root_sxid);

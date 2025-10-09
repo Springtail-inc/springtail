@@ -11,8 +11,8 @@
 #include <storage/csv_field.hh>
 #include <storage/vacuumer.hh>
 
-#include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/user_table.hh>
+#include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 #include <xid_mgr/xid_mgr_server.hh>
@@ -53,7 +53,7 @@ namespace {
             springtail_init_test();
             test::start_services(true, true, false);
 
-            auto client = sys_tbl_mgr::Client::get_instance();
+            auto server = sys_tbl_mgr::Server::get_instance();
 
             auto xid_client = XidMgrClient::get_instance();
             uint64_t access_xid = xid_client->get_committed_xid(1, 0);
@@ -64,7 +64,7 @@ namespace {
             PgMsgNamespace ns_msg;
             ns_msg.oid = 900;
             ns_msg.name = "public";
-            client->create_namespace(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), ns_msg);
+            server->create_namespace(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), ns_msg);
 
             auto xid_server = xid_mgr::XidMgrServer::get_instance();
             xid_server->commit_xid(1, 1, target_xid, false);
@@ -123,7 +123,7 @@ namespace {
 
         void _init_sys_tbls(uint64_t target_xid, uint64_t table_oid, std::string_view name)
         {
-            auto client = sys_tbl_mgr::Client::get_instance();
+            auto server = sys_tbl_mgr::Server::get_instance();
 
             PgMsgTable tbl_msg;
             tbl_msg.oid = table_oid;
@@ -137,9 +137,9 @@ namespace {
                  {"offset", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 3, -1, false,
                   false, false}});
 
-            client->create_table(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), tbl_msg);
+            server->create_table(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), tbl_msg);
 
-            client->finalize(_db_id, target_xid);
+            server->finalize(_db_id, target_xid);
         }
 
         // secondary keys
@@ -278,7 +278,7 @@ namespace {
 
         // finalize the empty table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -316,7 +316,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -421,7 +421,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -488,7 +488,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table for lookup
@@ -529,7 +529,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -608,7 +608,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -692,7 +692,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -781,7 +781,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -859,7 +859,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table and identify extents to be mutated
@@ -898,7 +898,7 @@ namespace {
         tester.set_verify([this, mtable, target_xid, server]() {
             // create an access table
             TableMetadata metadata = mtable->finalize();
-            sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+            sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
             server->commit_xid(1, 1, target_xid, false);
 
             auto access_xid = target_xid;
@@ -962,7 +962,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -1158,7 +1158,7 @@ namespace {
 
         // finalize the table after all operations
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table to verify the final state
@@ -1214,7 +1214,7 @@ namespace {
 
         // finalize the table after create
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, true);
 
         // create an access table and identify extents to be mutated
@@ -1250,7 +1250,7 @@ namespace {
 
         // finalize the table after update
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, true);
 
         // repopulate with new data
@@ -1293,7 +1293,7 @@ namespace {
 
         // finalize the table
         metadata = mtable->finalize();
-        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
@@ -1369,7 +1369,7 @@ namespace {
                 // the result should be <= target_name and should be the found_name or something close
                 ASSERT_LE(result_name, target_name);
 
-                // since target_name doesn't exist, inverse_lower_bound should return 
+                // since target_name doesn't exist, inverse_lower_bound should return
                 // the largest key that is <= target_name, which should be >= found_name
                 ASSERT_GE(result_name, found_name);
             }

@@ -6,13 +6,8 @@
 
 using namespace springtail;
 
-SystemTableMgr::SystemTableMgr() : Singleton<SystemTableMgr>(ServiceId::SystemTableMgrId)
+SystemTableMgr::SystemTableMgr() : Singleton<SystemTableMgr>(ServiceId::SystemTableMgrId), TableMgrBase()
 {
-    // get the base directory for table data
-    nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-    Json::get_to<std::filesystem::path>(json, "table_dir", _table_base);
-    _table_base = Properties::make_absolute_path(_table_base);
-
     // TableNames
     _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);
 
@@ -36,6 +31,18 @@ SystemTableMgr::SystemTableMgr() : Singleton<SystemTableMgr>(ServiceId::SystemTa
 
     // UserTypes
     _system_cache[{ sys_tbl::UserTypes::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::UserTypes::Data::SCHEMA);
+}
+
+std::shared_ptr<Schema>
+SystemTableMgr::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid)
+{
+    return _get_schema(table_id);
+}
+
+std::shared_ptr<ExtentSchema>
+SystemTableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid, bool allow_undefined, bool include_internal_row_id)
+{
+    return _get_extent_schema(table_id);
 }
 
 std::shared_ptr<Schema>
@@ -83,9 +90,7 @@ SystemTableMgr::_get_secondary_keys() {
 }
 
 TablePtr
-SystemTableMgr::get_system_table(uint64_t db_id,
-                            uint64_t table_id,
-                            uint64_t xid)
+SystemTableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid)
 {
     DCHECK(table_id < constant::MAX_SYSTEM_TABLE_ID);
     // initialize the system tables using the look-aside root files
@@ -93,7 +98,7 @@ SystemTableMgr::get_system_table(uint64_t db_id,
     std::vector<Index> secondary_keys;
 
     // construct generic table metadata for the system tables
-    TableMetadata tbl_meta;
+    TableMetadata tbl_meta{};
     tbl_meta.snapshot_xid = 1;
 
     // get the table's schema
@@ -147,17 +152,41 @@ SystemTableMgr::get_system_table(uint64_t db_id,
     }
 }
 
+std::map<uint32_t, SchemaColumn>
+SystemTableMgr::get_columns(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
+{
+    switch (table_id) {
+    case sys_tbl::TableNames::ID:
+        return _convert_columns(sys_tbl::TableNames::Data::SCHEMA);
+    case sys_tbl::TableRoots::ID:
+        return _convert_columns(sys_tbl::TableRoots::Data::SCHEMA);
+    case sys_tbl::Indexes::ID:
+        return _convert_columns(sys_tbl::Indexes::Data::SCHEMA);
+    case sys_tbl::Schemas::ID:
+        return _convert_columns(sys_tbl::Schemas::Data::SCHEMA);
+    case sys_tbl::TableStats::ID:
+        return _convert_columns(sys_tbl::TableStats::Data::SCHEMA);
+    case sys_tbl::IndexNames::ID:
+        return _convert_columns(sys_tbl::IndexNames::Data::SCHEMA);
+    case sys_tbl::NamespaceNames::ID:
+        return _convert_columns(sys_tbl::NamespaceNames::Data::SCHEMA);
+    case sys_tbl::UserTypes::ID:
+        return _convert_columns(sys_tbl::UserTypes::Data::SCHEMA);
+    default:
+        CHECK(false);
+        break;
+    }
+}
+
 MutableTablePtr
-SystemTableMgr::get_mutable_system_table(uint64_t db_id,
-                                    uint64_t table_id,
-                                    uint64_t access_xid,
-                                    uint64_t target_xid)
+SystemTableMgr::get_mutable_system_table(uint64_t db_id, uint64_t table_id,
+                                         uint64_t access_xid, uint64_t target_xid)
 {
     DCHECK(table_id < constant::MAX_SYSTEM_TABLE_ID);
     // initialize the system tables using the look-aside root files
     std::vector<Index> secondary_keys;
 
-    TableMetadata tbl_meta;
+    TableMetadata tbl_meta{};
     tbl_meta.snapshot_xid = 1;
 
     auto schema = _get_extent_schema(table_id);

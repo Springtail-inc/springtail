@@ -14,7 +14,10 @@ class AwsHelper:
 
     def __init__(self,
                  config : Optional[botocore.config.Config] = None,
-                 region : str = 'us-east-1'):
+                 region : str = 'us-east-1',
+                 s3_endpoint: Optional[str] = None,
+                 sns_endpoint: Optional[str] = None,
+                 secretsmanager_endpoint: Optional[str] = None) -> None:
 
         logging.getLogger('boto3').setLevel(logging.INFO)
         logging.getLogger('botocore').setLevel(logging.INFO) # botocore is a dependency of boto3
@@ -22,8 +25,12 @@ class AwsHelper:
         logging.getLogger('s3transfer').setLevel(logging.INFO) # For S3 specific transfers
 
         self.logger = logging.getLogger('springtail')
-        self.s3 = boto3.client('s3', config=config, region_name=region)
-        self.sns = boto3.client('sns', region_name=region)
+        self.s3 = boto3.client('s3', config=config, region_name=region,
+                               **{'endpoint_url': s3_endpoint} if s3_endpoint else {})
+        self.sns = boto3.client('sns', region_name=region,
+                                **{'endpoint_url': sns_endpoint} if sns_endpoint else {})
+        self.secretsmanager = boto3.client('secretsmanager', region_name=region,
+                                           **{'endpoint_url': secretsmanager_endpoint} if secretsmanager_endpoint else {})
 
 
     def get_instance_id(self) -> Optional[str]:
@@ -179,13 +186,11 @@ class AwsHelper:
         Returns an optional array of dictionaries.
         """
         # Create a Secrets Manager client
-        client = boto3.client("secretsmanager")
-
         try:
             self.logger.debug(f"Retrieving secret: {secret_name}")
 
             # Fetch the secret value
-            response = client.get_secret_value(SecretId=secret_name)
+            response = self.secretsmanager.get_secret_value(SecretId=secret_name)
 
             # Check if the secret is stored as plaintext or JSON
             if "SecretString" in response:

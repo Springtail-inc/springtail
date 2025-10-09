@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <common/timestamp.hh>
 
 #include <pg_repl/pg_msg_stream.hh>
@@ -8,13 +9,15 @@
 #include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
+#include <pg_log_mgr/pg_log_queue.hh>
+#include <write_cache/write_cache_table_set.hh>
 
 #include <storage/field.hh>
 
-#include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/server.hh>
 
 namespace springtail::pg_log_mgr {
+
     /**
      * @brief Log reader class.  Reads logs written by PgLogWriter.  Collects the various table
      * mutations into batches which are passed to the WriteCache to make them available to the
@@ -54,14 +57,12 @@ namespace springtail::pg_log_mgr {
          * @brief Process next set of messages from log file
          * @param path file path
          * @param timestamp log file timestamp
-         * @param start_offset starting file offset
-         * @param end_offset ending file offset (-1 = read until eos)
+         * @param entry log entry
          */
         void process_log(const std::filesystem::path &path,
                          uint64_t timestamp,
-                         uint64_t start_offset,
-                         uint64_t end_offset);
-
+                         const PgLogQueueEntryPtr& entry);
+                         
         /**
          * Set the starting point for XID assignment.
          */
@@ -112,7 +113,7 @@ namespace springtail::pg_log_mgr {
                     }
                 }
 
-                bool exists = sys_tbl_mgr::Client::get_instance()->exists(key.first, key.second, xid);
+                bool exists = sys_tbl_mgr::Server::get_instance()->exists(key.first, key.second, xid);
 
                 {
                     std::scoped_lock lock(_mutex);
@@ -166,9 +167,9 @@ namespace springtail::pg_log_mgr {
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
              * provided xid.
              * @param xid springtail xid
-             * @param commit_ts Postgres commit ts
+             * @param md Metadata 
              */
-            void commit(uint64_t xid, PostgresTimestamp commit_ts);
+            void commit(uint64_t xid, WriteCacheTableSet::Metadata md);
 
             /**
              * Abort the entire transaction.  Drop all related batches from the WriteCache.
@@ -217,6 +218,7 @@ namespace springtail::pg_log_mgr {
                 MutableFieldPtr op_f; ///< The field accessor for the mutation's operation type.
                 MutableFieldPtr lsn_f; ///< The field accessor for the mutation's LSN.
                 MutableFieldPtr row_id_f; ///< The field accessor for the mutation's LSN.
+
                 MutableFieldArrayPtr fields; ///< The underlying fields of the schema that match the columns from the table schema.
                 MutableFieldArrayPtr pkey_fields; ///< The underlying fields of the schema that match the pkey columns from the table schema.
 
@@ -225,8 +227,8 @@ namespace springtail::pg_log_mgr {
 
                 TableEntry() = default;
                 explicit TableEntry(ExtentSchemaPtr table_schema)
-                    : table_schema(table_schema)
-                { }
+                    : table_schema(table_schema) 
+                {}
 
                 /**
                  * Updates the schema and related fields from the table_schema.
@@ -288,12 +290,25 @@ namespace springtail::pg_log_mgr {
             void _apply_schema_change(PgMsgPtr change, const XidLsn &xidlsn, const std::vector<uint64_t> &pg_xids);
 
             /**
-             * @brief Helper method to mark the table for resync. Internally calls sync_tracker->mark_resync
+             * @brief Helper method to mark the table for resync. Internally calls
+             * sync_tracker->issue_resync_and_wait
+             *
+             * @param table_oids Table OIDs
+             * @param xidlsn XID LSN
+             * @param pg_xids PG XIDs
+             */
+            void _mark_table_resync(const std::unordered_set<uint32_t> &table_oids,
+                                    const XidLsn &xidlsn,
+                                    const std::vector<uint64_t> &pg_xids);
+
+            /**
+             * Helper to mark the table for resync. Internally calls sync_tracker->issue_resync_and_wait
              *
              * @param table_oid Table OID
              * @param xidlsn XID LSN
+             * @param pg_xids PG XIDs
              */
-            void _mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn, const std::vector<uint64_t> &pg_xids);
+            void _mark_table_resync(uint32_t table_oid, const XidLsn &xidlsn, const std::vector<uint64_t> &pg_xids);
 
             /**
              * Helper to check if a given table is invalid as visible within this Batch.
@@ -334,7 +349,7 @@ namespace springtail::pg_log_mgr {
                 if (it != _user_types.end()) {
                     return it->second;
                 }
-                auto utp = SchemaMgr::get_instance()->get_usertype(_db, pg_type, xidlsn);
+                auto utp = sys_tbl_mgr::Server::get_instance()->get_usertype(_db, pg_type, xidlsn);
                 _user_types[pg_type] = utp;
                 return utp;
             }

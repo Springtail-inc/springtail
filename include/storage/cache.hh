@@ -144,6 +144,12 @@ namespace springtail {
             }
 
         private:
+            /** Holds the details of an async waiter. */
+            struct Waiter {
+                std::promise<void> promise;
+                std::function<void()> callback;
+            };
+
             std::filesystem::path _file; ///< The file containing this extent.
             uint64_t _extent_id; ///< The extent_id of this extent.
             uint32_t _extent_size; ///< The original size of the extent on-disk.  Used for vacuuming.
@@ -154,7 +160,8 @@ namespace springtail {
             std::list<std::shared_ptr<CacheExtent>>::iterator _pos; ///< The position of this entry on it's global LRU list.  Invalid if use count is non-zero.
 
             State _state; ///< The current state of this extent.
-            std::shared_ptr<boost::condition_variable> _flush_cv; ///< A condition variable used to notify waiters when the extent is no longer FLUSHING.
+
+            std::vector<Waiter> _flush_waiters; ///< The list of waiters to notify upon flush completion.
 
             uint64_t _cache_id; ///< A unique ID provided from the DataCache when the CacheExtent is MUTABLE / DIRTY and shouldn't be referenced by extent_id.
         };
@@ -279,6 +286,7 @@ namespace springtail {
             }
 
             SafeExtent &operator=(const SafeExtent &other) {
+                if (this == &other) { return *this; }
                 if (_extent) {
                     StorageCache::get_instance()->_data_cache->put(_extent);
                 }
@@ -290,12 +298,12 @@ namespace springtail {
             }
 
             // move handling
-            SafeExtent(SafeExtent &&other) {
+            SafeExtent(SafeExtent &&other) noexcept  {
                 _extent = other._extent;
                 other._extent = nullptr;
             }
 
-            SafeExtent &operator=(SafeExtent &&other) {
+            SafeExtent &operator=(SafeExtent &&other) noexcept {
                 if (_extent) {
                     StorageCache::get_instance()->_data_cache->put(_extent);
                 }
@@ -413,7 +421,7 @@ namespace springtail {
             /**
              * Re-inserts a write cache extent back into the read cache.  Should be called once a
              * Page holding the Extent has been flush()'d to disk and no longer refereces the Extent
-             * object's cache_id.  Returns the page to a CLEAN state from a MUTABLE state.
+             * object's cache_id.  Returns the extent to a CLEAN state from a MUTABLE state.
              *
              * @param extent The extent that should be returned to the clean cache.
              */
@@ -424,6 +432,12 @@ namespace springtail {
              * after the flush() is complete.
              */
             void flush(CacheExtentPtr extent);
+
+            /**
+             * @brief Returns a future which writes the provided DIRTY extent to disk.  Extent is returned to the MUTABLE state
+             * after the flush() is complete.
+             */
+            std::future<void> async_flush(CacheExtentPtr extent, std::function<void()> callback);
 
             /**
              * Invalidates the provided DIRTY extent, ensuring that it is released without being
@@ -466,6 +480,12 @@ namespace springtail {
             CacheExtentPtr _use_direct(const CacheExtentPtr& extent, bool mark_dirty);
 
             /**
+             * Helper that takes in an extent that is marked as FLUSHING and blocks until it is no
+             * longer FLUSHING.
+             */
+            void _wait_for_flush(const CacheExtentPtr& extent);
+
+            /**
              * Removes an extent from the read cache for use by the write cache.  If the extent is
              * in use by multiple callers, then a copy of the extent is returned to maintain thread
              * safety, so you must always use the returned extent after this call.
@@ -501,6 +521,22 @@ namespace springtail {
              * state after the flush() is complete.
              */
             void _flush(CacheExtentPtr extent);
+
+            /**
+             * @brief Helper that returns a future which writes the provided DIRTY extent to disk.  Extent is returned to the MUTABLE
+             * state after the flush() is complete.
+             *
+             * @returns optional future which is nullopt if flush is not needed (not dirty)
+             */
+            std::future<void> _async_flush(CacheExtentPtr extent, std::function<void()> callback = nullptr);
+
+            /**
+             * @brief Helper that writes the provided DIRTY extent to disk, updates cache and extent
+             * @param extent             Extent to be flushed to the disk
+             * @param flush_response     IO Flush response
+             */
+            void _flush_and_update_extent(CacheExtentPtr extent,
+                    std::shared_ptr<IOResponseAppend> flush_response);
 
             /**
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
@@ -583,11 +619,21 @@ namespace springtail {
              * Writes all of the dirty in-memory extents to disk and returns the full set of extent
              * IDs for the page.
              *
-             * @param flush_xid The XID at which this page is being written out.  The page is
-             *                  considered valid from this XID forward.
+             * @param header  Extent header which will be used as header for all the in-memory extents
+             *
              * @return The ordered list of extent IDs that represent the data of the Page.
              */
             std::vector<uint64_t> flush(const ExtentHeader &header);
+
+            /**
+             * @brief Returns a future that writes all of the dirty in-memory extents to disk and returns
+             * the full set of extent IDs for the page.
+             *
+             * @param header  Extent header which will be used as header for all the in-memory extents
+             *
+             * @return future that returns ordered list of extent IDs that represent the data of the Page.
+             */
+            std::future<std::vector<uint64_t>> async_flush(const ExtentHeader &header, std::function<void(std::vector<uint64_t>)> callback = {});
 
             /**
              * Flushes an empty page to disk by creating an empty extent and flushing that to disk,
@@ -949,6 +995,16 @@ namespace springtail {
              */
             std::vector<uint64_t> _flush(const ExtentHeader &header);
 
+            /**
+             * @brief Helper that returns future which flushs the underlying extents of a Page and
+             * to return the extent IDs of the new on-disk positions.
+             *
+             * @param header  Extent header which will be used as header for all the in-memory extents
+             *
+             * @return future that returns ordered list of extent IDs that represent the data of the Page.
+             */
+            std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header, std::function<void(const std::vector<uint64_t> &)> callback = {});
+
         private:
             /** A count of the number of users of this page. */
             std::atomic<uint16_t> _use_count;
@@ -988,11 +1044,25 @@ namespace springtail {
             /** Position on the PageCache flush list.  Set to end() if not on the list. */
             std::list<std::shared_ptr<Page>>::iterator _flush_pos;
 
-            /** Flag indiciating if the page is currently being flushed. */
+            /** Flag indiciating if the page is currently being flushed by flush_file() or the
+                background_cleaner().  Need this to deal with the flush_callback, otherwise could
+                end up calling it multiple times. */
             bool _is_flushing;
 
-            /** Condition variable to wait on for flushing to complete. */
+            /** Condition variable to wait on for _is_flushing to complete. */
             boost::condition_variable _flush_cond;
+
+            /** The promise type for async flush. */
+            using FlushPromise = std::promise<std::vector<uint64_t>>;
+
+            /** Mutex to protect the async_flush variables. */
+            boost::mutex _async_flush_mutex;
+
+            /** Flag indicating if the page is in the internal _async_flush() operation. */
+            bool _is_async_flushing = false;
+
+            /** List of promises to set once the flush is complete. */
+            std::vector<std::shared_ptr<FlushPromise>> _async_flush_waiters;
         };
 
         using PagePtr = std::shared_ptr<Page>;
@@ -1011,7 +1081,7 @@ namespace springtail {
             SafePagePtr()
             {}
 
-            SafePagePtr(SafePagePtr &&other) {
+            SafePagePtr(SafePagePtr &&other) noexcept {
                 _p = other._p;
                 _c = other._c;
                 _cb = other._cb;
@@ -1294,6 +1364,38 @@ namespace springtail {
             _page_cache->validate();
         }
 
+        using ExtentExpireNotifyFun = std::function<void(const std::filesystem::path&,
+                                        uint64_t,
+                                        uint32_t,
+                                        uint64_t)>;
+
+        /**
+         * @brief Set the extent expire notify function. This function is called when extend
+         *      is expired.
+         *
+         * @param cb - callback function to call
+         */
+        void set_extent_expire_notify_fun(const ExtentExpireNotifyFun &cb) {
+            _extent_expire_notify_fn = cb;
+        }
+
+        /**
+         * @brief Call extent expire notification callback.
+         *
+         * @param file - file name
+         * @param extent_id - extent id
+         * @param size - file size
+         * @param xid - transaction id
+         */
+        void call_extent_expire_notify_fun(const std::filesystem::path& file,
+                                        uint64_t extent_id,
+                                        uint32_t size,
+                                        uint64_t xid)
+        {
+            if (_extent_expire_notify_fn != nullptr) {
+                _extent_expire_notify_fn(file, extent_id, size, xid);
+            }
+        }
     private:
         // INTERNAL MEMBER VARIABLES
 
@@ -1321,5 +1423,19 @@ namespace springtail {
             metrics::StorageCache::DropCalls>;
 
         std::unique_ptr<MetricCounters> _metric_counters;
+
+        // NOTE: this extent expiration notification is an ugly hack because this StorageCache
+        //  implementation supports both mutable and immutable cases in a single compilation
+        //  unit. The mutable case requires us to write extents out to disk and have the vacuumer
+        //  called, while immutable case does not need this functionality at all. So, FDW and ddl
+        //  manager do not depend on Vacuumer, but require the Vacuumer and everything it depends
+        //  on (XID server) to be linked in. This callback function solves this problem because
+        //  now StorageCache does not need to know about Vacuumer and in the scenarios where we
+        //  use Vacuumer, it will register the callback with the StorageCache.
+        /**
+         * @brief Callback for extent expiration.
+         *
+         */
+        ExtentExpireNotifyFun _extent_expire_notify_fn{nullptr};
     };
 }

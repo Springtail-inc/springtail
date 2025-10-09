@@ -142,19 +142,23 @@ springtail_init(const bool load_redis,
 }
 
 void
-springtail_init_daemon(const std::optional<std::string> &log_filename,
-                       const std::optional<std::string> &daemon_pid,
+springtail_init_daemon(const std::string &program_name,
+                       bool daemonize,
                        const std::optional<uint32_t> &logging_mask)
 {
+    std::optional<std::string> exec_name = std::filesystem::path(program_name).filename().string();
+    std::optional<std::string> daemon_pid;
+
     std::vector<std::unique_ptr<ServiceRunner>> service_runners;
     service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesRunner>(false));
-    if (daemon_pid.has_value()) {
+    if (daemonize) {
+        daemon_pid = exec_name.value() + ".pid";
         service_runners.emplace_back(std::make_unique<DaemonRunner>(daemon_pid.value()));
     }
-    service_runners.emplace_back(std::make_unique<LoggingRunner>(log_filename, daemon_pid, logging_mask));
-    service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(log_filename));
+    service_runners.emplace_back(std::make_unique<LoggingRunner>(exec_name, daemon_pid, logging_mask));
+    service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(exec_name));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
     service_runners.emplace_back(std::make_unique<CoordinatorRunner>());
@@ -214,24 +218,47 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::ServiceRegisterId,     {}},
     {ServiceId::DatabaseMgrId,         {ServiceId::ServiceRegisterId}},
     {ServiceId::UserMgrId,             {ServiceId::DatabaseMgrId}},
-    {ServiceId::ProxyServerId,         {ServiceId::ServiceRegisterId, ServiceId::UserMgrId}},
+    {ServiceId::ProxyServerId,         {ServiceId::ServiceRegisterId,
+                                            ServiceId::UserMgrId}},
     {ServiceId::XidMgrServerId,        {ServiceId::ServiceRegisterId}},
-    {ServiceId::XidMgrClientId,        {ServiceId::ServiceRegisterId, ServiceId::XidMgrServerId}},
-    {ServiceId::SysTblMgrServerId,     {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
+    {ServiceId::XidMgrClientId,        {ServiceId::ServiceRegisterId,
+                                            ServiceId::XidMgrServerId}},
+    {ServiceId::SysTblMgrServerId,     {ServiceId::ServiceRegisterId,
+                                            ServiceId::XidMgrClientId,
+                                            ServiceId::SystemTableMgrId}},
     {ServiceId::SysTblMgrClientId,     {ServiceId::ServiceRegisterId}},
-    {ServiceId::WriteCacheServerId,    {ServiceId::ServiceRegisterId, ServiceId::SysTblMgrServerId}},
-    {ServiceId::WriteCacheClientId,    {ServiceId::ServiceRegisterId, ServiceId::WriteCacheServerId}},
+    {ServiceId::WriteCacheServerId,    {ServiceId::ServiceRegisterId,
+                                            ServiceId::IOMgrId}},
+    {ServiceId::WriteCacheClientId,    {ServiceId::ServiceRegisterId,
+                                            ServiceId::WriteCacheServerId}},
     {ServiceId::IOMgrId,               {ServiceId::ServiceRegisterId}},
-    {ServiceId::VacuumerId,            {ServiceId::IOMgrId, ServiceId::XidMgrClientId}},
-    {ServiceId::SchemaMgrId,           {ServiceId::SysTblMgrClientId, ServiceId::SystemTableMgrId}},
-    {ServiceId::TableMgrId,            {ServiceId::IOMgrId, ServiceId::SchemaMgrId, ServiceId::StorageCacheId, ServiceId::SystemTableMgrId}},
+    {ServiceId::VacuumerId,            {ServiceId::IOMgrId,
+                                             ServiceId::XidMgrClientId}},
+    {ServiceId::TableMgrId,            {ServiceId::SysTblMgrServerId,
+                                             ServiceId::StorageCacheId,
+                                             ServiceId::SystemTableMgrId}},
+    {ServiceId::TableMgrClientId,      {ServiceId::SysTblMgrClientId,
+                                             ServiceId::StorageCacheId,
+                                             ServiceId::SystemTableMgrId}},
     {ServiceId::SyncTrackerId,         {ServiceId::ServiceRegisterId}},
-    {ServiceId::PgFdwMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
-    {ServiceId::PgXidSubscriberMgrId,  {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::SysTblMgrClientId}},
-    {ServiceId::PgDDLMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
-    {ServiceId::PgLogCoordinatorId,    {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::WriteCacheServerId, ServiceId::TableMgrId}},
-    {ServiceId::StorageCacheId,        {ServiceId::IOMgrId, ServiceId::VacuumerId}},
-    {ServiceId::SystemTableMgrId,      {ServiceId::StorageCacheId, ServiceId::IOMgrId}}
+    {ServiceId::PgFdwMgrId,            {ServiceId::ServiceRegisterId,
+                                             ServiceId::XidMgrClientId,
+                                             ServiceId::TableMgrId}},
+    {ServiceId::PgXidSubscriberMgrId,  {ServiceId::ServiceRegisterId,
+                                             ServiceId::XidMgrClientId,
+                                             ServiceId::SysTblMgrClientId}},
+    {ServiceId::PgDDLMgrId,            {ServiceId::ServiceRegisterId,
+                                             ServiceId::XidMgrClientId,
+                                             ServiceId::TableMgrId}},
+    {ServiceId::PgLogCoordinatorId,    {ServiceId::ServiceRegisterId,
+                                             ServiceId::XidMgrServerId,
+                                             ServiceId::WriteCacheServerId,
+                                             ServiceId::SysTblMgrServerId,
+                                             ServiceId::TableMgrId}},
+    {ServiceId::StorageCacheId,        {ServiceId::IOMgrId,
+                                             ServiceId::VacuumerId}},
+    {ServiceId::SystemTableMgrId,      {ServiceId::StorageCacheId,
+                                             ServiceId::IOMgrId}}
 };
 
 static const std::map<ServiceId, std::string> dependencies_names = {
@@ -247,8 +274,8 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::WriteCacheServerId,    "WriteCacheServer"},
     {ServiceId::WriteCacheClientId,    "WriteCacheClient"},
     {ServiceId::IOMgrId,               "IOMgr"},
-    {ServiceId::SchemaMgrId,           "SchemaMgr"},
     {ServiceId::TableMgrId,            "TableMgr"},
+    {ServiceId::TableMgrClientId,      "TableMgrClient"},
     {ServiceId::SyncTrackerId,         "SyncTracker"},
     {ServiceId::PgFdwMgrId,            "PgFdwMgr"},
     {ServiceId::PgXidSubscriberMgrId,  "PgXidSubscriberMgr"},

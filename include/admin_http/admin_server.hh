@@ -93,6 +93,9 @@ namespace springtail {
             _post_routes.erase(path);
         }
 
+        static bool
+        exists() { return _has_instance(); }
+
     private:
 
         /**

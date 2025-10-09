@@ -3,33 +3,53 @@
 #include <common/init.hh>
 
 #include <storage/schema.hh>
-#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/table_mgr_base.hh>
 
 namespace springtail {
 
-    class SystemTableMgr : public Singleton<SystemTableMgr>
+    class SystemTableMgr : public Singleton<SystemTableMgr>, public TableMgrBase
     {
         friend class Singleton<SystemTableMgr>;
-        friend class SystemTable;
-        friend class SchemaMgr;
-
     public:
         /**
          * Construct a system table.
          */
-        TablePtr get_system_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
+        virtual TablePtr
+        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid) override;
 
         /**
          * Construct a mutable system table.
          */
-        MutableTablePtr get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
+        MutableTablePtr
+        get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
+
+        /**
+         * Retrieve the column metadata for a given table at a given XID/LSN.
+         * Map from column ID/column position to column metadata.
+         */
+        virtual std::map<uint32_t, SchemaColumn>
+        get_columns(uint64_t db_id, uint64_t table_id, const XidLsn &xid) override;
+
+        /**
+         * Retrieves the schema for the table at a given XID.
+         */
+        virtual std::shared_ptr<Schema>
+        get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid) override;
+
+        /**
+         * Get a schema for accessing an extent from this table that was written at the provided XID.
+         */
+        virtual std::shared_ptr<ExtentSchema>
+        get_extent_schema(uint64_t db_id, uint64_t table_id,
+                          const XidLsn &xid, bool allow_undefined = false, bool include_internal_row_id = true) override;
 
     protected:
         /**
          * Retrieve the schema for a given table at a given point in time.
          * @param table_id The ID of the table being requested.
          */
-        std::shared_ptr<Schema> _get_schema(uint64_t table_id);
+        std::shared_ptr<Schema>
+        _get_schema(uint64_t table_id);
 
         /**
          * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
@@ -37,15 +57,14 @@ namespace springtail {
          * underlying data.
          * @param table_id The table we need the schema for.
          */
-        std::shared_ptr<ExtentSchema> _get_extent_schema(uint64_t table_id);
+        std::shared_ptr<ExtentSchema>
+        _get_extent_schema(uint64_t table_id);
 
         SystemTableMgr();
         ~SystemTableMgr() override = default;
 
         template<typename Table>
         static std::vector<Index> _get_secondary_keys();
-
-        std::filesystem::path _table_base; ///< The base directory for individual table directories.
 
         /**
          * A key for the system schema cache.

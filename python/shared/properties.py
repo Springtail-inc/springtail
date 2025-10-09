@@ -120,7 +120,13 @@ class Properties:
             self.service_name = os.environ.get('SERVICE_NAME', None)
 
             # fetch replication user from aws secrets manager
-            self.aws = AwsHelper()
+            self.aws = AwsHelper(
+                region=os.environ.get('AWS_REGION', 'us-east-1'),
+                # Override endpoints for local testing below
+                s3_endpoint=os.environ.get('AWS_S3_ENDPOINT', None),
+                sns_endpoint=os.environ.get('AWS_SNS_ENDPOINT', None),
+                secretsmanager_endpoint=os.environ.get('AWS_SECRETSMANAGER_ENDPOINT', None)
+            )
             self.aws_users = self._get_users_from_aws()
 
             # unset the REPLICATION_USER_PASSWORD environment variable

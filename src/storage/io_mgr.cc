@@ -17,9 +17,9 @@
 namespace springtail {
 
     void
-    IOMgr::_init(int num_threads, int max_filehandles)
+    IOMgr::_init(int num_threads, int max_filehandles, int io_request_queue_size)
     {
-        _thread_pool = std::make_shared<ThreadPool<IORequest>>(num_threads, "IOMgrWorker");
+        _thread_pool = std::make_shared<ThreadPool<IORequest>>(num_threads, "IOMgrWorker", io_request_queue_size);
         _file_cache = std::make_shared<LruObjectCache<std::filesystem::path, IOFile>>(max_filehandles, _evict_callback);
 
         for (int i = 0; i < num_threads; i++) {

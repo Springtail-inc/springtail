@@ -4,11 +4,8 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 
-#include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
@@ -174,17 +171,22 @@ namespace indexer_helpers {
                  const std::filesystem::path &table_base,
                  const std::vector<std::string> &primary_key,
                  const std::vector<Index> &secondary,
-                 const TableMetadata &metadata,
+                 const TableMetadata& metadata,
                  ExtentSchemaPtr schema)
         : _db_id(db_id),
           _id(table_id),
           _xid(xid),
           _primary_key(primary_key),
-          _schema(schema),
-          _stats(metadata.stats)
+          _schema(schema)
     {
+        std::vector<TableRoot> roots;
+        uint64_t snapshot_xid = 0;
+        _stats = metadata.stats;
+        roots = metadata.roots;
+        snapshot_xid = metadata.snapshot_xid;
+
         // construct the table's data directory
-        _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
+        _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, snapshot_xid);
 
         // check if the table directory exists; if not, table is considered vacant/empty
         if (!std::filesystem::exists(_table_dir)) {
@@ -197,8 +199,7 @@ namespace indexer_helpers {
         _roots_root_f = _roots_schema->get_field("root");
         _roots_index_id_f = _roots_schema->get_field("index_id");
 
-                // handle if the roots were not provided
-        auto roots = metadata.roots;
+        // handle if the roots were not provided
         if (roots.empty()) {
             if (std::filesystem::exists(_table_dir / constant::ROOTS_FILE)) {
                 // read the roots from the look-aside file
@@ -605,14 +606,17 @@ namespace indexer_helpers {
       _id(table_id),
       _access_xid(access_xid),
       _target_xid(target_xid),
-      _snapshot_xid(metadata.snapshot_xid),
       _primary_key(primary_key),
       _schema(schema),
-      _stats(metadata.stats),
       _for_gc(for_gc)
     {
+        std::vector<TableRoot> roots;
+        _snapshot_xid = metadata.snapshot_xid;
+        _stats = metadata.stats;
+        roots = metadata.roots;
+
         // construct the table's data directory
-        _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
+        _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, _snapshot_xid);
         _data_file = _table_dir / constant::DATA_FILE;
 
         // Initialize the last internal row ID in the table
@@ -627,7 +631,6 @@ namespace indexer_helpers {
         _roots_index_id_f = _roots_schema->get_mutable_field("index_id");
         _roots_last_internal_row_id_f = _roots_schema->get_mutable_field("last_internal_row_id");
 
-        auto roots = metadata.roots;
         if (roots.empty()) {
             if (std::filesystem::exists(_table_dir / constant::ROOTS_FILE)) {
                 // read the roots from the look-aside file
