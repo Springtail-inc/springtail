@@ -275,42 +275,49 @@ namespace {
         auto row_i = table->begin();
 
         uint64_t internal_row_id = 1;
-        auto tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 2, true, std::nullopt, std::nullopt, std::nullopt, false, false, internal_row_id++);
+        auto tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 2, true, std::nullopt, std::nullopt, std::nullopt, false, false, 1);
         auto table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 4, 4, false, std::nullopt, std::nullopt, std::nullopt, false, false, internal_row_id++);
+        ++internal_row_id;
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 4, 4, false, std::nullopt, std::nullopt, std::nullopt, false, false, 2);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_table", 100000, 5, 5, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false, internal_row_id++);
+        ++internal_row_id;
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_table", 100000, 5, 5, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false, 3);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_alter_table", 100000, 7, 7, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false, internal_row_id++);
+        ++internal_row_id;
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_alter_table", 100000, 7, 7, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false, 5);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_table", 100001, 6, 6, true, 100000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false, internal_row_id++);
+        ++internal_row_id;
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_table", 100001, 6, 6, true, 100000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false, 4);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_alter_table", 100001, 8, 8, true, 100000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false, internal_row_id++);
+        ++internal_row_id;
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_alter_table", 100001, 8, 8, true, 100000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false, 6);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_attach_table", 400000, 11, 11, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false, internal_row_id++);
+        ++internal_row_id;
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_attach_table", 400000, 11, 11, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false, 7);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_attach_table", 500001, 14, 14, true, 400000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false, internal_row_id++);
+        ++internal_row_id;++internal_row_id;
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_attach_table", 500001, 14, 14, true, 400000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false, 9);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 

@@ -914,7 +914,9 @@ namespace springtail {
              * Upserts the provided tuple to the Page using the provided ExtentSchema.
              * @return True if the upsert() resulted in an insert()
              */
-            bool upsert(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_mutation_handler = nullptr);
+            bool upsert(TuplePtr tuple, ExtentSchemaPtr schema,
+                    std::function<void(const Extent::Row&)> index_invalidation_handler = nullptr,
+                    std::function<void(const Extent::Row&)> index_population_handler = nullptr);
 
             /**
              * Updates the row in the Page with a matching key as the provided tuple to fully match

@@ -922,7 +922,8 @@ StorageCache::PageCache::background_cleaner()
     bool
     StorageCache::Page::upsert(TuplePtr tuple,
                                ExtentSchemaPtr schema,
-                               std::function<void(const Extent::Row&)> index_mutation_handler)
+                               std::function<void(const Extent::Row&)> index_invalidation_handler,
+                               std::function<void(const Extent::Row&)> index_population_handler)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -938,9 +939,9 @@ StorageCache::PageCache::background_cleaner()
             auto row = (*extent)->append();
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
-            if (index_mutation_handler) {
+            if (index_population_handler) {
                 // Invoke callback to mutation indexes
-                index_mutation_handler(row);
+                index_population_handler(row);
             }
 
             return true;
@@ -976,17 +977,38 @@ StorageCache::PageCache::background_cleaner()
         bool did_insert = false;
         if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), &*row_i).equal_strict(*key)) {
             // update the existing row
+
+            // get the existing internal row id
+            auto internal_row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
+            auto existing_internal_row_id = internal_row_id_f->get_uint64(&*row_i);
+
+            // update the existing row
             auto row = *row_i;
+
+            if (index_invalidation_handler) {
+                // callback function to remove entry from the indexes
+                index_invalidation_handler(row);
+            }
+
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+
+            // update the original internal row id back to the row
+            internal_row_id_f->set_uint64(&row, existing_internal_row_id);
+
+            if (index_population_handler) {
+                // callback function to insert updated entry to the indexes
+                index_population_handler(row);
+            }
+
         } else {
             // insert the tuple into the extent
             auto &&row = (*extent)->insert(row_i);
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
             did_insert = true;
 
-            if (index_mutation_handler) {
+            if (index_population_handler) {
                 // Invoke callback to mutation indexes
-                index_mutation_handler(row);
+                index_population_handler(row);
             }
         }
 

@@ -1176,9 +1176,14 @@ namespace indexer_helpers {
         _check_convert_page(page);
 
         // add the row to the page
-        bool did_insert = page->upsert(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                        this->_schema, this->_secondary_indexes, row);
+        bool did_insert = page->upsert(value, _schema,
+                [this, value](const Extent::Row& row) {
+                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
+                            _schema, _secondary_indexes, row);
+                },
+                [this, value](const Extent::Row& row) {
+                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                            _schema, _secondary_indexes, row);
                 });
 
         return did_insert;
@@ -1194,9 +1199,14 @@ namespace indexer_helpers {
         }
 
         // add the row to the page
-        return (*_empty_page)->upsert(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                        this->_schema, this->_secondary_indexes, row);
+        return (*_empty_page)->upsert(value, _schema,
+                [this, value](const Extent::Row& row) {
+                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
+                            _schema, _secondary_indexes, row);
+                },
+                [this, value](const Extent::Row& row) {
+                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
+                            _schema, _secondary_indexes, row);
                 });
     }
 
