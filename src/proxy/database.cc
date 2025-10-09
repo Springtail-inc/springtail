@@ -587,7 +587,7 @@ namespace springtail::pg_proxy
     DatabaseMgr::DatabaseMgr() :
         Singleton<DatabaseMgr>(ServiceId::DatabaseMgrId),
         _data_sub_thread(1, false),
-        _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE))
+        _primary_set(std::make_shared<DatabasePrimarySet>())
     {
         // get pool parameters
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
@@ -603,7 +603,7 @@ namespace springtail::pg_proxy
         _pool_config = {pool_size_limit, pool_timeout_limit, pool_expiration_interval};
 
         // create replica set with pool config
-        _replica_set = std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE, _pool_config);
+        _replica_set = std::make_shared<DatabaseReplicaSet>(_pool_config);
 
         // redis cache watcher to handle changes to the list of replicated databases
         _cache_watcher_db_ids = std::make_shared<RedisCache::RedisChangeWatcher>(

@@ -65,7 +65,7 @@ namespace {
     /** Mock database set derived class */
     class TestableDatabaseSet : public DatabaseInstanceSet {
     public:
-        TestableDatabaseSet() : DatabaseInstanceSet(5) {}
+        TestableDatabaseSet() : DatabaseInstanceSet() {}
 
         /** override abstract method */
         ServerSessionPtr allocate_session(UserPtr user,
@@ -115,9 +115,13 @@ namespace {
 
         /** make public for testing */
         std::map<DatabaseInstancePtr, int>
-        get_instance_sessions() {
+        get_instance_sessions() const {
+            std::map<DatabaseInstancePtr, int> instance_sessions;
             std::shared_lock lock(_base_mutex);
-            return _get_instance_sessions();
+            for (const auto &instance : _active_instances) {
+                instance_sessions[instance] = instance->all_session_count();
+            }
+            return instance_sessions;
         }
     };
     using TestableDatabaseSetPtr = std::shared_ptr<TestableDatabaseSet>;

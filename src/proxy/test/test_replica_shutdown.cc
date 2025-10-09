@@ -80,7 +80,7 @@ namespace {
     /** Testable DatabaseReplicaSet that exposes protected methods */
     class TestableReplicaSet : public DatabaseReplicaSet {
     public:
-        TestableReplicaSet() : DatabaseReplicaSet(5, DatabasePool::PoolConfig({10, 5, 300})) {}
+        TestableReplicaSet() : DatabaseReplicaSet(DatabasePool::PoolConfig({10, 5, 300})) {}
 
         DatabaseInstancePtr find_replica(const std::string &replica_id) {
             std::shared_lock lock(_base_mutex);

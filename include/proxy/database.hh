@@ -330,9 +330,7 @@ namespace springtail::pg_proxy {
     class DatabaseInstanceSet {
     public:
 
-        explicit DatabaseInstanceSet(int max_sessions_per_instance) :
-            _max_sessions_per_instance(max_sessions_per_instance)
-        {}
+        explicit DatabaseInstanceSet() = default;
 
         virtual ~DatabaseInstanceSet() = default;
 
@@ -447,23 +445,7 @@ namespace springtail::pg_proxy {
          */
         DatabaseInstancePtr _get_least_loaded_instance();
 
-        /**
-         * @brief For testing, retrieve the instance sessions map
-         * @return std::map<DatabaseInstancePtr, int>
-         */
-        std::map<DatabaseInstancePtr, int> _get_instance_sessions() const {
-            std::map<DatabaseInstancePtr, int> instance_sessions;
-            std::shared_lock lock(_base_mutex);
-            for (const auto &instance : _active_instances) {
-                instance_sessions[instance] = instance->all_session_count();
-            }
-            return instance_sessions;
-        }
-
     protected:
-        /** max sessions per instance, assuming roughly distributed evenly */
-        int _max_sessions_per_instance;
-
         /** mutex for maps */
         mutable std::shared_mutex _base_mutex;
 
@@ -484,9 +466,7 @@ namespace springtail::pg_proxy {
      */
     class DatabaseReplicaSet : public DatabaseInstanceSet {
     public:
-        explicit DatabaseReplicaSet(int max_sessions_per_instance,
-                                    const DatabasePool::PoolConfig& pool_config) :
-            DatabaseInstanceSet(max_sessions_per_instance),
+        explicit DatabaseReplicaSet(const DatabasePool::PoolConfig& pool_config) :
             _pool_config(pool_config)
         {}
 
@@ -542,8 +522,8 @@ namespace springtail::pg_proxy {
      */
     class DatabasePrimarySet : public DatabaseInstanceSet {
     public:
-        explicit DatabasePrimarySet(int max_sessions_per_instance) :
-            DatabaseInstanceSet(max_sessions_per_instance)
+        explicit DatabasePrimarySet() :
+            DatabaseInstanceSet()
         {}
 
         /** Set primary instance */
@@ -698,8 +678,6 @@ namespace springtail::pg_proxy {
         friend class Singleton<DatabaseMgr>;
 
     public:
-        static constexpr const int POOL_SESSIONS_PER_INSTANCE=5; ///< max sessions per instance
-
         /**
          * @brief Get a name of an arbitrary replicated database for running a user query in UserMgr
          * @return std::optional<std::string> - name of a replicated database if found
