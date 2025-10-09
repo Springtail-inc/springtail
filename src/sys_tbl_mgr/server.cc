@@ -768,7 +768,9 @@ Server::finalize(uint64_t db_id, uint64_t xid)
     _clear_table_info(db_id);
     _clear_roots_info(db_id);
     _clear_schema_info(db_id);
-    _clear_namespace_info(db_id);
+    _clear_namespace_info(db_id, request.xid());
+
+
 
     // Commit expired extents in Vacuumer
     Vacuumer::get_instance()->commit_expired_extents(db_id, request.xid());
@@ -2086,6 +2088,17 @@ Server::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn&
             if (info_i != namespace_i->second.end()) {
                 return info_i->second;
             }
+        } else {
+            auto it = _last_namespace_update_by_id.find(db_id);
+            if (it != _last_namespace_update_by_id.end()) { 
+                auto const& [last_xid, ns] = it->second;
+                if (last_xid <= xid.xid) {
+                    auto ns_it = ns.find(namespace_id);
+                    if (ns_it != ns.end()) {
+                        return ns_it->second;
+                    }
+                }
+            }
         }
     }
 
@@ -2117,9 +2130,22 @@ Server::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn&
     }
 
     // create and populate the namespace info
-    return std::make_shared<NamespaceCacheRecord>(
+    auto info =  std::make_shared<NamespaceCacheRecord>(
         namespace_id, fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row),
         fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row));
+
+    // save the last read info
+    {
+        boost::unique_lock lock(_mutex);
+        auto it = _last_namespace_update_by_id.find(db_id);
+        if (it != _last_namespace_update_by_id.end()) {
+            auto& [last_xid, ns] = it->second;
+            if (xid.xid >= last_xid) {
+                ns[namespace_id] = info;
+            }
+        }
+    }
+    return info;
 }
 
 Server::NamespaceCacheRecordPtr
@@ -2134,6 +2160,17 @@ Server::_get_namespace_info(uint64_t db_id, const std::string& name, const XidLs
             auto info_i = namespace_i->second.lower_bound(xid);
             if (info_i != namespace_i->second.end()) {
                 return info_i->second;
+            }
+        } else {
+            auto it = _last_namespace_update_by_name.find(db_id);
+            if (it != _last_namespace_update_by_name.end()) { 
+                auto const& [last_xid, ns] = it->second;
+                if (last_xid <= xid.xid) {
+                    auto ns_it = ns.find(name);
+                    if (ns_it != ns.end()) {
+                        return ns_it->second;
+                    }
+                }
             }
         }
     }
@@ -2174,10 +2211,23 @@ Server::_get_namespace_info(uint64_t db_id, const std::string& name, const XidLs
         return nullptr;
     }
 
-    // return the namespace ID
-    return std::make_shared<NamespaceCacheRecord>(
+    // return the namespace info
+    auto info = std::make_shared<NamespaceCacheRecord>(
         fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row), name,
         fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row));
+
+    // save the last read info
+    {
+        boost::unique_lock lock(_mutex);
+        auto it = _last_namespace_update_by_name.find(db_id);
+        if (it != _last_namespace_update_by_name.end()) {
+            auto& [last_xid, ns] = it->second;
+            if (xid.xid >= last_xid) {
+                ns[name] = info;
+            }
+        }
+    }
+    return info;
 }
 
 void
@@ -2210,9 +2260,16 @@ Server::_clear_table_info(uint64_t db_id)
 }
 
 void
-Server::_clear_namespace_info(uint64_t db_id)
+Server::_clear_namespace_info(uint64_t db_id, uint64_t xid)
 {
     boost::unique_lock lock(_mutex);
+    if (_namespace_id_cache[db_id].empty() && _namespace_name_cache[db_id].empty()) {
+        return;
+    }
+    // mark that the namespace needs to be re-read at this XID
+    _last_namespace_update_by_id[db_id] = {xid, {}};
+    _last_namespace_update_by_name[db_id] = {xid, {}};
+
     _namespace_name_cache.erase(db_id);
     _namespace_id_cache.erase(db_id);
 }
@@ -2251,8 +2308,10 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             }
             // we found a cached entry, update the stats
             row_count = xid_roots.second->stats().row_count();
-            end_offset = xid_roots.second->stats().end_offset();
             stats_found = true;
+            if (index_id == constant::INDEX_PRIMARY) {
+                end_offset = xid_roots.second->stats().end_offset();
+            }
             auto it = std::ranges::find_if(xid_roots.second->roots(), [index_id](const auto& v) {
                         return index_id == v.index_id();
                     }
@@ -2280,6 +2339,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     auto table_id_f = schema->get_field("table_id");
 
     auto index_id_f = schema->get_field("index_id");
+    auto end_offset_f = schema->get_field("end_offset");
 
     const std::string& sxid =
         sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::SNAPSHOT_XID].name;
@@ -2337,6 +2397,10 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             continue;
         }
 
+        if (idx.id() == constant::INDEX_PRIMARY) {
+            end_offset = end_offset_f->get_uint64(&row);
+        }
+
         proto::RootInfo ri;
         ri.set_index_id(idx.id());
         ri.set_extent_id(eid_f->get_uint64(&row));
@@ -2353,7 +2417,22 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
                     xid.lsn);
     }
 
-    // access the stats table
+    if (!stats_found) {
+        boost::shared_lock lock(_mutex);
+        auto it_db = _last_table_stats_update.find(db_id);
+        if (it_db != _last_table_stats_update.end()) {
+            auto const& [last_xid, tables] = it_db->second;
+            if (last_xid <= xid.xid) {
+                auto tab_it = tables.find(table_id);
+                if (tab_it != tables.end()) {
+                    row_count = tab_it->second.row_count;
+                    stats_found = true;
+                }
+            }
+        }
+    }
+    
+    // access the stats table if we didn't find cached stats
     if (!stats_found) {
         auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
         auto stats_schema = stats_t->extent_schema();
@@ -2368,14 +2447,11 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         if (srow_i != stats_t->end() && table_id_f->get_uint64(&row) == table_id) {
             // retrieve the stats from the row
             auto row_count_f = stats_schema->get_field("row_count");
-            auto end_offset_f = stats_schema->get_field("end_offset");
             row_count = row_count_f->get_uint64(&row);
-            end_offset = end_offset_f->get_uint64(&row);
         } else {
             // no stats for this table?  seems like a potential error
             LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
         }
-
     }
 
     roots_info->mutable_stats()->set_row_count(row_count);
@@ -2392,30 +2468,48 @@ Server::_set_roots_info(uint64_t db_id,
                          RootsCacheRecordPtr roots_info)
 {
     // cache the roots info
-    boost::unique_lock lock(_mutex);
-    _roots_cache[db_id][table_id][xid] = roots_info;
-    lock.unlock();
+    {
+        boost::unique_lock lock(_mutex);
+        _roots_cache[db_id][table_id][xid] = roots_info;
+    }
 
     // update the table_roots
     auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
     for (auto const& r : roots_info->roots()) {
         auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, r.index_id(), xid.xid,
-                                                      r.extent_id(), roots_info->snapshot_xid());
+                                                      r.extent_id(), roots_info->snapshot_xid(), roots_info->stats().end_offset()) ;
         table_roots_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
                             r.index_id(), r.extent_id());
     }
 
-    // TODO: make table stats updates optional or move to a separate API
-    // update the table_stats
-    auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
-    auto tuple =
-        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(), roots_info->stats().end_offset());
-    table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+    // get cached stats
+    //bool commit_stats = true;
+    bool commit_stats = false;
+    {
+        boost::unique_lock lock(_mutex);
+        auto& [last_xid, tables] = _last_table_stats_update[db_id];
+        last_xid = xid.xid; // record the last XID we updated the stats at
+        auto& table_stats = tables[table_id];
+        table_stats.row_count = roots_info->stats().row_count();
+        if (++table_stats.update_count >= MAX_STATS_UPDATES_BEFORE_COMMIT) {
+            table_stats.update_count = 0;
+            commit_stats = true;
+        }
+    }
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
-                        roots_info->stats().row_count());
+    if (commit_stats) {
+        // TODO: make table stats updates optional or move to a separate API
+        // update the table_stats
+        auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
+        auto tuple =
+            sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count());
+        table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
+                            roots_info->stats().row_count());
+    }
 }
 
 void
@@ -2459,7 +2553,6 @@ Server::_get_schema_info(uint64_t db_id,
         info->set_target_lsn_start(info->access_lsn_start());
         info->set_target_xid_end(info->access_xid_end());
         info->set_target_lsn_end(info->access_lsn_end());
-
         return info;
     }
 
