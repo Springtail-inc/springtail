@@ -230,6 +230,7 @@ namespace {
     // Tests the schema modification paths
     TEST_F(SysTblMgr_Test, Basic) {
         _client->ping();
+        _finalize();
     }
 
     // Tests index create
