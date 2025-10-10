@@ -28,16 +28,13 @@ XidMgrSubscriber::~XidMgrSubscriber()
 
 void XidMgrSubscriber::cancel()
 {
-    boost::unique_lock lock(_cb_mutex);
     _cb = {};
-    lock.unlock();
     _context.TryCancel();
 }
 
 void XidMgrSubscriber::OnReadDone(bool ok)
 {
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::OnReadDone");
-    boost::upgrade_lock lock(_cb_mutex);
     if (ok && _cb.has_value()) {
         _cb->push(_push_response.db_id(), _push_response.xid());
         StartRead(&_push_response);
@@ -46,7 +43,6 @@ void XidMgrSubscriber::OnReadDone(bool ok)
 
     if (_cb.has_value()) {
         _cb->disconnect();
-        boost::upgrade_to_unique_lock unique_lock(lock);
         _cb = {};
     }
 }
@@ -54,10 +50,8 @@ void XidMgrSubscriber::OnReadDone(bool ok)
 void XidMgrSubscriber::OnDone(const grpc::Status& s)
 {
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::OnDone");
-    boost::upgrade_lock lock(_cb_mutex);
     if (_cb.has_value()) {
         _cb->disconnect();
-        boost::upgrade_to_unique_lock unique_lock(lock);
         _cb = {};
     }
     delete this; //NOSONAR reason: The object lifetime is controlled by GRPC

@@ -1,6 +1,3 @@
-#include <boost/thread/shared_mutex.hpp>
-#include <boost/thread/locks.hpp>
-
 #include <proto/xid_manager.grpc.pb.h>
 #include <grpc/grpc_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
@@ -27,7 +24,7 @@ struct XidMgrSubscriber : public grpc::ClientReadReactor<proto::XidPushResponse>
     /**
      * @brief Subscriber calls the callback function on XID commits.
      * @param ch The GRPC channel.
-     * @param cb Notification callbacks.
+     * @param cb Notification callbacks. 
      */
     XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks cb);
     ~XidMgrSubscriber();
@@ -41,7 +38,6 @@ private:
 
     std::shared_ptr<grpc::Channel> _channel;
     std::optional<Callbacks> _cb;
-    boost::upgrade_mutex _cb_mutex;
 
     std::unique_ptr<proto::XidManager::Stub> _stub;
 
