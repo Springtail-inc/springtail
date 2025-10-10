@@ -1140,9 +1140,12 @@ StorageCache::PageCache::background_cleaner()
 
         boost::unique_lock lock(_mutex);
         auto fields = schema->get_fields();
-        // XXX Send different schema instead of removing
-        // Remove internal_row_id
-        fields->pop_back();
+
+        if(schema->column_order().back() == constant::INTERNAL_ROW_ID) {
+            // Remove internal_row_id as the incoming tuple
+            // cant have internal row id
+            fields->pop_back();
+        }
 
         auto extent_i = _extents.begin();
         uint32_t row_pos;
