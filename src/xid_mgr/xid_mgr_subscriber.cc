@@ -28,12 +28,8 @@ XidMgrSubscriber::~XidMgrSubscriber()
 
 void XidMgrSubscriber::cancel()
 {
-    boost::upgrade_lock lock(_cb_mutex);
-    if (_cb.has_value()) {
-        _cb->disconnect();
-        boost::upgrade_to_unique_lock unique_lock(lock);
-        _cb = {};
-    }
+    boost::unique_lock lock(_cb_mutex);
+    _cb = {};
     lock.unlock();
     _context.TryCancel();
 }
