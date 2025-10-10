@@ -226,18 +226,18 @@ getnum(const char *strp, int *const nump, const int min, const int max)
 	char		c;
 	int			num;
 
-	if (strp == NULL || !is_digit(c = *strp))
-		return NULL;
+	if (strp == nullptr || !is_digit(c = *strp))
+		return nullptr;
 	num = 0;
 	do
 	{
 		num = num * 10 + (c - '0');
 		if (num > max)
-			return NULL;		/* illegal value */
+			return nullptr;		/* illegal value */
 		c = *++strp;
 	} while (is_digit(c));
 	if (num < min)
-		return NULL;			/* illegal value */
+		return nullptr;			/* illegal value */
 	*nump = num;
 	return strp;
 }
@@ -253,23 +253,23 @@ getsecs(const char *strp, int32_t *const secsp)
 	 * equivalent of "02:00 on the first Sunday on or after 23 Oct".
 	 */
 	strp = getnum(strp, &num, 0, HOURSPERDAY * DAYSPERWEEK - 1);
-	if (strp == NULL)
-		return NULL;
+	if (strp == nullptr)
+		return nullptr;
 	*secsp = num * (int32_t) SECSPERHOUR;
 	if (*strp == ':')
 	{
 		++strp;
 		strp = getnum(strp, &num, 0, MINSPERHOUR - 1);
-		if (strp == NULL)
-			return NULL;
+		if (strp == nullptr)
+			return nullptr;
 		*secsp += num * SECSPERMIN;
 		if (*strp == ':')
 		{
 			++strp;
 			/* 'SECSPERMIN' allows for leap seconds.  */
 			strp = getnum(strp, &num, 0, SECSPERMIN);
-			if (strp == NULL)
-				return NULL;
+			if (strp == nullptr)
+				return nullptr;
 			*secsp += num;
 		}
 	}
@@ -289,8 +289,8 @@ getoffset(const char *strp, int32_t *const offsetp)
 	else if (*strp == '+')
 		++strp;
 	strp = getsecs(strp, offsetp);
-	if (strp == NULL)
-		return NULL;			/* illegal time */
+	if (strp == nullptr)
+		return nullptr;			/* illegal time */
 	if (neg)
 		*offsetp = -*offsetp;
 	return strp;
@@ -343,15 +343,15 @@ getrule(const char *strp, struct rule *const rulep)
 		rulep->r_type = MONTH_NTH_DAY_OF_WEEK;
 		++strp;
 		strp = getnum(strp, &rulep->r_mon, 1, MONSPERYEAR);
-		if (strp == NULL)
-			return NULL;
+		if (strp == nullptr)
+			return nullptr;
 		if (*strp++ != '.')
-			return NULL;
+			return nullptr;
 		strp = getnum(strp, &rulep->r_week, 1, 5);
-		if (strp == NULL)
-			return NULL;
+		if (strp == nullptr)
+			return nullptr;
 		if (*strp++ != '.')
-			return NULL;
+			return nullptr;
 		strp = getnum(strp, &rulep->r_day, 0, DAYSPERWEEK - 1);
 	}
 	else if (is_digit(*strp))
@@ -363,9 +363,9 @@ getrule(const char *strp, struct rule *const rulep)
 		strp = getnum(strp, &rulep->r_day, 0, DAYSPERLYEAR - 1);
 	}
 	else
-		return NULL;			/* invalid format */
-	if (strp == NULL)
-		return NULL;
+		return nullptr;			/* invalid format */
+	if (strp == nullptr)
+		return nullptr;
 	if (*strp == '/')
 	{
 		/*
@@ -475,7 +475,7 @@ bool
 tzparse(const char *name, struct state *sp, bool lastditch)
 {
 	const char *stdname;
-	const char *dstname = NULL;
+	const char *dstname = nullptr;
 	size_t		stdlen;
 	size_t		dstlen;
 	size_t		charcnt;
@@ -512,7 +512,7 @@ tzparse(const char *name, struct state *sp, bool lastditch)
 		if (*name == '\0')		/* we allow empty STD abbrev, unlike IANA */
 			return false;
 		name = getoffset(name, &stdoffset);
-		if (name == NULL)
+		if (name == nullptr)
 			return false;
 	}
 	charcnt = stdlen + 1;
@@ -557,7 +557,7 @@ tzparse(const char *name, struct state *sp, bool lastditch)
 		if (*name != '\0' && *name != ',' && *name != ';')
 		{
 			name = getoffset(name, &dstoffset);
-			if (name == NULL)
+			if (name == nullptr)
 				return false;
 		}
 		else
@@ -576,11 +576,11 @@ tzparse(const char *name, struct state *sp, bool lastditch)
 			int			yearbeg;
 
 			++name;
-			if ((name = getrule(name, &start)) == NULL)
+			if ((name = getrule(name, &start)) == nullptr)
 				return false;
 			if (*name++ != ',')
 				return false;
-			if ((name = getrule(name, &end)) == NULL)
+			if ((name = getrule(name, &end)) == nullptr)
 				return false;
 			if (*name != '\0')
 				return false;
@@ -783,7 +783,7 @@ typesequiv(const struct state *sp, int a, int b)
 {
 	bool		result;
 
-	if (sp == NULL ||
+	if (sp == nullptr ||
 		a < 0 || a >= sp->typecnt ||
 		b < 0 || b >= sp->typecnt)
 		result = false;
@@ -830,7 +830,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
 /* Load tz data from the file named NAME into *SP.  Read extended
  * format if DOEXTEND.  Use *LSP for temporary storage.  Return 0 on
  * success, an errno value on failure.
- * PG: If "canonname" is not NULL, then on success the canonical spelling of
+ * PG: If "canonname" is not nullptr, then on success the canonical spelling of
  * given name is stored there (the buffer must be > TZ_STRLEN_MAX bytes!).
  */
  static int
@@ -1205,7 +1205,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
 
  /* Load tz data from the file named NAME into *SP.  Read extended
   * format if DOEXTEND.  Return 0 on success, an errno value on failure.
-  * PG: If "canonname" is not NULL, then on success the canonical spelling of
+  * PG: If "canonname" is not nullptr, then on success the canonical spelling of
   * given name is stored there (the buffer must be > TZ_STRLEN_MAX bytes!).
   */
  int
@@ -1227,7 +1227,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
 static void
 gmtload(struct state *const sp)
 {
-	if (tzload(gmt, NULL, sp, true) != 0)
+	if (tzload(gmt, nullptr, sp, true) != 0)
 		tzparse(gmt, sp, true);
 }
 
@@ -1279,7 +1279,7 @@ timesub(const pg_time_t *timep, int32_t offset,
 
 	corr = 0;
 	hit = false;
-	i = (sp == NULL) ? 0 : sp->leapcnt;
+	i = (sp == nullptr) ? 0 : sp->leapcnt;
 	while (--i >= 0)
 	{
 		lp = &sp->lsis[i];
@@ -1381,7 +1381,7 @@ timesub(const pg_time_t *timep, int32_t offset,
 
 out_of_range:
 	errno = EOVERFLOW;
-	return NULL;
+	return nullptr;
 }
 
 static struct pg_tm *
@@ -1391,14 +1391,14 @@ gmtsub(pg_time_t const *timep, int32_t offset,
 	struct pg_tm *result;
 
 	/* GMT timezone state data is kept here */
-	static struct state *gmtptr = NULL;
+	static struct state *gmtptr = nullptr;
 
-	if (gmtptr == NULL)
+	if (gmtptr == nullptr)
 	{
 		/* Allocate on first use */
 		gmtptr = (struct state *) malloc(sizeof(struct state));
-		if (gmtptr == NULL)
-			return NULL;		/* errno should be set by malloc */
+		if (gmtptr == nullptr)
+			return nullptr;		/* errno should be set by malloc */
 		gmtload(gmtptr);
 	}
 
@@ -1425,7 +1425,7 @@ localsub(struct state const *sp, pg_time_t const *timep,
 	struct pg_tm *result;
 	const pg_time_t t = *timep;
 
-	if (sp == NULL)
+	if (sp == nullptr)
 		return gmtsub(timep, 0, tmp);
 	if ((sp->goback && t < sp->ats[0]) ||
 		(sp->goahead && t > sp->ats[sp->timecnt - 1]))
@@ -1447,7 +1447,7 @@ localsub(struct state const *sp, pg_time_t const *timep,
 			newt -= seconds;
 		if (newt < sp->ats[0] ||
 			newt > sp->ats[sp->timecnt - 1])
-			return NULL;		/* "cannot happen" */
+			return nullptr;		/* "cannot happen" */
 		result = localsub(sp, &newt, tmp);
 		if (result)
 		{
@@ -1459,7 +1459,7 @@ localsub(struct state const *sp, pg_time_t const *timep,
 			else
 				newy += years;
 			if (!(INT_MIN <= newy && newy <= INT_MAX))
-				return NULL;
+				return nullptr;
 			result->tm_year = newy;
 		}
 		return result;
@@ -1555,7 +1555,7 @@ timestamp2tm(Timestamp dt, int *tzp, struct pg_tm *tm, fsec_t *fsec, const char 
 	pg_time_t	utime;
 
 	/* Use session timezone if caller asks for default */
-	if (attimezone == NULL)
+	if (attimezone == nullptr)
 		attimezone = session_timezone;
 
 	time = dt;
@@ -1578,13 +1578,13 @@ timestamp2tm(Timestamp dt, int *tzp, struct pg_tm *tm, fsec_t *fsec, const char 
 	dt2time(time, &tm->tm_hour, &tm->tm_min, &tm->tm_sec, fsec);
 
 	/* Done if no TZ conversion wanted */
-	if (tzp == NULL)
+	if (tzp == nullptr)
 	{
 		tm->tm_isdst = -1;
 		tm->tm_gmtoff = 0;
-		tm->tm_zone = NULL;
-		if (tzn != NULL)
-			*tzn = NULL;
+		tm->tm_zone = nullptr;
+		if (tzn != nullptr)
+			*tzn = nullptr;
 		return 0;
 	}
 
@@ -1615,7 +1615,7 @@ timestamp2tm(Timestamp dt, int *tzp, struct pg_tm *tm, fsec_t *fsec, const char 
 		tm->tm_gmtoff = tx->tm_gmtoff;
 		tm->tm_zone = tx->tm_zone;
 		*tzp = -tm->tm_gmtoff;
-		if (tzn != NULL)
+		if (tzn != nullptr)
 			*tzn = tm->tm_zone;
 	}
 	else
@@ -1627,9 +1627,9 @@ timestamp2tm(Timestamp dt, int *tzp, struct pg_tm *tm, fsec_t *fsec, const char 
 		/* Mark this as *no* time zone available */
 		tm->tm_isdst = -1;
 		tm->tm_gmtoff = 0;
-		tm->tm_zone = NULL;
-		if (tzn != NULL)
-			*tzn = NULL;
+		tm->tm_zone = nullptr;
+		if (tzn != nullptr)
+			*tzn = nullptr;
 	}
 
 	return 0;
@@ -1786,7 +1786,7 @@ timetz2tm(TimeTzADT *time, struct pg_tm *tm, fsec_t *fsec, int *tzp)
 	tm->tm_sec = trem / USECS_PER_SEC;
 	*fsec = trem - tm->tm_sec * USECS_PER_SEC;
 
-	if (tzp != NULL)
+	if (tzp != nullptr)
 		*tzp = time->zone;
 
 	return 0;

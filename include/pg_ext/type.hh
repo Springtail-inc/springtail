@@ -9,10 +9,7 @@
 // Forward declare FmgrInfo
 typedef struct FmgrInfo FmgrInfo;
 
-#define TYPTYPE_COMPOSITE 'c' /* composite (e.g., table's rowtype) */
-#define TYPTYPE_DOMAIN 'd'    /* domain over another type */
-
-#define TYPECACHE_DOMAIN_BASE_INFO			0x01000
+constexpr uint32_t TYPECACHE_DOMAIN_BASE_INFO = 0x01000;
 
 struct DomainConstraintCache
 {

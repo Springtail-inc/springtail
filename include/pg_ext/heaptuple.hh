@@ -11,14 +11,19 @@ typedef struct FmgrInfo FmgrInfo;
 /*
  * information stored in t_infomask:
  */
- #define HEAP_HASNULL			0x0001	/* has null attribute(s) */
- #define HEAP_HASVARWIDTH		0x0002	/* has variable-width attribute(s) */
- #define HEAP_HASEXTERNAL		0x0004	/* has external stored attribute(s) */
- #define HEAP_HASOID_OLD			0x0008	/* has an object-id field */
- #define HEAP_XMAX_KEYSHR_LOCK	0x0010	/* xmax is a key-shared locker */
- #define HEAP_COMBOCID			0x0020	/* t_cid is a combo CID */
- #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
- #define HEAP_XMAX_LOCK_ONLY		0x0080	/* xmax, if valid, is only a locker */
+constexpr int HEAP_HASNULL			= 0x0001;	/* has null attribute(s) */
+constexpr int HEAP_HASVARWIDTH		= 0x0002;	/* has variable-width attribute(s) */
+constexpr int HEAP_HASEXTERNAL		= 0x0004;	/* has external stored attribute(s) */
+constexpr int HEAP_HASOID_OLD		= 0x0008;	/* has an object-id field */
+constexpr int HEAP_XMAX_KEYSHR_LOCK	= 0x0010;	/* xmax is a key-shared locker */
+constexpr int HEAP_COMBOCID			= 0x0020;	/* t_cid is a combo CID */
+constexpr int HEAP_XMAX_EXCL_LOCK	= 0x0040;	/* xmax is exclusive locker */
+constexpr int HEAP_XMAX_LOCK_ONLY	= 0x0080;	/* xmax, if valid, is only a locker */
+
+constexpr int FIELDNO_HEAPTUPLEHEADERDATA_BITS = 5;
+constexpr int FIELDNO_HEAPTUPLEHEADERDATA_HOFF = 4;
+constexpr int FIELDNO_HEAPTUPLEHEADERDATA_INFOMASK = 3;
+constexpr int FIELDNO_HEAPTUPLEHEADERDATA_INFOMASK2 = 2;
 
 #define HeapTupleHeaderHasExternal(tup) \
 		(((tup)->t_infomask & HEAP_HASEXTERNAL) != 0)
@@ -125,19 +130,10 @@ struct HeapTupleHeaderData
 								 * speculative insertion token) */
 
 	/* Fields below here must match MinimalTupleData! */
-
-#define FIELDNO_HEAPTUPLEHEADERDATA_INFOMASK2 2
 	uint16_t		t_infomask2;	/* number of attributes + various flags */
-
-#define FIELDNO_HEAPTUPLEHEADERDATA_INFOMASK 3
 	uint16_t		t_infomask;		/* various flag bits, see below */
-
-#define FIELDNO_HEAPTUPLEHEADERDATA_HOFF 4
 	uint8_t		t_hoff;			/* sizeof header incl. bitmap, padding */
-
 	/* ^ - 23 bytes - ^ */
-
-#define FIELDNO_HEAPTUPLEHEADERDATA_BITS 5
     uint8_t		t_bits[FLEXIBLE_ARRAY_MEMBER];	/* bitmap of NULLs */
 
 	/* MORE DATA FOLLOWS AT END OF STRUCT */

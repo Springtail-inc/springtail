@@ -16,106 +16,102 @@ typedef int64_t TimestampTz;
 typedef int64_t TimeOffset;
 typedef int64_t pg_time_t;
 
-#define MAXDATELEN		128
-#define MAXTZLEN		10
+constexpr int MAXDATELEN = 128;
+constexpr int MAXTZLEN = 10;
 
-#define USECS_PER_HOUR	INT64CONST(3600000000)
-#define USECS_PER_MINUTE INT64CONST(60000000)
-#define USECS_PER_SEC	INT64CONST(1000000)
-#define USECS_PER_MSEC	INT64CONST(1000)
-#define USECS_PER_USEC	INT64CONST(1)
-#define USECS_PER_DAY	INT64CONST(86400000000)
+constexpr int64_t USECS_PER_HOUR = INT64CONST(3600000000);
+constexpr int64_t USECS_PER_MINUTE = INT64CONST(60000000);
+constexpr int64_t USECS_PER_SEC = INT64CONST(1000000);
+constexpr int64_t USECS_PER_MSEC = INT64CONST(1000);
+constexpr int64_t USECS_PER_USEC = INT64CONST(1);
+constexpr int64_t USECS_PER_DAY = INT64CONST(86400000000);
 
-#define YEARSPERREPEAT		400 /* years before a Gregorian repeat */
-#define AVGSECSPERYEAR		31556952L
-#define SECSPERREPEAT \
-  ((int64_t) YEARSPERREPEAT * (int64_t) AVGSECSPERYEAR)
-#define SECSPERREPEAT_BITS	34
+constexpr int YEARSPERREPEAT = 400; /* years before a Gregorian repeat */
+constexpr int64_t AVGSECSPERYEAR = INT64CONST(31556952);
+constexpr int64_t SECSPERREPEAT = YEARSPERREPEAT * AVGSECSPERYEAR;
+constexpr int SECSPERREPEAT_BITS = 34;
 
-#define SECSPERMIN	60
-#define MINSPERHOUR 60
-#define HOURSPERDAY 24
-#define DAYSPERWEEK 7
-#define DAYSPERNYEAR	365
-#define DAYSPERLYEAR	366
-#define SECSPERHOUR (SECSPERMIN * MINSPERHOUR)
-#define SECSPERDAY	((int32_t) SECSPERHOUR * HOURSPERDAY)
-#define MONSPERYEAR 12
+constexpr int SECSPERMIN = 60;
+constexpr int MINSPERHOUR = 60;
+constexpr int HOURSPERDAY = 24;
+constexpr int DAYSPERWEEK = 7;
+constexpr int DAYSPERNYEAR = 365;
+constexpr int DAYSPERLYEAR = 366;
+constexpr int SECSPERHOUR = SECSPERMIN * MINSPERHOUR;
+constexpr int SECSPERDAY = SECSPERHOUR * HOURSPERDAY;
+constexpr int MONSPERYEAR = 12;
 
-#define UNIX_EPOCH_JDATE		2440588 /* == date2j(1970, 1, 1) */
+constexpr int UNIX_EPOCH_JDATE = 2440588; /* == date2j(1970, 1, 1) */
 
-#define PG_INT32_MIN	(-0x7FFFFFFF-1)
-#define PG_INT32_MAX	(0x7FFFFFFF)
+constexpr int PG_INT32_MIN = (-0x7FFFFFFF-1);
+constexpr int PG_INT32_MAX = 0x7FFFFFFF;
 
-#define SECS_PER_YEAR	(36525 * 864)	/* avoid floating-point computation */
-#define SECS_PER_DAY	86400
-#define SECS_PER_HOUR	3600
-#define SECS_PER_MINUTE 60
-#define MINS_PER_HOUR	60
+constexpr int SECS_PER_YEAR = 36525 * 864;	/* avoid floating-point computation */
+constexpr int SECS_PER_DAY = 86400;
+constexpr int SECS_PER_HOUR = 3600;
+constexpr int SECS_PER_MINUTE = 60;
+constexpr int MINS_PER_HOUR = 60;
 
 /* valid DateStyle values */
-#define USE_POSTGRES_DATES		0
-#define USE_ISO_DATES			1
-#define USE_SQL_DATES			2
-#define USE_GERMAN_DATES		3
-#define USE_XSD_DATES			4
+constexpr int USE_POSTGRES_DATES = 0;
+constexpr int USE_ISO_DATES = 1;
+constexpr int USE_SQL_DATES = 2;
+constexpr int USE_GERMAN_DATES = 3;
+constexpr int USE_XSD_DATES = 4;
 
 /* valid DateOrder values */
-#define DATEORDER_YMD			0
-#define DATEORDER_DMY			1
-#define DATEORDER_MDY			2
+constexpr int DATEORDER_YMD = 0;
+constexpr int DATEORDER_DMY = 1;
+constexpr int DATEORDER_MDY = 2;
 
-#define TM_SUNDAY	0
-#define TM_MONDAY	1
-#define TM_TUESDAY	2
-#define TM_WEDNESDAY	3
-#define TM_THURSDAY 4
-#define TM_FRIDAY	5
-#define TM_SATURDAY 6
+constexpr int TM_SUNDAY = 0;
+constexpr int TM_MONDAY = 1;
+constexpr int TM_TUESDAY = 2;
+constexpr int TM_WEDNESDAY = 3;
+constexpr int TM_THURSDAY = 4;
+constexpr int TM_FRIDAY = 5;
+constexpr int TM_SATURDAY = 6;
 
-#define EPOCH_YEAR	1970
-#define EPOCH_WDAY	TM_THURSDAY
+constexpr int EPOCH_YEAR = 1970;
+constexpr int EPOCH_WDAY = TM_THURSDAY;
 
-#define TM_YEAR_BASE	1900
+constexpr int TM_YEAR_BASE = 1900;
 
-#define MAX_TIMESTAMP_PRECISION 6
-#define MAX_TIME_PRECISION 6
+constexpr int MAX_TIMESTAMP_PRECISION = 6;
+constexpr int MAX_TIME_PRECISION = 6;
 
-#define TIMESTAMP_MINUS_INFINITY	INT64_MIN
-#define TIMESTAMP_INFINITY	INT64_MAX
+constexpr int64_t TIMESTAMP_MINUS_INFINITY = INT64_MIN;
+constexpr int64_t TIMESTAMP_INFINITY = INT64_MAX;
 
-#define DT_NOBEGIN		TIMESTAMP_MINUS_INFINITY
-#define DT_NOEND		TIMESTAMP_INFINITY
+constexpr int64_t DT_NOBEGIN = TIMESTAMP_MINUS_INFINITY;
+constexpr int64_t DT_NOEND = TIMESTAMP_INFINITY;
 
-#define EARLY			"-infinity"
-#define LATE			"infinity"
+constexpr const char *EARLY = "-infinity";
+constexpr const char *LATE = "infinity";
 
-#define TZDEFRULESTRING ",M3.2.0,M11.1.0"
+constexpr const char *TZDEFRULESTRING = ",M3.2.0,M11.1.0";
 
-#define DATEVAL_NOBEGIN		((DateADT) PG_INT32_MIN)
-#define DATEVAL_NOEND		((DateADT) PG_INT32_MAX)
+constexpr int DATEVAL_NOBEGIN = PG_INT32_MIN;
+constexpr int DATEVAL_NOEND = PG_INT32_MAX;
 
-#define DATE_IS_NOEND(j)	((j) == DATEVAL_NOEND)
-#define DATE_NOBEGIN(j)		((j) = DATEVAL_NOBEGIN)
-#define DATE_IS_NOBEGIN(j)	((j) == DATEVAL_NOBEGIN)
-#define DATE_NOT_FINITE(j)	(DATE_IS_NOBEGIN(j) || DATE_IS_NOEND(j))
+constexpr bool DATE_IS_NOEND(int j) { return j == DATEVAL_NOEND; }
+constexpr void DATE_NOBEGIN(int j) { j = DATEVAL_NOBEGIN; }
+constexpr bool DATE_IS_NOBEGIN(int j) { return j == DATEVAL_NOBEGIN; }
+constexpr bool DATE_NOT_FINITE(int j) { return DATE_IS_NOBEGIN(j) || DATE_IS_NOEND(j); }
 
-#define POSTGRES_EPOCH_JDATE	2451545 /* == date2j(2000, 1, 1) */
+constexpr int POSTGRES_EPOCH_JDATE = 2451545; /* == date2j(2000, 1, 1) */
 
-#define TIMESTAMP_NOBEGIN(j)	\
-	do {(j) = DT_NOBEGIN;} while (0)
+constexpr void TIMESTAMP_NOBEGIN(int64_t j) { j = DT_NOBEGIN; }
+constexpr bool TIMESTAMP_IS_NOBEGIN(int64_t j) { return j == DT_NOBEGIN; }
 
-#define TIMESTAMP_IS_NOBEGIN(j) ((j) == DT_NOBEGIN)
+constexpr void TIMESTAMP_NOEND(int64_t j) { j = DT_NOEND; }
 
-#define TIMESTAMP_NOEND(j)		\
-	do {(j) = DT_NOEND;} while (0)
+constexpr bool TIMESTAMP_IS_NOEND(int64_t j) { return j == DT_NOEND; }
 
-#define TIMESTAMP_IS_NOEND(j)	((j) == DT_NOEND)
+constexpr bool TIMESTAMP_NOT_FINITE(int64_t j) { return TIMESTAMP_IS_NOBEGIN(j) || TIMESTAMP_IS_NOEND(j); }
 
-#define TIMESTAMP_NOT_FINITE(j) (TIMESTAMP_IS_NOBEGIN(j) || TIMESTAMP_IS_NOEND(j))
-
-#define DAYS_PER_YEAR	365.25	/* assumes leap year every four years */
-#define MONTHS_PER_YEAR 12
+constexpr double DAYS_PER_YEAR = 365.25; /* assumes leap year every four years */
+constexpr int MONTHS_PER_YEAR = 12;
 
 #define TMODULO(t,q,u) \
 do { \
@@ -135,13 +131,13 @@ static const int mon_lengths[2][MONSPERYEAR] = {
 extern const char *months[];
 extern const char *days[];
 
-#define TZ_MAX_TIMES	2000
+constexpr int TZ_MAX_TIMES = 2000;
 /* This must be at least 17 for Europe/Samara and Europe/Vilnius.  */
-#define TZ_MAX_TYPES	256		/* Limited by what (unsigned char)'s can hold */
-#define TZ_MAX_CHARS	50		/* Maximum number of abbreviation characters */
+constexpr int TZ_MAX_TYPES = 256;		/* Limited by what (unsigned char)'s can hold */
+constexpr int TZ_MAX_CHARS = 50;		/* Maximum number of abbreviation characters */
  /* (limited by what unsigned chars can hold) */
-#define TZ_MAX_LEAPS	50		/* Maximum number of leap second corrections */
-#define TZ_STRLEN_MAX 255
+constexpr int TZ_MAX_LEAPS = 50;		/* Maximum number of leap second corrections */
+constexpr int TZ_STRLEN_MAX = 255;
 
 /*
  * Finally, some convenience items.
