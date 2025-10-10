@@ -24,6 +24,7 @@
          : (void)((str)->data[(str)->len] = (ch), (str)->data[++(str)->len] = '\0'))
 
 char *lowerstr(const char *str) {
+    if (!str) return nullptr;
     return lowerstr_with_len(str, std::strlen(str));
 }
 
@@ -85,11 +86,16 @@ char *lowerstr_with_len(const char *str, int len) {
 }
 
 char *upperstr(const char *str) {
+    if (!str) {
+        LOG_ERROR("Invalid arguments to upperstr");
+        return nullptr;
+    }
     return upperstr_with_len(str, std::strlen(str));
 }
 
 char *upperstr_with_len(const char *str, int len) {
     if (!str || len <= 0) {
+        LOG_ERROR("Invalid arguments to upperstr_with_len");
         return nullptr;
     }
 
@@ -376,11 +382,17 @@ void appendStringInfoChar(StringInfo str, char ch) {
 }
 
 void appendStringInfoString(StringInfo str, const char *s) {
-    if (str->len + strlen(s) + 1 > str->maxlen) {
-        enlargeStringInfo(str, strlen(s) + 1);
+    if (!str || !s) {
+        LOG_ERROR("Invalid arguments to appendStringInfoString");
+        return;
+    }
+
+    size_t slen = strlen(s);
+    if (str->len + slen + 1 > str->maxlen) {
+        enlargeStringInfo(str, slen + 1);
     }
     std::strcat(str->data, s);
-    str->len += strlen(s);
+    str->len += slen;
 }
 
 int

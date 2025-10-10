@@ -105,6 +105,11 @@ pq_sendtext(StringInfo buf, const char *str, int slen)
 {
     char *p;
 
+    if (!str || slen <= 0) {
+        LOG_ERROR("Invalid arguments to pq_sendtext");
+        return;
+    }
+
     p = pg_server_to_client(str, slen);
     if (p != str) /* actual conversion has been done? */
     {
@@ -193,8 +198,13 @@ pq_getmsgtext(StringInfo msg, int rawbytes, int *nbytes)
     char *str;
     char *p;
 
+    if (!msg || !nbytes) {
+        LOG_ERROR("Invalid arguments to pq_getmsgtext");
+        return nullptr;
+    }
     if (rawbytes < 0 || rawbytes > (msg->len - msg->cursor)) {
         LOG_ERROR("Insufficient data left in message");
+        return nullptr;
     }
     str = &msg->data[msg->cursor];
     msg->cursor += rawbytes;

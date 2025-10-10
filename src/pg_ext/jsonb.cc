@@ -170,7 +170,7 @@ static JsonbValue *
 pushJsonbValueScalar(JsonbParseState **pstate, JsonbIteratorToken seq,
 					 JsonbValue *scalarVal)
 {
-	JsonbValue *result = NULL;
+	JsonbValue *result = nullptr;
 
 	switch (seq)
 	{
@@ -295,7 +295,7 @@ iteratorFromContainer(JsonbContainer *container, JsonbIterator *parent)
 JsonbIterator *
 JsonbIteratorInit(JsonbContainer *container)
 {
-	return iteratorFromContainer(container, NULL);
+	return iteratorFromContainer(container, nullptr);
 }
 
 static JsonbIterator *
@@ -397,7 +397,7 @@ fillJsonbValue(JsonbContainer *container, int index,
 JsonbIteratorToken
 JsonbIteratorNext(JsonbIterator **it, JsonbValue *val, bool skipNested)
 {
-	if (*it == NULL)
+	if (*it == nullptr)
 	{
 		val->type = jbvNull;
 		return WJB_DONE;
@@ -549,32 +549,32 @@ pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 			   JsonbValue *jbval)
 {
 	JsonbIterator *it;
-	JsonbValue *res = NULL;
+	JsonbValue *res = nullptr;
 	JsonbValue v;
 	JsonbIteratorToken tok;
 	int i;
 
 	if (jbval && (seq == WJB_ELEM || seq == WJB_VALUE) && jbval->type == jbvObject)
 	{
-		pushJsonbValue(pstate, WJB_BEGIN_OBJECT, NULL);
+		pushJsonbValue(pstate, WJB_BEGIN_OBJECT, nullptr);
 		for (i = 0; i < jbval->val.object.nPairs; i++)
 		{
 			pushJsonbValue(pstate, WJB_KEY, jbval->val.object.pairs[i].key);
 			pushJsonbValue(pstate, WJB_VALUE, jbval->val.object.pairs[i].value);
 		}
 
-		return pushJsonbValue(pstate, WJB_END_OBJECT, NULL);
+		return pushJsonbValue(pstate, WJB_END_OBJECT, nullptr);
 	}
 
 	if (jbval && (seq == WJB_ELEM || seq == WJB_VALUE) && jbval->type == jbvArray)
 	{
-		pushJsonbValue(pstate, WJB_BEGIN_ARRAY, NULL);
+		pushJsonbValue(pstate, WJB_BEGIN_ARRAY, nullptr);
 		for (i = 0; i < jbval->val.array.nElems; i++)
 		{
 			pushJsonbValue(pstate, WJB_ELEM, &jbval->val.array.elems[i]);
 		}
 
-		return pushJsonbValue(pstate, WJB_END_ARRAY, NULL);
+		return pushJsonbValue(pstate, WJB_END_ARRAY, nullptr);
 	}
 
 	if (!jbval || (seq != WJB_ELEM && seq != WJB_VALUE) ||
@@ -600,7 +600,7 @@ pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 
 		tok = JsonbIteratorNext(&it, &v, true);
 		assert(tok == WJB_END_ARRAY);
-		assert(it == NULL);
+		assert(it == nullptr);
 
 		return res;
 	}
@@ -609,7 +609,7 @@ pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 		res = pushJsonbValueScalar(pstate, tok,
 								   tok < WJB_BEGIN_ARRAY ||
 								   (tok == WJB_BEGIN_ARRAY &&
-									v.val.array.rawScalar) ? &v : NULL);
+									v.val.array.rawScalar) ? &v : nullptr);
 
 	return res;
 }
@@ -674,8 +674,8 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 				/* Same as timestamp_out(), but forcing DateStyle */
 				if (TIMESTAMP_NOT_FINITE(timestamp))
 					EncodeSpecialTimestamp(timestamp, buf);
-				else if (timestamp2tm(timestamp, NULL, &tm, &fsec, NULL, NULL) == 0)
-					EncodeDateTime(&tm, fsec, false, 0, NULL, USE_XSD_DATES, buf);
+				else if (timestamp2tm(timestamp, nullptr, &tm, &fsec, nullptr, nullptr) == 0)
+					EncodeDateTime(&tm, fsec, false, 0, nullptr, USE_XSD_DATES, buf);
 				else
 					LOG_ERROR("timestamp out of range");
 			}
@@ -686,7 +686,7 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 				struct pg_tm tm;
 				int			tz;
 				fsec_t		fsec;
-				const char *tzn = NULL;
+				const char *tzn = nullptr;
 
 				timestamp = DatumGetTimestampTz(value);
 
@@ -705,8 +705,8 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 				/* Same as timestamptz_out(), but forcing DateStyle */
 				if (TIMESTAMP_NOT_FINITE(timestamp))
 					EncodeSpecialTimestamp(timestamp, buf);
-				else if (timestamp2tm(timestamp, tzp ? NULL : &tz, &tm, &fsec,
-									  tzp ? NULL : &tzn, NULL) == 0)
+				else if (timestamp2tm(timestamp, tzp ? nullptr : &tz, &tm, &fsec,
+									  tzp ? nullptr : &tzn, nullptr) == 0)
 				{
 					if (tzp)
 						tm.tm_isdst = 1;	/* set time-zone presence flag */
@@ -719,7 +719,7 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 			break;
 		default:
 			LOG_ERROR("unknown jsonb value datetime type oid %u", typid);
-			return NULL;
+			return nullptr;
 	}
 
 	return buf;
@@ -799,10 +799,10 @@ json_lex_number(JsonLexContext *lex, char *s,
 	for (; len < lex->input_length && JSON_ALPHANUMERIC_CHAR(*s); s++, len++)
 		error = true;
 
-	if (total_len != NULL)
+	if (total_len != nullptr)
 		*total_len = len;
 
-	if (num_err != NULL)
+	if (num_err != nullptr)
 	{
 		/* let the caller handle any error */
 		*num_err = error;
@@ -1209,7 +1209,7 @@ JsonbValueToJsonb(JsonbValue *val)
 	if (IsAJsonbScalar(val))
 	{
 		/* Scalar value */
-		JsonbParseState *pstate = NULL;
+		JsonbParseState *pstate = nullptr;
 		JsonbValue *res;
 		JsonbValue	scalarArray;
 
@@ -1219,7 +1219,7 @@ JsonbValueToJsonb(JsonbValue *val)
 
 		pushJsonbValue(&pstate, WJB_BEGIN_ARRAY, &scalarArray);
 		pushJsonbValue(&pstate, WJB_ELEM, val);
-		res = pushJsonbValue(&pstate, WJB_END_ARRAY, NULL);
+		res = pushJsonbValue(&pstate, WJB_END_ARRAY, nullptr);
 
 		out = convertToJsonb(res);
 	}

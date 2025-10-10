@@ -11,22 +11,22 @@
 #define JB_OFFSET_STRIDE		32
 
 /* flags for the header-field in JsonbContainer */
-#define JB_CMASK				0x0FFFFFFF	/* mask for count field */
-#define JB_FSCALAR				0x10000000	/* flag bits */
-#define JB_FOBJECT				0x20000000
-#define JB_FARRAY				0x40000000
+const uint32_t JB_CMASK				= 0x0FFFFFFF;	/* mask for count field */
+const uint32_t JB_FSCALAR			= 0x10000000;	/* flag bits */
+const uint32_t JB_FOBJECT			= 0x20000000;
+const uint32_t JB_FARRAY			= 0x40000000;
 
-#define JENTRY_OFFLENMASK		0x0FFFFFFF
-#define JENTRY_TYPEMASK			0x70000000
-#define JENTRY_HAS_OFF			0x80000000
+const uint32_t JENTRY_OFFLENMASK		= 0x0FFFFFFF;
+const uint32_t JENTRY_TYPEMASK			= 0x70000000;
+const uint32_t JENTRY_HAS_OFF			= 0x80000000;
 
 /* values stored in the type bits */
-#define JENTRY_ISSTRING			0x00000000
-#define JENTRY_ISNUMERIC		0x10000000
-#define JENTRY_ISBOOL_FALSE		0x20000000
-#define JENTRY_ISBOOL_TRUE		0x30000000
-#define JENTRY_ISNULL			0x40000000
-#define JENTRY_ISCONTAINER		0x50000000	/* array or object */
+const uint32_t JENTRY_ISSTRING			= 0x00000000;
+const uint32_t JENTRY_ISNUMERIC		= 0x10000000;
+const uint32_t JENTRY_ISBOOL_FALSE		= 0x20000000;
+const uint32_t JENTRY_ISBOOL_TRUE		= 0x30000000;
+const uint32_t JENTRY_ISNULL			= 0x40000000;
+const uint32_t JENTRY_ISCONTAINER		= 0x50000000;	/* array or object */
 
 /* Access macros.  Note possible multiple evaluations */
 #define JBE_OFFLENFLD(je_)		((je_) & JENTRY_OFFLENMASK)

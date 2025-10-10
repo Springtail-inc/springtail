@@ -23,23 +23,25 @@ float8out_internal(double num)
 
     if (std::isnan(num))
     {
-        strcpy(ascii, "NaN");
+        std::strncpy(ascii, "NaN", 127);
+    	ascii[127] = '\0';
     }
     else if (std::isinf(num))
     {
         if (num < 0)
-            strcpy(ascii, "-Infinity");
+            std::strncpy(ascii, "-Infinity", 127);
         else
-            strcpy(ascii, "Infinity");
+            std::strncpy(ascii, "Infinity", 127);
+        ascii[127] = '\0';
     }
     else if (extra_float_digits > 0)
     {
         // Use shortest decimal via ostringstream + max precision
         std::ostringstream oss;
-        oss << std::setprecision(std::numeric_limits<double>::max_digits10)
-            << num;
-        strncpy(ascii, oss.str().c_str(), 127);
-        ascii[127] = '\0';
+		oss << std::setprecision(std::numeric_limits<double>::max_digits10)
+			<< num;
+
+		std::snprintf(ascii, 128, "%s", oss.str().c_str());
     }
     else
     {

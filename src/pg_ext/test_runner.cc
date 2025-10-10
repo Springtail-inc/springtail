@@ -7,13 +7,20 @@
 #include <pg_ext/fmgr.hh>
 #include <pg_ext/string.hh>
 #include <pg_ext/array.hh>
-#include "pg_ext/guc.hh"
+#include <pg_ext/guc.hh>
+
+#include <common/logging.hh>
+
 
 typedef char GinTernaryValue;
 
 
 void*
 cstring_to_text_4b(const char *s) {
+    if (!s) {
+        LOG_ERROR("Invalid arguments to cstring_to_text_4b");
+        return nullptr;
+    }
     size_t data_len = std::strlen(s);
     size_t tot = VARHDRSZ + data_len;
     char *p = (char*)std::malloc(tot);
@@ -28,6 +35,10 @@ cstring_to_text_4b(const char *s) {
 
 void*
 cstring_to_text_1b(const char *s) {
+    if (!s) {
+        LOG_ERROR("Invalid arguments to cstring_to_text_1b");
+        return nullptr;
+    }
     size_t data_len = std::strlen(s);
     size_t tot = VARHDRSZ + data_len;
     char *p = (char*)std::malloc(tot);
@@ -42,6 +53,10 @@ cstring_to_text_1b(const char *s) {
 
 void*
 cstring_to_text_auto(const char *s) {
+    if (!s) {
+        LOG_ERROR("Invalid arguments to cstring_to_text_auto");
+        return nullptr;
+    }
     size_t n = std::strlen(s);
     return (n <= 127) ? cstring_to_text_1b(s) : cstring_to_text_4b(s);
 }
