@@ -29,7 +29,7 @@ XidMgrSubscriber::~XidMgrSubscriber()
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Deleting");
 
     // note: the comment above about lifetime.
-    // We are trying to delet the object, so we should make the best effor waiting
+    // We are trying to delete the object, so we should make the best effort waiting
     // for OnDone to be called.
 
     _context.TryCancel(); // TryCancel is thread-safe.
