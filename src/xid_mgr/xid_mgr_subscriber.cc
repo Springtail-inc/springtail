@@ -20,8 +20,8 @@ XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks 
     // is called. The callback call time is not guaranteed, so we should make 
     // the best effort to make sure that the object is valid until then.
     _stub->async()->Subscribe(&_context, &req, this);
-    StartRead(&_push_response);
     StartCall();
+    StartRead(&_push_response);
 }
 
 XidMgrSubscriber::~XidMgrSubscriber()
