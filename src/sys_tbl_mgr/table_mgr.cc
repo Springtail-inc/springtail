@@ -101,10 +101,13 @@ namespace springtail {
             std::filesystem::remove_all(table_dir);
         }
 
+        // Create schema with internal row ID field
+        auto schema_with_row_id = schema->create_schema(schema->column_order(), {}, schema->get_sort_keys());
+
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema, false);
+                                                  tbl_meta, schema_with_row_id, false);
     }
 
     std::map<uint32_t, SchemaColumn>
