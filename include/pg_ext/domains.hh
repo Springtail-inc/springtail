@@ -11,13 +11,13 @@ typedef struct DomainIOData {
     Oid typiofunc;
     Oid typioparam;
     int32_t typtypmod;
-    pgext::FmgrInfo proc;
+    FmgrInfo proc;
     // /* Reference to cached list of constraint items to check */
     // DomainConstraintRef constraint_ref;
     // /* Context for evaluating CHECK constraints in */
     // pgext::ExprContext *econtext;
     /* Memory context this cache is in */
-    pgext::MemoryContext mcxt;
+    MemoryContext mcxt;
 } DomainIOData;
 
 extern "C" PGEXT_API void domain_check(Oid domainoid, Datum value, bool isnull);

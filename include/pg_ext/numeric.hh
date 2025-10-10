@@ -29,3 +29,6 @@ struct NumericData {
 };
 
 extern "C" PGEXT_API Datum numeric_in(PG_FUNCTION_ARGS);
+
+char *pg_ultostr_zeropad(char *str, uint32_t value, int32_t minwidth);
+char *pg_ultostr(char *str, uint32_t value);

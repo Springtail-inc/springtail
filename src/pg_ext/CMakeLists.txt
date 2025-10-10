@@ -7,6 +7,7 @@ set(LIB_PGEXT_SOURCES
     error.cc
     memory.cc
     guc.cc
+    date.cc
     string.cc
     list.cc
     hash.cc

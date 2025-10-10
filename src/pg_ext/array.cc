@@ -1,9 +1,11 @@
-#include <pg_ext/array.hh>
-#include <pg_ext/fmgr.hh>
-#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+
+#include <pg_ext/array.hh>
+#include <pg_ext/fmgr.hh>
+#include <pg_ext/toast.hh>
+
 #include <pg_repl/pg_types.hh>
 #include <common/logging.hh>
 
@@ -44,13 +46,13 @@ store_att_byval(void *T, Datum newdatum, int attlen)
 	switch (attlen)
 	{
 		case sizeof(char):
-			*(char *) T = pgext::DatumGetChar(newdatum);
+			*(char *) T = DatumGetChar(newdatum);
 			break;
 		case sizeof(int16_t):
-			*(int16_t *) T = pgext::DatumGetInt16(newdatum);
+			*(int16_t *) T = DatumGetInt16(newdatum);
 			break;
 		case sizeof(int32_t):
-			*(int32_t *) T = pgext::DatumGetInt32(newdatum);
+			*(int32_t *) T = DatumGetInt32(newdatum);
 			break;
 		default:
 			LOG_ERROR("unsupported byval length: %d", attlen);
@@ -77,14 +79,14 @@ ArrayCastAndSet(Datum src,
 		if (typbyval)
 			store_att_byval(dest, src, typlen);
 		else
-			memmove(dest, pgext::DatumGetPointer(src), typlen);
+			memmove(dest, DatumGetPointer(src), typlen);
 		inc = att_align_nominal(typlen, typalign);
 	}
 	else
 	{
 		assert(!typbyval);
 		inc = att_addlength_datum(0, typlen, src);
-		memmove(dest, pgext::DatumGetPointer(src), inc);
+		memmove(dest, DatumGetPointer(src), inc);
 		inc = att_align_nominal(inc, typalign);
 	}
 
@@ -123,7 +125,7 @@ CopyArrayEls(ArrayType *array,
 			bitval |= bitmask;
 			p += ArrayCastAndSet(values[i], typlen, typbyval, typalign, p);
 			if (freedata)
-				pfree(pgext::DatumGetPointer(values[i]));
+				pfree(DatumGetPointer(values[i]));
 		}
 		if (bitmap)
 		{
@@ -186,7 +188,7 @@ construct_md_array(Datum *elems,
         }
         /* make sure data is not toasted */
         if (elmlen == -1) {
-            elems[i] = pgext::PointerGetDatum(PG_DETOAST_DATUM(elems[i]));
+            elems[i] = PointerGetDatum(PG_DETOAST_DATUM(elems[i]));
         }
         nbytes = att_addlength_datum(nbytes, elmlen, elems[i]);
         nbytes = att_align_nominal(nbytes, elmalign);
@@ -330,18 +332,18 @@ fetch_att(const void *T, bool attbyval, int attlen)
 		switch (attlen)
 		{
 			case sizeof(char):
-				return pgext::CharGetDatum(*((const char *) T));
+				return CharGetDatum(*((const char *) T));
 			case sizeof(int16_t):
-				return pgext::Int16GetDatum(*((const int16_t *) T));
+				return Int16GetDatum(*((const int16_t *) T));
 			case sizeof(int32_t):
-				return pgext::Int32GetDatum(*((const int32_t *) T));
+				return Int32GetDatum(*((const int32_t *) T));
 			default:
 				LOG_ERROR("unsupported byval length: %d", attlen);
 				return 0;
 		}
 	}
 	else
-		return pgext::PointerGetDatum(T);
+		return PointerGetDatum(T);
 }
 
 void

@@ -4,7 +4,11 @@
 #include <pg_ext/export.hh>
 #include <pg_ext/numeric.hh>
 #include <pg_ext/string.hh>
+#include <pg_ext/date.hh>
+
 #include <common/logging.hh>
+
+#define JB_OFFSET_STRIDE		32
 
 /* flags for the header-field in JsonbContainer */
 #define JB_CMASK				0x0FFFFFFF	/* mask for count field */
@@ -144,6 +148,7 @@ enum jbvType {
     jbvDatetime = 0x20,
 };
 
+
 #define JSON_ALPHANUMERIC_CHAR(c)  \
 	(((c) >= 'a' && (c) <= 'z') || \
 	 ((c) >= 'A' && (c) <= 'Z') || \
@@ -168,6 +173,11 @@ typedef struct JsonbContainer {
     /* the data for each child node follows. */
 } JsonbContainer;
 
+typedef struct
+{
+	int32_t		vl_len_;		/* varlena header (do not touch directly!) */
+	JsonbContainer root;
+} Jsonb;
 struct JsonbValue {
     enum jbvType type; /* Influences sort order */
 
@@ -260,5 +270,11 @@ typedef struct JsonLexContext
 
 extern "C" PGEXT_API JsonbValue * pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq, JsonbValue *jbval);
 extern "C" PGEXT_API bool IsValidJsonNumber(const char *str, int len);
-extern "C" PGEXT_API JsonbValue *JsonbValueToJsonb(JsonbValue *val);
+extern "C" PGEXT_API Jsonb *JsonbValueToJsonb(JsonbValue *val);
 extern "C" PGEXT_API void escape_json(StringInfo buf, const char *str);
+extern "C" PGEXT_API void convertJsonbValue(StringInfo buffer, JEntry *header, JsonbValue *val, int level);
+extern "C" PGEXT_API Jsonb *convertToJsonb(JsonbValue *val);
+extern "C" PGEXT_API void convertJsonbScalar(StringInfo buffer, JEntry *header, JsonbValue *scalarVal);
+extern "C" PGEXT_API short padBufferToInt(StringInfo buffer);
+extern "C" PGEXT_API void convertJsonbArray(StringInfo buffer, JEntry *header, JsonbValue *val, int level);
+extern "C" PGEXT_API void convertJsonbObject(StringInfo buffer, JEntry *header, JsonbValue *val, int level);

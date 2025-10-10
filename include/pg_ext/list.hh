@@ -2,12 +2,10 @@
 
 #include <pg_ext/export.hh>
 #include <pg_ext/node.hh>
+#include <pg_ext/common.hh>
 
 #define FLEXIBLE_ARRAY_MEMBER
 #define LIST_INITIAL_ALLOC 4
-
-typedef unsigned int 	Oid;
-typedef unsigned int 	TransactionId;
 
 typedef union ListCell
 {

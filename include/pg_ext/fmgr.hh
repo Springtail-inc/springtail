@@ -3,13 +3,14 @@
 #include <pg_ext/common.hh>
 #include <pg_ext/export.hh>
 #include <pg_ext/memory.hh>
-#include <pg_ext/type.hh>
 #include <pg_ext/toast.hh>
 #include <pg_ext/varatt.hh>
+#include <pg_ext/heaptuple.hh>
 
-#define PG_FUNCTION_ARGS pgext::FunctionCallInfo fcinfo
+#include <postgresql/server/catalog/pg_type_d.h>
 
-namespace pgext {
+#define PG_FUNCTION_ARGS FunctionCallInfo fcinfo
+
 struct NullableDatum {
     Datum value;
     bool isnull;
@@ -45,6 +46,12 @@ static inline int32_t
 DatumGetInt32(Datum X)
 {
 	return (int32_t) X;
+}
+
+static inline int64_t
+DatumGetInt64(Datum X)
+{
+	return (int64_t) X;
 }
 
 static inline Datum
@@ -113,7 +120,7 @@ CharGetDatum(char X)
 )
 
 #define att_addlength_datum(cur_offset, attlen, attdatum) \
-	att_addlength_pointer(cur_offset, attlen, pgext::DatumGetPointer(attdatum))
+	att_addlength_pointer(cur_offset, attlen, DatumGetPointer(attdatum))
 #define att_align_nominal(cur_offset, attalign) \
 ( \
     ((attalign) == TYPALIGN_INT) ? INTALIGN(cur_offset) : \
@@ -124,45 +131,6 @@ CharGetDatum(char X)
             SHORTALIGN(cur_offset) \
         ))) \
 )
-
-typedef struct {
-    // XXX Stubbed for now
-} FormData_pg_attribute;
-
-typedef int16_t AttrNumber;
-
-typedef struct ConstrCheck {
-    char *ccname;
-    char *ccbin; /* nodeToString representation of expr */
-    bool ccvalid;
-    bool ccnoinherit; /* this is a non-inheritable constraint */
-} ConstrCheck;
-
-typedef struct AttrDefault {
-    AttrNumber adnum;
-    char *adbin; /* nodeToString representation of expr */
-} AttrDefault;
-
-typedef struct TupleConstr {
-    AttrDefault *defval;         /* array */
-    ConstrCheck *check;          /* array */
-    struct AttrMissing *missing; /* missing attributes values, NULL if none */
-    uint16_t num_defval;
-    uint16_t num_check;
-    bool has_not_null;
-    bool has_generated_stored;
-} TupleConstr;
-
-typedef struct TupleDescData {
-    int natts;           /* number of attributes in the tuple */
-    Oid tdtypeid;        /* composite type ID for tuple type */
-    int32_t tdtypmod;    /* typmod for tuple type */
-    int tdrefcount;      /* reference count, or -1 if not counting */
-    TupleConstr *constr; /* constraints, or NULL if none */
-    /* attrs[N] is the description of Attribute Number N+1 */
-    FormData_pg_attribute attrs[FLEXIBLE_ARRAY_MEMBER];
-} TupleDescData;
-typedef struct TupleDescData *TupleDesc;
 
 /* Type categories for get_call_result_type and siblings */
 typedef enum TypeFuncClass {
@@ -185,7 +153,7 @@ typedef struct FmgrInfo {
     bool fn_retset;               /* function returns a set */
     unsigned char fn_stats;       /* collect stats if track_functions > this */
     void *fn_extra;               /* extra space for use by handler */
-    pgext::MemoryContext fn_mcxt; /* memory context to store fn_extra in */
+    MemoryContext fn_mcxt; /* memory context to store fn_extra in */
     fmNodePtr fn_expr;            /* expression parse tree for call, or NULL */
 } FmgrInfo;
 
@@ -200,7 +168,7 @@ typedef struct FunctionCallInfoBaseData {
     Oid fncollation;      /* collation for function to use */
     bool isnull; /* function must set true if result is NULL */
     short nargs; /* # arguments actually passed */
-    pgext::NullableDatum args[FLEXIBLE_ARRAY_MEMBER];
+    NullableDatum args[FLEXIBLE_ARRAY_MEMBER];
 } FunctionCallInfoBaseData;
 
 struct FunctionCallInfoData {
@@ -212,13 +180,6 @@ struct FunctionCallInfoData {
     Datum args[2];
     int nargs;
 };
-
-typedef struct AttInMetadata {
-    TupleDesc tupdesc;
-    FmgrInfo *attinfuncs;
-    Oid *attioparams;
-    int32_t *atttypmods;
-} AttInMetadata;
 
 typedef struct FuncCallContext {
     uint64_t call_cntr;
@@ -233,19 +194,17 @@ typedef struct FuncCallContext {
 
 } FuncCallContext;
 
-}  // namespace pgext
-
 #define SizeForFunctionCallInfo(nargs) \
-    (offsetof(pgext::FunctionCallInfoBaseData, args) + sizeof(pgext::NullableDatum) * (nargs))
+    (offsetof(FunctionCallInfoBaseData, args) + sizeof(NullableDatum) * (nargs))
 
 #define LOCAL_FCINFO(name, nargs)                                        \
     /* use union with FunctionCallInfoBaseData to guarantee alignment */ \
     union {                                                              \
-        pgext::FunctionCallInfoBaseData fcinfo;                          \
+        FunctionCallInfoBaseData fcinfo;                          \
         /* ensure enough space for nargs args is available */            \
         char fcinfo_data[SizeForFunctionCallInfo(nargs)];                \
     } name##data;                                                        \
-    pgext::FunctionCallInfo name = &name##data.fcinfo
+    FunctionCallInfo name = &name##data.fcinfo
 
 #define InitFunctionCallInfoData(Fcinfo, Flinfo, Nargs, Collation, Context, Resultinfo) \
     do {                                                                                \
@@ -260,70 +219,40 @@ typedef struct FuncCallContext {
 #define FunctionCallInvoke(fcinfo) ((*(fcinfo)->flinfo->fn_addr)(fcinfo))
 
 // Function interfaces
-extern "C" PGEXT_API Datum DirectFunctionCall1(pgext::PGFunction func, Datum arg1);
-extern "C" PGEXT_API Datum DirectFunctionCall1Coll(pgext::PGFunction func,
+extern "C" PGEXT_API Datum DirectFunctionCall1(PGFunction func, Datum arg1);
+extern "C" PGEXT_API Datum DirectFunctionCall1Coll(PGFunction func,
                                                    Oid collation,
                                                    Datum arg1);
-extern "C" PGEXT_API Datum DirectFunctionCall2(pgext::PGFunction func, Datum arg1, Datum arg2);
-extern "C" PGEXT_API Datum DirectFunctionCall2Coll(pgext::PGFunction func,
+extern "C" PGEXT_API Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2);
+extern "C" PGEXT_API Datum DirectFunctionCall2Coll(PGFunction func,
                                                    Oid collation,
                                                    Datum arg1,
                                                    Datum arg2);
-extern "C" PGEXT_API Datum DirectFunctionCall3(pgext::PGFunction func,
+extern "C" PGEXT_API Datum DirectFunctionCall3(PGFunction func,
                                                Datum arg1,
                                                Datum arg2,
                                                Datum arg3);
-extern "C" PGEXT_API Datum DirectFunctionCall3Coll(pgext::PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
-extern "C" PGEXT_API Datum InputFunctionCall(pgext::FmgrInfo *flinfo,
+extern "C" PGEXT_API Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
+extern "C" PGEXT_API Datum InputFunctionCall(FmgrInfo *flinfo,
                                              char *str,
                                              Oid typioparam,
                                              int32_t typmod);
-extern "C" PGEXT_API Datum get_fn_opclass_options(pgext::FmgrInfo *fcinfo);
-extern "C" PGEXT_API bool has_fn_opclass_options(pgext::FmgrInfo *fcinfo);
-extern "C" PGEXT_API pgext::PGFunction lookup_pgfunction_by_oid(Oid oid);
+extern "C" PGEXT_API Datum get_fn_opclass_options(FmgrInfo *fcinfo);
+extern "C" PGEXT_API bool has_fn_opclass_options(FmgrInfo *fcinfo);
+extern "C" PGEXT_API PGFunction lookup_pgfunction_by_oid(Oid oid);
 extern "C" PGEXT_API char *OidOutputFunctionCall(Oid function_oid, Datum value);
-extern "C" PGEXT_API char *OutputFunctionCall(pgext::FmgrInfo *flinfo, Datum val);
+extern "C" PGEXT_API char *OutputFunctionCall(FmgrInfo *flinfo, Datum val);
 extern "C" PGEXT_API void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena);
 extern "C" PGEXT_API void getTypeInputInfo(Oid type, Oid *typInput, Oid *typIOParam);
-extern "C" PGEXT_API pgext::TypeFuncClass get_call_result_type(pgext::FunctionCallInfo fcinfo,
+extern "C" PGEXT_API TypeFuncClass get_call_result_type(FunctionCallInfo fcinfo,
                                                                Oid *resultTypeId,
-                                                               pgext::TupleDesc *resultTupleDesc);
+                                                               TupleDesc *resultTupleDesc);
 extern "C" PGEXT_API Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3);
-extern "C" PGEXT_API Oid get_fn_expr_argtype(pgext::FmgrInfo *flinfo, int argnum);
-extern "C" PGEXT_API pgext::FuncCallContext *per_MultiFuncCall(pgext::FunctionCallInfo fcinfo);
-extern "C" PGEXT_API void fmgr_info_cxt(Oid functionId, pgext::FmgrInfo *finfo, pgext::MemoryContext mcxt);
+extern "C" PGEXT_API Oid get_fn_expr_argtype(FmgrInfo *flinfo, int argnum);
+extern "C" PGEXT_API FuncCallContext *per_MultiFuncCall(FunctionCallInfo fcinfo);
+extern "C" PGEXT_API void fmgr_info_cxt(Oid functionId, FmgrInfo *finfo, MemoryContext mcxt);
 
 // Type interfaces
-extern "C" PGEXT_API pgext::TupleDesc lookup_rowtype_tupdesc_domain(Oid type_id,
-                                                                    int32_t typmod,
-                                                                    bool noError);
-extern "C" PGEXT_API void end_MultiFuncCall(PG_FUNCTION_ARGS, pgext::FuncCallContext *funcctx);
-extern "C" PGEXT_API pgext::FuncCallContext *init_MultiFuncCall(PG_FUNCTION_ARGS);
-
-struct HeapTupleHeaderData {};
-typedef struct HeapTupleHeaderData *HeapTupleHeader;
-
-struct BlockIdData {
-    uint16_t bi_hi;
-    uint16_t bi_lo;
-};
-
-struct ItemPointerData {
-    BlockIdData ip_blkid;
-    uint16_t ip_posid;
-};
-typedef ItemPointerData *ItemPointer;
-
-struct HeapTupleData {
-    uint32_t t_len;         /* length of *t_data */
-    ItemPointerData t_self; /* SelfItemPointer */
-    Oid t_tableOid;         /* table the tuple came from */
-    HeapTupleHeader t_data; /* -> tuple header and data */
-};
-typedef struct HeapTupleData *HeapTuple;
-
-extern "C" PGEXT_API void DecrTupleDescRefCount(pgext::TupleDesc tupdesc);
-extern "C" PGEXT_API pgext::TupleDesc BlessTupleDesc(pgext::TupleDesc tupdesc);
-extern "C" PGEXT_API Datum HeapTupleHeaderGetDatum(HeapTupleHeader tuple);
-extern "C" PGEXT_API HeapTuple heap_form_tuple(pgext::TupleDesc tupleDescriptor, Datum *values, bool *isnull);
-extern "C" PGEXT_API void heap_deform_tuple(HeapTuple tuple, pgext::TupleDesc tupleDesc, Datum *values, bool *isnull);
+extern "C" PGEXT_API void end_MultiFuncCall(PG_FUNCTION_ARGS, FuncCallContext *funcctx);
+extern "C" PGEXT_API FuncCallContext *init_MultiFuncCall(PG_FUNCTION_ARGS);
+extern "C" PGEXT_API void getTypeBinaryInputInfo(Oid type, Oid *typReceive, Oid *typIOParam);

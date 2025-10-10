@@ -36,7 +36,7 @@ PgExtnRegistry::add_operator(const std::string& extension, uint32_t oid, const s
     _proc_oid_to_name.insert({oid, proc_name});
 }
 
-pgext::PGFunction
+PGFunction
 PgExtnRegistry::get_operator_func_by_oid(uint32_t oid) const
 {
     auto it = _oper_oid_to_name.find(oid);
@@ -47,7 +47,7 @@ PgExtnRegistry::get_operator_func_by_oid(uint32_t oid) const
     return _oper_name_to_func.at(it->second);
 }
 
-pgext::PGFunction
+PGFunction
 PgExtnRegistry::get_operator_func_by_oper_name(const std::string& oper_name) const
 {
     auto it = _oper_name_to_func.find(oper_name);
@@ -58,7 +58,7 @@ PgExtnRegistry::get_operator_func_by_oper_name(const std::string& oper_name) con
     return it->second;
 }
 
-pgext::PGFunction
+PGFunction
 PgExtnRegistry::get_operator_func_by_proc_name(const std::string& proc_name) const
 {
     auto it = _proc_name_to_func.find(proc_name);
@@ -69,7 +69,7 @@ PgExtnRegistry::get_operator_func_by_proc_name(const std::string& proc_name) con
     return it->second;
 }
 
-pgext::PGFunction
+PGFunction
 PgExtnRegistry::get_type_func_by_type_name(const std::string& type_name) const
 {
     auto it = _type_func_name_to_func.find(type_name);
@@ -118,11 +118,11 @@ PgExtnRegistry::comparator_func(uint64_t type_oid,
 
     auto comparator_func = extn_registry->get_operator_func_by_oper_name(op_str.data());
 
-    Datum result = DirectFunctionCall3(comparator_func, leftDatum, rightDatum, pgext::ObjectIdGetDatum(0));
+    Datum result = DirectFunctionCall3(comparator_func, leftDatum, rightDatum, ObjectIdGetDatum(0));
 
     auto leftDatumString = extn_registry->datum_to_string(leftDatum, type_oid);
     auto rightDatumString = extn_registry->datum_to_string(rightDatum, type_oid);
-    bool comparatorResult = pgext::DatumGetBool(result);
+    bool comparatorResult = DatumGetBool(result);
 
     LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG3, "Operator = Result: {} {} {} = {}", leftDatumString,
               op_str, rightDatumString, comparatorResult);
@@ -139,7 +139,7 @@ PgExtnRegistry::datum_to_string(Datum value, Oid pg_oid){
 
     // call the output function
     Datum result = DirectFunctionCall1(typoutput, value);
-    const char* str = pgext::DatumGetCString(result);
+    const char* str = DatumGetCString(result);
 
     return std::string(str);
 }
@@ -158,19 +158,19 @@ PgExtnRegistry::binary_to_datum(const std::span<const char> &value,
     initStringInfo(&string);
 
     appendBinaryStringInfoNT(&string, value.data(), value.size());
-    Datum datum = pgext::PointerGetDatum(&string);
+    Datum datum = PointerGetDatum(&string);
 
     // call the receive function
-    Datum result = DirectFunctionCall3(typreceive, datum, pgext::ObjectIdGetDatum(0), pgext::Int32GetDatum(atttypmod));
+    Datum result = DirectFunctionCall3(typreceive, datum, ObjectIdGetDatum(0), Int32GetDatum(atttypmod));
     return result;
 };
 
-pgext::PGFunction
+PGFunction
 PgExtnRegistry::_load_extn_function(void* library, const std::string_view func_name)
 {
-    pgext::PGFunction extn_function = (pgext::PGFunction)dlsym(library, func_name.data());
+    PGFunction extn_function = (PGFunction)dlsym(library, func_name.data());
     if (!extn_function) {
-        LOG_ERROR("Failed to find function pgext::PGFunction {}", func_name);
+        LOG_ERROR("Failed to find function PGFunction {}", func_name);
         return nullptr;
     }
     return extn_function;

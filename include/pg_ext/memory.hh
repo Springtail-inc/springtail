@@ -29,7 +29,7 @@ extern "C" PGEXT_API void pfree(void *ptr);
 extern "C" PGEXT_API void *repalloc(void *ptr, size_t size);
 
 //// INTERNAL INTERFACES
-namespace pgext {
+// namespace pgext {
 
 /**
  * Object to manage memory in a way similar to postgres.  Used to implement the PG emulation
@@ -176,4 +176,4 @@ bool operator!=(const PGAllocator<T>&, const PGAllocator<U>&) noexcept {
     return false;
 }
 
-} // namespace pgext
+// } // namespace pgext

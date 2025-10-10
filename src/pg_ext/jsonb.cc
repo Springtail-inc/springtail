@@ -614,6 +614,117 @@ pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 	return res;
 }
 
+char *
+JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
+{
+	if (!buf)
+		buf = (char *) palloc(MAXDATELEN + 1);
+
+	switch (typid)
+	{
+		case DATEOID:
+			{
+				DateADT		date;
+				struct pg_tm tm;
+
+				date = DatumGetDateADT(value);
+
+				/* Same as date_out(), but forcing DateStyle */
+				if (DATE_NOT_FINITE(date))
+					EncodeSpecialDate(date, buf);
+				else
+				{
+					j2date(date + POSTGRES_EPOCH_JDATE,
+						   &(tm.tm_year), &(tm.tm_mon), &(tm.tm_mday));
+					EncodeDateOnly(&tm, USE_XSD_DATES, buf);
+				}
+			}
+			break;
+		case TIMEOID:
+			{
+				TimeADT		time = DatumGetTimeADT(value);
+				struct pg_tm tt,
+						   *tm = &tt;
+				fsec_t		fsec;
+
+				/* Same as time_out(), but forcing DateStyle */
+				time2tm(time, tm, &fsec);
+				EncodeTimeOnly(tm, fsec, false, 0, USE_XSD_DATES, buf);
+			}
+			break;
+		case TIMETZOID:
+			{
+				TimeTzADT  *time = DatumGetTimeTzADTP(value);
+				struct pg_tm tt, *tm = &tt;
+				fsec_t		fsec;
+				int			tz;
+
+				/* Same as timetz_out(), but forcing DateStyle */
+				timetz2tm(time, tm, &fsec, &tz);
+				EncodeTimeOnly(tm, fsec, true, tz, USE_XSD_DATES, buf);
+			}
+			break;
+		case TIMESTAMPOID:
+			{
+				Timestamp	timestamp;
+				struct pg_tm tm;
+				fsec_t		fsec;
+
+				timestamp = DatumGetTimestamp(value);
+				/* Same as timestamp_out(), but forcing DateStyle */
+				if (TIMESTAMP_NOT_FINITE(timestamp))
+					EncodeSpecialTimestamp(timestamp, buf);
+				else if (timestamp2tm(timestamp, NULL, &tm, &fsec, NULL, NULL) == 0)
+					EncodeDateTime(&tm, fsec, false, 0, NULL, USE_XSD_DATES, buf);
+				else
+					LOG_ERROR("timestamp out of range");
+			}
+			break;
+		case TIMESTAMPTZOID:
+			{
+				TimestampTz timestamp;
+				struct pg_tm tm;
+				int			tz;
+				fsec_t		fsec;
+				const char *tzn = NULL;
+
+				timestamp = DatumGetTimestampTz(value);
+
+				/*
+				 * If a time zone is specified, we apply the time-zone shift,
+				 * convert timestamptz to pg_tm as if it were without a time
+				 * zone, and then use the specified time zone for converting
+				 * the timestamp into a string.
+				 */
+				if (tzp)
+				{
+					tz = *tzp;
+					timestamp -= (TimestampTz) tz * USECS_PER_SEC;
+				}
+
+				/* Same as timestamptz_out(), but forcing DateStyle */
+				if (TIMESTAMP_NOT_FINITE(timestamp))
+					EncodeSpecialTimestamp(timestamp, buf);
+				else if (timestamp2tm(timestamp, tzp ? NULL : &tz, &tm, &fsec,
+									  tzp ? NULL : &tzn, NULL) == 0)
+				{
+					if (tzp)
+						tm.tm_isdst = 1;	/* set time-zone presence flag */
+
+					EncodeDateTime(&tm, fsec, true, tz, tzn, USE_XSD_DATES, buf);
+				}
+				else
+					LOG_ERROR("timestamp out of range");
+			}
+			break;
+		default:
+			LOG_ERROR("unknown jsonb value datetime type oid %u", typid);
+			return NULL;
+	}
+
+	return buf;
+}
+
 JsonParseErrorType
 json_lex_number(JsonLexContext *lex, char *s,
 				bool *num_err, int *total_len)
@@ -741,9 +852,390 @@ IsValidJsonNumber(const char *str, int len)
 	return (!numeric_error) && (total_len == dummy_lex.input_length);
 }
 
-JsonbValue *JsonbValueToJsonb(JsonbValue *val) {
-    // XXX Stubbed for now
-    return val;
+int
+reserveFromBuffer(StringInfo buffer, int len)
+{
+	int			offset;
+
+	/* Make more room if needed */
+	enlargeStringInfo(buffer, len);
+
+	/* remember current offset */
+	offset = buffer->len;
+
+	/* reserve the space */
+	buffer->len += len;
+
+	/*
+	 * Keep a trailing null in place, even though it's not useful for us; it
+	 * seems best to preserve the invariants of StringInfos.
+	 */
+	buffer->data[buffer->len] = '\0';
+
+	return offset;
+}
+
+void
+copyToBuffer(StringInfo buffer, int offset, const char *data, int len)
+{
+	memcpy(buffer->data + offset, data, len);
+}
+
+
+void
+appendToBuffer(StringInfo buffer, const char *data, int len)
+{
+	int			offset;
+
+	offset = reserveFromBuffer(buffer, len);
+	copyToBuffer(buffer, offset, data, len);
+}
+
+short
+padBufferToInt(StringInfo buffer)
+{
+	int			padlen,
+				p,
+				offset;
+
+	padlen = INTALIGN(buffer->len) - buffer->len;
+
+	offset = reserveFromBuffer(buffer, padlen);
+
+	/* padlen must be small, so this is probably faster than a memset */
+	for (p = 0; p < padlen; p++)
+		buffer->data[offset + p] = '\0';
+
+	return padlen;
+}
+
+void
+convertJsonbValue(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
+{
+	if (!val)
+		return;
+
+	/*
+	 * A JsonbValue passed as val should never have a type of jbvBinary, and
+	 * neither should any of its sub-components. Those values will be produced
+	 * by convertJsonbArray and convertJsonbObject, the results of which will
+	 * not be passed back to this function as an argument.
+	 */
+
+	if (IsAJsonbScalar(val))
+		convertJsonbScalar(buffer, header, val);
+	else if (val->type == jbvArray)
+		convertJsonbArray(buffer, header, val, level);
+	else if (val->type == jbvObject)
+		convertJsonbObject(buffer, header, val, level);
+	else
+		LOG_ERROR("unknown type of jsonb container to convert");
+}
+
+void
+convertJsonbArray(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
+{
+	int			base_offset;
+	int			jentry_offset;
+	int			i;
+	int			totallen;
+	uint32_t		containerhead;
+	int			nElems = val->val.array.nElems;
+
+	/* Remember where in the buffer this array starts. */
+	base_offset = buffer->len;
+
+	/* Align to 4-byte boundary (any padding counts as part of my data) */
+	padBufferToInt(buffer);
+
+	/*
+	 * Construct the header Jentry and store it in the beginning of the
+	 * variable-length payload.
+	 */
+	containerhead = nElems | JB_FARRAY;
+	if (val->val.array.rawScalar)
+	{
+		assert(nElems == 1);
+		assert(level == 0);
+		containerhead |= JB_FSCALAR;
+	}
+
+	appendToBuffer(buffer, (char *) &containerhead, sizeof(uint32_t));
+
+	/* Reserve space for the JEntries of the elements. */
+	jentry_offset = reserveFromBuffer(buffer, sizeof(JEntry) * nElems);
+
+	totallen = 0;
+	for (i = 0; i < nElems; i++)
+	{
+		JsonbValue *elem = &val->val.array.elems[i];
+		int			len;
+		JEntry		meta;
+
+		/*
+		 * Convert element, producing a JEntry and appending its
+		 * variable-length data to buffer
+		 */
+		convertJsonbValue(buffer, &meta, elem, level + 1);
+
+		len = JBE_OFFLENFLD(meta);
+		totallen += len;
+
+		/*
+		 * Bail out if total variable-length data exceeds what will fit in a
+		 * JEntry length field.  We check this in each iteration, not just
+		 * once at the end, to forestall possible integer overflow.
+		 */
+		if (totallen > JENTRY_OFFLENMASK)
+			LOG_ERROR("total size of jsonb array elements exceeds the maximum of %d bytes", JENTRY_OFFLENMASK);
+
+		/*
+		 * Convert each JB_OFFSET_STRIDE'th length to an offset.
+		 */
+		if ((i % JB_OFFSET_STRIDE) == 0)
+			meta = (meta & JENTRY_TYPEMASK) | totallen | JENTRY_HAS_OFF;
+
+		copyToBuffer(buffer, jentry_offset, (char *) &meta, sizeof(JEntry));
+		jentry_offset += sizeof(JEntry);
+	}
+
+	/* Total data size is everything we've appended to buffer */
+	totallen = buffer->len - base_offset;
+
+	/* Check length again, since we didn't include the metadata above */
+	if (totallen > JENTRY_OFFLENMASK)
+		LOG_ERROR("total size of jsonb array elements exceeds the maximum of %d bytes", JENTRY_OFFLENMASK);
+
+	/* Initialize the header of this node in the container's JEntry array */
+	*header = JENTRY_ISCONTAINER | totallen;
+}
+
+void
+convertJsonbObject(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
+{
+	int			base_offset;
+	int			jentry_offset;
+	int			i;
+	int			totallen;
+	uint32_t		containerheader;
+	int			nPairs = val->val.object.nPairs;
+
+	/* Remember where in the buffer this object starts. */
+	base_offset = buffer->len;
+
+	/* Align to 4-byte boundary (any padding counts as part of my data) */
+	padBufferToInt(buffer);
+
+	/*
+	 * Construct the header Jentry and store it in the beginning of the
+	 * variable-length payload.
+	 */
+	containerheader = nPairs | JB_FOBJECT;
+	appendToBuffer(buffer, (char *) &containerheader, sizeof(uint32_t));
+
+	/* Reserve space for the JEntries of the keys and values. */
+	jentry_offset = reserveFromBuffer(buffer, sizeof(JEntry) * nPairs * 2);
+
+	/*
+	 * Iterate over the keys, then over the values, since that is the ordering
+	 * we want in the on-disk representation.
+	 */
+	totallen = 0;
+	for (i = 0; i < nPairs; i++)
+	{
+		JsonbPair  *pair = &val->val.object.pairs[i];
+		int			len;
+		JEntry		meta;
+
+		/*
+		 * Convert key, producing a JEntry and appending its variable-length
+		 * data to buffer
+		 */
+		convertJsonbScalar(buffer, &meta, pair->key);
+
+		len = JBE_OFFLENFLD(meta);
+		totallen += len;
+
+		/*
+		 * Bail out if total variable-length data exceeds what will fit in a
+		 * JEntry length field.  We check this in each iteration, not just
+		 * once at the end, to forestall possible integer overflow.
+		 */
+		if (totallen > JENTRY_OFFLENMASK)
+			LOG_ERROR("total size of jsonb object elements exceeds the maximum of %d bytes", JENTRY_OFFLENMASK);
+
+		/*
+		 * Convert each JB_OFFSET_STRIDE'th length to an offset.
+		 */
+		if ((i % JB_OFFSET_STRIDE) == 0)
+			meta = (meta & JENTRY_TYPEMASK) | totallen | JENTRY_HAS_OFF;
+
+		copyToBuffer(buffer, jentry_offset, (char *) &meta, sizeof(JEntry));
+		jentry_offset += sizeof(JEntry);
+	}
+	for (i = 0; i < nPairs; i++)
+	{
+		JsonbPair  *pair = &val->val.object.pairs[i];
+		int			len;
+		JEntry		meta;
+
+		/*
+		 * Convert value, producing a JEntry and appending its variable-length
+		 * data to buffer
+		 */
+		convertJsonbValue(buffer, &meta, pair->value, level + 1);
+
+		len = JBE_OFFLENFLD(meta);
+		totallen += len;
+
+		/*
+		 * Bail out if total variable-length data exceeds what will fit in a
+		 * JEntry length field.  We check this in each iteration, not just
+		 * once at the end, to forestall possible integer overflow.
+		 */
+		if (totallen > JENTRY_OFFLENMASK)
+			LOG_ERROR("total size of jsonb object elements exceeds the maximum of %d bytes", JENTRY_OFFLENMASK);
+
+		/*
+		 * Convert each JB_OFFSET_STRIDE'th length to an offset.
+		 */
+		if (((i + nPairs) % JB_OFFSET_STRIDE) == 0)
+			meta = (meta & JENTRY_TYPEMASK) | totallen | JENTRY_HAS_OFF;
+
+		copyToBuffer(buffer, jentry_offset, (char *) &meta, sizeof(JEntry));
+		jentry_offset += sizeof(JEntry);
+	}
+
+	/* Total data size is everything we've appended to buffer */
+	totallen = buffer->len - base_offset;
+
+	/* Check length again, since we didn't include the metadata above */
+	if (totallen > JENTRY_OFFLENMASK)
+		LOG_ERROR("total size of jsonb object elements exceeds the maximum of %d bytes", JENTRY_OFFLENMASK);
+
+	/* Initialize the header of this node in the container's JEntry array */
+	*header = JENTRY_ISCONTAINER | totallen;
+}
+
+void
+convertJsonbScalar(StringInfo buffer, JEntry *header, JsonbValue *scalarVal)
+{
+	int			numlen;
+	short		padlen;
+
+	switch (scalarVal->type)
+	{
+		case jbvNull:
+			*header = JENTRY_ISNULL;
+			break;
+
+		case jbvString:
+			appendToBuffer(buffer, scalarVal->val.string.val, scalarVal->val.string.len);
+
+			*header = scalarVal->val.string.len;
+			break;
+
+		case jbvNumeric:
+			numlen = VARSIZE_ANY(scalarVal->val.numeric);
+			padlen = padBufferToInt(buffer);
+
+			appendToBuffer(buffer, (char *) scalarVal->val.numeric, numlen);
+
+			*header = JENTRY_ISNUMERIC | (padlen + numlen);
+			break;
+
+		case jbvBool:
+			*header = (scalarVal->val.boolean) ?
+				JENTRY_ISBOOL_TRUE : JENTRY_ISBOOL_FALSE;
+			break;
+
+		case jbvDatetime:
+			{
+				char		buf[MAXDATELEN + 1];
+				size_t		len;
+
+				JsonEncodeDateTime(buf,
+								   scalarVal->val.datetime.value,
+								   scalarVal->val.datetime.typid,
+								   &scalarVal->val.datetime.tz);
+				len = strlen(buf);
+				appendToBuffer(buffer, buf, len);
+
+				*header = len;
+			}
+			break;
+
+		default:
+			LOG_ERROR("invalid jsonb scalar type");
+	}
+}
+
+Jsonb *
+convertToJsonb(JsonbValue *val)
+{
+	StringInfoData buffer;
+	JEntry		jentry;
+	Jsonb	   *res;
+
+	/* Should not already have binary representation */
+	assert(val->type != jbvBinary);
+
+	/* Allocate an output buffer. It will be enlarged as needed */
+	initStringInfo(&buffer);
+
+	/* Make room for the varlena header */
+	reserveFromBuffer(&buffer, VARHDRSZ);
+
+	convertJsonbValue(&buffer, &jentry, val, 0);
+
+	/*
+	 * Note: the JEntry of the root is discarded. Therefore the root
+	 * JsonbContainer struct must contain enough information to tell what kind
+	 * of value it is.
+	 */
+
+	res = (Jsonb *) buffer.data;
+
+	SET_VARSIZE(res, buffer.len);
+
+	return res;
+}
+
+Jsonb *
+JsonbValueToJsonb(JsonbValue *val)
+{
+	Jsonb	   *out;
+
+	if (IsAJsonbScalar(val))
+	{
+		/* Scalar value */
+		JsonbParseState *pstate = NULL;
+		JsonbValue *res;
+		JsonbValue	scalarArray;
+
+		scalarArray.type = jbvArray;
+		scalarArray.val.array.rawScalar = true;
+		scalarArray.val.array.nElems = 1;
+
+		pushJsonbValue(&pstate, WJB_BEGIN_ARRAY, &scalarArray);
+		pushJsonbValue(&pstate, WJB_ELEM, val);
+		res = pushJsonbValue(&pstate, WJB_END_ARRAY, NULL);
+
+		out = convertToJsonb(res);
+	}
+	else if (val->type == jbvObject || val->type == jbvArray)
+	{
+		out = convertToJsonb(val);
+	}
+	else
+	{
+		assert(val->type == jbvBinary);
+		out = (Jsonb *) palloc(VARHDRSZ + val->val.binary.len);
+		SET_VARSIZE(out, VARHDRSZ + val->val.binary.len);
+		memcpy(VARDATA(out), val->val.binary.data, val->val.binary.len);
+	}
+
+	return out;
 }
 
 void
