@@ -917,6 +917,17 @@ namespace indexer_helpers {
          */
         std::vector<uint64_t> _find_updated_secondary_indexes(Extent::Row existing_row, TuplePtr value);
 
+    private:
+        enum class MutationType { INSERT, APPEND, UPDATE, UPSERT, REMOVE, REMOVE_BY_SCAN };
+
+        /**
+         * Helper method to wrap callback and invoke cache mutation methods
+         * @param page   StorageCache Page in which value will be mutated
+         * @param value  TuplePtr to be mutated
+         */
+        template <MutationType m_type>
+        auto _mutation_wrapper(StorageCache::SafePagePtr &page, TuplePtr value);
+
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.

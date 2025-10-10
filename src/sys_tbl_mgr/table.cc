@@ -1056,6 +1056,45 @@ namespace indexer_helpers {
         return btree;
     }
 
+    template <MutableTable::MutationType m_type>
+    auto
+    MutableTable::_mutation_wrapper(StorageCache::SafePagePtr &page,
+                                    TuplePtr value)
+    {
+        // small helper that returns a lambda which calls the templated indexer helper
+        auto make_handler = [this]<indexer_helpers::IndexOperation op>() {
+            return [this](const Extent::Row& row) {
+                indexer_helpers::index_mutation_handler<op>(this->_schema, this->_secondary_indexes, row);
+            };
+        };
+
+        // single-op helpers
+        auto insert_handler = make_handler.template operator()<indexer_helpers::IndexOperation::Insert>();
+        auto remove_handler = make_handler.template operator()<indexer_helpers::IndexOperation::Remove>();
+
+        if constexpr (m_type == MutationType::INSERT) {
+            page->insert(value, _schema, insert_handler);
+
+        } else if constexpr (m_type == MutationType::APPEND) {
+            page->append(value, _schema, insert_handler);
+
+        } else if constexpr (m_type == MutationType::UPDATE) {
+            page->update(value, _schema, remove_handler, insert_handler);
+
+        } else if constexpr (m_type == MutationType::UPSERT) {
+            return page->upsert(value, _schema, remove_handler, insert_handler);
+
+        } else if constexpr (m_type == MutationType::REMOVE) {
+            page->remove(value, _schema, remove_handler);
+
+        } else if constexpr (m_type == MutationType::REMOVE_BY_SCAN) {
+            return page->try_remove_by_scan(value, _schema, remove_handler);
+
+        } else {
+            CHECK(false);
+        }
+    }
+
     void
     MutableTable::_insert_direct(TuplePtr value,
                                  uint64_t extent_id)
@@ -1070,10 +1109,7 @@ namespace indexer_helpers {
         _check_convert_page(page);
 
         // add the row to the page
-        page->insert(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                        this->_schema, this->_secondary_indexes, row);
-                });
+        _mutation_wrapper<MutationType::INSERT>(page, value);
     }
 
     void
@@ -1086,10 +1122,7 @@ namespace indexer_helpers {
         }
 
         // add the row to the page
-        (*_empty_page)->insert(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                        this->_schema, this->_secondary_indexes, row);
-                });
+        _mutation_wrapper<MutationType::INSERT>(*_empty_page, value);
     }
 
     void
@@ -1102,10 +1135,7 @@ namespace indexer_helpers {
         }
 
         // add the row to the page
-        (*_empty_page)->append(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                        this->_schema, this->_secondary_indexes, row);
-                });
+        _mutation_wrapper<MutationType::APPEND>(*_empty_page, value);
     }
 
     void
@@ -1134,10 +1164,7 @@ namespace indexer_helpers {
         _check_convert_page(page);
 
         // append the value to the extent
-        page->append(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                        this->_schema, this->_secondary_indexes, row);
-                });
+        _mutation_wrapper<MutationType::APPEND>(page, value);
     }
 
     void
@@ -1176,17 +1203,7 @@ namespace indexer_helpers {
         _check_convert_page(page);
 
         // add the row to the page
-        bool did_insert = page->upsert(value, _schema,
-                [this, value](const Extent::Row& row) {
-                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
-                            _schema, _secondary_indexes, row);
-                },
-                [this, value](const Extent::Row& row) {
-                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                            _schema, _secondary_indexes, row);
-                });
-
-        return did_insert;
+        return _mutation_wrapper<MutationType::UPSERT>(page, value);
     }
 
     bool
@@ -1199,15 +1216,7 @@ namespace indexer_helpers {
         }
 
         // add the row to the page
-        return (*_empty_page)->upsert(value, _schema,
-                [this, value](const Extent::Row& row) {
-                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
-                            _schema, _secondary_indexes, row);
-                },
-                [this, value](const Extent::Row& row) {
-                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                            _schema, _secondary_indexes, row);
-                });
+        return _mutation_wrapper<MutationType::UPSERT>(*_empty_page, value);
     }
 
     bool
@@ -1243,10 +1252,7 @@ namespace indexer_helpers {
 
         // remove the row from the page
         // note: this can only be used when a primary key is present, otherwise use _remove_by_scan()
-        page->remove(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
-                        this->_schema, this->_secondary_indexes, row);
-                });
+        _mutation_wrapper<MutationType::REMOVE>(page, value);
     }
 
     void
@@ -1256,10 +1262,7 @@ namespace indexer_helpers {
         CHECK(_empty_page != nullptr);
 
         // add the row to the page
-        (*_empty_page)->remove(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
-                        this->_schema, this->_secondary_indexes, row);
-                });
+        _mutation_wrapper<MutationType::REMOVE>(*_empty_page, value);
     }
 
     void
@@ -1296,10 +1299,7 @@ namespace indexer_helpers {
             CHECK(_empty_page != nullptr);
 
             // add the row to the page
-            (*_empty_page)->try_remove_by_scan(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
-                        this->_schema, this->_secondary_indexes, row);
-                });
+            _mutation_wrapper<MutationType::REMOVE_BY_SCAN>(*_empty_page, value);
             return;
         }
 
@@ -1320,10 +1320,7 @@ namespace indexer_helpers {
             _check_convert_page(page);
 
             // pass the value tuple and the schema down to the page
-            found = page->try_remove_by_scan(value, _schema, [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
-                        this->_schema, this->_secondary_indexes, row);
-                });
+            found = _mutation_wrapper<MutationType::REMOVE_BY_SCAN>(page, value);
 
             if (!found) {
                 ++i;
@@ -1378,15 +1375,7 @@ namespace indexer_helpers {
 
         // update the row in the page
         // note: this can only be used when a primary key is present, otherwise update should have been split
-        page->update(value, _schema,
-                [this, value](const Extent::Row& row) {
-                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Remove>(
-                            _schema, _secondary_indexes, row);
-                },
-                [this, value](const Extent::Row& row) {
-                    indexer_helpers::index_mutation_handler<indexer_helpers::IndexOperation::Insert>(
-                            _schema, _secondary_indexes, row);
-                });
+        _mutation_wrapper<MutationType::UPDATE>(page, value);
     }
 
     void
