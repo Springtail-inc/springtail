@@ -1406,7 +1406,6 @@ namespace indexer_helpers {
         auto search_key = _schema->tuple_subset(value, _primary_key);
         uint64_t extent_id = _get_extent_id(search_key);
 
-        LOG_INFO("GOT THE EXTENT BY LOOKUP:: {}", extent_id);
         // then we can do a direct update
         _update_direct(value, extent_id);
     }

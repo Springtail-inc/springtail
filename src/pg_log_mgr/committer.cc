@@ -630,8 +630,8 @@ namespace springtail::committer {
             switch (op) {
             case INSERT:
                 {
-                    internal_row_id_f->set_uint64(const_cast<Extent::Row *>(&row), table->get_next_internal_row_id());
                     ++tx_counters.inserts;
+                    internal_row_id_f->set_uint64(const_cast<Extent::Row *>(&row), table->get_next_internal_row_id());
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, constant::UNKNOWN_EXTENT);
