@@ -1616,7 +1616,7 @@ timestamp2tm(Timestamp dt, int *tzp, struct pg_tm *tm, fsec_t *fsec, const char 
 		tm->tm_zone = tx->tm_zone;
 		*tzp = -tm->tm_gmtoff;
 		if (tzn != nullptr)
-			*tzn = tm->tm_zone;
+			*tzn = tm->tm_zone.c_str();
 	}
 	else
 	{

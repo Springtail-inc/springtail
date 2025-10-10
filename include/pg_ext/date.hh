@@ -161,9 +161,8 @@ constexpr int TZ_STRLEN_MAX = 255;
 #define TIME_T_MIN MINVAL(pg_time_t, TYPE_BIT(pg_time_t))
 #define TIME_T_MAX MAXVAL(pg_time_t, TYPE_BIT(pg_time_t))
 
-#define WILDABBR	"   "
-
-static const char wildabbr[] = WILDABBR;
+constexpr char WILDABBR[] = "   ";
+static std::string wildabbr = WILDABBR;
 
 static const char gmt[] = "GMT";
 
@@ -176,7 +175,7 @@ static const char gmt[] = "GMT";
 
 #define TWOS_COMPLEMENT(t) ((t) ~ (t) 0 < 0)
 
-#define TZDEFAULT	"/etc/localtime"
+constexpr const char *TZDEFAULT = "/etc/localtime";
 
 extern int DateOrder;
 
@@ -198,7 +197,7 @@ struct pg_tm
 	int			tm_yday;
 	int			tm_isdst;
 	long int	tm_gmtoff;
-	const char *tm_zone;
+	std::string tm_zone;
 };
 
 struct ttinfo

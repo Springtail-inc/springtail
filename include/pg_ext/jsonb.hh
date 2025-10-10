@@ -55,9 +55,9 @@ constexpr uint32_t JENTRY_ISCONTAINER		= 0x50000000;	/* array or object */
 #define JsonContainerSize(jc)		((jc)->header & JB_CMASK)
 #define JsonContainerIsScalar(jc)	(((jc)->header & JB_FSCALAR) != 0)
 
-#define IsAJsonbScalar(jsonbval)	(((jsonbval)->type >= jbvNull && \
-									  (jsonbval)->type <= jbvBool) || \
-									  (jsonbval)->type == jbvDatetime)
+#define IsAJsonbScalar(jsonbval)	(((jsonbval)->type >= jbvType::jbvNull && \
+									  (jsonbval)->type <= jbvType::jbvBool) || \
+									  (jsonbval)->type == jbvType::jbvDatetime)
 
 /* Forward declarations */
 typedef struct JsonbPair JsonbPair;
@@ -65,7 +65,7 @@ typedef struct JsonbValue JsonbValue;
 typedef struct JsonbContainer JsonbContainer;
 typedef uint32_t JEntry;
 
-typedef enum JsonTokenType
+enum class JsonTokenType
 {
 	JSON_TOKEN_INVALID,
 	JSON_TOKEN_STRING,
@@ -80,9 +80,9 @@ typedef enum JsonTokenType
 	JSON_TOKEN_FALSE,
 	JSON_TOKEN_NULL,
 	JSON_TOKEN_END
-} JsonTokenType;
+};
 
-typedef enum JsonParseErrorType
+enum class JsonParseErrorType
 {
 	JSON_SUCCESS,
 	JSON_ESCAPING_INVALID,
@@ -104,9 +104,9 @@ typedef enum JsonParseErrorType
 	JSON_UNICODE_HIGH_SURROGATE,
 	JSON_UNICODE_LOW_SURROGATE,
 	JSON_SEM_ACTION_FAILED		/* error should already be reported */
-} JsonParseErrorType;
+};
 
-typedef enum
+enum class JsonbIteratorToken
 {
 	WJB_DONE,
 	WJB_KEY,
@@ -116,18 +116,18 @@ typedef enum
 	WJB_END_ARRAY,
 	WJB_BEGIN_OBJECT,
 	WJB_END_OBJECT
-} JsonbIteratorToken;
+};
 
-typedef enum
+enum class JsonbIterState
 {
 	JBI_ARRAY_START,
 	JBI_ARRAY_ELEM,
 	JBI_OBJECT_START,
 	JBI_OBJECT_KEY,
 	JBI_OBJECT_VALUE
-} JsonbIterState;
+};
 
-enum jbvType {
+enum class jbvType {
     /* Scalar types */
     jbvNull = 0x0,
     jbvString,
@@ -165,19 +165,19 @@ struct JsonbPair {
     uint32_t order;    /* Pair's index in original sequence */
 };
 
-typedef struct JsonbContainer {
+struct JsonbContainer {
     uint32_t header; /* number of elements or key/value pairs, and
                       * flags */
     JEntry children[FLEXIBLE_ARRAY_MEMBER];
 
     /* the data for each child node follows. */
-} JsonbContainer;
+};
 
-typedef struct
+struct Jsonb
 {
 	int32_t		vl_len_;		/* varlena header (do not touch directly!) */
 	JsonbContainer root;
-} Jsonb;
+};
 struct JsonbValue {
     enum jbvType type; /* Influences sort order */
 
@@ -214,16 +214,16 @@ struct JsonbValue {
         } datetime;
     } val;
 };
-typedef struct JsonbParseState
+struct JsonbParseState
 {
 	JsonbValue	contVal;
 	Size		size;
 	struct JsonbParseState *next;
 	bool		unique_keys;	/* Check object key uniqueness */
 	bool		skip_nulls;		/* Skip null object fields */
-} JsonbParseState;
+};
 
-typedef struct JsonbIterator
+struct JsonbIterator
 {
 	/* Container being iterated */
 	JsonbContainer *container;
@@ -251,9 +251,9 @@ typedef struct JsonbIterator
 	JsonbIterState state;
 
 	struct JsonbIterator *parent;
-} JsonbIterator;
+};
 
-typedef struct JsonLexContext
+struct JsonLexContext
 {
 	char	   *input;
 	int			input_length;
@@ -266,7 +266,7 @@ typedef struct JsonLexContext
 	int			line_number;	/* line number, starting from 1 */
 	char	   *line_start;		/* where that line starts within input */
 	StringInfo	strval;
-} JsonLexContext;
+};
 
 extern "C" PGEXT_API JsonbValue * pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq, JsonbValue *jbval);
 extern "C" PGEXT_API bool IsValidJsonNumber(const char *str, int len);

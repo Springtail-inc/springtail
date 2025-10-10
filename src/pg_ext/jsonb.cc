@@ -16,8 +16,8 @@ lengthCompareJsonbStringValue(const void *a, const void *b)
 	const JsonbValue *va = (const JsonbValue *) a;
 	const JsonbValue *vb = (const JsonbValue *) b;
 
-	assert(va->type == jbvString);
-	assert(vb->type == jbvString);
+	assert(va->type == jbvType::jbvString);
+	assert(vb->type == jbvType::jbvString);
 
 	return lengthCompareJsonbString(va->val.string.val, va->val.string.len,
 									vb->val.string.val, vb->val.string.len);
@@ -49,7 +49,7 @@ uniqueifyJsonbObject(JsonbValue *object, bool unique_keys, bool skip_nulls)
 {
 	bool		hasNonUniq = false;
 
-	assert(object->type == jbvObject);
+	assert(object->type == jbvType::jbvObject);
 
 	if (object->val.object.nPairs > 1)
 		qsort_r(object->val.object.pairs, object->val.object.nPairs, sizeof(JsonbPair),
@@ -64,7 +64,7 @@ uniqueifyJsonbObject(JsonbValue *object, bool unique_keys, bool skip_nulls)
 				   *res;
 
 		while (skip_nulls && object->val.object.nPairs > 0 &&
-			   object->val.object.pairs->value->type == jbvNull)
+			   object->val.object.pairs->value->type == jbvType::jbvNull)
 		{
 			/* If skip_nulls is true, remove leading items with null */
 			object->val.object.pairs++;
@@ -80,7 +80,7 @@ uniqueifyJsonbObject(JsonbValue *object, bool unique_keys, bool skip_nulls)
 			{
 				/* Avoid copying over duplicate or null */
 				if (lengthCompareJsonbStringValue(ptr, res) != 0 &&
-					(!skip_nulls || ptr->value->type != jbvNull))
+					(!skip_nulls || ptr->value->type != jbvType::jbvNull))
 				{
 					res++;
 					if (ptr != res)
@@ -99,8 +99,8 @@ appendKey(JsonbParseState *pstate, JsonbValue *string)
 {
 	JsonbValue *object = &pstate->contVal;
 
-	assert(object->type == jbvObject);
-	assert(string->type == jbvString);
+	assert(object->type == jbvType::jbvObject);
+	assert(string->type == jbvType::jbvString);
 
 	if (object->val.object.nPairs >= JSONB_MAX_PAIRS)
 		LOG_ERROR("number of jsonb object pairs exceeds the maximum allowed (%zu)", JSONB_MAX_PAIRS);
@@ -125,7 +125,7 @@ appendValue(JsonbParseState *pstate, JsonbValue *scalarVal)
 {
 	JsonbValue *object = &pstate->contVal;
 
-	assert(object->type == jbvObject);
+	assert(object->type == jbvType::jbvObject);
 
 	object->val.object.pairs[object->val.object.nPairs++].value = scalarVal;
 }
@@ -138,7 +138,7 @@ appendElement(JsonbParseState *pstate, JsonbValue *scalarVal)
 {
 	JsonbValue *array = &pstate->contVal;
 
-	assert(array->type == jbvArray);
+	assert(array->type == jbvType::jbvArray);
 
 	if (array->val.array.nElems >= JSONB_MAX_ELEMS)
 		LOG_ERROR("number of jsonb array elements exceeds the maximum allowed (%zu)", JSONB_MAX_ELEMS);
@@ -174,18 +174,18 @@ pushJsonbValueScalar(JsonbParseState **pstate, JsonbIteratorToken seq,
 
 	switch (seq)
 	{
-		case WJB_BEGIN_ARRAY:
+		case JsonbIteratorToken::WJB_BEGIN_ARRAY:
 			assert(!scalarVal || scalarVal->val.array.rawScalar);
 			*pstate = pushState(pstate);
 			result = &(*pstate)->contVal;
-			(*pstate)->contVal.type = jbvArray;
+			(*pstate)->contVal.type = jbvType::jbvArray;
 			(*pstate)->contVal.val.array.nElems = 0;
 			(*pstate)->contVal.val.array.rawScalar = (scalarVal &&
 													  scalarVal->val.array.rawScalar);
 			if (scalarVal && scalarVal->val.array.nElems > 0)
 			{
 				/* Assume that this array is still really a scalar */
-				assert(scalarVal->type == jbvArray);
+				assert(scalarVal->type == jbvType::jbvArray);
 				(*pstate)->size = scalarVal->val.array.nElems;
 			}
 			else
@@ -195,34 +195,34 @@ pushJsonbValueScalar(JsonbParseState **pstate, JsonbIteratorToken seq,
 			(*pstate)->contVal.val.array.elems = (JsonbValue *) palloc(sizeof(JsonbValue) *
 																(*pstate)->size);
 			break;
-		case WJB_BEGIN_OBJECT:
+		case JsonbIteratorToken::WJB_BEGIN_OBJECT:
 			assert(!scalarVal);
 			*pstate = pushState(pstate);
 			result = &(*pstate)->contVal;
-			(*pstate)->contVal.type = jbvObject;
+			(*pstate)->contVal.type = jbvType::jbvObject;
 			(*pstate)->contVal.val.object.nPairs = 0;
 			(*pstate)->size = 4;
 			(*pstate)->contVal.val.object.pairs = (JsonbPair *) palloc(sizeof(JsonbPair) *
 																 (*pstate)->size);
 			break;
-		case WJB_KEY:
-			assert(scalarVal->type == jbvString);
+		case JsonbIteratorToken::WJB_KEY:
+			assert(scalarVal->type == jbvType::jbvString);
 			appendKey(*pstate, scalarVal);
 			break;
-		case WJB_VALUE:
+		case JsonbIteratorToken::WJB_VALUE:
 			assert(IsAJsonbScalar(scalarVal));
 			appendValue(*pstate, scalarVal);
 			break;
-		case WJB_ELEM:
+		case JsonbIteratorToken::WJB_ELEM:
 			assert(IsAJsonbScalar(scalarVal));
 			appendElement(*pstate, scalarVal);
 			break;
-		case WJB_END_OBJECT:
+		case JsonbIteratorToken::WJB_END_OBJECT:
 			uniqueifyJsonbObject(&(*pstate)->contVal,
 								 (*pstate)->unique_keys,
 								 (*pstate)->skip_nulls);
 			/* fall through! */
-		case WJB_END_ARRAY:
+		case JsonbIteratorToken::WJB_END_ARRAY:
 			/* Steps here common to WJB_END_OBJECT case */
 			assert(!scalarVal);
 			result = &(*pstate)->contVal;
@@ -236,10 +236,10 @@ pushJsonbValueScalar(JsonbParseState **pstate, JsonbIteratorToken seq,
 			{
 				switch ((*pstate)->contVal.type)
 				{
-					case jbvArray:
+					case jbvType::jbvArray:
 						appendElement(*pstate, result);
 						break;
-					case jbvObject:
+					case jbvType::jbvObject:
 						appendValue(*pstate, result);
 						break;
 					default:
@@ -276,13 +276,13 @@ iteratorFromContainer(JsonbContainer *container, JsonbIterator *parent)
 			/* This is either a "raw scalar", or an array */
 			assert(!it->isScalar || it->nElems == 1);
 
-			it->state = JBI_ARRAY_START;
+			it->state = JsonbIterState::JBI_ARRAY_START;
 			break;
 
 		case JB_FOBJECT:
 			it->dataProper =
 				(char *) it->children + it->nElems * sizeof(JEntry) * 2;
-			it->state = JBI_OBJECT_START;
+			it->state = JsonbIterState::JBI_OBJECT_START;
 			break;
 
 		default:
@@ -359,34 +359,34 @@ fillJsonbValue(JsonbContainer *container, int index,
 
 	if (JBE_ISNULL(entry))
 	{
-		result->type = jbvNull;
+		result->type = jbvType::jbvNull;
 	}
 	else if (JBE_ISSTRING(entry))
 	{
-		result->type = jbvString;
-		result->val.string.val = base_addr + offset;
+		result->type = jbvType::jbvString;
 		result->val.string.len = getJsonbLength(container, index);
+		result->val.string.val = base_addr + offset;
 		assert(result->val.string.len >= 0);
 	}
 	else if (JBE_ISNUMERIC(entry))
 	{
-		result->type = jbvNumeric;
+		result->type = jbvType::jbvNumeric;
 		result->val.numeric = (Numeric) (base_addr + INTALIGN(offset));
 	}
 	else if (JBE_ISBOOL_TRUE(entry))
 	{
-		result->type = jbvBool;
+		result->type = jbvType::jbvBool;
 		result->val.boolean = true;
 	}
 	else if (JBE_ISBOOL_FALSE(entry))
 	{
-		result->type = jbvBool;
+		result->type = jbvType::jbvBool;
 		result->val.boolean = false;
 	}
 	else
 	{
 		assert(JBE_ISCONTAINER(entry));
-		result->type = jbvBinary;
+		result->type = jbvType::jbvBinary;
 		/* Remove alignment padding from data pointer and length */
 		result->val.binary.data = (JsonbContainer *) (base_addr + INTALIGN(offset));
 		result->val.binary.len = getJsonbLength(container, index) -
@@ -399,8 +399,8 @@ JsonbIteratorNext(JsonbIterator **it, JsonbValue *val, bool skipNested)
 {
 	if (*it == nullptr)
 	{
-		val->type = jbvNull;
-		return WJB_DONE;
+		val->type = jbvType::jbvNull;
+		return JsonbIteratorToken::WJB_DONE;
 	}
 
 	/*
@@ -412,9 +412,9 @@ JsonbIteratorNext(JsonbIterator **it, JsonbValue *val, bool skipNested)
 recurse:
 	switch ((*it)->state)
 	{
-		case JBI_ARRAY_START:
+		case JsonbIterState::JBI_ARRAY_START:
 			/* Set v to array on first array call */
-			val->type = jbvArray;
+			val->type = jbvType::jbvArray;
 			val->val.array.nElems = (*it)->nElems;
 
 			/*
@@ -426,10 +426,10 @@ recurse:
 			(*it)->curDataOffset = 0;
 			(*it)->curValueOffset = 0;	/* not actually used */
 			/* Set state for next call */
-			(*it)->state = JBI_ARRAY_ELEM;
-			return WJB_BEGIN_ARRAY;
+			(*it)->state = JsonbIterState::JBI_ARRAY_ELEM;
+			return JsonbIteratorToken::WJB_BEGIN_ARRAY;
 
-		case JBI_ARRAY_ELEM:
+		case JsonbIterState::JBI_ARRAY_ELEM:
 			if ((*it)->curIndex >= (*it)->nElems)
 			{
 				/*
@@ -439,8 +439,8 @@ recurse:
 				 * nesting).
 				 */
 				*it = freeAndGetParent(*it);
-				val->type = jbvNull;
-				return WJB_END_ARRAY;
+				val->type = jbvType::jbvNull;
+				return JsonbIteratorToken::WJB_END_ARRAY;
 			}
 
 			fillJsonbValue((*it)->container, (*it)->curIndex,
@@ -463,12 +463,12 @@ recurse:
 				 * Scalar item in array, or a container and caller didn't want
 				 * us to recurse into it.
 				 */
-				return WJB_ELEM;
+				return JsonbIteratorToken::WJB_ELEM;
 			}
 
-		case JBI_OBJECT_START:
+		case JsonbIterState::JBI_OBJECT_START:
 			/* Set v to object on first object call */
-			val->type = jbvObject;
+			val->type = jbvType::jbvObject;
 			val->val.object.nPairs = (*it)->nElems;
 
 			/*
@@ -480,10 +480,10 @@ recurse:
 			(*it)->curValueOffset = getJsonbOffset((*it)->container,
 												   (*it)->nElems);
 			/* Set state for next call */
-			(*it)->state = JBI_OBJECT_KEY;
-			return WJB_BEGIN_OBJECT;
+			(*it)->state = JsonbIterState::JBI_OBJECT_KEY;
+			return JsonbIteratorToken::WJB_BEGIN_OBJECT;
 
-		case JBI_OBJECT_KEY:
+		case JsonbIterState::JBI_OBJECT_KEY:
 			if ((*it)->curIndex >= (*it)->nElems)
 			{
 				/*
@@ -493,8 +493,8 @@ recurse:
 				 * of nesting).
 				 */
 				*it = freeAndGetParent(*it);
-				val->type = jbvNull;
-				return WJB_END_OBJECT;
+				val->type = jbvType::jbvNull;
+				return JsonbIteratorToken::WJB_END_OBJECT;
 			}
 			else
 			{
@@ -502,17 +502,17 @@ recurse:
 				fillJsonbValue((*it)->container, (*it)->curIndex,
 							   (*it)->dataProper, (*it)->curDataOffset,
 							   val);
-				if (val->type != jbvString)
+				if (val->type != jbvType::jbvString)
 					LOG_ERROR("unexpected jsonb type as object key");
 
 				/* Set state for next call */
-				(*it)->state = JBI_OBJECT_VALUE;
-				return WJB_KEY;
+				(*it)->state = JsonbIterState::JBI_OBJECT_VALUE;
+				return JsonbIteratorToken::WJB_KEY;
 			}
 
-		case JBI_OBJECT_VALUE:
+		case JsonbIterState::JBI_OBJECT_VALUE:
 			/* Set state for next call */
-			(*it)->state = JBI_OBJECT_KEY;
+			(*it)->state = JsonbIterState::JBI_OBJECT_KEY;
 
 			fillJsonbValue((*it)->container, (*it)->curIndex + (*it)->nElems,
 						   (*it)->dataProper, (*it)->curValueOffset,
@@ -535,13 +535,13 @@ recurse:
 				goto recurse;
 			}
 			else
-				return WJB_VALUE;
+				return JsonbIteratorToken::WJB_VALUE;
 	}
 
 	LOG_ERROR("invalid jsonb iterator state");
 	/* satisfy compilers that don't know that elog(ERROR) doesn't return */
-	val->type = jbvNull;
-	return WJB_DONE;
+	val->type = jbvType::jbvNull;
+	return JsonbIteratorToken::WJB_DONE;
 }
 
 JsonbValue *
@@ -554,31 +554,31 @@ pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 	JsonbIteratorToken tok;
 	int i;
 
-	if (jbval && (seq == WJB_ELEM || seq == WJB_VALUE) && jbval->type == jbvObject)
+	if (jbval && (seq == JsonbIteratorToken::WJB_ELEM || seq == JsonbIteratorToken::WJB_VALUE) && jbval->type == jbvType::jbvObject)
 	{
-		pushJsonbValue(pstate, WJB_BEGIN_OBJECT, nullptr);
+		pushJsonbValue(pstate, JsonbIteratorToken::WJB_BEGIN_OBJECT, nullptr);
 		for (i = 0; i < jbval->val.object.nPairs; i++)
 		{
-			pushJsonbValue(pstate, WJB_KEY, jbval->val.object.pairs[i].key);
-			pushJsonbValue(pstate, WJB_VALUE, jbval->val.object.pairs[i].value);
+			pushJsonbValue(pstate, JsonbIteratorToken::WJB_KEY, jbval->val.object.pairs[i].key);
+			pushJsonbValue(pstate, JsonbIteratorToken::WJB_VALUE, jbval->val.object.pairs[i].value);
 		}
 
-		return pushJsonbValue(pstate, WJB_END_OBJECT, nullptr);
+		return pushJsonbValue(pstate, JsonbIteratorToken::WJB_END_OBJECT, nullptr);
 	}
 
-	if (jbval && (seq == WJB_ELEM || seq == WJB_VALUE) && jbval->type == jbvArray)
+	if (jbval && (seq == JsonbIteratorToken::WJB_ELEM || seq == JsonbIteratorToken::WJB_VALUE) && jbval->type == jbvType::jbvArray)
 	{
-		pushJsonbValue(pstate, WJB_BEGIN_ARRAY, nullptr);
+		pushJsonbValue(pstate, JsonbIteratorToken::WJB_BEGIN_ARRAY, nullptr);
 		for (i = 0; i < jbval->val.array.nElems; i++)
 		{
-			pushJsonbValue(pstate, WJB_ELEM, &jbval->val.array.elems[i]);
+			pushJsonbValue(pstate, JsonbIteratorToken::WJB_ELEM, &jbval->val.array.elems[i]);
 		}
 
-		return pushJsonbValue(pstate, WJB_END_ARRAY, nullptr);
+		return pushJsonbValue(pstate, JsonbIteratorToken::WJB_END_ARRAY, nullptr);
 	}
 
-	if (!jbval || (seq != WJB_ELEM && seq != WJB_VALUE) ||
-		jbval->type != jbvBinary)
+	if (!jbval || (seq != JsonbIteratorToken::WJB_ELEM && seq != JsonbIteratorToken::WJB_VALUE) ||
+		jbval->type != jbvType::jbvBinary)
 	{
 		/* drop through */
 		return pushJsonbValueScalar(pstate, seq, jbval);
@@ -590,25 +590,25 @@ pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 	if ((jbval->val.binary.data->header & JB_FSCALAR) && *pstate)
 	{
 		tok = JsonbIteratorNext(&it, &v, true);
-		assert(tok == WJB_BEGIN_ARRAY);
-		assert(v.type == jbvArray && v.val.array.rawScalar);
+		assert(tok == JsonbIteratorToken::WJB_BEGIN_ARRAY);
+		assert(v.type == jbvType::jbvArray && v.val.array.rawScalar);
 
 		tok = JsonbIteratorNext(&it, &v, true);
-		assert(tok == WJB_ELEM);
+		assert(tok == JsonbIteratorToken::WJB_ELEM);
 
 		res = pushJsonbValueScalar(pstate, seq, &v);
 
 		tok = JsonbIteratorNext(&it, &v, true);
-		assert(tok == WJB_END_ARRAY);
+		assert(tok == JsonbIteratorToken::WJB_END_ARRAY);
 		assert(it == nullptr);
 
 		return res;
 	}
 
-	while ((tok = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
+	while ((tok = JsonbIteratorNext(&it, &v, false)) != JsonbIteratorToken::WJB_DONE)
 		res = pushJsonbValueScalar(pstate, tok,
-								   tok < WJB_BEGIN_ARRAY ||
-								   (tok == WJB_BEGIN_ARRAY &&
+								   tok < JsonbIteratorToken::WJB_BEGIN_ARRAY ||
+								   (tok == JsonbIteratorToken::WJB_BEGIN_ARRAY &&
 									v.val.array.rawScalar) ? &v : nullptr);
 
 	return res;
@@ -814,10 +814,10 @@ json_lex_number(JsonLexContext *lex, char *s,
 		lex->token_terminator = s;
 		/* handle error if any */
 		if (error)
-			return JSON_INVALID_TOKEN;
+			return JsonParseErrorType::JSON_INVALID_TOKEN;
 	}
 
-	return JSON_SUCCESS;
+	return JsonParseErrorType::JSON_SUCCESS;
 }
 
 bool
@@ -924,9 +924,9 @@ convertJsonbValue(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
 
 	if (IsAJsonbScalar(val))
 		convertJsonbScalar(buffer, header, val);
-	else if (val->type == jbvArray)
+	else if (val->type == jbvType::jbvArray)
 		convertJsonbArray(buffer, header, val, level);
-	else if (val->type == jbvObject)
+	else if (val->type == jbvType::jbvObject)
 		convertJsonbObject(buffer, header, val, level);
 	else
 		LOG_ERROR("unknown type of jsonb container to convert");
@@ -1125,17 +1125,17 @@ convertJsonbScalar(StringInfo buffer, JEntry *header, JsonbValue *scalarVal)
 
 	switch (scalarVal->type)
 	{
-		case jbvNull:
+		case jbvType::jbvNull:
 			*header = JENTRY_ISNULL;
 			break;
 
-		case jbvString:
+		case jbvType::jbvString:
 			appendToBuffer(buffer, scalarVal->val.string.val, scalarVal->val.string.len);
 
 			*header = scalarVal->val.string.len;
 			break;
 
-		case jbvNumeric:
+		case jbvType::jbvNumeric:
 			numlen = VARSIZE_ANY(scalarVal->val.numeric);
 			padlen = padBufferToInt(buffer);
 
@@ -1144,12 +1144,12 @@ convertJsonbScalar(StringInfo buffer, JEntry *header, JsonbValue *scalarVal)
 			*header = JENTRY_ISNUMERIC | (padlen + numlen);
 			break;
 
-		case jbvBool:
+		case jbvType::jbvBool:
 			*header = (scalarVal->val.boolean) ?
 				JENTRY_ISBOOL_TRUE : JENTRY_ISBOOL_FALSE;
 			break;
 
-		case jbvDatetime:
+		case jbvType::jbvDatetime:
 			{
 				char		buf[MAXDATELEN + 1];
 				size_t		len;
@@ -1178,7 +1178,7 @@ convertToJsonb(JsonbValue *val)
 	Jsonb	   *res;
 
 	/* Should not already have binary representation */
-	assert(val->type != jbvBinary);
+	assert(val->type != jbvType::jbvBinary);
 
 	/* Allocate an output buffer. It will be enlarged as needed */
 	initStringInfo(&buffer);
@@ -1213,23 +1213,23 @@ JsonbValueToJsonb(JsonbValue *val)
 		JsonbValue *res;
 		JsonbValue	scalarArray;
 
-		scalarArray.type = jbvArray;
+		scalarArray.type = jbvType::jbvArray;
 		scalarArray.val.array.rawScalar = true;
 		scalarArray.val.array.nElems = 1;
 
-		pushJsonbValue(&pstate, WJB_BEGIN_ARRAY, &scalarArray);
-		pushJsonbValue(&pstate, WJB_ELEM, val);
-		res = pushJsonbValue(&pstate, WJB_END_ARRAY, nullptr);
+		pushJsonbValue(&pstate, JsonbIteratorToken::WJB_BEGIN_ARRAY, &scalarArray);
+		pushJsonbValue(&pstate, JsonbIteratorToken::WJB_ELEM, val);
+		res = pushJsonbValue(&pstate, JsonbIteratorToken::WJB_END_ARRAY, nullptr);
 
 		out = convertToJsonb(res);
 	}
-	else if (val->type == jbvObject || val->type == jbvArray)
+	else if (val->type == jbvType::jbvObject || val->type == jbvType::jbvArray)
 	{
 		out = convertToJsonb(val);
 	}
 	else
 	{
-		assert(val->type == jbvBinary);
+		assert(val->type == jbvType::jbvBinary);
 		out = (Jsonb *) palloc(VARHDRSZ + val->val.binary.len);
 		SET_VARSIZE(out, VARHDRSZ + val->val.binary.len);
 		memcpy(VARDATA(out), val->val.binary.data, val->val.binary.len);
