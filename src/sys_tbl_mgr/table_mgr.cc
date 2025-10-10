@@ -106,7 +106,7 @@ namespace springtail {
 
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
-                                                  _table_base, schema->get_sort_keys(), secondary_keys,
+                                                  _table_base, schema_with_row_id->get_sort_keys(), secondary_keys,
                                                   tbl_meta, schema_with_row_id, false);
     }
 
