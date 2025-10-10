@@ -70,7 +70,7 @@ namespace springtail::constant {
      * Name of the internal row ID for the rows in the table,
      * to be used in the look-aside index for secondary indexes
      */
-    static const std::string INTERNAL_ROW_ID = "internal_row_id";
+    static const std::string INTERNAL_ROW_ID = "__springtail_internal_row_id";
 
     /** The format of a raw data file name. */
     static constexpr std::string_view DATA_FILE = "raw";
