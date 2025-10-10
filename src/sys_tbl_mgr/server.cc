@@ -695,7 +695,7 @@ Server::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
 }
 
 void
-Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata)
+Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata, bool force_stats_update)
 {
     proto::UpdateRootsRequest request;
     request.set_db_id(db_id);
@@ -720,7 +720,7 @@ Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
     boost::shared_lock lock(_write_mutex);
 
     // update the metadata and return
-    _update_roots(request);
+    _update_roots(request, force_stats_update);
 }
 
 void
@@ -1069,7 +1069,7 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
     // 6. update the metadata of the table
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Update roots: {}:{} @ {}:{}", create_req.db_id(),
                         create_req.table().id(), create_req.xid(), create_req.lsn());
-    this->_update_roots(roots_req);
+    this->_update_roots(roots_req, true);
 
     // 7. serialize the ddl json and return
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Response: {}", nlohmann::to_string(ddls));
@@ -1581,7 +1581,7 @@ Server::_create_table(const proto::TableRequest& request)
     ri->set_extent_id(constant::UNKNOWN_EXTENT);
     roots_info->set_snapshot_xid(request.snapshot_xid());
 
-    _set_roots_info(request.db_id(), request.table().id(), xid, roots_info);
+    _set_roots_info(request.db_id(), request.table().id(), xid, roots_info, true);
 
     // add schemas entries for each column
     std::vector<proto::ColumnHistory> columns;
@@ -1750,7 +1750,7 @@ Server::_mutate_namespace(
 }
 
 void
-Server::_update_roots(const proto::UpdateRootsRequest& request)
+Server::_update_roots(const proto::UpdateRootsRequest& request, bool force_stats_update)
 {
     XidLsn xid(request.xid());
 
@@ -1759,7 +1759,7 @@ Server::_update_roots(const proto::UpdateRootsRequest& request)
     *info->mutable_stats() = request.stats();
     info->set_snapshot_xid(request.snapshot_xid());
 
-    _set_roots_info(request.db_id(), request.table_id(), xid, info);
+    _set_roots_info(request.db_id(), request.table_id(), xid, info, force_stats_update);
 }
 
 XidLsn
@@ -2465,7 +2465,8 @@ void
 Server::_set_roots_info(uint64_t db_id,
                          uint64_t table_id,
                          const XidLsn& xid,
-                         RootsCacheRecordPtr roots_info)
+                         RootsCacheRecordPtr roots_info,
+                         bool force_stats_update)
 {
     // cache the roots info
     {
@@ -2499,9 +2500,7 @@ Server::_set_roots_info(uint64_t db_id,
         }
     }
 
-    if (commit_stats) {
-        // TODO: make table stats updates optional or move to a separate API
-        // update the table_stats
+    if (commit_stats || force_stats_update) {
         auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
         auto tuple =
             sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count());

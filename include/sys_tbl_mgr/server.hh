@@ -117,7 +117,7 @@ public:
      * @brief Update roots API cal
      */
     void
-    update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata);
+    update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata, bool force_stats_update = false);
 
     /**
      * @brief Finalize API cal
@@ -285,11 +285,14 @@ private:
      * We don't finalize the system tables so they may remain dirty in the StorageCache.  Nothing
      * from the cache is not evicted until _clear_roots_info() is called.
      * @param table_info The metadata to update.
+     * @param force_stats_update If true, we will update the table stats
      */
     void _set_roots_info(uint64_t db_id,
                          uint64_t table_id,
                          const XidLsn& xid,
-                         RootsCacheRecordPtr roots_info);
+                         RootsCacheRecordPtr roots_info,
+                         bool force_stats_update);
+
 
     /**
      * Clears the cache of TableCacheRecord objects.  Called by finalize() once the system tables
@@ -607,7 +610,7 @@ private:
     /**
      * Performs an update_roots() assuming that the correct locks are already held.
      */
-    void _update_roots(const proto::UpdateRootsRequest& request);
+    void _update_roots(const proto::UpdateRootsRequest& request, bool force_stats_update=false);
 
     /** Performs an set_index_state() assuming that the correct locks are already held.
      */
