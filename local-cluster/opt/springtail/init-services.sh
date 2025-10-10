@@ -57,6 +57,17 @@ echo "production: True" >> ${INSTALL_DIR}/stc/coordinator/config.yaml
 echo "log_rotation_size: 104857600" >> ${INSTALL_DIR}/stc/coordinator/config.yaml
 echo "log_rotation_count: 10" >> ${INSTALL_DIR}/stc/coordinator/config.yaml
 
+# Service specific initialization
+if [ "$SERVICE_NAME" == "ingestion" ]; then
+  echo "Tightening the certs permissions"
+  chmod 400 /certs/*.pem
+fi
+
+if [ "$SERVICE_NAME" == "proxy" ]; then
+  echo "Tightening the certs permissions"
+  chmod 400 /certs/*.pem
+fi
+
 if [ "$SERVICE_NAME" == "fdw" ]; then
   echo "Starting the bootstrap FDW Custom PG"
   CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1 ansible-playbook -i localhost, -c local "${INSTALL_DIR}/customize-pg.yml" --extra-vars "username=${FDW_USER}"
