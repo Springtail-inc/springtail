@@ -467,7 +467,7 @@ namespace {
         _finalize();
 
         // add more data to the table
-        _server->update_roots(_db, tid, _xid.xid, {{{0, 100}}, {30}}, true);
+        _server->update_roots(_db, tid, _xid.xid, {{{0, 100}}, {30}}, false);
         _finalize();
 
         // rename col2 => coltwo
