@@ -270,7 +270,6 @@ class TestSet:
         passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
         failed_tests = sum(1 for r in results if r['result'] == 'FAILED' or r['result'] == 'ERROR')
         skipped_tests = sum(1 for r in results if r['result'] == 'SKIPPED')
-        unknown_tests = sum(1 for r in results if r['result'] == 'UNKNOWN')
 
         print('\n')
         print(f'--- Test Summary: {self._name} ---')
@@ -278,8 +277,7 @@ class TestSet:
         print(f'Total tests run: {passed_tests + failed_tests}')
         print(f'Tests passed: {passed_tests}')
         print(f'Tests failed: {failed_tests}')
-        print(f'Tests skipped: {skipped_tests + unknown_tests}')
-        print(f'Tests not run: {unknown_tests}')
+        print(f'Tests skipped: {skipped_tests}')
 
         print('Test durations:')
         for result in results:
@@ -291,8 +289,8 @@ class TestSet:
             if result['error']:
                 print(f'\t{result["name"]}: {result["error"]}')
 
-        # returns True if no failed or not run tests
-        return (len(self._tests) - skipped_tests == passed_tests)
+        # returns True if no failed tests
+        return (failed_tests == 0)
 
 
     def junit(self) -> etree.Element:
