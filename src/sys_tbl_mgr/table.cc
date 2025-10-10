@@ -52,7 +52,6 @@ namespace indexer_helpers {
             const ExtentSchemaPtr          &schema)
     {
         /* 1. Column metadata is the same for every row - fetch it once. */
-        //const auto column_names = schema->get_column_names(idx_cols);
         const auto key_fields   = schema->get_fields(idx_cols);
 
         /* 2. Build the (extent_id , row_id) value tuple incrementally. */
