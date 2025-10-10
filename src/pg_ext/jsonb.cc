@@ -13,8 +13,8 @@ lengthCompareJsonbString(const char *val1, int len1, const char *val2, int len2)
 static int
 lengthCompareJsonbStringValue(const void *a, const void *b)
 {
-	const JsonbValue *va = (const JsonbValue *) a;
-	const JsonbValue *vb = (const JsonbValue *) b;
+	auto va = (const JsonbValue *) a;
+	auto vb = (const JsonbValue *) b;
 
 	assert(va->type == jbvType::jbvString);
 	assert(vb->type == jbvType::jbvString);
@@ -26,11 +26,10 @@ lengthCompareJsonbStringValue(const void *a, const void *b)
 static int
 lengthCompareJsonbPair(const void *a, const void *b, void *binequal)
 {
-	const JsonbPair *pa = (const JsonbPair *) a;
-	const JsonbPair *pb = (const JsonbPair *) b;
-	int			res;
+	auto pa = (const JsonbPair *) a;
+	auto pb = (const JsonbPair *) b;
 
-	res = lengthCompareJsonbStringValue(&pa->key, &pb->key);
+	int res = lengthCompareJsonbStringValue(&pa->key, &pb->key);
 	if (res == 0 && binequal)
 		*((bool *) binequal) = true;
 
@@ -60,8 +59,7 @@ uniqueifyJsonbObject(JsonbValue *object, bool unique_keys, bool skip_nulls)
 
 	if (hasNonUniq || skip_nulls)
 	{
-		JsonbPair  *ptr,
-				   *res;
+		JsonbPair  *ptr, *res;
 
 		while (skip_nulls && object->val.object.nPairs > 0 &&
 			   object->val.object.pairs->value->type == jbvType::jbvNull)
@@ -134,7 +132,7 @@ appendValue(JsonbParseState *pstate, JsonbValue *scalarVal)
  * pushJsonbValue() worker:  Append an element to state when generating a Jsonb
  */
 static void
-appendElement(JsonbParseState *pstate, JsonbValue *scalarVal)
+appendElement(JsonbParseState *pstate, const JsonbValue *scalarVal)
 {
 	JsonbValue *array = &pstate->contVal;
 
@@ -206,15 +204,24 @@ pushJsonbValueScalar(JsonbParseState **pstate, JsonbIteratorToken seq,
 																 (*pstate)->size);
 			break;
 		case JsonbIteratorToken::WJB_KEY:
-			assert(scalarVal->type == jbvType::jbvString);
+			if (!scalarVal)
+				LOG_ERROR("unexpected null jsonb key");
+			if (scalarVal->type != jbvType::jbvString)
+				LOG_ERROR("unexpected jsonb type as object key");
 			appendKey(*pstate, scalarVal);
 			break;
 		case JsonbIteratorToken::WJB_VALUE:
-			assert(IsAJsonbScalar(scalarVal));
+			if (!scalarVal)
+				LOG_ERROR("unexpected null jsonb value");
+			if (!IsAJsonbScalar(scalarVal))
+				LOG_ERROR("invalid non-scalar jsonb value");
 			appendValue(*pstate, scalarVal);
 			break;
 		case JsonbIteratorToken::WJB_ELEM:
-			assert(IsAJsonbScalar(scalarVal));
+			if (!scalarVal)
+				LOG_ERROR("unexpected null jsonb array element");
+			if (!IsAJsonbScalar(scalarVal))
+				LOG_ERROR("invalid non-scalar jsonb array element");
 			appendElement(*pstate, scalarVal);
 			break;
 		case JsonbIteratorToken::WJB_END_OBJECT:
@@ -257,9 +264,7 @@ pushJsonbValueScalar(JsonbParseState **pstate, JsonbIteratorToken seq,
 static JsonbIterator *
 iteratorFromContainer(JsonbContainer *container, JsonbIterator *parent)
 {
-	JsonbIterator *it;
-
-	it = (JsonbIterator *) palloc0(sizeof(JsonbIterator));
+	auto it = (JsonbIterator *) palloc0(sizeof(JsonbIterator));
 	it->container = container;
 	it->parent = parent;
 	it->nElems = JsonContainerSize(container);
@@ -332,7 +337,7 @@ uint32_t
 getJsonbLength(const JsonbContainer *jc, int index)
 {
 	uint32_t		off;
-	uint32_t		len;
+	uint32_t		len = 0;
 
 	/*
 	 * If the length is stored directly in the JEntry, just return it.
@@ -351,7 +356,7 @@ getJsonbLength(const JsonbContainer *jc, int index)
 }
 
 void
-fillJsonbValue(JsonbContainer *container, int index,
+fillJsonbValue(const JsonbContainer *container, int index,
 			   char *base_addr, uint32_t offset,
 			   JsonbValue *result)
 {

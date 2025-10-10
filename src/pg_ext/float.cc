@@ -5,8 +5,7 @@
 
 #include <common/logging.hh>
 
-int extra_float_digits = 1;
-#define DOUBLE_SHORTEST_DECIMAL_LEN 25
+const int extra_float_digits = 1;
 
 char *
 float8out_internal(double num)

@@ -12,8 +12,7 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
-#define BITOID 1560
-#define VARBITOID 1562
+#include <postgresql/server/catalog/pg_type_d.h>
 
 /* See: https://www.postgresql.org/docs/current/datatype.html for postgres types */
 

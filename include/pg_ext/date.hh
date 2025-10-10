@@ -128,9 +128,6 @@ static const int mon_lengths[2][MONSPERYEAR] = {
 	{31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
 };
 
-extern const char *months[];
-extern const char *days[];
-
 constexpr int TZ_MAX_TIMES = 2000;
 /* This must be at least 17 for Europe/Samara and Europe/Vilnius.  */
 constexpr int TZ_MAX_TYPES = 256;		/* Limited by what (unsigned char)'s can hold */
@@ -162,7 +159,7 @@ constexpr int TZ_STRLEN_MAX = 255;
 #define TIME_T_MAX MAXVAL(pg_time_t, TYPE_BIT(pg_time_t))
 
 constexpr char WILDABBR[] = "   ";
-static std::string wildabbr = WILDABBR;
+static const std::string wildabbr = WILDABBR;
 
 static const char gmt[] = "GMT";
 
@@ -176,14 +173,11 @@ static const char gmt[] = "GMT";
 #define TWOS_COMPLEMENT(t) ((t) ~ (t) 0 < 0)
 
 constexpr const char *TZDEFAULT = "/etc/localtime";
-
-extern int DateOrder;
-
-typedef struct
+struct TimeTzADT
 {
 	TimeADT		time;			/* all time units other than months and years */
 	int32_t		zone;			/* numeric time zone, in seconds */
-} TimeTzADT;
+};
 
 struct pg_tm
 {
@@ -258,7 +252,7 @@ struct tzhead
 	char		tzh_charcnt[4]; /* coded number of abbr. chars */
 };
 
-enum r_type
+enum class r_type
 {
 	JULIAN_DAY,					/* Jn = Julian day */
 	DAY_OF_YEAR,				/* n = day of year */
@@ -300,6 +294,10 @@ union local_storage
 	/* We don't need the "fullname" member */
 };
 
+/* Global variables */
+extern const char * const months[];
+extern const char * const days[];
+extern const int DateOrder;
 extern pg_tz *session_timezone;
 extern struct pg_tm tm;
 

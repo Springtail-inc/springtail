@@ -36,8 +36,8 @@ constexpr int32_t ALIGNOF_SHORT = 2;
 
 #define AssertMacro(condition)	((void)true)
 
-#define MAXPGPATH		1024
-#define PG_BINARY	0
+constexpr int MAXPGPATH = 1024;
+constexpr int PG_BINARY = 0;
 #define INITIALIZE(x)	((x) = 0)
 
 static const uint8_t pg_leftmost_one_pos[256] = {

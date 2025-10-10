@@ -2,11 +2,11 @@
 
 #include <fcntl.h>
 
-const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", nullptr};
-const char *days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", nullptr};
+const char * const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", nullptr};
+const char * const days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", nullptr};
 pg_tz *session_timezone = nullptr;
 struct pg_tm tm;
-int DateOrder = DATEORDER_MDY;
+const int DateOrder = DATEORDER_MDY;
 
 DateADT
 DatumGetDateADT(Datum X)
@@ -331,7 +331,7 @@ getrule(const char *strp, struct rule *const rulep)
 		/*
 		 * Julian day.
 		 */
-		rulep->r_type = JULIAN_DAY;
+		rulep->r_type = r_type::JULIAN_DAY;
 		++strp;
 		strp = getnum(strp, &rulep->r_day, 1, DAYSPERNYEAR);
 	}
@@ -340,7 +340,7 @@ getrule(const char *strp, struct rule *const rulep)
 		/*
 		 * Month, week, day.
 		 */
-		rulep->r_type = MONTH_NTH_DAY_OF_WEEK;
+		rulep->r_type = r_type::MONTH_NTH_DAY_OF_WEEK;
 		++strp;
 		strp = getnum(strp, &rulep->r_mon, 1, MONSPERYEAR);
 		if (strp == nullptr)
@@ -359,7 +359,7 @@ getrule(const char *strp, struct rule *const rulep)
 		/*
 		 * Day of year.
 		 */
-		rulep->r_type = DAY_OF_YEAR;
+		rulep->r_type = r_type::DAY_OF_YEAR;
 		strp = getnum(strp, &rulep->r_day, 0, DAYSPERLYEAR - 1);
 	}
 	else
@@ -398,7 +398,7 @@ transtime(const int year, const struct rule *const rulep,
 	switch (rulep->r_type)
 	{
 
-		case JULIAN_DAY:
+		case r_type::JULIAN_DAY:
 
 			/*
 			 * Jn - Julian day, 1 == January 1, 60 == March 1 even in leap
@@ -411,7 +411,7 @@ transtime(const int year, const struct rule *const rulep,
 				value += SECSPERDAY;
 			break;
 
-		case DAY_OF_YEAR:
+		case r_type::DAY_OF_YEAR:
 
 			/*
 			 * n - day of year. Just add SECSPERDAY times the day number to
@@ -420,7 +420,7 @@ transtime(const int year, const struct rule *const rulep,
 			value = rulep->r_day * SECSPERDAY;
 			break;
 
-		case MONTH_NTH_DAY_OF_WEEK:
+		case r_type::MONTH_NTH_DAY_OF_WEEK:
 
 			/*
 			 * Mm.n.d - nth "dth day" of month m.

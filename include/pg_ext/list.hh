@@ -5,17 +5,17 @@
 #include <pg_ext/common.hh>
 
 #define FLEXIBLE_ARRAY_MEMBER
-#define LIST_INITIAL_ALLOC 4
+constexpr int LIST_INITIAL_ALLOC = 4;
 
-typedef union ListCell
+union ListCell
 {
 	void	   *ptr_value;
 	int			int_value;
 	Oid			oid_value;
 	TransactionId xid_value;
-} ListCell;
+};
 
-typedef struct List
+struct List
 {
 	NodeTag		type;			/* T_List, T_IntList, T_OidList, or T_XidList */
 	int			length;			/* number of elements currently present */
@@ -24,14 +24,14 @@ typedef struct List
 	/* We may allocate some cells along with the List header: */
 	ListCell	initial_elements[FLEXIBLE_ARRAY_MEMBER];
 	/* If elements == initial_elements, it's not a separate allocation */
-} List;
+};
 
 
-typedef struct ForEachState
+struct ForEachState
 {
 	const List *l;				/* list we're looping through */
 	int			i;				/* current element index */
-} ForEachState;
+};
 
 #define lfirst(lc) ((lc)->ptr_value)
 
