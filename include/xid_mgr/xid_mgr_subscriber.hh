@@ -1,4 +1,5 @@
 #include <proto/xid_manager.grpc.pb.h>
+#include <condition_variable>
 #include <grpc/grpc_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -29,8 +30,6 @@ struct XidMgrSubscriber : public grpc::ClientReadReactor<proto::XidPushResponse>
     XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks cb);
     ~XidMgrSubscriber();
 
-    void cancel();
-
 private:
     // GRPC callbacks
     void OnReadDone(bool ok) override;
@@ -43,6 +42,10 @@ private:
 
     grpc::ClientContext _context;
     proto::XidPushResponse _push_response;
+
+    std::mutex _mutex;
+    std::condition_variable _cv;
+    bool _finished = false;
 };
 
 }
