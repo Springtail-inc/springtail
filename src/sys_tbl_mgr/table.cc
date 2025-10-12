@@ -566,15 +566,13 @@ namespace indexer_helpers {
                                const std::vector<std::string> &primary_key,
                                const std::vector<Index> &secondary,
                                const TableMetadata &metadata,
-                               ExtentSchemaPtr schema,
-                               bool for_gc)
+                               ExtentSchemaPtr schema)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
       _target_xid(target_xid),
       _primary_key(primary_key),
-      _schema(schema),
-      _for_gc(for_gc)
+      _schema(schema)
     {
         std::vector<TableRoot> roots;
         _snapshot_xid = metadata.snapshot_xid;
@@ -904,9 +902,14 @@ namespace indexer_helpers {
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
         if (_empty_page) {
-            _flush_and_populate_indexes(_empty_page->ptr());
-            // this will release the page to the cache
-            _empty_page.reset();
+            // if the empty page is empty, then we don't need to do anything here
+            if (!(*_empty_page)->empty()) {
+                _flush_and_populate_indexes(_empty_page->ptr());
+                DCHECK(!(*_empty_page)->dirty());
+
+                // this will release the page to the cache
+                _empty_page.reset();
+            }
         }
 
         // flush the dirty data pages of the table to disk

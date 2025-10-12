@@ -896,6 +896,10 @@ namespace springtail {
                 return _extents.size();
             }
 
+            bool dirty() const {
+                return _is_dirty;
+            }
+
         public:
             // MUTATIONS
             // note: all mutations will invalidate an Iterator on the page

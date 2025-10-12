@@ -58,127 +58,148 @@ namespace springtail::committer {
             // update the coordinator
             Coordinator::mark_alive(keep_alive);
 
-            // figure out if there's an XID to process
+            // figure out if there are XIDs to process
             // note: this is a blocking call that will timeout after keep_alive secs
-            auto result = _committer_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (result == nullptr) {
+            auto results = _committer_queue->pop_all(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (results.empty()) {
                 continue; // got a timeout, try again
             }
 
-            // perform rotation if needed
-            uint64_t db_id = result->db();
+            // clear batch state from previous iteration
+            _batch_state.clear();
 
-            // Process index recovery first as this message doesnt require xid
-            // or timestamp processing for xact_log
-            if (result->type() == XidReady::Type::INDEX_RECOVERY_TRIGGER) {
-                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Initiate indexes recovery: {}", db_id);
-                _indexer->recover_indexes(db_id);
-                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexes recovery initiated: {}", db_id);
-                continue;
-            }
+            // process all messages, grouping by db_id and handling special cases
+            while (!results.empty()) {
+                auto result = results.front();
+                results.pop();
 
-            uint64_t timestamp = result->timestamp();
-            uint64_t stored_timestamp = 0;
-            auto emplace_result = _db_to_timestamp.try_emplace(db_id, timestamp);
-            if (!emplace_result.second) {
-                // set stored_timestamp
-                stored_timestamp = emplace_result.first->second;
-            }
-            if (timestamp > stored_timestamp) {
-                xid_mgr::XidMgrServer::get_instance()->rotate(db_id, timestamp);
-                emplace_result.first->second = timestamp;
-            }
+                uint64_t db_id = result->db();
 
-            auto token_1 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
+                // Process index recovery first as this message doesnt require xid
+                // or timestamp processing for xact_log
+                if (result->type() == XidReady::Type::INDEX_RECOVERY_TRIGGER) {
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Initiate indexes recovery: {}", db_id);
+                    _indexer->recover_indexes(db_id);
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexes recovery initiated: {}", db_id);
+                    continue;
+                }
 
-            // handle a TABLE_SYNC_START
-            if (result->type() == XidReady::Type::TABLE_SYNC_START) {
-                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Stop committing due to table sync: {}", db_id);
-                // stop performing commits on this db until the table syncs are complete and aligned
-                _block_commit.insert(db_id);
+                uint64_t timestamp = result->timestamp();
+                uint64_t stored_timestamp = 0;
+                auto emplace_result = _db_to_timestamp.try_emplace(db_id, timestamp);
+                if (!emplace_result.second) {
+                    // set stored_timestamp
+                    stored_timestamp = emplace_result.first->second;
+                }
+                if (timestamp > stored_timestamp) {
+                    xid_mgr::XidMgrServer::get_instance()->rotate(db_id, timestamp);
+                    emplace_result.first->second = timestamp;
+                }
 
-                continue;
-            }
+                auto token_1 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
 
-            // initialize the most recently completed XID for this database if needed
-            uint64_t completed_xid;
-            auto itr = _completed_xids.find(db_id);
-            if (itr == _completed_xids.end()) {
-                completed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
-                _completed_xids[db_id] = completed_xid;
-            } else {
-                completed_xid = itr->second;
-            }
+                // handle a TABLE_SYNC_START - commit any pending batch for this db first
+                if (result->type() == XidReady::Type::TABLE_SYNC_START) {
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Stop committing due to table sync: {}", db_id);
 
-            auto token_2 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
-            LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
-
-            // handle a TABLE_SYNC_COMMIT
-            if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
-                result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
-                LOG_DEBUG(
-                    LOG_COMMITTER, LOG_LEVEL_DEBUG1,
-                    "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}, request xid @{}",
-                    static_cast<char>(result->type()), db_id, completed_xid, result->swap().xid());
-                CHECK_GT(result->swap().xid(), completed_xid);
-
-                // note: we used to bundle the commit onto the previous XID, but now the XID is guaranteed to be in-order
-                completed_xid = result->swap().xid();
-                nlohmann::json ddls = result->swap().ddls();
-                auto swapped_tids = result->swap().tids();
-
-                auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
-
-                // pre-commit the DDLs in case there's a failure
-                _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
-                _has_ddl_precommit = true;
-
-                if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
-                    // finalize the system metadata
-                    sys_tbl_mgr::Server::get_instance()->finalize(db_id, completed_xid);
-
-                    // perform a commit to the XidMgr
-                    xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true);
-
-                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, completed_xid);
-                    // notify the FDW of the schema changes
-                    if (_has_ddl_precommit) {
-                        _redis_ddl.commit_ddl(db_id, completed_xid);
-                        _has_ddl_precommit = false;
+                    // commit any pending batch for this database before blocking
+                    auto batch_it = _batch_state.find(db_id);
+                    if (batch_it != _batch_state.end()) {
+                        uint64_t completed_xid = _completed_xids[db_id];
+                        _commit_batch(db_id, batch_it->second, completed_xid, keep_alive);
+                        _batch_state.erase(batch_it);
                     }
 
-                    for (const auto swapped_tid: swapped_tids) {
-                        // Notify vacuumer to expire old table snapshot
-                        // Send completed_xid - 1 to get the previous old snapshot dir
-                        // and then expire that at the completed_xid
-                        auto swapped_table_old_dir = TableMgr::get_instance()->get_table_data_dir(db_id, swapped_tid, completed_xid - 1);
-                        if (swapped_table_old_dir.has_value()) {
-                            Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir.value(), completed_xid);
-                        }
-                    }
+                    // stop performing commits on this db until the table syncs are complete and aligned
+                    _block_commit.insert(db_id);
+                    continue;
+                }
+
+                // initialize the most recently completed XID for this database if needed
+                uint64_t completed_xid;
+                auto itr = _completed_xids.find(db_id);
+                if (itr == _completed_xids.end()) {
+                    completed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
+                    _completed_xids[db_id] = completed_xid;
                 } else {
-                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Record DDL changes db {} xid {}", db_id, completed_xid);
-                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true);
-                }
-                _completed_xids[db_id] = completed_xid;
-                WriteCacheServer::get_instance()->evict_xid(db_id, completed_xid);
-
-                if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
-                    // notify everyone that the database is now in the "ready" state
-                    redis::db_state_change::set_db_state(db_id,
-                                                         redis::db_state_change::DB_STATE_RUNNING);
-
-                    // allow commits on future XIDs
-                    _block_commit.erase(db_id);
+                    completed_xid = itr->second;
                 }
 
-                continue;
+                auto token_2 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
+                LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
+
+                // handle a TABLE_SYNC_COMMIT or TABLE_SYNC_SWAP
+                // note: no need to commit batch since SYNC_START already blocked commits
+                if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
+                    result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
+                    CHECK_GT(result->swap().xid(), completed_xid);
+                    _handle_table_sync_message(result, db_id);
+                    continue;
+                }
+
+                // handle RECONCILE_INDEX - must commit pending batch first since reconciliation
+                // depends on previous XIDs being committed
+                if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+                    auto batch_it = _batch_state.find(db_id);
+                    if (batch_it != _batch_state.end()) {
+                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1,
+                                  "Committing batch before RECONCILE_INDEX for db {}", db_id);
+                        _commit_batch(db_id, batch_it->second, completed_xid, keep_alive);
+                        _batch_state.erase(batch_it);
+                        // update completed_xid for this database
+                        completed_xid = _completed_xids[db_id];
+                    }
+                }
+
+                // handle XACT_MSG or RECONCILE_INDEX - process mutations and accumulate in batch
+                _handle_transaction_message(result, db_id, completed_xid, keep_alive);
             }
 
-            // note: from here we know we have an XACT_MSG or RECONCILE_INDEX
-            // XXX: Once we confirm we can commit the index at table's last XID safely,
-            //      we can remove the type RECONCILE_INDEX
-            CHECK(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
+            // commit all accumulated batches
+            for (auto& [db_id, batch] : _batch_state) {
+                uint64_t completed_xid = _completed_xids[db_id];
+                _commit_batch(db_id, batch, completed_xid, keep_alive);
+            }
+        }
+
+        // join all of the worker threads
+        for (auto &thread : _worker_threads) {
+            thread.join();
+        }
+
+        // unregister the thread on shutdown
+        coordinator->unregister_thread(daemon_type, "committer");
+
+        _indexer.reset();
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committer shutdown");
+    }
+
+    void
+    Committer::_commit_batch(
+        uint64_t db_id,
+        BatchState& batch,
+        uint64_t completed_xid,
+        std::atomic<uint64_t>& keep_alive)
+    {
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committing batch for db {} with {} XIDs",
+                  db_id, batch.xid_results.size());
+
+        // finalize all tables in the batch
+        for (auto& [tid, table] : batch.table_cache) {
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Finalizing table {}", tid);
+
+            constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+            Coordinator::get_instance()->unregister_thread(daemon_type, "committer");
+
+            auto metadata = table->finalize();
+
+            Coordinator::get_instance()->register_thread(daemon_type, "committer");
+
+            sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, batch.last_xid, metadata);
+        }
+
+        // process each XID in the batch
+        for (auto& result : batch.xid_results) {
             uint64_t xid = 0;
             uint64_t pg_xid = 0;
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
@@ -187,62 +208,13 @@ namespace springtail::committer {
                 xid = result->xact().xid();
                 pg_xid = result->xact().pg_xid();
             }
-            auto token_4 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
-            LOG_INFO("Process XID: {}@{}", db_id, xid);
-            assert(xid > completed_xid);
 
-            // check if there were DDL mutations as part of this txn, invalidate the schema cache
-            // accordingly
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processing batch XID: {}@{}", db_id, xid);
+
+            // get DDL changes for this XID
             nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
-            if (!completed_ddls.is_null()) {
-                _invalidate_systbl_cache(db_id, completed_ddls);
-            }
 
-            // find every table associated with this XID
-            uint64_t table_cursor = 0;
-            bool tid_done = false;
-            while (!tid_done) {
-                // query the write cache for the tables modified through this XID
-                auto table_list = WriteCacheServer::get_instance()->list_tables(db_id, xid, 100, table_cursor);
-
-                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Got {} tables from the write cache", table_list.size());
-
-                // check if we are done processing this XID
-                if (table_list.empty()) {
-                    tid_done = true;
-                    break;
-                }
-
-                for (auto tid : table_list) {
-                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Pass table {} to a worker", tid);
-                    // mark this table as in-flight
-                    {
-                        boost::unique_lock lock(_mutex);
-                        _tid_set.emplace(tid);
-                    }
-
-                    // pass each table to a worker thread to process it's mutations
-                    auto entry = std::make_shared<WorkerEntry>(db_id, tid, completed_xid, xid);
-                    _worker_queue.push(entry);
-                }
-
-                // update the coordinator
-                Coordinator::mark_alive(keep_alive);
-            }
-
-            // wait for tables to complete their processing
-            // XXX ideally we could start working on the next XID while the finalize() operations
-            //     are being completed.
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Wait for {} tables to complete", _tid_set.size());
-            {
-                boost::unique_lock lock(_mutex);
-                while (!_cv.wait_for(lock, boost::chrono::seconds(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT),
-                                     [this]() { return _tid_set.empty(); })) {
-                    Coordinator::mark_alive(keep_alive); // update the coordinator
-                }
-            }
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "All table processing complete for XID {}", xid);
-
+            // handle index operations
             auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
 
             // Trigger index reconciliation for the earliest pending XID
@@ -261,11 +233,16 @@ namespace springtail::committer {
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
+            bool is_last_xid = (xid == batch.last_xid);
+
             if (!_block_commit.contains(db_id)) {
-                // finalize the system metadata
-                // note: we do this even without DDL changes to ensure the primary and secondary
-                //       index root offsets are written to disk
-                sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
+                // only finalize system metadata once at the end
+                if (is_last_xid) {
+                    // finalize the system metadata
+                    // note: we do this even without DDL changes to ensure the primary and secondary
+                    //       index root offsets are written to disk
+                    sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
+                }
 
                 // Check and notify vacuumer about dropped tables
                 if (!completed_ddls.is_null()) {
@@ -280,40 +257,179 @@ namespace springtail::committer {
                 // Sync expired extents on the XID with vacuum
                 Vacuumer::get_instance()->commit_expired_extents(db_id, xid);
 
-                // commit the completed XID
-                xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
+                // use record_mapping for intermediate XIDs, commit_xid only for last
+                if (is_last_xid) {
+                    // commit the completed XID
+                    xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
 
-                // push completed DDL changes to the FDWs
-                if (_has_ddl_precommit) {
-                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, xid);
-                    _redis_ddl.commit_ddl(db_id, xid);
-                    _has_ddl_precommit = false;
+                    // push completed DDL changes to the FDWs
+                    if (_has_ddl_precommit) {
+                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, xid);
+                        _redis_ddl.commit_ddl(db_id, xid);
+                        _has_ddl_precommit = false;
+                    }
+                } else {
+                    // for intermediate XIDs, just record the mapping
+                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
                 }
-
             } else {
                 // don't commit, but record any DDL changes to the history
                 xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
             }
+
             _completed_xids[db_id] = xid;
 
             if (result->type() != XidReady::Type::RECONCILE_INDEX) {
                 result->notify_tracker(xid);
             }
+
+            // evict from write cache
             WriteCacheServer::get_instance()->evict_xid(db_id, xid);
 
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
         }
 
-        // join all of the worker threads
-        for (auto &thread : _worker_threads) {
-            thread.join();
+        // clear the table cache for this batch
+        batch.table_cache.clear();
+    }
+
+    void
+    Committer::_handle_table_sync_message(const std::shared_ptr<XidReady>& result,
+                                          uint64_t db_id)
+    {
+        uint64_t completed_xid = result->swap().xid();
+        nlohmann::json ddls = result->swap().ddls();
+        auto swapped_tids = result->swap().tids();
+
+        LOG_DEBUG(
+            LOG_COMMITTER, LOG_LEVEL_DEBUG1,
+            "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, request xid @{}",
+            static_cast<char>(result->type()), db_id, completed_xid);
+
+        auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
+
+        // pre-commit the DDLs in case there's a failure
+        _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
+        _has_ddl_precommit = true;
+
+        if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
+            // finalize the system metadata
+            sys_tbl_mgr::Server::get_instance()->finalize(db_id, completed_xid);
+
+            // perform a commit to the XidMgr
+            xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true);
+
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, completed_xid);
+            // notify the FDW of the schema changes
+            if (_has_ddl_precommit) {
+                _redis_ddl.commit_ddl(db_id, completed_xid);
+                _has_ddl_precommit = false;
+            }
+
+            for (const auto swapped_tid: swapped_tids) {
+                // Notify vacuumer to expire old table snapshot
+                // Send completed_xid - 1 to get the previous old snapshot dir
+                // and then expire that at the completed_xid
+                auto swapped_table_old_dir = TableMgr::get_instance()->get_table_data_dir(db_id, swapped_tid, completed_xid - 1);
+                if (swapped_table_old_dir.has_value()) {
+                    Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir.value(), completed_xid);
+                }
+            }
+        } else {
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Record DDL changes db {} xid {}", db_id, completed_xid);
+            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true);
+        }
+        _completed_xids[db_id] = completed_xid;
+        WriteCacheServer::get_instance()->evict_xid(db_id, completed_xid);
+
+        if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
+            // notify everyone that the database is now in the "ready" state
+            redis::db_state_change::set_db_state(db_id,
+                                                 redis::db_state_change::DB_STATE_RUNNING);
+
+            // allow commits on future XIDs
+            _block_commit.erase(db_id);
+        }
+    }
+
+    void
+    Committer::_handle_transaction_message(const std::shared_ptr<XidReady>& result,
+                                           uint64_t db_id,
+                                           uint64_t completed_xid,
+                                           std::atomic<uint64_t>& keep_alive)
+    {
+        // note: from here we know we have an XACT_MSG or RECONCILE_INDEX
+        // XXX: Once we confirm we can commit the index at table's last XID safely,
+        //      we can remove the type RECONCILE_INDEX
+        CHECK(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
+        uint64_t xid = 0;
+        if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+            xid = result->reconcile().xid();
+        } else {
+            xid = result->xact().xid();
+        }
+        auto token_4 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
+        LOG_INFO("Process XID: {}@{}", db_id, xid);
+        assert(xid > completed_xid);
+
+        // accumulate this XID in the batch state
+        auto& batch = _batch_state[db_id];
+        batch.xid_results.push_back(result);
+        if (batch.first_xid == 0) {
+            batch.first_xid = xid;
+        }
+        batch.last_xid = xid;
+
+        // check if there were DDL mutations as part of this txn, invalidate the schema cache
+        // accordingly
+        nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+        if (!completed_ddls.is_null()) {
+            _invalidate_systbl_cache(db_id, completed_ddls);
         }
 
-        // unregister the thread on shutdown
-        coordinator->unregister_thread(daemon_type, "committer");
+        // find every table associated with this XID
+        uint64_t table_cursor = 0;
+        bool tid_done = false;
+        while (!tid_done) {
+            // query the write cache for the tables modified through this XID
+            auto table_list = WriteCacheServer::get_instance()->list_tables(db_id, xid, 100, table_cursor);
 
-        _indexer.reset();
-        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committer shutdown");
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Got {} tables from the write cache", table_list.size());
+
+            // check if we are done processing this XID
+            if (table_list.empty()) {
+                tid_done = true;
+                break;
+            }
+
+            for (auto tid : table_list) {
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Pass table {} to a worker", tid);
+                // mark this table as in-flight
+                {
+                    boost::unique_lock lock(_mutex);
+                    _tid_set.emplace(tid);
+                }
+
+                // pass each table to a worker thread to process it's mutations
+                auto entry = std::make_shared<WorkerEntry>(db_id, tid, completed_xid, xid);
+                _worker_queue.push(entry);
+            }
+
+            // update the coordinator
+            Coordinator::mark_alive(keep_alive);
+        }
+
+        // wait for tables to complete their processing
+        // Note: finalization (finalize, update_roots, commit) is now deferred until _commit_batch()
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Wait for {} tables to complete", _tid_set.size());
+        {
+            boost::unique_lock lock(_mutex);
+            while (!_cv.wait_for(lock, boost::chrono::seconds(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT),
+                                 [this]() { return _tid_set.empty(); })) {
+                Coordinator::mark_alive(keep_alive); // update the coordinator
+            }
+        }
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "All table processing complete for XID {}", xid);
     }
 
     void
@@ -486,8 +602,22 @@ namespace springtail::committer {
             return;
         }
 
-        // construct the mutable table object
-        auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
+        // get or create the mutable table object from batch cache
+        auto& batch = _batch_state[db_id];
+        MutableTablePtr table;
+
+        auto table_it = batch.table_cache.find(tid);
+        if (table_it != batch.table_cache.end()) {
+            // reuse existing table from batch
+            table = table_it->second;
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Reusing table {} from batch cache", tid);
+        } else {
+            // create new mutable table with target_xid set to last xid in batch
+            uint64_t target_xid = (batch.last_xid > 0) ? batch.last_xid : xid;
+            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, target_xid);
+            batch.table_cache[tid] = table;
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, target_xid);
+        }
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
@@ -525,23 +655,8 @@ namespace springtail::committer {
         TIME_TRACE_STOP(process_extents_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_extents-xid_{}", xid), process_extents_trace);
 
-        // XXX we are doing this because the finalize can take a long time.  What we should do
-        //     instead is update the cache to use async IO so that we can initiate all of the page
-        //     flush requests and then perform the keep-alives while waiting for completion
-        Coordinator::get_instance()->unregister_thread(daemon_type, thread_name);
-
-        time_trace::Trace finalize_trace;
-        TIME_TRACE_START(finalize_trace);
-        // finalize the table
-        auto &&metadata = table->finalize();
-        TIME_TRACE_STOP(finalize_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("finalize-xid_{}", xid), finalize_trace);
-
-        // XXX see above comment, need to change this
-        Coordinator::get_instance()->register_thread(daemon_type, thread_name);
-
-        // update the system table roots
-        sys_tbl_mgr::Server::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
+        // Note: finalize() and update_roots() are now deferred until _commit_batch()
+        // This allows us to batch multiple XIDs' mutations to the same table before finalizing
 
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_MESSAGES, tx_counters.messages);
         open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_INSERTS, tx_counters.inserts);

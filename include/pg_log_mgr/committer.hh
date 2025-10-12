@@ -9,6 +9,7 @@
 
 #include <common/concurrent_queue.hh>
 #include <common/constants.hh>
+#include <common/coordinator.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/properties.hh>
@@ -150,6 +151,55 @@ namespace springtail::committer {
          */
         bool _shift_to_xid(SchemaMetadata &meta, const XidLsn &xid);
 
+        /**
+         * Handle TABLE_SYNC_COMMIT and TABLE_SYNC_SWAP message types.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         */
+        void _handle_table_sync_message(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id
+        );
+
+        /**
+         * Handle XACT_MSG and RECONCILE_INDEX message types.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         * @param completed_xid The most recent XID we completed processing
+         * @param keep_alive Reference to the coordinator keep-alive
+         */
+        void _handle_transaction_message(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id,
+            uint64_t completed_xid,
+            std::atomic<uint64_t>& keep_alive
+        );
+
+    private:
+        /**
+         * Batch state tracked per database during batch processing
+         */
+        struct BatchState {
+            std::map<uint64_t, MutableTablePtr> table_cache;  ///< tid → MutableTable
+            std::vector<std::shared_ptr<XidReady>> xid_results;  ///< All XidReady messages for this db
+            uint64_t first_xid = 0;
+            uint64_t last_xid = 0;
+        };
+
+        /**
+         * Commits all accumulated changes for a single database batch.
+         * @param db_id The database ID
+         * @param batch The batch state to commit
+         * @param completed_xid The XID we started from
+         * @param keep_alive Reference to the coordinator keep-alive
+         */
+        void _commit_batch(
+            uint64_t db_id,
+            BatchState& batch,
+            uint64_t completed_xid,
+            std::atomic<uint64_t>& keep_alive
+        );
+
     private:
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
@@ -158,6 +208,11 @@ namespace springtail::committer {
          * Table worker threads in the committer
          */
         uint32_t _worker_count;
+
+        /**
+         * Batch processing state per database. Maps db_id → BatchState
+         */
+        std::map<uint64_t, BatchState> _batch_state;
 
         /**
          * Indexer worker threads to process indexes

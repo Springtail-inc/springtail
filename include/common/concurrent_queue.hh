@@ -124,6 +124,50 @@ namespace springtail {
         }
 
         /**
+         * @brief Pop all entries from queue in one operation, optionally waiting for entries
+         * @param seconds timeout in seconds
+         * @return std::queue<Tptr> all entries currently in queue, empty queue if no entries
+         *         found either due to timeout or shutdown
+         */
+        std::queue<Tptr> pop_all(uint32_t seconds = 0)
+        {
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            while (_queue.empty() && !_shutdown) {
+                // wait on cv until not empty
+                if (seconds) {
+                    // wait for the requested number of seconds
+                    _cv_pop.wait_for(write_lock, std::chrono::seconds(seconds));
+                    if (_queue.empty() && !_shutdown) {
+                        // timeout
+                        return std::queue<Tptr>();
+                    }
+                } else {
+                    // wait indefinitely
+                    _cv_pop.wait(write_lock);
+                }
+            }
+
+            if (_queue.empty()) {
+                write_lock.unlock();
+                if (_shutdown) {
+                    _cv_shutdown.notify_all();
+                }
+                return std::queue<Tptr>();
+            }
+
+            // Efficiently extract all items by swapping with an empty queue
+            std::queue<Tptr> result;
+            std::swap(_queue, result);
+
+            write_lock.unlock();
+
+            // Notify any threads waiting to push (in case we had a bounded queue)
+            _cv_push.notify_all();
+
+            return result;
+        }
+
+        /**
          * @brief Peek at the front of the queue without unlocking
          * Note: another thread may pop this item between front() and pop(); so use carefully
          * @return std::shared_ptr<T> element at front of queue
