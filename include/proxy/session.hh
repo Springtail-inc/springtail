@@ -295,6 +295,9 @@ namespace springtail::pg_proxy {
          * @return false if connection is open
          */
         virtual bool is_connection_closed() const {
+            if (_connection == nullptr) {
+                return true;
+            }
             return _connection->closed();
         }
 

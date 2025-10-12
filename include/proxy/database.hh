@@ -44,25 +44,17 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Destroy the Database Pool object
-         *
          */
-        ~DatabasePool()
-        {
-            while (!_cache.empty()) {
-                _evict_next();
-            }
-        }
+        ~DatabasePool() { shutdown(); }
 
         /**
          * @brief Add new session to the database pool
-         *
          * @param session - new session
          */
         void add_session(ServerSessionPtr session);
 
         /**
          * @brief Get an existing session from the database pool
-         *
          * @param db_id - database id
          * @param username - user name
          * @return ServerSessionPtr - session pointer
@@ -83,7 +75,7 @@ namespace springtail::pg_proxy {
          *
          * @param db_id - database id
          */
-        void evict(uint64_t db_id);
+        void evict_db(uint64_t db_id);
 
         /**
          * @brief This function will evict the oldest expired session when
@@ -94,13 +86,19 @@ namespace springtail::pg_proxy {
         void evict_expired_sessions();
 
         /**
+         * @brief Evict the session with the given id from the pool
+         * @param session_id - session id
+         */
+        void evict_session(uint64_t session_id);
+
+        /**
          * @brief Get the total number of sessions stored in the pool
          * @return size_t
          */
         size_t size() const
         {
             std::shared_lock lock(_mutex);
-            return _cache.size();
+            return _lru.size();
         }
 
         /**
@@ -129,6 +127,11 @@ namespace springtail::pg_proxy {
          */
         void shutdown();
 
+        /**
+         * @brief Dump the current state of the database pool
+         */
+        void dump();
+
     private:
         mutable std::shared_mutex _mutex;                       ///< mutex for pool
         using SessionKey = std::pair<uint64_t, std::string>;    ///< typedef for session key, that is database id and user name pair
@@ -138,12 +141,19 @@ namespace springtail::pg_proxy {
          */
         struct SessionEntry {
             SessionKey key;                 ///< session key
-            ServerSessionWeakPtr value;     ///< session value
+            ServerSessionPtr value;         ///< session value
             uint64_t expiration_time;       ///< storage expiration time
         };
 
-        std::map<SessionKey, std::deque<typename std::list<SessionEntry>::iterator>> _lookup; ///< A map that holds the entries.
-        std::list<SessionEntry> _cache;     ///< An ordered list of objects for priority removal
+        /** Lookup map for session entries by key {db_id, username} */
+        std::map<SessionKey, std::deque<typename std::list<SessionEntry>::iterator>> _lookup;
+
+        /** Map for session entries by session id */
+        std::unordered_map<uint64_t, std::list<SessionEntry>::iterator> _session_id_map;
+
+        /** Ordered list of session entries for priority removal */
+        std::list<SessionEntry> _lru;
+
         size_t _size_limit;                 ///< Maximum number of sessions that can be stored in cache
         size_t _timeout_limit;              ///< Maximum number of sessions that can be stored in cache without expiration
         uint64_t _expiration_interval;      ///< Expiration interval
@@ -151,27 +161,15 @@ namespace springtail::pg_proxy {
         /**
          * @brief Remove entry for the given session key
          * @param key - session key
+         * @return ServerSessionPtr - removed session pointer
          */
-        void _remove_entry(const SessionKey &key);
+        ServerSessionPtr _remove_entry(const SessionKey &key);
 
         /**
          * @brief Evict next session from the cache.
+         * @return ServerSessionPtr - evicted session pointer
          */
-        void _evict_next();
-
-        /**
-         * @brief Insert new session into the cache
-         * @param key - session key
-         * @param value - session
-         */
-        void _insert(const SessionKey &key, ServerSessionWeakPtr value);
-
-        /**
-         * @brief Get the most recently used session for the given key and user
-         * @param key - session key
-         * @return ServerSessionPtr - session
-         */
-        ServerSessionPtr _get(const SessionKey &key);
+        ServerSessionPtr _evict_next();
     };
     using DatabasePoolPtr = std::shared_ptr<DatabasePool>;
 
@@ -275,12 +273,6 @@ namespace springtail::pg_proxy {
             const std::string &database);
 
         /**
-         * @brief Get the database pool
-         * @return DatabasePoolPtr
-         */
-        DatabasePoolPtr get_pool() { return _pool; }
-
-        /**
          * @brief Remove session from active sessions map
          * Called from ServerSession destructor
          * @param session_id session id
@@ -305,6 +297,97 @@ namespace springtail::pg_proxy {
             return _active_sessions.size() - _pool->size();
         }
 
+        /**
+         * @brief Get the database pool size
+         * @return int number of pooled sessions
+         */
+        int pooled_session_count() {
+            return _pool->size();
+        }
+
+        /**
+         * @brief Does the pool have a session for the given db_id and user
+         * @param db_id database id
+         * @param username username
+         * @return true
+         * @return false
+         */
+        bool has_pooled_session(uint64_t db_id, const std::string &username) {
+            return _pool->has_session(db_id, username);
+        }
+
+        /**
+         * @brief Get a session from the pool for the given db_id and user
+         * @param db_id database id
+         * @param username username
+         * @return ServerSessionPtr session or nullptr if no session available
+         */
+        ServerSessionPtr get_pooled_session(uint64_t db_id, const std::string &username) {
+            auto session = _pool->get_session(db_id, username);
+            DCHECK_GE(_active_sessions.size(), _pool->size());
+            return session;
+        }
+
+        /**
+         * @brief Release expired sessions from the pool
+         */
+        void release_expired_sessions() {
+            _pool->evict_expired_sessions();
+        }
+
+        /**
+         * @brief Evict all sessions for the given database id from the pool
+         * @param db_id database id
+         */
+        void evict_pooled_sessions(uint64_t db_id) {
+            _pool->evict_db(db_id);
+        }
+
+        /**
+         * @brief Release session back to pool, or deallocate session
+         * On deallocate, the session is removed from the pool, if it was there,
+         * the session destructor will call back into remove_session() which
+         * will remove it from the active sessions map.
+         * @param session session to release
+         * @param deallocate deallocate session, if false add back to pool,
+         *                   otherwise session will ultimately be destroyed
+         */
+        void release_session(ServerSessionPtr session, bool deallocate=false)
+        {
+            if (deallocate) {
+                _pool->evict_session(session->id());
+            } else {
+                _pool->add_session(session);
+            }
+            if (_active_sessions.size() < _pool->size()) {
+                LOG_ERROR("Active sessions {} less than pooled sessions {}",
+                          _active_sessions.size(), _pool->size());
+                dump();
+            }
+            DCHECK_GE(_active_sessions.size(), _pool->size());
+        }
+
+        /**
+         * @brief Dump the current state of the database instance sessions
+         */
+        void dump();
+
+    protected: // for testing
+        /** map of active sessions by id, includes all allocated sessions (incl. pooled) */
+        std::unordered_map<uint64_t, ServerSessionWeakPtr> _active_sessions;
+        std::shared_mutex _active_sessions_mutex;   ///< mutex for active sessions map
+
+        /**
+         * @brief Add session to active sessions map
+         * Called from allocate_session() and can be called from test code
+         * @param session session to add
+         */
+        void _add_session(ServerSessionPtr session) {
+            std::unique_lock lock(_active_sessions_mutex);
+            _active_sessions[session->id()] = session;
+            DCHECK_GE(_active_sessions.size(), _pool->size());
+        }
+
     private:
         std::atomic<InstanceState> _state{InstanceState::ACTIVE}; ///< state of instance
         DatabasePoolPtr _pool{nullptr};      ///< free connections pool for this instance
@@ -313,10 +396,6 @@ namespace springtail::pg_proxy {
         std::string _replica_db_prefix;      ///< prefix to be used for replica database
         std::string _replica_id;             ///< unique id used for identifying replica (fdw)
         int _port;                           ///< port of instance
-
-        /** map of active sessions by id, includes all allocated sessions */
-        std::unordered_map<uint64_t, ServerSessionWeakPtr> _active_sessions;
-        std::shared_mutex _active_sessions_mutex;   ///< mutex for active sessions map
 
         /** shutdown callback */
         std::function<void(DatabaseInstancePtr)> _shutdown_callback{nullptr};
@@ -390,14 +469,12 @@ namespace springtail::pg_proxy {
         void shutdown_instance(DatabaseInstancePtr instance)
         {
             std::unique_lock lock(_base_mutex);
-            instance->initiate_shutdown();
-            _active_instances.erase(instance);
-            _shutdown_pending_instances.insert(instance);
+            _shutdown_instance(instance, lock);
         }
 
     protected:
         /**
-         * @brief Add a database instance to the database set
+         * @brief Add a database instance to the instance set
          * @param instance database instance
          * @param lock unique_lock on _base_mutex
          * Note: caller must hold the lock
@@ -405,6 +482,9 @@ namespace springtail::pg_proxy {
         void _add_instance(DatabaseInstancePtr instance, std::unique_lock<std::shared_mutex> &lock)
         {
             DCHECK(lock.owns_lock());
+            DCHECK(instance->is_active());
+            _active_instances.insert(instance);
+            lock.unlock();
             instance->register_shutdown_callback([this, instance](DatabaseInstancePtr) {
                 std::unique_lock lock(_base_mutex);
                 _remove_instance(instance, lock);
@@ -412,17 +492,37 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Remove instance from the replica set
+         * @brief Remove instance from the instance set; must be in _shutdown_pending_instances
          * @param instance database instance
+         * @param lock unique_lock on _base_mutex
+         * Note: caller must hold the lock
          */
-         void _remove_instance(DatabaseInstancePtr instance, std::unique_lock<std::shared_mutex> &lock);
+        void _remove_instance(DatabaseInstancePtr instance, std::unique_lock<std::shared_mutex> &lock);
+
+        /**
+         * @brief Shutdown instance; move it from active to shutdown_pending
+         * @param instance database instance
+         * @param lock unique_lock on _base_mutex
+         * Note: caller must hold the lock
+         */
+        void _shutdown_instance(DatabaseInstancePtr instance, std::unique_lock<std::shared_mutex> &lock)
+        {
+            DCHECK(lock.owns_lock());
+            _active_instances.erase(instance);
+            _shutdown_pending_instances.insert(instance);
+            lock.unlock();
+            // don't hold lock while initiating shutdown as it may call back into us
+            instance->initiate_shutdown();
+        }
 
         /**
          * @brief Release session back to pool if space, or deallocate session
          * @param session session to release
          * @param deallocate deallocate session
+         * @param lock unique_lock on _base_mutex
+         * Note: caller must hold the lock
          */
-        void _release_session(ServerSessionPtr session, bool deallocate=false);
+        void _release_session(ServerSessionPtr session, bool deallocate);
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
@@ -454,9 +554,6 @@ namespace springtail::pg_proxy {
 
         /** set of shutting down instances */
         std::set<DatabaseInstancePtr> _shutdown_pending_instances;
-
-        /** map of database id to database instance */
-        std::unordered_multimap<uint64_t, DatabaseInstancePtr> _db_instances;
     };
     using DatabaseInstanceSetPtr = std::shared_ptr<DatabaseInstanceSet>;
 
@@ -508,6 +605,13 @@ namespace springtail::pg_proxy {
          * @param replica_id replica id
          */
         void initiate_replica_shutdown(const std::string &replica_id);
+
+        /**
+         * @brief Get the replica instance object
+         * @param replica_id replica id string
+         * @return DatabaseInstancePtr
+         */
+        DatabaseInstancePtr get_replica_instance(const std::string &replica_id) const;
 
     protected:
         /** pool config used for each instance */
