@@ -611,8 +611,9 @@ namespace springtail::committer {
         columns.push_back(constant::INTERNAL_ROW_ID);
         auto wc_fields = wc_schema->get_fields(columns);
         auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
-        // Get the mutable field to set it in the row for INSERTs
-        auto internal_row_id_f = wc_schema->get_mutable_field(constant::INTERNAL_ROW_ID);
+        // To add internal_row_id as part of INSERTS. Other mutations will have
+        // internal_row_id as part of wc_extent as-is
+        auto internal_row_id_field = std::make_shared<FieldArray>(1);
 
         TIME_TRACE_STOP(process_extent_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_write_extent-xid_{}", xid.xid), process_extent_trace);
@@ -631,8 +632,8 @@ namespace springtail::committer {
             case INSERT:
                 {
                     ++tx_counters.inserts;
-                    internal_row_id_f->set_uint64(const_cast<Extent::Row *>(&row), table->get_next_internal_row_id());
-                    auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
+                    (*internal_row_id_field)[0] = std::make_shared<ConstTypeField<uint64_t>>(table->get_next_internal_row_id());
+                    auto tuple = std::make_shared<KeyValueTuple>(actual_table_fields, internal_row_id_field, &row);
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, constant::UNKNOWN_EXTENT);
                     break;
