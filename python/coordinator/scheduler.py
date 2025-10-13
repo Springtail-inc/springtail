@@ -67,6 +67,12 @@ FAILURE_WINDOW_THRESHOLD = 5 # seconds
 # Wait time between max failures before retrying
 RETRY_WAITTIME_BETWEEN_MAX_FAILURES = 5 # minutes
 
+# Wait time between connection count queries
+RETRY_WAITTIME_CONNECTION_COUNT = 5 # seconds
+
+# Sleep interval in idle mode, when all services are down, but coordinator is up
+IDLE_SLEEP_INTERVAL = 5 # seconds
+
 class Scheduler:
     """Scheduler class to manage the lifecycle of components"""
 
@@ -74,7 +80,7 @@ class Scheduler:
         props: Properties,
         service_name : str,
         production : Optional[Production] = None,
-        allowed_timeout_secs: int = 15
+        allowed_timeout_secs: int = 40
     ):
         """
         Initialize a new scheduler
@@ -98,6 +104,8 @@ class Scheduler:
         self.db_states = {}
         # Map of component_name to {count, time} where count is the number of failures and time is the last time it failed
         self.last_fail_time = {}
+        self.postgres_component = None
+        self.services_stopped = False
 
         # Setup pubsub for liveness notifications
         self.pubsub = self.redis.pubsub(ignore_subscribe_messages=True)
@@ -113,6 +121,8 @@ class Scheduler:
         self.components[component.get_id()] = component
         component.set_startup_order(startup_order)
         self.logger.info(f"Scheduler registered component {component.name}")
+        if component.name == 'postgres':
+            self.postgres_component = component
 
     def start_all(self) -> bool:
         """
@@ -395,6 +405,73 @@ class Scheduler:
                 self.logger.error(f"Unknown coordinator state: {coordinator_state}")
                 return
 
+    def _process_fdw_state_change(self):
+        """
+        Check if there was FDW state change to 'draining' and there was, process it accordingly.
+        """
+        # get FDW state
+        fdw_config = self.props.get_fdw_config(True)
+        fdw_state = fdw_config['state']
+        self.logger.debug(f"FDW state = '{fdw_state}'")
+        if fdw_state != 'draining':
+            return
+
+        self.logger.debug(f"Draining state detected, waiting for connections to drain")
+        # wait for all proxy connections to drain
+        while True:
+            connection_count = self.postgres_component.get_connection_count()
+            self.logger.debug(f"Remaining number of connections: {connection_count}")
+            if connection_count == 0:
+                break
+            time.sleep(RETRY_WAITTIME_CONNECTION_COUNT)
+
+        # bring all components down
+        self.shutdown_all()
+
+        try:
+            # wait for stopped state
+            self.logger.debug(f"Waiting for FDW state change to 'stopped'")
+            self.props.wait_for_fdw_state('stopped', 30)
+            self.logger.debug(f"FDW state was set to 'stopped', performing cleanup")
+        except TimeoutError as e:
+            self.logger.error(f"Timed out waiting for state change: {str(e)}")
+            self.props.set_fdw_state('stopped')
+
+        # clean up data db
+        # <db instance id>:queue:ddl:fdw:<fdw id>
+        # <db instance_id>:hash:ddl:fdw  key: <fdw_id>
+        instance_id = self.props.get_db_instance_id()
+        fdw_id = self.props.get_fdw_id()
+
+        redis = self.props.get_data_redis()
+        redis.delete(f"{instance_id}:queue:ddl:fdw:{fdw_id}")
+
+        ddl_hash_name = f"{instance_id}:hash:ddl:fdw"
+        # Get all matching keys of the hash
+        keys = [k for k in redis.hkeys(ddl_hash_name) if k.endswith(f":{fdw_id}")]
+        # Remove matching keys
+        if keys:
+            redis.hdel(ddl_hash_name, *keys)
+
+        fdw_min_xids_hash_name = f"{instance_id}:fdw_min_xids"
+        # Get all matching keys of the hash
+        keys = [k for k in redis.hkeys(fdw_min_xids_hash_name) if k.startswith(f"{fdw_id}:")]
+        # Remove matching keys
+        if keys:
+            redis.hdel(fdw_min_xids_hash_name, *keys)
+
+        fdw_pids_set_name = f"{instance_id}:fdw_pids"
+        # Get all matching members of the set
+        members = [m for m in redis.smembers(fdw_pids_set_name) if m.startswith(f"{fdw_id}:")]
+        # Remove matching members
+        if members:
+            redis.srem(fdw_pids_set_name, *members)
+
+        # set a flag indicating that the services are stopped while coordinator
+        # is still running
+        self.services_stopped = True
+        self.logger.info("FDW is now stopped")
+
     def monitor_timeouts(self) -> None:
         """
         Monitor Redis queue for timeout events
@@ -409,6 +486,11 @@ class Scheduler:
 
                 # get the coordinator state
                 self._check_coordinator_state()
+
+                if self.services_stopped:
+                    self.logger.debug("All services are stopped")
+                    time.sleep(IDLE_SLEEP_INTERVAL)
+                    continue
 
                 # track database state changes
                 self._track_db_state_changes()
@@ -433,6 +515,10 @@ class Scheduler:
                             self.production.send_sns('failure', component='all')
                         self.logger.error("Failed to restart all components")
                         break
+
+                # handle 'draining' state for FDW
+                if self.service_name == 'fdw':
+                    self._process_fdw_state_change()
 
             except redis.RedisError as e:
                 # XXX handle
