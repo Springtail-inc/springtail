@@ -30,15 +30,27 @@ namespace springtail::pg_proxy {
 
         : Session(instance, connection, user, database, parameters, type), _db_prefix(prefix)
     {
-        _state = STARTUP;
+        _state = State::STARTUP;
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
+    }
+
+    ServerSession::~ServerSession()
+    {
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session being deallocated", _id);
+        try {
+            if (_instance != nullptr) {
+                _instance->remove_session(_id);
+            }
+        } catch (const std::exception &e) {
+            LOG_ERROR("Error deallocating server session: {}", e.what());
+        }
     }
 
     void
     ServerSession::run(std::set<int> &fds)
     {
         // should only be called when session is in reset state or deferred shutdown
-        CHECK(_defer_shadow_shutdown || (_state == RESET_SESSION || _state == RESET_SESSION_READY));
+        CHECK(_defer_shadow_shutdown || (_state == State::RESET_SESSION || _state == State::RESET_SESSION_READY));
         DCHECK_EQ(_client_session.lock(), nullptr);
 
         _wrap_error_handler([this] {
@@ -47,12 +59,12 @@ namespace springtail::pg_proxy {
                     // process any pending messages
                     process_connection(_seq_id);
                 } else {
-                    CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
+                    CHECK(_state == State::RESET_SESSION || _state == State::RESET_SESSION_READY);
                     // process the reset query response
                     _handle_reset_session_message();
                 }
                 // check if we have any pending messages necessary for SSL
-            } while (_state != ERROR && _connection->has_pending());
+            } while (_state != State::ERROR && _connection->has_pending());
         });
     }
 
@@ -60,9 +72,9 @@ namespace springtail::pg_proxy {
     ServerSession::_release_session(bool deallocate)
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Server type={}; releasing session", _id,
-                    (_type == REPLICA ? "Replica" : "Primary"));
+                    (_type == Type::REPLICA ? "Replica" : "Primary"));
 
-        if (_type == PRIMARY) {
+        if (_type == Type::PRIMARY) {
             DatabaseMgr::get_instance()->primary_set()->release_session(shared_from_this(), deallocate);
         } else {
             DatabaseMgr::get_instance()->replica_set()->release_session(shared_from_this(), deallocate);
@@ -98,12 +110,12 @@ namespace springtail::pg_proxy {
     void
     ServerSession::startup(uint64_t seq_id)
     {
-        CHECK_EQ(_state, STARTUP);
+        CHECK_EQ(_state, State::STARTUP);
 
         // wrap in error handler to catch any exceptions
         _wrap_error_handler([this, seq_id] {
             _auth = std::make_shared<ServerAuthorization>(_connection, _id, _user, _database, _db_prefix, _type, _parameters);
-            _state = AUTH_SERVER;
+            _state = State::AUTH_SERVER;
             _auth->send_startup_msg(seq_id);
         });
     }
@@ -112,7 +124,7 @@ namespace springtail::pg_proxy {
     ServerSession::startup_reset_session(uint64_t seq_id, const std::unordered_map<std::string, std::string> &parameters)
     {
         // reset the session with new startup parameters
-        CHECK_EQ(_state, RESET_SESSION_READY);
+        CHECK_EQ(_state, State::RESET_SESSION_READY);
 
         // wrap in error handler to catch any exceptions
         _wrap_error_handler([this, seq_id, parameters]() {
@@ -125,18 +137,18 @@ namespace springtail::pg_proxy {
                 return;
             }
 
-            _state = RESET_SESSION_PARAMS;
+            _state = State::RESET_SESSION_PARAMS;
         });
     }
 
     void
     ServerSession::set_ready_reset_done()
     {
-        CHECK(_state == RESET_SESSION_READY || _state == RESET_SESSION_PARAMS);
+        CHECK(_state == State::RESET_SESSION_READY || _state == State::RESET_SESSION_PARAMS);
 
         // set state to ready
         _seq_id = 0;
-        _state = READY;
+        _state = State::READY;
 
         // check for any pending messages
         _process_next_batch();
@@ -160,7 +172,7 @@ namespace springtail::pg_proxy {
             _batch_queue.push_batch(std::move(msg_batch));
 
             // if not processing anything, start processing this batch
-            if (_pending_queue.empty() && _state == READY) {
+            if (_pending_queue.empty() && _state == State::READY) {
                 _process_next_batch();
             }
         });
@@ -175,7 +187,7 @@ namespace springtail::pg_proxy {
         // for the next batch if there is one
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session processing next batch", _id);
 
-        while (_pending_queue.empty() && _state == READY) {
+        while (_pending_queue.empty() && _state == State::READY) {
             if (!_batch_queue.load_processing_batch()) {
                 // batch queue is empty
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session batch queue is empty", _id);
@@ -194,7 +206,7 @@ namespace springtail::pg_proxy {
     ServerSession::process_msg(SessionMsgPtr msg)
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server {}{}; message: type: {}, seq_id: {}", _id,
-                    (_is_shadow ? "Shadow " : ""), (_type == REPLICA ? "Replica" : "Primary"),
+                    (_is_shadow ? "Shadow " : ""), (_type == Type::REPLICA ? "Replica" : "Primary"),
                     msg->type_str(), msg->seq_id());
 
         // wrap in error handler to catch any exceptions
@@ -240,7 +252,7 @@ namespace springtail::pg_proxy {
 
         _wrap_error_handler([this] {
 
-            if (_state == RESET_SESSION || is_shutdown()) {
+            if (_state == State::RESET_SESSION || is_shutdown()) {
                 // if we are in reset session state, or shutdown return
                 return;
             }
@@ -248,13 +260,13 @@ namespace springtail::pg_proxy {
             // clear the client before going forward to avoid loops in shutdown handling
             unpin_client_session();
 
-            if (_state == READY && _db_id != constant::INVALID_DB_ID) {
+            if (_state == State::READY && _db_id != constant::INVALID_DB_ID) {
                 // if in ready state, we can reuse this session, and add back to pool
                 // reset server_session and the private session state
                 DCHECK(_batch_queue.empty() && _pending_queue.empty());
 
                 reset_session();
-                _state = RESET_SESSION;
+                _state = State::RESET_SESSION;
                 // register the session with the server
                 ProxyServer::get_instance()->register_session(shared_from_this(), nullptr, _connection->get_socket(), true);
                 // send the reset simple query to server
@@ -264,7 +276,7 @@ namespace springtail::pg_proxy {
             }
 
             // NOT in a READY state
-            if (is_shadow() && (_state == QUERY || _state == DEPENDENCIES)) {
+            if (is_shadow() && (_state == State::QUERY || _state == State::DEPENDENCIES)) {
                 // if in shadow mode, we can defer the shutdown until we done
                 // with all the messages in the message queue
                 _defer_shadow_shutdown = true;
@@ -278,7 +290,7 @@ namespace springtail::pg_proxy {
             // this will return us through Session::_handle_error() and to shutdown_session()
             LOG_WARN("[S:{}] Server session shutting down, state not ready {}", _id, (int8_t)_state);
             _send_shutdown();
-            _state = ERROR;
+            _state = State::ERROR;
 
             return;
         });
@@ -293,10 +305,10 @@ namespace springtail::pg_proxy {
             // entry point for connection message processing
             // called from run in client session
             switch(_state) {
-                case AUTH_SERVER:
+                case State::AUTH_SERVER:
                     if (_auth->process_auth_data(seq_id)) {
                         // auth done, ready for queries
-                        _state = READY;
+                        _state = State::READY;
 
                         // check for pending messages
                         _process_next_batch();
@@ -308,7 +320,7 @@ namespace springtail::pg_proxy {
                         cs->server_auth_done(shared_from_this(), params);
                     }
 
-                    if (_state == ERROR) {
+                    if (_state == State::ERROR) {
                         auto error = _auth->get_error();
                         auto cs = get_client_session();
                         CHECK_NE(cs, nullptr);
@@ -317,28 +329,28 @@ namespace springtail::pg_proxy {
 
                     break;
 
-                case READY:
-                case QUERY:
-                case DEPENDENCIES:
-                case EXTENDED_ERROR:
+                case State::READY:
+                case State::QUERY:
+                case State::DEPENDENCIES:
+                case State::EXTENDED_ERROR:
                     // ready for query, handle requests
                     _handle_message_from_server();
                     break;
 
-                case RESET_SESSION_READY:
-                case RESET_SESSION_PARAMS:
+                case State::RESET_SESSION_READY:
+                case State::RESET_SESSION_PARAMS:
                     // session is being or has just been reset
                     // mostly dropping messages or handling error waiting for client
                     _handle_reset_session_message();
                     break;
 
-                case RESET_SESSION:
-                    CHECK_NE(_state, RESET_SESSION);
+                case State::RESET_SESSION:
+                    CHECK_NE(_state, State::RESET_SESSION);
                     break;
 
                 default:
                     LOG_ERROR("Unknown state: {:d}", (int8_t)_state);
-                    _state = ERROR;
+                    _state = State::ERROR;
                     break;
             }
         });
@@ -388,20 +400,20 @@ namespace springtail::pg_proxy {
                 if (status == 'E') {
                     // error in transaction, need to reset session
                     LOG_WARN("[S:{}] Error in transaction while resetting session", _id);
-                    _state = ERROR;
+                    _state = State::ERROR;
                     return;
                 }
 
-                if (_state == RESET_SESSION) {
+                if (_state == State::RESET_SESSION) {
                     // sent reset query, now ready to be added to pool
                     DCHECK_EQ(status, 'I');
                     _seq_id = 0;
-                    _state = RESET_SESSION_READY;
+                    _state = State::RESET_SESSION_READY;
                     _release_session(false);
                     return;
                 }
 
-                if (_state == RESET_SESSION_PARAMS) {
+                if (_state == State::RESET_SESSION_PARAMS) {
                     DCHECK_EQ(status, 'I');
                     // reset is complete move to ready state
                     set_ready_reset_done();
@@ -468,7 +480,7 @@ namespace springtail::pg_proxy {
                 // 'T' can be a response to a simple query for a select or for a describe
                 if (_get_pending_query_type() == QueryStmt::Type::SIMPLE_QUERY) {
                     // simple query, not a completion
-                    CHECK_EQ(_state, QUERY);
+                    CHECK_EQ(_state, State::QUERY);
                     // forward to client
                     _stream_to_remote_session(code, msg_length, _seq_id);
                     return;
@@ -485,9 +497,9 @@ namespace springtail::pg_proxy {
             case 'n': // No data - response to (describe)
             case 't': // Parameter description (describe)
             case 'V': // Function call response
-                CHECK_NE(_state, EXTENDED_ERROR);
+                CHECK_NE(_state, State::EXTENDED_ERROR);
 
-                if (_state == DEPENDENCIES) {
+                if (_state == State::DEPENDENCIES) {
                     // we are in dependency checking state, continue with dependencies
                     _handle_dependency_response(false);
 
@@ -497,7 +509,7 @@ namespace springtail::pg_proxy {
                     return;
                 }
 
-                if (_state == QUERY) {
+                if (_state == State::QUERY) {
                     // we are in query state, continue with query responses
                     // this may send a message to the client
                     _handle_query_response();
@@ -543,7 +555,7 @@ namespace springtail::pg_proxy {
 
             case 'K':
                 // backend key data
-                CHECK_EQ(_state, AUTH_DONE);
+                CHECK_EQ(_state, State::AUTH_DONE);
                 // get the backend pid and key for cancel
                 _pid = buffer->get32();
                 _cancel_key.resize(buffer->remaining());
@@ -556,7 +568,7 @@ namespace springtail::pg_proxy {
                 // it also sends the error response to the client
                 _decode_error_buffer(buffer, _seq_id);
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] error", _id);
-                if (_state == ERROR) {
+                if (_state == State::ERROR) {
                     // TODO: possible this is a dependency error, which for now will be fatal
                     // fatal error, send error to client
                     _send_to_remote_session(code, buffer, _seq_id);
@@ -564,7 +576,7 @@ namespace springtail::pg_proxy {
                 }
 
                 // non-fatal error -- check which state we are in
-                if (_state == QUERY) {
+                if (_state == State::QUERY) {
                     LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] error in query state, forwarding", _id);
                     // error during query
                     _handle_query_error();
@@ -572,7 +584,7 @@ namespace springtail::pg_proxy {
                     _send_to_remote_session(code, buffer, _seq_id);
                 }
 
-                if (_state == DEPENDENCIES) {
+                if (_state == State::DEPENDENCIES) {
                     // error during dependency checking, shouldn't happen
                     _handle_dependency_response(true);
                     // drop the buffer
@@ -592,7 +604,7 @@ namespace springtail::pg_proxy {
                 // regardless of state
                 _handle_ready_for_query_response(status);
 
-                if (_state == DEPENDENCIES) {
+                if (_state == State::DEPENDENCIES) {
                     return;
                 }
 
@@ -603,7 +615,7 @@ namespace springtail::pg_proxy {
             }
             default:
                 LOG_ERROR("Unknown message: {}", code);
-                _state = ERROR;
+                _state = State::ERROR;
                 break;
         }
 
@@ -639,7 +651,7 @@ namespace springtail::pg_proxy {
         // if text is "FATAL" or "PANIC" we should stop, sever connection
         if (text == "FATAL" || text == "PANIC") {
             LOG_ERROR("Got fatal error from server: {}", message);
-            _state = ERROR;
+            _state = State::ERROR;
         }
 
         // if not fatal then wait for ready for query from server
@@ -650,7 +662,7 @@ namespace springtail::pg_proxy {
     ServerSession::_handle_dependency_response(bool error)
     {
         // response to dependency
-        CHECK_EQ(_state, DEPENDENCIES);
+        CHECK_EQ(_state, State::DEPENDENCIES);
         DCHECK(!error);
 
         CHECK(!_pending_queue.empty());
@@ -681,7 +693,7 @@ namespace springtail::pg_proxy {
         // message from the server (for simple query dependency)
         // if so we shouldn't set the _state to QUERY
         if (!query_status->simple_query_dependency) {
-            _state = QUERY;
+            _state = State::QUERY;
         }
     }
 
@@ -702,7 +714,7 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        _state = EXTENDED_ERROR;
+        _state = State::EXTENDED_ERROR;
 
         // iterate through all pending messages and set them to error
         while (!_pending_queue.empty()) {
@@ -726,7 +738,7 @@ namespace springtail::pg_proxy {
             query_status = _pending_queue.front();
         }
 
-        if (_state == DEPENDENCIES) {
+        if (_state == State::DEPENDENCIES) {
             // we are in dependency checking state,
             // this shouldn't generate message back to client
             // check if have more messages in queue;
@@ -736,12 +748,12 @@ namespace springtail::pg_proxy {
 
             if (query_status->dependency_count == 0) {
                 // we had dependencies, set state to query
-                _state = QUERY;
+                _state = State::QUERY;
             }
             return;
         }
 
-        DCHECK(_state == QUERY || _state == EXTENDED_ERROR);
+        DCHECK(_state == State::QUERY || _state == State::EXTENDED_ERROR);
 
         // check if current message is a sync message
         if (query_status != nullptr && query_status->msg->data()->type == QueryStmt::Type::SYNC) {
@@ -761,7 +773,7 @@ namespace springtail::pg_proxy {
         }
 
         // no pending message, set state to ready and process next batch
-        _state = READY;
+        _state = State::READY;
         _seq_id = 0;
 
         if (_defer_shadow_shutdown && _batch_queue.empty()) {
@@ -769,7 +781,7 @@ namespace springtail::pg_proxy {
             // we can reset the session and release it to the pool
             CHECK(_is_shadow);
             reset_session();
-            _state = RESET_SESSION;
+            _state = State::RESET_SESSION;
             _send_reset();
             return;
         }
@@ -790,7 +802,7 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_query_response()
     {
-        CHECK_EQ(_state, QUERY);
+        CHECK_EQ(_state, State::QUERY);
         CHECK(!_pending_queue.empty());
 
         // no error, mark query as complete
@@ -853,7 +865,7 @@ namespace springtail::pg_proxy {
         // see if there are more dependencies
         if (query_status->dependency_count > 0) {
             // we have dependencies, set state to handle them
-            _state = DEPENDENCIES;
+            _state = State::DEPENDENCIES;
         }
     }
 
@@ -875,7 +887,7 @@ namespace springtail::pg_proxy {
             query_status->query_count = 1;
         }
 
-        _state = QUERY;
+        _state = State::QUERY;
 
         // set seq_id if this is a new message that is current
         if (_pending_queue.empty()) {
@@ -922,8 +934,8 @@ namespace springtail::pg_proxy {
     {
         SessionMsgPtr msg = query_status->msg;
         // queue server message
-        if (_state == READY) {
-            _state = QUERY;
+        if (_state == State::READY) {
+            _state = State::QUERY;
         }
 
         QueryStmtPtr qs = msg->data();
