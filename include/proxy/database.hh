@@ -45,7 +45,13 @@ namespace springtail::pg_proxy {
         /**
          * @brief Destroy the Database Pool object
          */
-        ~DatabasePool() { shutdown(); }
+        ~DatabasePool() {
+            try { // for sonarqube
+                shutdown();
+            } catch (const std::exception &e) {
+                LOG_ERROR("Error shutting down database pool: {}", e.what());
+            }
+        }
 
         /**
          * @brief Add new session to the database pool

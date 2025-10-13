@@ -40,14 +40,18 @@ namespace springtail::pg_proxy {
         };
 
         /** Type of session */
-        enum Type : int8_t {
+        enum class Type : int8_t {
             CLIENT=0,
             PRIMARY=1,
             REPLICA=2
         };
+        // friend function for logging and DCHECK_EQ
+        friend std::ostream& operator<<(std::ostream& os, Type type) {
+            return os << "Session::Type(" << static_cast<int>(type) << ")";
+        }
 
         /** State of session */
-        enum State : int8_t {
+        enum class State : int8_t {
             STARTUP=0,        ///< initial state
             AUTH_SERVER=3,    ///< server auth
             AUTH_DONE=4,      ///< auth complete
@@ -64,10 +68,14 @@ namespace springtail::pg_proxy {
 
             ERROR=99          ///< fatal error state
         };
+        // friend function for logging and DCHECK_EQ
+        friend std::ostream& operator<<(std::ostream& os, State state) {
+            return os << "Session::State(" << static_cast<int>(state) << ")";
+        }
 
         /** Out-of-band notification message sent to a session via the server */
         struct NotificationMsg {
-            enum Type : int8_t {
+            enum class Type : int8_t {
                 NOTIFY_NONE=0,      ///< no notification; used for return type of peek
                 NOTIFY_FAILOVER=1,  ///< failover notification for replica (sent to client)
             };
@@ -103,7 +111,7 @@ namespace springtail::pg_proxy {
                 UserPtr user,
                 const std::string &database,
                 const std::unordered_map<std::string, std::string> &parameters,
-                Type type=PRIMARY);
+                Type type=Type::PRIMARY);
 
         /** For test purposes */
         Session(Type type,
@@ -179,13 +187,13 @@ namespace springtail::pg_proxy {
         void set_associated_session(std::shared_ptr<Session> remote_session) {
             assert(remote_session != nullptr);
             _associated_session = remote_session;
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Setting associated session", (_type == CLIENT ? 'C': 'S'), _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Setting associated session", (_type == Type::CLIENT ? 'C': 'S'), _id);
         }
 
         /** Clear associated session from this session, leaves any association on remote session */
         void clear_associated_session() {
             assert(_associated_session != nullptr);
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == CLIENT ? 'C': 'S'), _id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == Type::CLIENT ? 'C': 'S'), _id);
             _associated_session = nullptr;
         }
 
@@ -225,7 +233,7 @@ namespace springtail::pg_proxy {
 
         /** Check if session is in ready state or not */
         virtual bool is_ready() const {
-            return _state == READY;
+            return _state == State::READY;
         }
 
         /** Get session id */
@@ -286,7 +294,7 @@ namespace springtail::pg_proxy {
          */
         void queue_failover_notification() {
             std::lock_guard<std::mutex> lock(_notification_mutex);
-            _notification_queue.emplace(NotificationMsg{NotificationMsg::NOTIFY_FAILOVER});
+            _notification_queue.emplace(NotificationMsg{NotificationMsg::Type::NOTIFY_FAILOVER});
         }
 
         /**
@@ -308,7 +316,7 @@ namespace springtail::pg_proxy {
             _is_shadow = false;
             _in_transaction = false;
             _associated_session.reset();
-            _state = RESET_SESSION;
+            _state = State::RESET_SESSION;
         }
 
         /**
@@ -358,7 +366,7 @@ namespace springtail::pg_proxy {
 
         std::mutex   _session_mutex;       ///< mutex for session
 
-        State        _state = STARTUP;     ///< state of session, governs process()
+        State        _state = State::STARTUP; ///< state of session, governs process()
         Type         _type;                ///< type of session
 
         int32_t      _pid;                 ///< pid for cancel request
@@ -405,16 +413,16 @@ namespace springtail::pg_proxy {
                 func(std::forward<Args>(args)...);
             } catch (ProxyError &e) {
                 LOG_ERROR("Error in session: {}", e.what());
-                _state = ERROR;
+                _state = State::ERROR;
             } catch (std::exception &e) {
                 LOG_ERROR("Error in session: {}", e.what());
-                _state = ERROR;
+                _state = State::ERROR;
             } catch (...) {
                 LOG_ERROR("Unknown exception");
-                _state = ERROR;
+                _state = State::ERROR;
             }
 
-            if (_state == ERROR || _connection->closed()) {
+            if (_state == State::ERROR || _connection->closed()) {
                 _handle_error();
             }
         }

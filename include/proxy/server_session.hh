@@ -53,7 +53,7 @@ namespace springtail::pg_proxy {
                       std::string prefix,
                       DatabaseInstancePtr instance,
                       const std::unordered_map<std::string, std::string> &parameters,
-                      Session::Type type=PRIMARY);
+                      Session::Type type=Type::PRIMARY);
 
         /** For test purposes */
         ServerSession(Session::Type type,
