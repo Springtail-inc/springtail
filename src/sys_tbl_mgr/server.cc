@@ -695,7 +695,7 @@ Server::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
 }
 
 void
-Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata, bool force_stats_update)
+Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata)
 {
     proto::UpdateRootsRequest request;
     request.set_db_id(db_id);
@@ -720,7 +720,7 @@ Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
     boost::shared_lock lock(_write_mutex);
 
     // update the metadata and return
-    _update_roots(request, force_stats_update);
+    _update_roots(request);
 }
 
 void
@@ -1069,7 +1069,7 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
     // 6. update the metadata of the table
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Update roots: {}:{} @ {}:{}", create_req.db_id(),
                         create_req.table().id(), create_req.xid(), create_req.lsn());
-    this->_update_roots(roots_req, true);
+    this->_update_roots(roots_req);
 
     // 7. serialize the ddl json and return
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Response: {}", nlohmann::to_string(ddls));
@@ -1581,7 +1581,7 @@ Server::_create_table(const proto::TableRequest& request)
     ri->set_extent_id(constant::UNKNOWN_EXTENT);
     roots_info->set_snapshot_xid(request.snapshot_xid());
 
-    _set_roots_info(request.db_id(), request.table().id(), xid, roots_info, true);
+    _set_roots_info(request.db_id(), request.table().id(), xid, roots_info);
 
     // add schemas entries for each column
     std::vector<proto::ColumnHistory> columns;
@@ -1750,7 +1750,7 @@ Server::_mutate_namespace(
 }
 
 void
-Server::_update_roots(const proto::UpdateRootsRequest& request, bool force_stats_update)
+Server::_update_roots(const proto::UpdateRootsRequest& request)
 {
     XidLsn xid(request.xid());
 
@@ -1759,7 +1759,7 @@ Server::_update_roots(const proto::UpdateRootsRequest& request, bool force_stats
     *info->mutable_stats() = request.stats();
     info->set_snapshot_xid(request.snapshot_xid());
 
-    _set_roots_info(request.db_id(), request.table_id(), xid, info, force_stats_update);
+    _set_roots_info(request.db_id(), request.table_id(), xid, info);
 }
 
 XidLsn
@@ -2465,8 +2465,7 @@ void
 Server::_set_roots_info(uint64_t db_id,
                          uint64_t table_id,
                          const XidLsn& xid,
-                         RootsCacheRecordPtr roots_info,
-                         bool force_stats_update)
+                         RootsCacheRecordPtr roots_info)
 {
     // cache the roots info
     {
@@ -2485,30 +2484,21 @@ Server::_set_roots_info(uint64_t db_id,
                             r.index_id(), r.extent_id());
     }
 
-    // get cached stats
-    //bool commit_stats = true;
-    bool commit_stats = false;
     {
         boost::unique_lock lock(_mutex);
         auto& [last_xid, tables] = _last_table_stats_update[db_id];
         last_xid = xid.xid; // record the last XID we updated the stats at
         auto& table_stats = tables[table_id];
         table_stats.row_count = roots_info->stats().row_count();
-        if (++table_stats.update_count >= MAX_STATS_UPDATES_BEFORE_COMMIT) {
-            table_stats.update_count = 0;
-            commit_stats = true;
-        }
     }
 
-    if (commit_stats || force_stats_update) {
-        auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
-        auto tuple =
-            sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count());
-        table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+    auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
+    auto tuple =
+        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count());
+    table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
-                            roots_info->stats().row_count());
-    }
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
+                        roots_info->stats().row_count());
 }
 
 void

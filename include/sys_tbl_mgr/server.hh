@@ -117,7 +117,7 @@ public:
      * @brief Update roots API cal
      */
     void
-    update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata, bool force_stats_update = false);
+    update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata);
 
     /**
      * @brief Finalize API cal
@@ -285,13 +285,11 @@ private:
      * We don't finalize the system tables so they may remain dirty in the StorageCache.  Nothing
      * from the cache is not evicted until _clear_roots_info() is called.
      * @param table_info The metadata to update.
-     * @param force_stats_update If true, we will update the table stats
      */
     void _set_roots_info(uint64_t db_id,
                          uint64_t table_id,
                          const XidLsn& xid,
-                         RootsCacheRecordPtr roots_info,
-                         bool force_stats_update);
+                         RootsCacheRecordPtr roots_info);
 
 
     /**
@@ -610,7 +608,7 @@ private:
     /**
      * Performs an update_roots() assuming that the correct locks are already held.
      */
-    void _update_roots(const proto::UpdateRootsRequest& request, bool force_stats_update=false);
+    void _update_roots(const proto::UpdateRootsRequest& request);
 
     /** Performs an set_index_state() assuming that the correct locks are already held.
      */
@@ -795,9 +793,7 @@ private:
      */
     struct TableStats {
         uint64_t row_count;
-        size_t update_count = 0; ///< Number of updates to the stats without commit to the stats table
     };
-    static constexpr uint64_t MAX_STATS_UPDATES_BEFORE_COMMIT = 20;
     std::unordered_map<uint64_t, ///< db_id
         // xid - map
         std::pair<uint64_t, ///< table_id

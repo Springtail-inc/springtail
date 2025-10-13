@@ -463,11 +463,11 @@ namespace {
 
         // "add data" to the table
         _create_index(tid, "x", index_id);
-        _server->update_roots(_db, tid, _xid.xid, {{{0, 0}}, {15}}, true);
+        _server->update_roots(_db, tid, _xid.xid, {{{0, 0}}, {15}});
         _finalize();
 
         // add more data to the table
-        _server->update_roots(_db, tid, _xid.xid, {{{0, 100}}, {30}}, false);
+        _server->update_roots(_db, tid, _xid.xid, {{{0, 100}}, {30}});
         _finalize();
 
         // rename col2 => coltwo
