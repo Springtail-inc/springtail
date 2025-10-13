@@ -43,12 +43,7 @@ namespace {
             }
 
             void cancel() {
-                // GRPC is supposed to delete it after cancel()
-                auto p = _s.release();
-                p->cancel();
-                std::unique_lock<std::mutex> l(_m);
-                auto st = _cv_done.wait_for(l, std::chrono::seconds(5), [this]() { return _disconnect; });
-                ASSERT_EQ(st, true);
+                _s.reset();
             }
 
             void on_push(uint64_t db_id, uint64_t xid)

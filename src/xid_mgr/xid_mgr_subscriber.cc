@@ -15,32 +15,52 @@ XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks 
     CHECK(_stub);
 
     proto::SubscribeRequest req;
+    // From this point the lifetime of this object is managed by gRPC
+    // According to gRPC docs, we must not delete this object until OnDone callback
+    // is called. The callback call time is not guaranteed, so we should make 
+    // the best effort to make sure that the object is valid until then.
     _stub->async()->Subscribe(&_context, &req, this);
-    StartRead(&_push_response);
     StartCall();
+    StartRead(&_push_response);
 }
 
 XidMgrSubscriber::~XidMgrSubscriber()
 {
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::~XidMgrSubscriber: Deleted");
-    _stub.reset();
-}
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Deleting");
 
-void XidMgrSubscriber::cancel()
-{
-    _context.TryCancel();
+    // note: the comment above about lifetime.
+    // We are trying to delete the object, so we should make the best effort waiting
+    // for OnDone to be called.
+
+    _context.TryCancel(); // TryCancel is thread-safe.
+
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        // After an attempt to cancel, wait for 1sec to finish,
+        // after that all bets are off and we'll blame gRPC...
+        _cv.wait_until(lock,
+                std::chrono::steady_clock::now() + std::chrono::seconds(4), 
+                [this] { return _finished; });
+        CHECK(_finished);
+    }
+
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Discconnected");
+    _stub.reset();
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Deleted");
 }
 
 void XidMgrSubscriber::OnReadDone(bool ok)
 {
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::OnReadDone");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "OnReadDone");
     if (ok) {
         _cb->push(_push_response.db_id(), _push_response.xid());
         StartRead(&_push_response);
         return;
     }
 
+    // something went wrong, disconnect
     if (_cb.has_value()) {
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "OnReadDone: ok=false");
         _cb->disconnect();
         _cb = {};
     }
@@ -48,12 +68,15 @@ void XidMgrSubscriber::OnReadDone(bool ok)
 
 void XidMgrSubscriber::OnDone(const grpc::Status& s)
 {
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::OnDone");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "OnDone");
     if (_cb.has_value()) {
         _cb->disconnect();
         _cb = {};
     }
-    delete this; //NOSONAR reason: The object lifetime is controlled by GRPC
+
+    std::unique_lock<std::mutex> lock(_mutex);
+    _finished = true;
+    _cv.notify_one();
 }
 
 }
