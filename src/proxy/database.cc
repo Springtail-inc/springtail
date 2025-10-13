@@ -277,7 +277,7 @@ namespace springtail::pg_proxy
         std::shared_lock lock(_mutex);
         LOG_INFO("DatabasePool dump: size_limit={}, expiration_interval={}, timeout_limit={}, current_size={}",
                  _size_limit, _expiration_interval, _timeout_limit, _lru.size());
-        for (auto &entry : _lru) {
+        for (const auto &entry : _lru) {
             LOG_INFO("  Session[id={}, db_id={}, user={}, exp_time={}]",
                      entry.value->id(), entry.key.first, entry.key.second, entry.expiration_time);
         }
@@ -305,7 +305,7 @@ namespace springtail::pg_proxy
         std::unique_lock lock(_base_mutex);
 
         // evict pooled sessions for this db_id
-        for (auto &db_instance : _active_instances) {
+        for (const auto &db_instance : _active_instances) {
             db_instance->evict_pooled_sessions(db_id);
         }
     }
@@ -395,7 +395,7 @@ namespace springtail::pg_proxy
         DatabaseInstancePtr selected_instance = nullptr;
 
         // first look for a free pooled session
-        for (auto &db_instance : _active_instances) {
+        for (const auto &db_instance : _active_instances) {
             if (!db_instance->is_active()) {
                 continue;
             }
@@ -472,7 +472,7 @@ namespace springtail::pg_proxy
         std::unique_lock lock(_base_mutex);
 
         // check if replica with this id already exists
-        for (auto &it : _active_instances) {
+        for (const auto &it : _active_instances) {
             if (it->replica_id() == replica_id) {
                 LOG_WARN("Replica instance with replica id {} already exists, ignoring add", replica_id);
                 return;
@@ -639,6 +639,24 @@ namespace springtail::pg_proxy
         _pool->shutdown();
 
         std::unique_lock lock(_active_sessions_mutex);
+        LOG_INFO("[DB:{}] Shutting down, waiting for {} active sessions", to_string(), _active_sessions.size());
+
+        // go through active sessions and notify client sessions of failover
+        for (auto it = _active_sessions.begin(); it != _active_sessions.end(); ++it) {
+            auto &session_weak = it->second;
+            auto session = session_weak.lock();
+            if (session != nullptr) {
+                auto client_session = session->get_client_session();
+                if (client_session != nullptr) {
+                    // enqueue a failover notification to the client session, this is non-blocking
+                    client_session->queue_failover_notification();
+                }
+            } else {
+                LOG_INFO("[DB:{}] Session expired during shutdown", to_string());
+                // session already expired, remove from map
+                it = _active_sessions.erase(it);
+            }
+        }
 
         if (_active_sessions.empty()) {
             LOG_INFO("[DB:{}] No active sessions, shutting down instance", to_string());
@@ -648,20 +666,6 @@ namespace springtail::pg_proxy
                 _shutdown_callback(shared_from_this());
             }
             return;
-        }
-
-        LOG_INFO("[DB:{}] Shutting down, waiting for {} active sessions", to_string(), _active_sessions.size());
-
-        // go through active sessions and notify client sessions of failover
-        for (auto &[_, session_weak] : _active_sessions) {
-            auto session = session_weak.lock();
-            if (session != nullptr) {
-                auto client_session = session->get_client_session();
-                if (client_session != nullptr) {
-                    // enqueue a failover notification to the client session, this is non-blocking
-                    client_session->queue_failover_notification();
-                }
-            }
         }
     }
 
