@@ -398,7 +398,7 @@ void appendStringInfoString(StringInfo str, const char *s) {
 int
 errposition(int cursorpos)
 {
-    // XXX Stubbed for now
+    LOG_ERROR("Errorpos - cursorpos: {}", cursorpos);
     return 0; /* return value does not matter */
 }
 
@@ -477,8 +477,8 @@ strncasecmp(const char *s1, const char *s2, size_t n)
 {
 	while (n-- > 0)
 	{
-		unsigned char ch1 = (unsigned char) *s1++;
-		unsigned char ch2 = (unsigned char) *s2++;
+		auto ch1 = (unsigned char) *s1++;
+		auto ch2 = (unsigned char) *s2++;
 
 		if (ch1 != ch2)
 		{

@@ -3,11 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 
-typedef uint32_t Oid;
-typedef uintptr_t Datum;
-typedef size_t Size;
-typedef uint32_t CommandId;
-typedef uint32_t TransactionId;
+using Oid = uint32_t;
+using Datum = uintptr_t;
+using Size = size_t;
+using CommandId = uint32_t;
+using TransactionId = uint32_t;
 
 #define InvalidOid (Oid(0))
 #define FLEXIBLE_ARRAY_MEMBER

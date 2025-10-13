@@ -29,7 +29,6 @@ extern "C" PGEXT_API void pfree(void *ptr);
 extern "C" PGEXT_API void *repalloc(void *ptr, size_t size);
 
 //// INTERNAL INTERFACES
-// namespace pgext {
 
 /**
  * Object to manage memory in a way similar to postgres.  Used to implement the PG emulation
@@ -59,7 +58,7 @@ public:
 private:
     /** Definition of a memory block. */
     struct MemoryBlock {
-        MemoryBlock(size_t block_size) {
+        explicit MemoryBlock(size_t block_size) {
             memory = static_cast<char*>(std::malloc(block_size));
             if (!memory) {
                 throw std::bad_alloc();
@@ -136,7 +135,7 @@ struct PGAllocator {
     using value_type = T;
 
     PGAllocator() noexcept = default;
-    template <class U> PGAllocator(const PGAllocator<U>&) noexcept {}
+    template <class U> explicit PGAllocator(const PGAllocator<U>&) noexcept {}
 
     T* allocate(std::size_t n) {
         if (n > std::size_t(-1) / sizeof(T))
@@ -175,5 +174,3 @@ template <typename T, typename U>
 bool operator!=(const PGAllocator<T>&, const PGAllocator<U>&) noexcept {
     return false;
 }
-
-// } // namespace pgext

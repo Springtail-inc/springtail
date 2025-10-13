@@ -1,4 +1,5 @@
 #include <pg_ext/error.hh>
+#include <common/logging.hh>
 
 #include <cstdarg>
 #include <cstdio>
@@ -37,65 +38,43 @@ bool errstart_cold(int elevel, const char *domain) {
     return errstart(elevel, domain);
 }
 
-void errfinish(int dummy, ...) {
-    // XXX Stubbed for now
+void
+errfinish(const char *filename, int lineno, const char *funcname)
+{
+    LOG_ERROR("Filename: %s, Line: %d, Function: %s, Error: %s", filename, lineno, funcname, current_error_message);
 }
 
-void errsave_start(int dummy, ...) {
-    // XXX Stubbed for now
-    if (!error_in_progress) {
-        return;
-    }
+bool
+errsave_start(struct Node *context, const char *domain)
+{
+    LOG_ERROR("Errsave - Start %s", domain);
+    return true;
 }
 
-void errsave_finish(int dummy, ...) {
-    // XXX Stubbed for now
-    if (!error_in_progress) {
-        return;
-    }
+void
+errsave_finish(struct Node *context, const char *filename, int lineno,
+			   const char *funcname)
+{
+    LOG_ERROR("Errsave - Finish %s, Line: %d, Function: %s", filename, lineno, funcname);
 }
 
 void errdetail(const char *fmt, ...) {
-    if (!error_in_progress) {
-        return;
-    }
-
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(current_error_message, sizeof(current_error_message), fmt, args);
-    va_end(args);
+    LOG_ERROR("Errdetail %s", fmt);
 }
 
 int errcode(int sqlerrcode) {
-    if (!error_in_progress) {
-        return 0;
-    }
-    current_sqlcode = sqlerrcode;
+    LOG_ERROR("Errcode %d", sqlerrcode);
     return 0;
 }
 
 int errmsg(const char *fmt, ...) {
-    if (!error_in_progress) {
-        return 0;
-    }
-
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(current_error_message, sizeof(current_error_message), fmt, args);
-    va_end(args);
+    LOG_ERROR("Errmsg %s", fmt);
 
     return 0;
 }
 
 int errmsg_internal(const char *fmt, ...) {
-    if (!error_in_progress) {
-        return 0;
-    }
-
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(current_error_message, sizeof(current_error_message), fmt, args);
-    va_end(args);
+    LOG_ERROR("Errmsg internal %s", fmt);
 
     return 0;
 }
@@ -103,16 +82,12 @@ int errmsg_internal(const char *fmt, ...) {
 int
 pg_fprintf(FILE *stream, const char *fmt,...)
 {
-	va_list		args;
-
-	va_start(args, fmt);
-	vsnprintf(current_error_message, sizeof(current_error_message), fmt, args);
-	va_end(args);
+    LOG_ERROR("Pg_fprintf %s", fmt);
 	return 0;
 }
 
 
 bool GetDefaultCharSignedness(void) {
-    // XXX Stubbed for now
+    LOG_ERROR("GetDefaultCharSignedness");
     return true;
 }

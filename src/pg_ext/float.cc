@@ -11,10 +11,10 @@ char *
 float8out_internal(double num)
 {
     // allocate plenty of space for formatted double
-    char *ascii = (char *) palloc(128);
+    auto ascii = (char *) palloc(128);
 
     // clamp ndig like Postgres does
-    int ndig = std::numeric_limits<double>::digits10 + extra_float_digits;
+    auto ndig = std::numeric_limits<double>::digits10 + extra_float_digits;
     if (ndig < 1)
         ndig = 1;
     else if (ndig > std::numeric_limits<double>::digits10 + 3)

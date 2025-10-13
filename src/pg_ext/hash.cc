@@ -1,10 +1,10 @@
 #include <pg_ext/hash.hh>
 
 static uint64_t default_hash_func(const void *key, size_t len) {
-    uint64_t hash = 14695981039346656037ull;
-    const unsigned char *data = (const unsigned char *)key;
+    uint64_t hash = 14695981039346656037uLL;
+    const auto *data = (const unsigned char *)key;
     for (size_t i = 0; i < len; ++i)
-        hash = (hash ^ data[i]) * 1099511628211ull;
+        hash = (hash ^ data[i]) * 1099511628211uLL;
     return hash;
 }
 
@@ -85,14 +85,14 @@ uint32_t hash_bytes(const unsigned char *k, int keylen) {
 uint64_t
 hash_bytes_extended(const unsigned char *k, int keylen, uint64_t seed)
 {
-	uint32_t		a,
-				b,
-				c,
-				len;
+    uint32_t a = 0;
+    uint32_t b = 0;
+    uint32_t c = 0;
+    uint32_t len = 0;
 
 	/* Set up the internal state */
-	len = keylen;
-	a = b = c = 0x9e3779b9 + len + 3923095;
+    len = keylen;
+    a = b = c = 0x9e3779b9u + len + 3923095u;
 
 	/* If the seed is non-zero, use it to perturb the internal state. */
 	if (seed != 0)
@@ -111,7 +111,7 @@ hash_bytes_extended(const unsigned char *k, int keylen, uint64_t seed)
 	if (((uintptr_t) k & UINT32_ALIGN_MASK) == 0)
 	{
 		/* Code path for aligned source data */
-		const uint32_t *ka = (const uint32_t *) k;
+		const auto *ka = (const uint32_t *) k;
 
 		/* handle most of the key */
 		while (len >= 12)
