@@ -87,10 +87,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
 
         if (connected == false) {
             if (subscriber) {
-                // GRPC is supposed to delete it after cancel()
-                auto p = subscriber.release();
-                CHECK(p);
-                // try to reconnect after 200ms
+                subscriber.reset();
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
             connected = true;
@@ -100,13 +97,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         std::this_thread::sleep_for(loop_time_period);
         _cache->keep_alive();
     }
-    if (subscriber) {
-        // GRPC is supposed to delete it after cancel()
-        auto p = subscriber.release();
-        if (connected) {
-            p->cancel();
-        }
-    }
+    subscriber.reset();
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
     workers.clear();
     client = sys_tbl_mgr::Client::get_instance();
