@@ -355,11 +355,23 @@ namespace springtail::pg_proxy
 
         // find the instance with the least number of sessions
         DatabaseInstancePtr instance = nullptr;
-        int min_sessions = INT_MAX;
+        int min_active_sessions = INT_MAX;
+        int min_total_sessions = INT_MAX;
+
         for (auto &it : _active_instances) {
-            int num_sessions = it->active_session_count();
-            if (num_sessions < min_sessions) {
-                min_sessions = num_sessions;
+            int num_active_sessions = it->active_session_count();
+            int num_sessions = it->all_session_count();
+
+            if (num_active_sessions < min_active_sessions) {
+                // first look at only active sessions
+                min_total_sessions = num_sessions;
+                min_active_sessions = num_active_sessions;
+                instance = it;
+            } else if (num_active_sessions == min_active_sessions &&
+                       num_sessions < min_total_sessions) {
+                // break tie by total sessions
+                min_total_sessions = num_sessions;
+                min_active_sessions = num_active_sessions;
                 instance = it;
             }
         }

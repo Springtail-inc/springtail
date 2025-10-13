@@ -458,6 +458,8 @@ namespace {
 
         instance_sessions = db_set->get_instance_sessions();
         EXPECT_EQ(instance_sessions.size(), 2);
+        EXPECT_EQ(instance1->all_session_count(), 1);
+        EXPECT_EQ(instance2->all_session_count(), 2);
 
         auto least_loaded_instance = db_set->get_least_loaded_instance();
         EXPECT_EQ(least_loaded_instance, instance1);
