@@ -30,6 +30,7 @@ services:
     user: root
     volumes:
       - ./env:/envfiles:rw  # We will be updating this file for other services to consume.
+      - /var/run/docker.sock:/var/run/docker.sock
     init: true
     command: [ "sh", "-c", "cd /app && ./local-cluster-bootstrap " ]
     depends_on:
@@ -144,11 +145,7 @@ services:
       - ./env/env.services
       - ./env/env.setup
       - ./env/.env
-    environment:
-      - SERVICE_NAME=ingestion
-      - INSTANCE_KEY=default
-      - PGSSLCERT=/certs/client_cert.pem
-      - PGSSLKEY=/certs/client_key.pem
+      - ./env/env.ingestion
     cap_add:
       - SYS_ADMIN
       - SYS_PTRACE
@@ -186,12 +183,7 @@ services:
       - ./env/env.services
       - ./env/env.setup
       - ./env/.env
-    environment:
-      - SERVICE_NAME=proxy
-      - NFS_SERVER_IP=ingestion
-      - INSTANCE_KEY=default
-      - PGSSLCERT=/certs/client_cert.pem
-      - PGSSLKEY=/certs/client_key.pem
+      - ./env/env.proxy
     cap_add:
       - SYS_ADMIN
       - SYS_PTRACE
@@ -232,12 +224,7 @@ services:
       - ./env/env.services
       - ./env/env.setup
       - ./env/.env
-    environment:
-      - SERVICE_NAME=fdw
-      - NFS_SERVER_IP=ingestion
-      - INSTANCE_KEY=default
-      - FDW_ID=default
-      - PGDATABASE=__springtail
+      - ./env/env.fdw
     cap_add:
       - SYS_ADMIN
       - SYS_PTRACE

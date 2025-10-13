@@ -41,9 +41,11 @@ class Coordinator:
     def __init__(self,
                  props: Properties,
                  debug: bool,
+                 manual: bool,
                  is_production: bool,
                  install_path: str,
-                 service_name: str):
+                 service_name: str,
+                 postgres_pid_file: Optional[str] = None):
         """
         Initialize the Coordinator.
         Arguments:
@@ -52,6 +54,7 @@ class Coordinator:
             is_production -- the production flag from config (deployed env)
             install_path -- the installation path
             service_name -- the name of the service
+            postgres_pid_file -- the Postgres PID file (for fdw service only) to look for.
         """
         self.props = props
         self._check_properties(props)
@@ -59,6 +62,8 @@ class Coordinator:
         self.scheduler = None
         self.logger = logging.getLogger('springtail')
         self.debug = debug
+        self.manual = manual
+        self.postgres_pid_file = postgres_pid_file
 
         # if running in a production environment set deployed env var
         if is_production:
@@ -72,17 +77,17 @@ class Coordinator:
             if not sn_env:
                 self.logger.error("Service name not provided")
                 raise ValueError("Service name not provided")
+            if not sn_env in ['ingestion', 'fdw', 'proxy']:
+                msg = f"Invalid service name in environment variable SERVICE_NAME: {sn_env}"
+                self.logger.error(msg)
+                raise ValueError(msg)
             self.service_name = sn_env
-
-        # Check the service name
-        if not self.service_name in ['ingestion', 'fdw', 'proxy']:
-            self.logger.error(f"Invalid service name: {self.service_name}")
-            raise ValueError(f"Invalid service name: {self.service_name}")
 
         # Check the install path
         if not install_path or not os.path.exists(install_path):
-            self.logger.error(f"Invalid install path: {install_path}")
-            raise ValueError(f"Invalid install path: {install_path}")
+            msg = f"Invalid install path: {install_path}"
+            self.logger.error(msg)
+            raise ValueError(msg)
 
         self.install_path = install_path
 
@@ -90,7 +95,7 @@ class Coordinator:
         self.production = None
         if is_production:
             self.logger.debug("Checking properties for production")
-            self.production = Production(self.install_path)
+            self.production = Production(self.install_path, self.postgres_pid_file)
 
     def startup(self):
         """
@@ -112,12 +117,13 @@ class Coordinator:
                     # Install binaries
                     self.logger.debug("Installing binaries")
                     self.production.install_binaries(config_gitsha)
-                    self.logger.debug("Re-installing coordinator")
-                    loader.startup(self.install_path, project_root)
+                    if not self.manual:
+                        self.logger.debug("Re-installing coordinator")
+                        loader.startup(self.install_path, project_root, self.postgres_pid_file)
                     self.props.set_coordinator_state(CoordinatorState.RELOADING)
 
                     # loader will restart the coordinator when ready
-                    if state == CoordinatorState.STARTUP:
+                    if state == CoordinatorState.STARTUP and not self.manual:
                         sys.exit(0)
             except Exception as e:
                 raise ValueError("Failed to install binaries: " + str(e))
@@ -125,8 +131,9 @@ class Coordinator:
         # Get the installation path and setup bin dir
         self.bin_dir = os.path.join(self.install_path, 'bin/system')
         if not os.path.exists(self.bin_dir):
-            self.logger.error(f"Invalid binary directory: {self.bin_dir}")
-            raise ValueError(f"Invalid binary directory: {self.bin_dir}")
+            msg = f"Invalid binary directory: {self.bin_dir}"
+            self.logger.error(msg)
+            raise ValueError(msg)
 
         if self.shutdown_event.is_set():
             return
@@ -196,28 +203,6 @@ class Coordinator:
         # this will exit on a SIGINT or SIGTERM
         self.logger.debug("Scheduler entering monitor loop")
         self.scheduler.monitor_timeouts()
-
-        # shutdown all components
-        self.logger.info("Shutting down all components")
-        self.scheduler.shutdown()
-
-    def shutdown(self, signum: int = 0):
-        """
-        Shutdown the coordinator.
-        """
-        # set shutdown flag
-        self.shutdown_event.set()
-
-        # shutdown scheduler
-        if self.scheduler:
-            self.logger.info(f"Received signal {signum}, shutting down...")
-            self.scheduler.shutdown()
-
-        # make sure everything is shutdown
-        stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
-
-        if self.production:
-            self.production.send_sns('shutdown')
 
     def _check_properties(self, props: Properties) -> None:
         """
@@ -289,8 +274,12 @@ def parse_arguments():
     # Add arguments -f for config file and -b for build directory
     parser.add_argument('-c', '--config-file', type=str, default='config.yaml', help='Path to the configuration file')
     parser.add_argument('-s', '--service', type=str, required=False,
+                        choices=["ingestion", "fdw", "proxy"],
                         help='Name of the service: ingestion, fdw, or proxy')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    parser.add_argument('--manual', action='store_true', help='Enable manual mode for running from command line')
+    parser.add_argument('-f', '--postgres-pid-file', type=str, default=None,
+                        help='Full path name to the Postgres PID file (for fdw service only)')
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -321,6 +310,21 @@ def setup_props(yaml_config: dict) -> Properties:
 
     return props
 
+def make_signal_handler(coordinator):
+    """
+    Create signal handler function and return it.
+    """
+    def signal_handler(signum, frame):
+        """
+        Shutdown the coordinator.
+        """
+        logger.info(f"Received signal {signum}, shutting down...")
+        coordinator.shutdown_event.set()
+
+        if coordinator.scheduler:
+            coordinator.scheduler.shutdown()
+    return signal_handler
+
 
 if __name__ == "__main__":
     """Main entry point for the coordinator script."""
@@ -349,20 +353,27 @@ if __name__ == "__main__":
 
     logger = logging.getLogger('springtail')
 
-    coordinator = Coordinator(props, args.debug, yaml_config.get('production'),
-                              yaml_config.get('install_dir'), args.service)
+    coordinator = Coordinator(props, args.debug, args.manual, yaml_config.get('production'),
+                              yaml_config.get('install_dir'),
+                              args.service,
+                              args.postgres_pid_file)
+    logger.info("Starting Springtail Coordinator with parameters: %s", ' '.join(
+        [f"{k}={v}" for k, v in vars(args).items()]
+    ))
 
-
-    # Set up signal handlers
-    def signal_handler(signum, frame):
-        coordinator.shutdown(signum)
-
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    handler = make_signal_handler(coordinator)
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
 
     try:
         coordinator.startup()
+
+        # make sure everything is shutdown
+        stop_daemons(coordinator.props.get_pid_path(), ALL_DAEMONS)
+
+        if coordinator.production:
+            coordinator.production.send_sns('shutdown')
+
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error(f"An error occurred during startup: {e}")
