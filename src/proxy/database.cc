@@ -23,10 +23,8 @@ namespace springtail::pg_proxy
         std::unique_lock lock(_mutex);
 
         // evict the next session if we are at the size limit
-        if (!_lru.empty()) {
-            if (_size_limit != 0  && _lru.size() == _size_limit) {
-                released_session = _evict_next();
-            }
+        if (_size_limit != 0  && _lru.size() == _size_limit) {
+            released_session = _evict_next();
         }
 
         // find the deque for this key, or create a new one
