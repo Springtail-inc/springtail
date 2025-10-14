@@ -80,7 +80,6 @@ namespace springtail::test {
         {
             uint64_t xid;
             uint64_t row_count;
-            uint64_t end_offset;
         };
 
         /**

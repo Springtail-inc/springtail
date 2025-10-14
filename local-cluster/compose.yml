@@ -32,7 +32,7 @@ services:
       - ./env:/envfiles:rw  # We will be updating this file for other services to consume.
       - /var/run/docker.sock:/var/run/docker.sock
     init: true
-    command: [ "sh", "-c", "cd /app && ./local-cluster-bootstrap " ]
+    command: [ "sh", "-c", "cd /app/controller && ./local-cluster-bootstrap " ]
     depends_on:
       primary:
         condition: service_healthy
@@ -59,7 +59,7 @@ services:
       - ./env:/envfiles:rw
       - /var/run/docker.sock:/var/run/docker.sock
     init: true
-    command: [ "sh", "-lc", "cd /app && ./stctl server run --port $$CONTROLLER_PORT" ]
+    command: [ "sh", "-lc", "cd /app/controller && ./stctl server run --port $$CONTROLLER_PORT" ]
     depends_on:
       controller-bootstrap:
         condition: service_completed_successfully
