@@ -152,6 +152,7 @@ namespace springtail::pg_proxy {
 
         ServerSessionPtr _primary_session; ///< primary server session
         ServerSessionPtr _replica_session; ///< replica server session
+        ServerSessionPtr _pending_replica_session; ///< pending replica server session during failover
 
         std::string _default_schema = "public"; ///< default schema to be used for query parsing
 
@@ -184,6 +185,24 @@ namespace springtail::pg_proxy {
          * @brief Entry point for data from the connection, called from _run()
          */
         void _process_connection();
+
+        /**
+         * @brief Process notifications from the server
+         * Currently handles failover notification indicating that the replica
+         * is to be failed over to a new replica.
+         */
+        void _process_notifications();
+
+        /**
+         * @brief Handle failover notification from server session
+         * Allocate a new replica session and associate it with this client session
+         */
+        void _handle_failover_notification();
+
+        /**
+         * @brief Handle completion of authentication for failover replica session
+         */
+        void _handle_failover_auth_done();
 
         /**
          * @brief Read in data from client, parse queries and dispatch to server session
@@ -224,9 +243,10 @@ namespace springtail::pg_proxy {
          * @brief Create a server session of a certain type: primary or replica
          * @param type type of server session to create (PRIMARY or REPLICA)
          * @param seq_id sequence id
+         * @param failover_session true if this is being created as part of a failover
          * @return ServerSessionPtr server session
          */
-        ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id);
+        ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id, bool failover_session=false);
 
         /**
          * @brief Parse a simple query and return type of server session that can handle it

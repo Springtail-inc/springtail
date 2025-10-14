@@ -53,7 +53,7 @@ namespace springtail::pg_proxy {
                       std::string prefix,
                       DatabaseInstancePtr instance,
                       const std::unordered_map<std::string, std::string> &parameters,
-                      Session::Type type=PRIMARY);
+                      Session::Type type=Type::PRIMARY);
 
         /** For test purposes */
         ServerSession(Session::Type type,
@@ -64,7 +64,7 @@ namespace springtail::pg_proxy {
             : Session(type, id, db_id, database, username)
         {}
 
-        ~ServerSession() { LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session being deallocated", _id); }
+        ~ServerSession();
 
         /** Entry point from server */
         void run(std::set<int> &fds) override;
