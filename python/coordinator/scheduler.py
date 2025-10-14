@@ -520,6 +520,8 @@ class Scheduler:
                 if self.service_name == 'fdw':
                     self._process_fdw_state_change()
 
+                time.sleep(5)
+
             except redis.RedisError as e:
                 # XXX handle
                 self.logger.error(f"Redis error: {str(e)}")
