@@ -902,41 +902,68 @@ namespace springtail {
 
             /**
              * Inserts the provided tuple into the Page using the provided ExtentSchema.
+             * @param tuple                Tuple to be inserted
+             * @param schema               Schema for the tuple
+             * @param post_insert_handler  callback to trigger with the resulted row, post the insert
              */
-            void insert(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_population_handler = nullptr);
+            void insert(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> post_insert_handler = nullptr);
 
             /**
              * Appends the provided tuple to the Page using the provided ExtentSchema.
+             * @param tuple                    Tuple to be appended
+             * @param schema                   Schema for the tuple
+             * @param post_append_handler      Callback to trigger with the resulted row,
+             *                                 post appending the tuple
              */
-            void append(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_population_handler = nullptr);
+            void append(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> post_append_handler = nullptr);
 
             /**
              * Upserts the provided tuple to the Page using the provided ExtentSchema.
+             * @param tuple                    Tuple to be upserted
+             * @param schema                   Schema for the tuple
+             * @param pre_upsert_handler       Callback to trigger with the matched row,
+             *                                 before updating the tuple
+             * @param post_upsert_handler      Callback to trigger with the resulted row,
+             *                                 post updating/inserting the tuple
              * @return True if the upsert() resulted in an insert()
              */
             bool upsert(TuplePtr tuple, ExtentSchemaPtr schema,
-                    std::function<void(const Extent::Row&)> index_invalidation_handler = nullptr,
-                    std::function<void(const Extent::Row&)> index_population_handler = nullptr);
+                    std::function<void(const Extent::Row&)> pre_upsert_handler = nullptr,
+                    std::function<void(const Extent::Row&)> post_upsert_handler = nullptr);
 
             /**
              * Updates the row in the Page with a matching key as the provided tuple to fully match
              * the tuple, using the provided ExtentSchema.
+             * @param tuple                    Tuple to be updated
+             * @param schema                   Schema for the tuple
+             * @param pre_update_handler       Callback to trigger with the matched row,
+             *                                 before updating the tuple
+             * @param post_update_handler      Callback to trigger with the resulted row,
+             *                                 post updating the tuple
              */
             void update(TuplePtr tuple, ExtentSchemaPtr schema,
-                    std::function<void(const Extent::Row&)> index_invalidation_handler = nullptr,
-                    std::function<void(const Extent::Row&)> index_population_handler = nullptr);
+                    std::function<void(const Extent::Row&)> pre_update_handler = nullptr,
+                    std::function<void(const Extent::Row&)> post_update_handler = nullptr);
 
             /**
              * Removes a row with the provided key from the Page using the provided ExtentSchema.
+             * @param tuple                    Tuple to be removed
+             * @param schema                   Schema for the tuple
+             * @param post_remove_handler      Callback to trigger with the matched row,
+             *                                 after removing the tuple
              */
-            void remove(TuplePtr key, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_population_handler = nullptr);
+            void remove(TuplePtr key, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> post_remove_handler = nullptr);
 
             /**
              * Tries to remove a row by scanning the Page for the given value.
+             * @param tuple                    Tuple to be removed
+             * @param schema                   Schema for the tuple
+             * @param post_remove_handler      Callback to trigger with the matched row,
+             *                                 after removing the tuple only if found
              * @return true if the row was found and removed, false otherwise.
              */
             bool try_remove_by_scan(TuplePtr value, ExtentSchemaPtr schema, 
-                    std::function<void(const Extent::Row&)> index_population_handler = nullptr);
+                    std::function<void(const Extent::Row&)> post_remove_handler = nullptr);
 
             /**
              * Converts the page to the provided target_schema.  It reads rows from the existing
@@ -983,8 +1010,12 @@ namespace springtail {
 
             /**
              * Internal implementation of append.  Page must be locked when called.
+             * @param tuple                    Tuple to be appended
+             * @param schema                   Schema for the tuple
+             * @param post_append_handler      Callback to trigger with the resulted row,
+             *                                 post appending the tuple
              */
-            void _append(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> index_population_handler = nullptr);
+            void _append(TuplePtr tuple, ExtentSchemaPtr schema, std::function<void(const Extent::Row&)> post_append_handler = nullptr);
 
             /**
              * Checks if the provided extent needs to be split and performs the split if needed.
