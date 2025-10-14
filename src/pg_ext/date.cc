@@ -1211,15 +1211,15 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
  int
  tzload(const char *name, char *canonname, struct state *sp, bool doextend)
  {
-     union local_storage *lsp = (union local_storage *) malloc(sizeof *lsp);
+     auto *lsp = (union local_storage *) malloc(sizeof(union local_storage));
 
      if (!lsp)
          return errno;
      else
      {
-         int			err = tzloadbody(name, canonname, sp, doextend, lsp);
+         int err = tzloadbody(name, canonname, sp, doextend, lsp);
 
-         free(lsp);
+         pfree(lsp);
          return err;
      }
  }

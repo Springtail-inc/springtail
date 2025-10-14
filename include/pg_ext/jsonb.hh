@@ -55,9 +55,10 @@ constexpr uint32_t JENTRY_ISCONTAINER		= 0x50000000;	/* array or object */
 #define JsonContainerSize(jc)		((jc)->header & JB_CMASK)
 #define JsonContainerIsScalar(jc)	(((jc)->header & JB_FSCALAR) != 0)
 
-#define IsAJsonbScalar(jsonbval)	(((jsonbval)->type >= jbvType::jbvNull && \
-									  (jsonbval)->type <= jbvType::jbvBool) || \
-									  (jsonbval)->type == jbvType::jbvDatetime)
+#define IsAJsonbScalar(jsonbval) \
+    ((jsonbval != nullptr) && \
+    ((((jsonbval)->type >= jbvType::jbvNull) && ((jsonbval)->type <= jbvType::jbvBool)) || \
+     ((jsonbval)->type == jbvType::jbvDatetime)))
 
 /* Forward declarations */
 typedef struct JsonbPair JsonbPair;

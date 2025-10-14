@@ -400,7 +400,7 @@ namespace springtail {
          * @param columns The column definitions for the underlying extent data.
          * @param updates The updates to apply to the extent schema to generate the virtual schema.
          */
-        VirtualSchema(const SchemaMetadata &meta, ComparatorFunc comparator_func = nullptr);
+        explicit VirtualSchema(const SchemaMetadata &meta, ComparatorFunc comparator_func = nullptr);
 
         /**
          * Checks if the column exists within the virtual schema.

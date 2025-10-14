@@ -38,7 +38,7 @@ uint64_t pg_popcount64(const char *buf, int bytes)
 {
 	uint64_t popcnt = 0;
 
-    const uint64_t *words = (const uint64_t *) buf;
+    const auto *words = (const uint64_t *) buf;
 
     while (bytes >= 8)
     {

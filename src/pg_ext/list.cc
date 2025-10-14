@@ -1,5 +1,6 @@
 #include <pg_ext/list.hh>
-#include <cstdlib>
+#include <pg_ext/node.hh>
+#include <pg_ext/memory.hh>
 #include <cstring>
 
 static inline int list_cell_bytes(int count) {
@@ -8,9 +9,8 @@ static inline int list_cell_bytes(int count) {
 
 static List *allocate_list(NodeTag type, int initial_capacity) {
     size_t total_size = sizeof(List) + list_cell_bytes(initial_capacity);
-    List *list = (List *)std::malloc(total_size);
+    auto *list = (List *)palloc(total_size);
     if (!list) return nullptr;
-
     list->type = type;
     list->length = 0;
     list->max_length = initial_capacity;
@@ -21,7 +21,7 @@ static List *allocate_list(NodeTag type, int initial_capacity) {
 
 List *list_make1_impl(List *list, void *datum) {
     if (!list) {
-        list = allocate_list(T_Invalid, LIST_INITIAL_ALLOC);
+        list = allocate_list(NodeTag::T_Invalid, LIST_INITIAL_ALLOC);
         if (!list) return nullptr;
     }
 
@@ -39,14 +39,16 @@ List *lappend(List *list, void *datum) {
     // Resize if needed
     if (list->length >= list->max_length) {
         int new_capacity = list->max_length * 2;
-        ListCell *new_elements = (ListCell *)std::malloc(list_cell_bytes(new_capacity));
-        std::memcpy(new_elements, list->elements, list_cell_bytes(list->length));
+        ListCell *new_elements = nullptr;
 
-        // Switch from initial_elements to malloc'd buffer
         if (list->elements == list->initial_elements) {
+            // First growth: allocate a new buffer and copy existing inline elements
+            new_elements = (ListCell *) palloc(list_cell_bytes(new_capacity));
+            std::memcpy(new_elements, list->elements, list_cell_bytes(list->length));
             list->elements = new_elements;
         } else {
-            std::free(list->elements);
+            // Subsequent growth: resize the existing buffer
+            new_elements = (ListCell *) repalloc(list->elements, list_cell_bytes(new_capacity));
             list->elements = new_elements;
         }
 
@@ -68,7 +70,7 @@ List *list_concat(List *list1, List *list2) {
     return list1;
 }
 
-List *list_delete_cell(List *list, ListCell *cell_to_delete) {
+List *list_delete_cell(List *list, const ListCell *cell_to_delete) {
     if (!list || !cell_to_delete) return list;
 
     int index = -1;
@@ -93,10 +95,10 @@ void list_free(List *list) {
     if (!list) return;
 
     if (list->elements != list->initial_elements) {
-        std::free(list->elements);
+        pfree(list->elements);
     }
 
-    std::free(list);
+    pfree(list);
 }
 
 List *list_delete_nth_cell(List *list, int n) {

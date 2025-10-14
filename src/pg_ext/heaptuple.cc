@@ -19,10 +19,8 @@ TupleDesc BlessTupleDesc(TupleDesc tupdesc)
 Datum
 HeapTupleHeaderGetDatum(HeapTupleHeader tuple)
 {
-	Datum		result;
-
+	Datum result = 0;
 	// XXX Stubbed for now
-
 	return result;
 }
 

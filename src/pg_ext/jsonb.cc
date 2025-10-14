@@ -59,7 +59,8 @@ uniqueifyJsonbObject(JsonbValue *object, bool unique_keys, bool skip_nulls)
 
 	if (hasNonUniq || skip_nulls)
 	{
-		JsonbPair  *ptr, *res;
+		JsonbPair  *ptr = nullptr;
+		JsonbPair  *res = nullptr;
 
 		while (skip_nulls && object->val.object.nPairs > 0 &&
 			   object->val.object.pairs->value->type == jbvType::jbvNull)
@@ -316,14 +317,13 @@ uint32_t
 getJsonbOffset(const JsonbContainer *jc, int index)
 {
 	uint32_t		offset = 0;
-	int			i;
 
 	/*
 	 * Start offset of this entry is equal to the end offset of the previous
 	 * entry.  Walk backwards to the most recent entry stored as an end
 	 * offset, returning that offset plus any lengths in between.
 	 */
-	for (i = index - 1; i >= 0; i--)
+	for (int i = index - 1; i >= 0; i--)
 	{
 		offset += JBE_OFFLENFLD(jc->children[i]);
 		if (JBE_HAS_OFF(jc->children[i]))
@@ -336,7 +336,7 @@ getJsonbOffset(const JsonbContainer *jc, int index)
 uint32_t
 getJsonbLength(const JsonbContainer *jc, int index)
 {
-	uint32_t		off;
+	uint32_t		off = 0;
 	uint32_t		len = 0;
 
 	/*
@@ -362,41 +362,47 @@ fillJsonbValue(const JsonbContainer *container, int index,
 {
 	JEntry		entry = container->children[index];
 
+	// Build into a local to avoid writing different union members into the same
+	// storage repeatedly (UBSan: union type punning). Then copy out once.
+	JsonbValue	tmp = {};
+
 	if (JBE_ISNULL(entry))
 	{
-		result->type = jbvType::jbvNull;
+		tmp.type = jbvType::jbvNull;
 	}
 	else if (JBE_ISSTRING(entry))
 	{
-		result->type = jbvType::jbvString;
-		result->val.string.len = getJsonbLength(container, index);
-		result->val.string.val = base_addr + offset;
-		assert(result->val.string.len >= 0);
+		tmp.type = jbvType::jbvString;
+		tmp.val.string.len = getJsonbLength(container, index);
+		tmp.val.string.val = base_addr + offset;
+		assert(tmp.val.string.len >= 0);
 	}
 	else if (JBE_ISNUMERIC(entry))
 	{
-		result->type = jbvType::jbvNumeric;
-		result->val.numeric = (Numeric) (base_addr + INTALIGN(offset));
+		tmp.type = jbvType::jbvNumeric;
+		tmp.val.numeric = (Numeric) (base_addr + INTALIGN(offset));
 	}
 	else if (JBE_ISBOOL_TRUE(entry))
 	{
-		result->type = jbvType::jbvBool;
-		result->val.boolean = true;
+		tmp.type = jbvType::jbvBool;
+		tmp.val.boolean = true;
 	}
 	else if (JBE_ISBOOL_FALSE(entry))
 	{
-		result->type = jbvType::jbvBool;
-		result->val.boolean = false;
+		tmp.type = jbvType::jbvBool;
+		tmp.val.boolean = false;
 	}
 	else
 	{
 		assert(JBE_ISCONTAINER(entry));
-		result->type = jbvType::jbvBinary;
+		tmp.type = jbvType::jbvBinary;
 		/* Remove alignment padding from data pointer and length */
-		result->val.binary.data = (JsonbContainer *) (base_addr + INTALIGN(offset));
-		result->val.binary.len = getJsonbLength(container, index) -
+		tmp.val.binary.data = (JsonbContainer *) (base_addr + INTALIGN(offset));
+		tmp.val.binary.len = getJsonbLength(container, index) -
 			(INTALIGN(offset) - offset);
 	}
+
+	*result = tmp;
 }
 
 JsonbIteratorToken
@@ -942,7 +948,6 @@ convertJsonbArray(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
 {
 	int			base_offset;
 	int			jentry_offset;
-	int			i;
 	int			totallen;
 	uint32_t		containerhead;
 	int			nElems = val->val.array.nElems;
@@ -971,11 +976,11 @@ convertJsonbArray(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
 	jentry_offset = reserveFromBuffer(buffer, sizeof(JEntry) * nElems);
 
 	totallen = 0;
-	for (i = 0; i < nElems; i++)
+	for (int i = 0; i < nElems; i++)
 	{
 		JsonbValue *elem = &val->val.array.elems[i];
-		int			len;
-		JEntry		meta;
+		int			len = 0;
+		JEntry		meta = 0;
 
 		/*
 		 * Convert element, producing a JEntry and appending its
@@ -1049,8 +1054,8 @@ convertJsonbObject(StringInfo buffer, JEntry *header, JsonbValue *val, int level
 	for (i = 0; i < nPairs; i++)
 	{
 		JsonbPair  *pair = &val->val.object.pairs[i];
-		int			len;
-		JEntry		meta;
+		int			len = 0;
+		JEntry		meta = 0;
 
 		/*
 		 * Convert key, producing a JEntry and appending its variable-length
@@ -1081,8 +1086,8 @@ convertJsonbObject(StringInfo buffer, JEntry *header, JsonbValue *val, int level
 	for (i = 0; i < nPairs; i++)
 	{
 		JsonbPair  *pair = &val->val.object.pairs[i];
-		int			len;
-		JEntry		meta;
+		int			len = 0;
+		JEntry		meta = 0;
 
 		/*
 		 * Convert value, producing a JEntry and appending its variable-length
@@ -1125,8 +1130,8 @@ convertJsonbObject(StringInfo buffer, JEntry *header, JsonbValue *val, int level
 void
 convertJsonbScalar(StringInfo buffer, JEntry *header, JsonbValue *scalarVal)
 {
-	int			numlen;
-	short		padlen;
+	int numlen = 0;
+	short padlen = 0;
 
 	switch (scalarVal->type)
 	{
@@ -1179,8 +1184,8 @@ Jsonb *
 convertToJsonb(JsonbValue *val)
 {
 	StringInfoData buffer;
-	JEntry		jentry;
-	Jsonb	   *res;
+	JEntry		jentry = 0;
+	Jsonb	   *res = nullptr;
 
 	/* Should not already have binary representation */
 	assert(val->type != jbvType::jbvBinary);
@@ -1209,13 +1214,13 @@ convertToJsonb(JsonbValue *val)
 Jsonb *
 JsonbValueToJsonb(JsonbValue *val)
 {
-	Jsonb	   *out;
+	Jsonb	   *out = nullptr;
 
 	if (IsAJsonbScalar(val))
 	{
 		/* Scalar value */
 		JsonbParseState *pstate = nullptr;
-		JsonbValue *res;
+		JsonbValue *res = nullptr;
 		JsonbValue	scalarArray;
 
 		scalarArray.type = jbvType::jbvArray;

@@ -5,12 +5,6 @@
 #include <cstdio>
 #include <cstring>
 
-// Global variables for error state
-static thread_local int current_elevel = 0;
-static thread_local int current_sqlcode = 0;
-static thread_local char current_error_message[1024] = {0};
-static thread_local bool error_in_progress = false;
-
 volatile sig_atomic_t InterruptPending = false;
 
 void ProcessInterrupts() {
@@ -23,12 +17,6 @@ void ProcessInterrupts() {
 }
 
 bool errstart(int elevel, const char *domain) {
-    // Reset error state
-    current_elevel = elevel;
-    current_sqlcode = 0;
-    current_error_message[0] = '\0';
-    error_in_progress = true;
-
     fprintf(stderr, "\nError started at (domain: %s)", domain ? domain : "none");
     return true;
 }
@@ -41,7 +29,7 @@ bool errstart_cold(int elevel, const char *domain) {
 void
 errfinish(const char *filename, int lineno, const char *funcname)
 {
-    LOG_ERROR("Filename: %s, Line: %d, Function: %s, Error: %s", filename, lineno, funcname, current_error_message);
+    LOG_ERROR("Filename: %s, Line: %d, Function: %s", filename, lineno, funcname);
 }
 
 bool

@@ -125,7 +125,8 @@ public:
      * @param pg_oid The oid of the type
      * @return The string
      */
-    std::string datum_to_string(Datum value, Oid pg_oid);
+    std::string datum_to_string(Datum value, Oid pg_oid) const;
+
     /**
      * Convert a binary value to a datum - Using the typreceive function of the extension type
      * @param value The binary value
@@ -135,7 +136,7 @@ public:
      */
     Datum binary_to_datum(const std::span<const char> &value,
                           Oid pg_oid,
-                          int32_t atttypmod);
+                          int32_t atttypmod) const;
     /**
      * Compare two datums - Using the comparator function of the extension type
      * Looks up the comparator function using the type oid and operation name string
@@ -153,7 +154,7 @@ private:
     PGFunction _load_extn_function(void* library, const std::string_view oper_name);
     void* _load_library(const std::string_view lib_path);
 
-    PgExtnRegistry() {}
+    PgExtnRegistry() = default;
     uint64_t _db_id;
     uint64_t _xid;
 

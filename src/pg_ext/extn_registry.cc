@@ -15,10 +15,10 @@ PgExtnRegistry::add_type(const std::string& extension, uint32_t oid, const std::
 {
     auto library = _library_map.at(extension);
 
-    _type_func_name_to_func.insert({typreceive, _load_extn_function(library, typreceive)});
-    _type_func_name_to_func.insert({typsend, _load_extn_function(library, typsend)});
-    _type_func_name_to_func.insert({typinput, _load_extn_function(library, typinput)});
-    _type_func_name_to_func.insert({typoutput, _load_extn_function(library, typoutput)});
+    _type_func_name_to_func.try_emplace(typreceive, _load_extn_function(library, typreceive));
+    _type_func_name_to_func.try_emplace(typsend, _load_extn_function(library, typsend));
+    _type_func_name_to_func.try_emplace(typinput, _load_extn_function(library, typinput));
+    _type_func_name_to_func.try_emplace(typoutput, _load_extn_function(library, typoutput));
 
     _type_oid_to_type[oid] = {oid, typinput, typoutput, typreceive, typsend};
 }
@@ -29,11 +29,11 @@ PgExtnRegistry::add_operator(const std::string& extension, uint32_t oid, const s
     auto library = _library_map.at(extension);
 
     auto extn_function = _load_extn_function(library, proc_name);
-    _oper_name_to_func.insert({oper_name, extn_function});
-    _proc_name_to_func.insert({proc_name, extn_function});
+    _oper_name_to_func.try_emplace(oper_name, extn_function);
+    _proc_name_to_func.try_emplace(proc_name, extn_function);
 
-    _oper_oid_to_name.insert({oid, oper_name});
-    _proc_oid_to_name.insert({oid, proc_name});
+    _oper_oid_to_name.try_emplace(oid, oper_name);
+    _proc_oid_to_name.try_emplace(oid, proc_name);
 }
 
 PGFunction
@@ -100,7 +100,7 @@ PgExtnRegistry::init_libraries(uint64_t db_id,
 
     auto library = _load_library(extension_lib_path);
 
-    _library_map.insert({extension, library});
+    _library_map.try_emplace(extension, library);
 }
 
 bool
@@ -131,7 +131,8 @@ PgExtnRegistry::comparator_func(uint64_t type_oid,
 }
 
 std::string
-PgExtnRegistry::datum_to_string(Datum value, Oid pg_oid){
+PgExtnRegistry::datum_to_string(Datum value, Oid pg_oid) const
+{
     auto type = get_type_by_oid(pg_oid);
     auto typoutput = get_type_func_by_type_name(type.typoutput);
 
@@ -147,7 +148,7 @@ PgExtnRegistry::datum_to_string(Datum value, Oid pg_oid){
 Datum
 PgExtnRegistry::binary_to_datum(const std::span<const char> &value,
                                 Oid pg_oid,
-                                int32_t atttypmod)
+                                int32_t atttypmod) const
 {
     auto type = get_type_by_oid(pg_oid);
     auto typreceive = get_type_func_by_type_name(type.typreceive);
@@ -168,7 +169,7 @@ PgExtnRegistry::binary_to_datum(const std::span<const char> &value,
 PGFunction
 PgExtnRegistry::_load_extn_function(void* library, const std::string_view func_name)
 {
-    PGFunction extn_function = (PGFunction)dlsym(library, func_name.data());
+    auto extn_function = (PGFunction)dlsym(library, func_name.data());
     if (!extn_function) {
         LOG_ERROR("Failed to find function PGFunction {}", func_name);
         return nullptr;

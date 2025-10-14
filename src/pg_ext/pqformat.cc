@@ -33,7 +33,7 @@ pq_writeint64(StringInfo buf, uint64_t i)
     uint64_t ni = springtail::pg_hton64(i);
 
     assert(buf->len + (int)sizeof(uint64_t) <= buf->maxlen);
-    memcpy((char *)(buf->data + buf->len), &ni, sizeof(uint64_t));
+    memcpy(buf->data + buf->len, &ni, sizeof(uint64_t));
     buf->len += sizeof(uint64_t);
 }
 
@@ -52,52 +52,24 @@ pq_sendfloat8(StringInfo buf, double f)
 }
 
 char *
-pg_client_to_server(const char *s, int len)
+pg_client_to_server(const char *s, int len = 0)
 {
-	// return pg_any_to_server(s, len, ClientEncoding->encoding);
     // XXX Stubbed for now
-
-    return const_cast<char *>(s);
+    return nullptr;
 }
 
 char *
-pg_server_to_any(const char *s, int len, int encoding)
+pg_server_to_any(const char *s, int len = 0, int encoding = 0)
 {
-    // if (len <= 0) {
-    //     return unconstify(char *, s); /* empty string is always valid */
-    // }
-
-    // if (encoding == DatabaseEncoding->encoding || encoding == PG_SQL_ASCII) {
-    //     return unconstify(char *, s); /* assume data is valid */
-    // }
-
-    // if (DatabaseEncoding->encoding == PG_SQL_ASCII) {
-    //     /* No conversion is possible, but we must validate the result */
-    //     (void)pg_verify_mbstr(encoding, s, len, false);
-    //     return unconstify(char *, s);
-    // }
-
-    // /* Fast path if we can use cached conversion function */
-    // if (encoding == ClientEncoding->encoding) {
-    //     return perform_default_encoding_conversion(s, len, false);
-    // }
-
-    // /* General case ... will not work outside transactions */
-    // return (char *)pg_do_encoding_conversion((unsigned char *)unconstify(char *, s), len,
-    //                                          DatabaseEncoding->encoding, encoding);
-
     // XXX Stubbed for now
-
-    return const_cast<char *>(s);
+    return nullptr;
 }
 
 char *
-pg_server_to_client(const char *s, int len)
+pg_server_to_client(const char *s, int len = 0)
 {
-    // return pg_server_to_any(s, len, ClientEncoding->encoding);
     // XXX Stubbed for now
-
-    return const_cast<char *>(s);
+    return nullptr;
 }
 
 void
@@ -135,7 +107,7 @@ pq_copymsgbytes(StringInfo msg, char *buf, int datalen)
 int64_t
 pq_getmsgint64(StringInfo msg)
 {
-    uint64_t n64;
+    uint64_t n64 = 0;
 
     pq_copymsgbytes(msg, (char *)&n64, sizeof(n64));
 
@@ -146,15 +118,14 @@ double
 pq_getmsgfloat8(StringInfo msg)
 {
     uint64_t bits = pq_getmsgint64(msg);
-    double f;
-    std::memcpy(&f, &bits, sizeof(f));
+    double f = std::bit_cast<double>(bits);
     return f;
 }
 
 bytea *
 pq_endtypsend(StringInfo buf)
 {
-    bytea *result = (bytea *)buf->data;
+    auto *result = (bytea *)buf->data;
 
     /* Insert correct length into bytea length word */
     assert(buf->len >= VARHDRSZ);
@@ -166,14 +137,14 @@ pq_endtypsend(StringInfo buf)
 uint32_t
 pq_getmsgint(StringInfo msg, int b)
 {
-    uint32_t result;
-    char n8;
-    uint16_t n16;
-    uint32_t n32;
+    uint32_t result = 0;
+    char n8 = 0;
+    uint16_t n16 = 0;
+    uint32_t n32 = 0;
 
     switch (b) {
         case 1:
-            pq_copymsgbytes(msg, (char *)&n8, 1);
+            pq_copymsgbytes(msg, &n8, 1);
             result = n8;
             break;
         case 2:
@@ -195,8 +166,8 @@ pq_getmsgint(StringInfo msg, int b)
 char *
 pq_getmsgtext(StringInfo msg, int rawbytes, int *nbytes)
 {
-    char *str;
-    char *p;
+    const char *str = nullptr;
+    char *p = nullptr;
 
     if (!msg || !nbytes) {
         LOG_ERROR("Invalid arguments to pq_getmsgtext");
