@@ -7,11 +7,11 @@
 
 const int extra_float_digits = 1;
 
-char *
+char*
 float8out_internal(double num)
 {
     // allocate plenty of space for formatted double
-    auto ascii = (char *) palloc(128);
+    auto ascii = (char*) palloc(128);
 
     // clamp ndig like Postgres does
     auto ndig = std::numeric_limits<double>::digits10 + extra_float_digits;
@@ -20,33 +20,31 @@ float8out_internal(double num)
     else if (ndig > std::numeric_limits<double>::digits10 + 3)
         ndig = std::numeric_limits<double>::digits10 + 3;
 
+    std::string_view text;
+
     if (std::isnan(num))
-    {
-        std::strncpy(ascii, "NaN", 127);
-    	ascii[127] = '\0';
-    }
+        text = "NaN";
     else if (std::isinf(num))
-    {
-        if (num < 0)
-            std::strncpy(ascii, "-Infinity", 127);
-        else
-            std::strncpy(ascii, "Infinity", 127);
-        ascii[127] = '\0';
-    }
+        text = (num < 0) ? "-Infinity" : "Infinity";
     else if (extra_float_digits > 0)
     {
-        // Use shortest decimal via ostringstream + max precision
+        // shortest decimal representation with max precision
         std::ostringstream oss;
-		oss << std::setprecision(std::numeric_limits<double>::max_digits10)
-			<< num;
-
-		std::snprintf(ascii, 128, "%s", oss.str().c_str());
+        oss << std::setprecision(std::numeric_limits<double>::max_digits10)
+            << num;
+        text = oss.str();
     }
     else
     {
         // fixed precision formatting
-        std::snprintf(ascii, 128, "%.*g", ndig, num);
+        std::ostringstream oss;
+        oss << std::setprecision(ndig) << num;
+        text = oss.str();
     }
+
+    // Write into ascii safely
+    auto result = std::format_to_n(ascii, 127, "{}", text);
+    ascii[result.size] = '\0';
 
     return ascii;
 }

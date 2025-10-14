@@ -185,18 +185,19 @@ pg_TZDIR(void)
 int
 pg_open_tzfile(const char *name, char *canonname)
 {
-	char		fullname[MAXPGPATH];
+    char fullname[MAXPGPATH];
 
-	if (canonname)
-		strlcpy(canonname, name, TZ_STRLEN_MAX + 1);
+    if (canonname)
+        strlcpy(canonname, name, TZ_STRLEN_MAX + 1);
 
-	strlcpy(fullname, pg_TZDIR(), sizeof(fullname));
-	if (strlen(fullname) + 1 + strlen(name) >= MAXPGPATH)
-		return -1;				/* not gonna fit */
-	strcat(fullname, "/");
-	strcat(fullname, name);
+    strlcpy(fullname, pg_TZDIR(), sizeof(fullname));
 
-	return open(fullname, O_RDONLY | PG_BINARY, 0);
+    if (strlcat(fullname, "/", sizeof(fullname)) >= sizeof(fullname))
+        return -1; // overflow
+    if (strlcat(fullname, name, sizeof(fullname)) >= sizeof(fullname))
+        return -1; // overflow
+
+    return open(fullname, O_RDONLY | PG_BINARY, 0);
 }
 
 static const char *
@@ -1076,10 +1077,10 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
 
                      if (j + tsabbrlen < TZ_MAX_CHARS)
                      {
-                         strcpy(sp->chars + j, tsabbr);
-                         charcnt = j + tsabbrlen + 1;
-                         ts->ttis[i].tt_desigidx = j;
-                         gotabbr++;
+						snprintf(sp->chars + j, TZ_MAX_CHARS - j, "%s", tsabbr);
+						charcnt = j + tsabbrlen + 1;
+						ts->ttis[i].tt_desigidx = j;
+						gotabbr++;
                      }
                  }
              }
@@ -1695,25 +1696,52 @@ AppendSeconds(char *cp, int sec, fsec_t fsec, int precision, bool fillzeros)
 void
 EncodeSpecialTimestamp(Timestamp dt, char *str)
 {
-	if (TIMESTAMP_IS_NOBEGIN(dt))
-		strcpy(str, EARLY);
-	else if (TIMESTAMP_IS_NOEND(dt))
-		strcpy(str, LATE);
-	else						/* shouldn't happen */
-		LOG_ERROR("invalid argument for EncodeSpecialTimestamp");
+	if (str == nullptr)
+    {
+        LOG_ERROR("invalid buffer passed to EncodeSpecialTimestamp");
+        return;
+    }
+
+    std::string_view text;
+    if (TIMESTAMP_IS_NOBEGIN(dt))
+        text = EARLY;
+    else if (TIMESTAMP_IS_NOEND(dt))
+        text = LATE;
+    else
+    {
+        LOG_ERROR("invalid argument for EncodeSpecialTimestamp");
+        return;
+    }
+
+    // Write into str, ensuring null termination
+    auto result = std::format_to_n(str, 63, "{}", text);
+    str[result.size] = '\0';
 }
 
-void
-EncodeSpecialDate(DateADT dt, char *str)
+void EncodeSpecialDate(DateADT dt, char* str, size_t str_size)
 {
-	if (DATE_IS_NOBEGIN(dt))
-		strcpy(str, EARLY);
-	else if (DATE_IS_NOEND(dt))
-		strcpy(str, LATE);
-	else						/* shouldn't happen */
-		LOG_ERROR("invalid argument for EncodeSpecialDate");
-}
+    if (str == nullptr || str_size == 0)
+    {
+        LOG_ERROR("invalid buffer passed to EncodeSpecialDate");
+        return;
+    }
 
+    std::string_view text;
+
+    if (DATE_IS_NOBEGIN(dt))
+        text = EARLY;
+    else if (DATE_IS_NOEND(dt))
+        text = LATE;
+    else
+    {
+        LOG_ERROR("invalid argument for EncodeSpecialDate");
+        return;
+    }
+
+    // Write into str safely, ensuring null termination
+    auto result = std::format_to_n(str, str_size - 1, "{}", text);
+    str[result.size] = '\0';
+}
 static char *
 EncodeTimezone(char *str, int tz, int style)
 {
@@ -1842,167 +1870,150 @@ j2day(int date)
 	return date;
 }
 
-void
-EncodeDateTime(struct pg_tm *tm, fsec_t fsec, bool print_tz, int tz, const char *tzn, int style, char *str)
+void EncodeDateTime(struct pg_tm *tm,
+                    fsec_t fsec,
+                    bool print_tz,
+                    int tz,
+                    const char *tzn,
+                    int style,
+                    char *str,
+                    size_t str_size)
 {
-	int			day;
+    int day;
+    assert(tm->tm_mon >= 1 && tm->tm_mon <= MONTHS_PER_YEAR);
 
-	assert(tm->tm_mon >= 1 && tm->tm_mon <= MONTHS_PER_YEAR);
+    if (tm->tm_isdst < 0)
+        print_tz = false;
 
-	/*
-	 * Negative tm_isdst means we have no valid time zone translation.
-	 */
-	if (tm->tm_isdst < 0)
-		print_tz = false;
+    size_t remaining = str_size;     // remaining buffer size
 
-	switch (style)
-	{
-		case USE_ISO_DATES:
-		case USE_XSD_DATES:
-			/* Compatible with ISO-8601 date formats */
-			str = pg_ultostr_zeropad(str,
-									 (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
-			*str++ = '-';
-			str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
-			*str++ = '-';
-			str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
-			*str++ = (style == USE_ISO_DATES) ? ' ' : 'T';
-			str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
-			*str++ = ':';
-			str = pg_ultostr_zeropad(str, tm->tm_min, 2);
-			*str++ = ':';
-			str = AppendTimestampSeconds(str, tm, fsec);
-			if (print_tz)
-				str = EncodeTimezone(str, tz, style);
-			break;
+    auto write_str = [&](std::string_view s) {
+        if (remaining == 0) return; // nothing left
+        auto result = std::format_to_n(str, remaining - 1, "{}", s); // reserve 1 for '\0'
+        size_t written = result.size;
+        if (written >= remaining)
+            written = remaining - 1; // truncate if necessary
+        str += written;
+        remaining -= written;
+        *str = '\0'; // maintain null termination
+    };
 
-		case USE_SQL_DATES:
-			/* Compatible with Oracle/Ingres date formats */
-			if (DateOrder == DATEORDER_DMY)
-			{
-				str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
-				*str++ = '/';
-				str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
-			}
-			else
-			{
-				str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
-				*str++ = '/';
-				str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
-			}
-			*str++ = '/';
-			str = pg_ultostr_zeropad(str,
-									 (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
-			*str++ = ' ';
-			str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
-			*str++ = ':';
-			str = pg_ultostr_zeropad(str, tm->tm_min, 2);
-			*str++ = ':';
-			str = AppendTimestampSeconds(str, tm, fsec);
+    switch (style)
+    {
+        case USE_ISO_DATES:
+        case USE_XSD_DATES:
+            str = pg_ultostr_zeropad(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            if (remaining > 1) { *str++ = (style == USE_ISO_DATES ? ' ' : 'T'); --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+            if (remaining > 1) { *str++ = '-'; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+            if (remaining > 1) { *str++ = ' '; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+            if (remaining > 1) { *str++ = ':'; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+            if (remaining > 1) { *str++ = ':'; --remaining; }
+            str = AppendTimestampSeconds(str, tm, fsec);
+            if (print_tz)
+                str = EncodeTimezone(str, tz, style);
+            break;
 
-			/*
-			 * Note: the uses of %.*s in this function would be risky if the
-			 * timezone names ever contain non-ASCII characters, since we are
-			 * not being careful to do encoding-aware clipping.  However, all
-			 * TZ abbreviations in the IANA database are plain ASCII.
-			 */
-			if (print_tz)
-			{
-				if (tzn)
-				{
-					sprintf(str, " %.*s", MAXTZLEN, tzn);
-					str += strlen(str);
-				}
-				else
-					str = EncodeTimezone(str, tz, style);
-			}
-			break;
+        case USE_SQL_DATES:
+            if (DateOrder == DATEORDER_DMY)
+            {
+                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                if (remaining > 1) { *str++ = '/'; --remaining; }
+                str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+            }
+            else
+            {
+                str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+                if (remaining > 1) { *str++ = '/'; --remaining; }
+                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+            }
+            if (remaining > 1) { *str++ = '/'; --remaining; }
+            str = pg_ultostr_zeropad(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            if (remaining > 1) { *str++ = ' '; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+            if (remaining > 1) { *str++ = ':'; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+            if (remaining > 1) { *str++ = ':'; --remaining; }
+            str = AppendTimestampSeconds(str, tm, fsec);
 
-		case USE_GERMAN_DATES:
-			/* German variant on European style */
-			str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
-			*str++ = '.';
-			str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
-			*str++ = '.';
-			str = pg_ultostr_zeropad(str,
-									 (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
-			*str++ = ' ';
-			str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
-			*str++ = ':';
-			str = pg_ultostr_zeropad(str, tm->tm_min, 2);
-			*str++ = ':';
-			str = AppendTimestampSeconds(str, tm, fsec);
+            if (print_tz)
+            {
+                if (tzn)
+                    write_str(std::string_view(" " + std::string(tzn, std::min(strlen(tzn), size_t(MAXTZLEN)))));
+                else
+                    str = EncodeTimezone(str, tz, style);
+            }
+            break;
 
-			if (print_tz)
-			{
-				if (tzn)
-				{
-					sprintf(str, " %.*s", MAXTZLEN, tzn);
-					str += strlen(str);
-				}
-				else
-					str = EncodeTimezone(str, tz, style);
-			}
-			break;
+        case USE_GERMAN_DATES:
+            str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+            if (remaining > 1) { *str++ = '.'; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+            if (remaining > 1) { *str++ = '.'; --remaining; }
+            str = pg_ultostr_zeropad(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            if (remaining > 1) { *str++ = ' '; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+            if (remaining > 1) { *str++ = ':'; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+            if (remaining > 1) { *str++ = ':'; --remaining; }
+            str = AppendTimestampSeconds(str, tm, fsec);
 
-		case USE_POSTGRES_DATES:
-		default:
-			/* Backward-compatible with traditional Postgres abstime dates */
-			day = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday);
-			tm->tm_wday = j2day(day);
-			memcpy(str, days[tm->tm_wday], 3);
-			str += 3;
-			*str++ = ' ';
-			if (DateOrder == DATEORDER_DMY)
-			{
-				str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
-				*str++ = ' ';
-				memcpy(str, months[tm->tm_mon - 1], 3);
-				str += 3;
-			}
-			else
-			{
-				memcpy(str, months[tm->tm_mon - 1], 3);
-				str += 3;
-				*str++ = ' ';
-				str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
-			}
-			*str++ = ' ';
-			str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
-			*str++ = ':';
-			str = pg_ultostr_zeropad(str, tm->tm_min, 2);
-			*str++ = ':';
-			str = AppendTimestampSeconds(str, tm, fsec);
-			*str++ = ' ';
-			str = pg_ultostr_zeropad(str,
-									 (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            if (print_tz)
+            {
+                if (tzn)
+                    write_str(std::string_view(" " + std::string(tzn, std::min(strlen(tzn), size_t(MAXTZLEN)))));
+                else
+                    str = EncodeTimezone(str, tz, style);
+            }
+            break;
 
-			if (print_tz)
-			{
-				if (tzn)
-				{
-					sprintf(str, " %.*s", MAXTZLEN, tzn);
-					str += strlen(str);
-				}
-				else
-				{
-					/*
-					 * We have a time zone, but no string version. Use the
-					 * numeric form, but be sure to include a leading space to
-					 * avoid formatting something which would be rejected by
-					 * the date/time parser later. - thomas 2001-10-19
-					 */
-					*str++ = ' ';
-					str = EncodeTimezone(str, tz, style);
-				}
-			}
-			break;
-	}
+        case USE_POSTGRES_DATES:
+        default:
+            day = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday);
+            tm->tm_wday = j2day(day);
+            if (remaining >= 3) { memcpy(str, days[tm->tm_wday], 3); str += 3; remaining -= 3; }
+            if (remaining > 1) { *str++ = ' '; --remaining; }
+            if (DateOrder == DATEORDER_DMY)
+            {
+                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                if (remaining > 1) { *str++ = ' '; --remaining; }
+                if (remaining >= 3) { memcpy(str, months[tm->tm_mon - 1], 3); str += 3; remaining -= 3; }
+            }
+            else
+            {
+                if (remaining >= 3) { memcpy(str, months[tm->tm_mon - 1], 3); str += 3; remaining -= 3; }
+                if (remaining > 1) { *str++ = ' '; --remaining; }
+                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+            }
+            if (remaining > 1) { *str++ = ' '; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+            if (remaining > 1) { *str++ = ':'; --remaining; }
+            str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+            if (remaining > 1) { *str++ = ':'; --remaining; }
+            str = AppendTimestampSeconds(str, tm, fsec);
+            if (remaining > 1) { *str++ = ' '; --remaining; }
+            str = pg_ultostr_zeropad(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
 
-	if (tm->tm_year <= 0)
-	{
-		memcpy(str, " BC", 3);	/* Don't copy NUL */
-		str += 3;
-	}
-	*str = '\0';
+            if (print_tz)
+            {
+                if (tzn)
+                    write_str(std::string_view(" " + std::string(tzn, std::min(strlen(tzn), size_t(MAXTZLEN)))));
+                else
+                {
+                    if (remaining > 1) { *str++ = ' '; --remaining; }
+                    str = EncodeTimezone(str, tz, style);
+                }
+            }
+            break;
+    }
+
+    if (tm->tm_year <= 0)
+    {
+        if (remaining >= 3) { memcpy(str, " BC", 3); str += 3; remaining -= 3; }
+    }
+
+    *str = '\0'; // always null-terminate
 }
