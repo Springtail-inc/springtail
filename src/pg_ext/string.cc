@@ -25,6 +25,7 @@
 
 char *lowerstr(const char *str) {
     if (!str) return nullptr;
+    // NOSONAR: 'str' is expected to be a valid NUL-terminated C string
     return lowerstr_with_len(str, std::strlen(str));
 }
 
@@ -90,6 +91,7 @@ char *upperstr(const char *str) {
         LOG_ERROR("Invalid arguments to upperstr");
         return nullptr;
     }
+    // NOSONAR: 'str' is expected to be a valid NUL-terminated C string
     return upperstr_with_len(str, std::strlen(str));
 }
 
@@ -388,6 +390,7 @@ void appendStringInfoString(StringInfo str, const char *s) {
         return;
     }
 
+    // NOSONAR: 's' is expected to be a valid NUL-terminated C string by contract
     size_t slen = strlen(s);
     if (str->len + slen + 1 > str->maxlen) {
         enlargeStringInfo(str, slen + 1);

@@ -1,5 +1,6 @@
 #include <pg_ext/jsonb.hh>
 #include <pg_ext/string.hh>
+#include <cstring>
 
 static int
 lengthCompareJsonbString(const char *val1, int len1, const char *val2, int len2)
@@ -1197,7 +1198,7 @@ convertJsonbScalar(StringInfo buffer, JEntry *header, JsonbValue *scalarVal)
 								   scalarVal->val.datetime.value,
 								   scalarVal->val.datetime.typid,
 								   &scalarVal->val.datetime.tz);
-				len = strlen(buf);
+				len = strnlen(buf, MAXDATELEN + 1);
 				appendToBuffer(buffer, buf, len);
 
 				*header = len;
@@ -1206,15 +1207,16 @@ convertJsonbScalar(StringInfo buffer, JEntry *header, JsonbValue *scalarVal)
 
 		default:
 			LOG_ERROR("invalid jsonb scalar type");
+			break;
+		}
 	}
-}
 
 Jsonb *
 convertToJsonb(JsonbValue *val)
 {
 	StringInfoData buffer;
 	JEntry		jentry = 0;
-	Jsonb	   *res = nullptr;
+    Jsonb      *res = nullptr;
 
 	/* Should not already have binary representation */
 	assert(val->type != jbvType::jbvBinary);

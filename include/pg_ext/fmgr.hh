@@ -97,28 +97,29 @@ CStringGetDatum(const char *str)
 static inline Datum
 CharGetDatum(char X)
 {
-	return (Datum) X;
+    return (Datum) X;
 }
 
 #define att_addlength_pointer(cur_offset, attlen, attptr) \
 ( \
-	((attlen) > 0) ? \
-	( \
-		(cur_offset) + (attlen) \
-	) \
-	: (((attlen) == -1) ? \
-	( \
-		(cur_offset) + VARSIZE_ANY(attptr) \
-	) \
-	: \
-	( \
-		AssertMacro((attlen) == -2), \
-		(cur_offset) + (strlen((char *) (attptr)) + 1) \
-	)) \
+    ((attlen) > 0) ? \
+    ( \
+        (cur_offset) + (attlen) \
+    ) \
+    : (((attlen) == -1) ? \
+    ( \
+        (cur_offset) + VARSIZE_ANY(attptr) \
+    ) \
+    : \
+    ( \
+        AssertMacro((attlen) == -2), \
+        (cur_offset) + (((attptr) != nullptr) ? (strlen((char *) (attptr)) + 1) : 1) \
+    )) \
 )
 
 #define att_addlength_datum(cur_offset, attlen, attdatum) \
-	att_addlength_pointer(cur_offset, attlen, DatumGetPointer(attdatum))
+    att_addlength_pointer(cur_offset, attlen, DatumGetPointer(attdatum))
+
 #define att_align_nominal(cur_offset, attalign) \
 ( \
     ((attalign) == TYPALIGN_INT) ? INTALIGN(cur_offset) : \

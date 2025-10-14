@@ -486,13 +486,15 @@ tzparse(const char *name, struct state *sp, bool lastditch)
 	bool		load_ok;
 
 	stdname = name;
-	if (lastditch)
-	{
-		/* Unlike IANA, don't assume name is exactly "GMT" */
-		stdlen = strlen(name);	/* length of standard zone name */
-		name += stdlen;
-		stdoffset = 0;
-	}
+    if (lastditch)
+    {
+        /* Unlike IANA, don't assume name is exactly "GMT" */
+        if (!name || strnlen(name, TZ_STRLEN_MAX) == 0)
+            return false;
+        stdlen = strnlen(name, TZ_STRLEN_MAX);	/* length of standard zone name */
+        name += stdlen;
+        stdoffset = 0;
+    }
 	else
 	{
 		if (*name == '<')
@@ -1073,7 +1075,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
                      }
                  if (!(j < charcnt))
                  {
-                     int			tsabbrlen = strlen(tsabbr);
+                     size_t		tsabbrlen = strnlen(tsabbr, TZ_MAX_CHARS - j);
 
                      if (j + tsabbrlen < TZ_MAX_CHARS)
                      {
@@ -1718,9 +1720,9 @@ EncodeSpecialTimestamp(Timestamp dt, char *str)
     str[result.size] = '\0';
 }
 
-void EncodeSpecialDate(DateADT dt, char* str, size_t str_size)
+void EncodeSpecialDate(DateADT dt, char* str)
 {
-    if (str == nullptr || str_size == 0)
+    if (str == nullptr)
     {
         LOG_ERROR("invalid buffer passed to EncodeSpecialDate");
         return;
@@ -1739,7 +1741,7 @@ void EncodeSpecialDate(DateADT dt, char* str, size_t str_size)
     }
 
     // Write into str safely, ensuring null termination
-    auto result = std::format_to_n(str, str_size - 1, "{}", text);
+    auto result = std::format_to_n(str, 63, "{}", text);
     str[result.size] = '\0';
 }
 static char *
@@ -1876,8 +1878,7 @@ void EncodeDateTime(struct pg_tm *tm,
                     int tz,
                     const char *tzn,
                     int style,
-                    char *str,
-                    size_t str_size)
+                    char *str)
 {
     int day;
     assert(tm->tm_mon >= 1 && tm->tm_mon <= MONTHS_PER_YEAR);
@@ -1885,7 +1886,7 @@ void EncodeDateTime(struct pg_tm *tm,
     if (tm->tm_isdst < 0)
         print_tz = false;
 
-    size_t remaining = str_size;     // remaining buffer size
+    size_t remaining = 64;     // remaining buffer size
 
     auto write_str = [&](std::string_view s) {
         if (remaining == 0) return; // nothing left
@@ -1942,7 +1943,11 @@ void EncodeDateTime(struct pg_tm *tm,
             if (print_tz)
             {
                 if (tzn)
-                    write_str(std::string_view(" " + std::string(tzn, std::min(strlen(tzn), size_t(MAXTZLEN)))));
+                {
+                    size_t tznlen = strnlen(tzn, MAXTZLEN);
+                    write_str(" ");
+                    write_str(std::string_view(tzn, tznlen));
+                }
                 else
                     str = EncodeTimezone(str, tz, style);
             }
@@ -2000,7 +2005,11 @@ void EncodeDateTime(struct pg_tm *tm,
             if (print_tz)
             {
                 if (tzn)
-                    write_str(std::string_view(" " + std::string(tzn, std::min(strlen(tzn), size_t(MAXTZLEN)))));
+                {
+                    size_t tznlen = strnlen(tzn, MAXTZLEN);
+                    write_str(" ");
+                    write_str(std::string_view(tzn, tznlen));
+                }
                 else
                 {
                     if (remaining > 1) { *str++ = ' '; --remaining; }

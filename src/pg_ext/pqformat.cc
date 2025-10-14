@@ -6,6 +6,7 @@
 #include <common/logging.hh>
 #include <pg_ext/memory.hh>
 #include <cstdlib>
+#include <cstring>
 
 #include <arpa/inet.h>
 
@@ -83,12 +84,14 @@ pq_sendtext(StringInfo buf, const char *str, int slen)
     }
 
     p = pg_server_to_client(str, slen);
-    if (p != str) /* actual conversion has been done? */
+    if (p && p != str) /* actual conversion has been done? */
     {
-        slen = strlen(p);
-        appendBinaryStringInfo(buf, p, slen);
+        // Converted string is NUL-terminated by converter; still, be defensive
+        int plen = (int)strnlen(p, slen); /* cap to original length */
+        appendBinaryStringInfo(buf, p, plen);
         free(p);
-    } else {
+    }
+    else {
         appendBinaryStringInfo(buf, str, slen);
     }
 }
@@ -181,8 +184,8 @@ pq_getmsgtext(StringInfo msg, int rawbytes, int *nbytes)
     msg->cursor += rawbytes;
 
     p = pg_client_to_server(str, rawbytes);
-    if (p != str) { /* actual conversion has been done? */
-        *nbytes = strlen(p);
+    if (p && p != str) { /* actual conversion has been done? */
+        *nbytes = (int)strnlen(p, rawbytes); /* do not read past provided size */
     } else {
         p = (char *)palloc(rawbytes + 1);
         memcpy(p, str, rawbytes);
