@@ -7,8 +7,6 @@
 #include <pg_ext/varatt.hh>
 #include <pg_ext/heaptuple.hh>
 
-#include <postgresql/server/catalog/pg_type_d.h>
-
 #define PG_FUNCTION_ARGS FunctionCallInfo fcinfo
 
 struct NullableDatum {

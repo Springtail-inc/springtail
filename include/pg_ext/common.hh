@@ -3,11 +3,16 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <common/logging.hh>
+#include <postgresql/server/catalog/pg_type_d.h>
+
 using Oid = uint32_t;
+using regproc = Oid;
 using Datum = uintptr_t;
 using Size = size_t;
 using CommandId = uint32_t;
 using TransactionId = uint32_t;
+using Index = uint32_t;
 
 #define InvalidOid (Oid(0))
 #define FLEXIBLE_ARRAY_MEMBER
@@ -30,6 +35,9 @@ constexpr int32_t ALIGNOF_SHORT = 2;
 #define LONGALIGN(LEN)			TYPEALIGN(ALIGNOF_LONG, (LEN))
 #define DOUBLEALIGN(LEN)		TYPEALIGN(ALIGNOF_DOUBLE, (LEN))
 #define MAXALIGN(LEN)			TYPEALIGN(MAXIMUM_ALIGNOF, (LEN))
+
+#define OidIsValid(objectId)  ((bool) ((objectId) != InvalidOid))
+#define PointerIsValid(pointer) ((const void*)(pointer) != NULL)
 
 #define MaxAllocSize ((Size) 0x3fffffff)
 #define is_digit(c) ((unsigned)(c) - '0' <= 9)

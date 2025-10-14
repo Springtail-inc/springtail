@@ -26,20 +26,18 @@ getBaseType(Oid typid)
 bool
 type_is_rowtype(Oid typid)
 {
-    // RECORDOID XXX Stubbed for now
-    if (typid == -1) {
-        return true; /* easy case */
-    }
-    switch (get_typtype(typid)) {
-        case TYPTYPE_COMPOSITE:
-            return true;
-        case TYPTYPE_DOMAIN:
-            if (get_typtype(getBaseType(typid)) == TYPTYPE_COMPOSITE) {
-                return true;
-            }
-            break;
-        default:
-            break;
-    }
-    return false;
+	if (typid == RECORDOID)
+		return true;			/* easy case */
+	switch (get_typtype(typid))
+	{
+		case TYPTYPE_COMPOSITE:
+			return true;
+		case TYPTYPE_DOMAIN:
+			if (get_typtype(getBaseType(typid)) == TYPTYPE_COMPOSITE)
+				return true;
+			break;
+		default:
+			break;
+	}
+	return false;
 }

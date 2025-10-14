@@ -67,7 +67,7 @@ typedef struct TupleConstr {
     bool has_generated_stored;
 } TupleConstr;
 
-typedef struct TupleDescData {
+struct TupleDescData {
     int natts;           /* number of attributes in the tuple */
     Oid tdtypeid;        /* composite type ID for tuple type */
     int32_t tdtypmod;    /* typmod for tuple type */
@@ -75,19 +75,19 @@ typedef struct TupleDescData {
     TupleConstr *constr; /* constraints, or NULL if none */
     /* attrs[N] is the description of Attribute Number N+1 */
     FormData_pg_attribute attrs[FLEXIBLE_ARRAY_MEMBER];
-} TupleDescData;
+};
 typedef struct TupleDescData *TupleDesc;
 
-typedef struct AttInMetadata {
+struct AttInMetadata {
     TupleDesc tupdesc;
     FmgrInfo *attinfuncs;
     Oid *attioparams;
     int32_t *atttypmods;
-} AttInMetadata;
+};
 
 typedef struct HeapTupleData *HeapTuple;
 
-typedef struct HeapTupleFields
+struct HeapTupleFields
 {
 	TransactionId t_xmin;		/* inserting xact ID */
 	TransactionId t_xmax;		/* deleting or locking xact ID */
@@ -97,9 +97,9 @@ typedef struct HeapTupleFields
 		CommandId	t_cid;		/* inserting or deleting command ID, or both */
 		TransactionId t_xvac;	/* old-style VACUUM FULL xact ID */
 	}			t_field3;
-} HeapTupleFields;
+};
 
-typedef struct DatumTupleFields
+struct DatumTupleFields
 {
 	int32_t		datum_len_;		/* varlena header (do not touch directly!) */
 
@@ -116,7 +116,7 @@ typedef struct DatumTupleFields
 	 * Note: field ordering is chosen with thought that Oid might someday
 	 * widen to 64 bits.
 	 */
-} DatumTupleFields;
+};
 
 struct HeapTupleHeaderData
 {
@@ -146,6 +146,8 @@ struct HeapTupleData {
     Oid t_tableOid;         /* table the tuple came from */
     HeapTupleHeader t_data; /* -> tuple header and data */
 };
+
+#define HeapTupleIsValid(tuple) PointerIsValid(tuple)
 
 extern "C" PGEXT_API void DecrTupleDescRefCount(TupleDesc tupdesc);
 extern "C" PGEXT_API TupleDesc BlessTupleDesc(TupleDesc tupdesc);
