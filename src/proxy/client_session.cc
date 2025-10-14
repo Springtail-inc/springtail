@@ -87,6 +87,11 @@ namespace springtail::pg_proxy {
 
                 fds.clear();
 
+                // check once more for any notifications
+                if (_state == State::READY) {
+                    _process_notifications();
+                }
+
             } while ((_state != State::ERROR) && !is_shutdown() && _has_pending_data(fds));
         });
 
@@ -105,7 +110,6 @@ namespace springtail::pg_proxy {
 
         if (_replica_session) {
             connections.push_back(_replica_session->get_connection());
-
         }
 
         return ProxyConnection::has_pending(connections, fds);
@@ -127,6 +131,11 @@ namespace springtail::pg_proxy {
                 case NotificationMsg::Type::NOTIFY_FAILOVER:
                     LOG_INFO("[C:{}] Client session received failover notification", _id);
                     _handle_failover_notification();
+                    break;
+
+                case NotificationMsg::Type::NOTIFY_FAILOVER_READY:
+                    LOG_INFO("[C:{}] Client session received failover ready notification", _id);
+                    _switch_failover_replica();
                     break;
 
                 default:
@@ -174,17 +183,61 @@ namespace springtail::pg_proxy {
         // handle failover notification
         LOG_INFO("[C:{}] Client session handling failover notification", _id);
 
-        // allocate a new replica session if possible
-        _create_server_session(Session::Type::REPLICA, _gen_seq_id(), true);
-
+        // allocate a new replica session
+        // this will set _pending_replica_session
+        // and when auth is done, server_auth_done() will be called
+        // which will call _handle_failover_auth_done() to complete the failover
+        auto session = _create_server_session(Session::Type::REPLICA, _gen_seq_id(), true);
+        if (session == nullptr) {
+            LOG_ERROR("[C:{}] Client session failed to create failover replica session", _id);
+            // we stay in ready state, and continue to use the primary session
+            return;
+        }
     }
 
     void
     ClientSession::_handle_failover_auth_done()
     {
-        // failover replica session auth is done
+        // called from server_auth_done() when failover replica is ready
         LOG_INFO("[C:{}] Client session handling failover auth done", _id);
         DCHECK_NE(_pending_replica_session, nullptr);
+
+        // if in ready state we can switch over
+        if (_state == State::READY) {
+            _switch_failover_replica();
+            return;
+        }
+
+        // if not ready, queue the failover ready notification
+        // this will only be processed when we are in ready state
+        std::unique_lock<std::mutex> lock(_notification_mutex);
+        _notification_queue.push(NotificationMsg{NotificationMsg::Type::NOTIFY_FAILOVER_READY});
+    }
+
+    void
+    ClientSession::_switch_failover_replica()
+    {
+        // switch the failover replica session with the current replica session
+        DCHECK_EQ(_state, State::READY);
+        DCHECK_NE(_pending_replica_session, nullptr);
+
+        if (_pending_replica_session == nullptr) {
+            LOG_ERROR("[C:{}] Client session no pending replica session to switch", _id);
+            return;
+        }
+
+        LOG_INFO("[C:{}] Client session switching failover replica session", _id);
+
+        if (_replica_session != nullptr) {
+            // release the old replica session
+            DCHECK(_replica_session->is_pinned());
+            _replica_session->unpin_client_session();
+            _replica_session->shutdown_session();
+        }
+        _replica_session = _pending_replica_session;
+        _pending_replica_session = nullptr;
+
+        LOG_INFO("[C:{}] Client session failover replica session switched over to [S:{}]", _id, _replica_session->id());
     }
 
     void

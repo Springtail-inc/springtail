@@ -1159,16 +1159,28 @@ namespace springtail::pg_proxy
     }
 
     void
+    DatabaseMgr::_internal_thread_shutdown()
+    {
+        _shutdown_cv.notify_all();
+    }
+
+    void
     DatabaseMgr::_internal_run()
     {
         while (!_is_shutting_down()) {
             if (_primary_set != nullptr) {
                 _primary_set->release_expired_sessions();
             }
+
             if (_replica_set != nullptr) {
                 _replica_set->release_expired_sessions();
             }
-            sleep(5);
+
+            // condition variable sleep for 5 seconds
+            std::unique_lock lock(_shutdown_mutex);
+            _shutdown_cv.wait_for(lock, std::chrono::seconds(5), [this]() {
+                return _is_shutting_down();
+            });
         }
     }
 

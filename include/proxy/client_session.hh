@@ -277,6 +277,9 @@ namespace springtail::pg_proxy {
         ServerSessionPtr _get_associated_session() {
             return std::static_pointer_cast<ServerSession>(get_associated_session());
         }
+
+        /** Helper to switch failover replica session with replica session */
+        void _switch_failover_replica();
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
 } // namespace springtail::pg_proxy

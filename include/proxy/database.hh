@@ -935,6 +935,11 @@ namespace springtail::pg_proxy {
         void _internal_shutdown() override;
 
         /**
+         * @brief Function called by Singleton base class to prior to thread shutdown.
+         */
+        void _internal_thread_shutdown() override;
+
+        /**
          * @brief Function called by Singleton base class to run thread.
          *
          */
@@ -958,6 +963,9 @@ namespace springtail::pg_proxy {
 
         std::string _db_replica_prefix;         ///< prefix to be used for replica database (for testing)
         DatabasePool::PoolConfig _pool_config;  ///< pool configuration
+
+        std::condition_variable _shutdown_cv;    ///< condition variable for shutdown
+        std::mutex _shutdown_mutex;              ///< mutex for shutdown
 
         /**
          * @brief Construct a new Database Mgr object

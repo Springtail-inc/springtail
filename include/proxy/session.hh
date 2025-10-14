@@ -78,6 +78,7 @@ namespace springtail::pg_proxy {
             enum class Type : int8_t {
                 NOTIFY_NONE=0,      ///< no notification; used for return type of peek
                 NOTIFY_FAILOVER=1,  ///< failover notification for replica (sent to client)
+                NOTIFY_FAILOVER_READY=2, ///< failover complete, ready to switch (sent to client)
             };
 
             Type type;                                   ///< type of notification
