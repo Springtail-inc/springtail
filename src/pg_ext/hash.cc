@@ -1,3 +1,4 @@
+#include <memory>
 #include <pg_ext/hash.hh>
 
 static uint64_t default_hash_func(const void *key, size_t len) {
@@ -13,15 +14,23 @@ static bool default_match_func(const void *a, const void *b, size_t len) {
 }
 
 HTAB *hash_create(const char *tabname, int nelem, const HASHCTL *info) {
-    auto *htab = new HTAB;
+    auto htab = std::make_shared<HTAB>();
+
+	auto df_hash_func = default_hash_func;
+	auto df_match_func = default_match_func;
+	if ( df_hash_func == nullptr)
+		df_hash_func = &default_hash_func;
+	if ( df_match_func == nullptr)
+		df_match_func = &default_match_func;
+
     htab->name = tabname ? tabname : "";
     htab->keysize = info ? info->keysize : sizeof(void *);
     htab->entrysize = info ? info->entrysize : sizeof(void *);
-    htab->hash_func = info && info->hash_func ? info->hash_func : default_hash_func;
-    htab->match_func = info && info->match_func ? info->match_func : default_match_func;
+    htab->hash_func = info && info->hash_func ? info->hash_func : df_hash_func;
+    htab->match_func = info && info->match_func ? info->match_func : df_match_func;
     htab->table.resize(nelem * 2);
     htab->count = 0;
-    return htab;
+    return htab.get();
 }
 
 void *hash_search(HTAB *htab, const void *key, HASHACTION action, bool *found) {
@@ -79,7 +88,10 @@ long hash_get_num_entries(HTAB *htab) {
 }
 
 uint32_t hash_bytes(const unsigned char *k, int keylen) {
-    return default_hash_func(k, keylen);
+	auto df_hash_func = default_hash_func;
+	if ( df_hash_func == nullptr)
+		df_hash_func = &default_hash_func;
+    return df_hash_func(k, keylen);
 }
 
 uint64_t

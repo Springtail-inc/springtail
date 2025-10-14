@@ -1214,7 +1214,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
      auto *lsp = (union local_storage *) malloc(sizeof(union local_storage));
 
      if (!lsp)
-         return errno;
+         return -1;
      else
      {
          int err = tzloadbody(name, canonname, sp, doextend, lsp);
@@ -1268,27 +1268,28 @@ timesub(const pg_time_t *timep, int32_t offset,
 		const struct state *sp, struct pg_tm *tmp)
 {
 	const struct lsinfo *lp;
-	pg_time_t	tdays;
-	int			idays;			/* unsigned would be so 2003 */
-	int64_t		rem;
-	int			y;
-	const int  *ip;
-	int64_t		corr;
-	bool		hit;
-	int			i;
+	pg_time_t	tdays = 0;
+	int			idays = 0;			/* unsigned would be so 2003 */
+	int64_t		rem = 0;
+	int			y = 0;
+	const int  *ip = nullptr;
+	int64_t		corr = 0;
+	bool		hit = false;
+	int			i = 0;
 
-	corr = 0;
-	hit = false;
-	i = (sp == nullptr) ? 0 : sp->leapcnt;
+	if (sp)
+		i = sp->leapcnt;
 	while (--i >= 0)
 	{
-		lp = &sp->lsis[i];
-		if (*timep >= lp->ls_trans)
 		{
-			corr = lp->ls_corr;
-			hit = (*timep == lp->ls_trans
-				   && (i == 0 ? 0 : lp[-1].ls_corr) < corr);
-			break;
+			lp = &sp->lsis[i];
+			if (*timep >= lp->ls_trans)
+			{
+				corr = lp->ls_corr;
+				hit = (*timep == lp->ls_trans
+					   && (i == 0 ? 0 : lp[-1].ls_corr) < corr);
+				break;
+			}
 		}
 	}
 	y = EPOCH_YEAR;

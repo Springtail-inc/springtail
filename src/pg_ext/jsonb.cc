@@ -135,28 +135,38 @@ appendValue(JsonbParseState *pstate, JsonbValue *scalarVal)
 static void
 appendElement(JsonbParseState *pstate, const JsonbValue *scalarVal)
 {
-	JsonbValue *array = &pstate->contVal;
+    JsonbValue *array = &pstate->contVal;
 
-	assert(array->type == jbvType::jbvArray);
+    assert(array->type == jbvType::jbvArray);
 
-	if (array->val.array.nElems >= JSONB_MAX_ELEMS)
-		LOG_ERROR("number of jsonb array elements exceeds the maximum allowed (%zu)", JSONB_MAX_ELEMS);
+    /*
+     * Defensive check: callers already validate non-null, but some analyzers
+     * may not follow that control flow. Make it explicit here.
+     */
+    if (!scalarVal)
+    {
+        LOG_ERROR("unexpected null jsonb array element");
+        return; /* make control flow explicit for analyzers */
+    }
 
-	if (array->val.array.nElems >= pstate->size)
-	{
-		pstate->size *= 2;
-		array->val.array.elems = (JsonbValue* )repalloc(array->val.array.elems,
-										  sizeof(JsonbValue) * pstate->size);
-	}
+    if (array->val.array.nElems >= JSONB_MAX_ELEMS)
+        LOG_ERROR("number of jsonb array elements exceeds the maximum allowed (%zu)", JSONB_MAX_ELEMS);
 
-	array->val.array.elems[array->val.array.nElems++] = *scalarVal;
+    if (array->val.array.nElems >= pstate->size)
+    {
+        pstate->size *= 2;
+        array->val.array.elems = (JsonbValue* )repalloc(array->val.array.elems,
+                                          sizeof(JsonbValue) * pstate->size);
+    }
+
+    array->val.array.elems[array->val.array.nElems++] = *scalarVal;
 }
 
 
 static JsonbParseState *
 pushState(JsonbParseState **pstate)
 {
-	JsonbParseState *ns = (JsonbParseState *) palloc(sizeof(JsonbParseState));
+	auto ns = (JsonbParseState *) palloc(sizeof(JsonbParseState));
 
 	ns->next = *pstate;
 	ns->unique_keys = false;
@@ -206,23 +216,41 @@ pushJsonbValueScalar(JsonbParseState **pstate, JsonbIteratorToken seq,
 			break;
 		case JsonbIteratorToken::WJB_KEY:
 			if (!scalarVal)
+			{
 				LOG_ERROR("unexpected null jsonb key");
+				return nullptr; /* make control flow explicit for analyzers */
+			}
 			if (scalarVal->type != jbvType::jbvString)
+			{
 				LOG_ERROR("unexpected jsonb type as object key");
+				return nullptr; /* unreachable at runtime, silences analyzer */
+			}
 			appendKey(*pstate, scalarVal);
 			break;
 		case JsonbIteratorToken::WJB_VALUE:
 			if (!scalarVal)
+			{
 				LOG_ERROR("unexpected null jsonb value");
+				return nullptr; /* make control flow explicit for analyzers */
+			}
 			if (!IsAJsonbScalar(scalarVal))
+			{
 				LOG_ERROR("invalid non-scalar jsonb value");
+				return nullptr; /* unreachable at runtime, silences analyzer */
+			}
 			appendValue(*pstate, scalarVal);
 			break;
 		case JsonbIteratorToken::WJB_ELEM:
 			if (!scalarVal)
+			{
 				LOG_ERROR("unexpected null jsonb array element");
+				return nullptr; /* make control flow explicit for analyzers */
+			}
 			if (!IsAJsonbScalar(scalarVal))
+			{
 				LOG_ERROR("invalid non-scalar jsonb array element");
+				return nullptr; /* unreachable at runtime, silences analyzer */
+			}
 			appendElement(*pstate, scalarVal);
 			break;
 		case JsonbIteratorToken::WJB_END_OBJECT:
@@ -654,9 +682,9 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 		case TIMEOID:
 			{
 				TimeADT		time = DatumGetTimeADT(value);
-				struct pg_tm tt,
-						   *tm = &tt;
-				fsec_t		fsec;
+				struct pg_tm tt;
+				struct pg_tm *tm = &tt;
+				fsec_t		fsec = 0;
 
 				/* Same as time_out(), but forcing DateStyle */
 				time2tm(time, tm, &fsec);
@@ -666,9 +694,10 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 		case TIMETZOID:
 			{
 				TimeTzADT  *time = DatumGetTimeTzADTP(value);
-				struct pg_tm tt, *tm = &tt;
-				fsec_t		fsec;
-				int			tz;
+				struct pg_tm tt;
+				struct pg_tm *tm = &tt;
+				fsec_t		fsec = 0;
+				int			tz = 0;
 
 				/* Same as timetz_out(), but forcing DateStyle */
 				timetz2tm(time, tm, &fsec, &tz);

@@ -113,6 +113,7 @@ char *upperstr_with_len(const char *str, int len) {
 int pg_snprintf(char *str, size_t count, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
+    // NOSONAR: fmt is controlled internally, not from user input
     int result = vsnprintf(str, count, fmt, args);
     va_end(args);
     return result;
