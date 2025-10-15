@@ -1516,6 +1516,7 @@ MutableTable::_get_extent_id(TuplePtr search_key) {
     {
         DCHECK(_cache_size);
 
+        _look_aside_key_fields = std::make_shared<FieldArray>(1);
         _extent_id_f = table->look_aside_schema()->get_field(constant::INDEX_EID_FIELD);
         _row_id_f = table->look_aside_schema()->get_field(constant::INDEX_RID_FIELD);
         _internal_row_id_f = schema->get_field(constant::INTERNAL_ROW_ID);
@@ -1555,9 +1556,8 @@ MutableTable::_get_extent_id(TuplePtr search_key) {
         auto &&look_aside_index = _table->look_aside_index();
 
         // Construct and set the key for lookup
-        auto key_fields = std::make_shared<FieldArray>(1);
-        key_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
-        auto lookup_tuple = std::make_shared<FieldTuple>(key_fields, nullptr);
+        _look_aside_key_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+        auto lookup_tuple = std::make_shared<FieldTuple>(_look_aside_key_fields, nullptr);
 
         // Look-aside entry must exist if entry exists in secondary index
         auto &&lookup_i = look_aside_index->lower_bound(lookup_tuple);

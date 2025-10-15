@@ -218,6 +218,7 @@ namespace indexer_helpers {
             FieldPtr _extent_id_f;
             FieldPtr _row_id_f;
             FieldPtr _internal_row_id_f;
+            FieldArrayPtr _look_aside_key_fields;
 
             struct PageMapItem {
                 StorageCache::SafePagePtr page;
