@@ -2442,6 +2442,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
                 auto tab_it = tables.find(table_id);
                 if (tab_it != tables.end()) {
                     row_count = tab_it->second.row_count;
+                    last_internal_row_id = tab_it->second.last_internal_row_id;
                     stats_found = true;
                 }
             }
@@ -2511,6 +2512,7 @@ Server::_set_roots_info(uint64_t db_id,
         last_xid = xid.xid; // record the last XID we updated the stats at
         auto& table_stats = tables[table_id];
         table_stats.row_count = roots_info->stats().row_count();
+        table_stats.last_internal_row_id = roots_info->stats().last_internal_row_id();
     }
 
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);

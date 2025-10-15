@@ -815,6 +815,7 @@ private:
      */
     struct TableStats {
         uint64_t row_count;
+        uint64_t last_internal_row_id;
     };
     std::unordered_map<uint64_t, ///< db_id
         // xid - map
