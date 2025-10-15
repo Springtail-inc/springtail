@@ -80,7 +80,7 @@ namespace indexer_helpers {
     template <IndexOperation op>            // Operation on the index - insert/remove
     void index_mutation_handler(
             const ExtentSchemaPtr schema,
-            const std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>>& secondary_indexes,
+            const SecondaryIndexesCache& secondary_indexes,
             const Extent::Row& row)
     {
         auto internal_row_id_f = schema->get_field(constant::INTERNAL_ROW_ID);
@@ -140,6 +140,27 @@ namespace indexer_helpers {
         _update_secondary_index<IndexOperation::Remove>(extent_id, extent, root,
                 idx_cols, schema);
     }
+
+    /**
+     * Struct to hold context to be passed to the callback from cache
+     */
+    struct IndexMutationContext
+    {
+        const ExtentSchemaPtr schema;
+        const SecondaryIndexesCache& indexes;
+    };
+
+    /**
+     * Handler that does the secondary index mutations
+     * @param row   Extent row holding the content
+     * @param ctx   pointer to an IndexMutationContext
+     */
+    template<IndexOperation op>
+    static void mutation_handler(const Extent::Row& row, void* ctx) {
+        auto* c = static_cast<const IndexMutationContext*>(ctx);
+        index_mutation_handler<op>(c->schema, c->indexes, row);
+    }
+
 } // namespace indexer_helpers
 
     namespace {
@@ -1060,34 +1081,28 @@ namespace indexer_helpers {
     MutableTable::_mutation_wrapper(StorageCache::SafePagePtr &page,
                                     TuplePtr value)
     {
-        // small helper that returns a lambda which calls the templated indexer helper
-        auto make_handler = [this]<indexer_helpers::IndexOperation op>() {
-            return [this](const Extent::Row& row) {
-                indexer_helpers::index_mutation_handler<op>(this->_schema, this->_secondary_indexes, row);
-            };
-        };
 
-        // single-op helpers
-        auto insert_handler = make_handler.template operator()<indexer_helpers::IndexOperation::Insert>();
-        auto remove_handler = make_handler.template operator()<indexer_helpers::IndexOperation::Remove>();
+        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes };
 
         if constexpr (m_type == MutationType::INSERT) {
-            page->insert(value, _schema, insert_handler);
+            page->insert(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Insert>, &ctx);
 
         } else if constexpr (m_type == MutationType::APPEND) {
-            page->append(value, _schema, insert_handler);
+            page->append(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Insert>, &ctx);
 
         } else if constexpr (m_type == MutationType::UPDATE) {
-            page->update(value, _schema, remove_handler, insert_handler);
+            page->update(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Remove>,
+                    &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Insert>, &ctx);
 
         } else if constexpr (m_type == MutationType::UPSERT) {
-            return page->upsert(value, _schema, remove_handler, insert_handler);
+            return page->upsert(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Remove>,
+                    &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Insert>, &ctx);
 
         } else if constexpr (m_type == MutationType::REMOVE) {
-            page->remove(value, _schema, remove_handler);
+            page->remove(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Remove>, &ctx);
 
         } else if constexpr (m_type == MutationType::REMOVE_BY_SCAN) {
-            return page->try_remove_by_scan(value, _schema, remove_handler);
+            return page->try_remove_by_scan(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Remove>, &ctx);
 
         } else {
             CHECK(false);

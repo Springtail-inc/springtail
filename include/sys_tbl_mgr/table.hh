@@ -11,6 +11,11 @@
 
 namespace springtail {
 
+    /**
+     * Alias to a map holding secondary indexes :: index_id => (root, index_cols)
+     */
+    using SecondaryIndexesCache = std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>>;
+
 namespace table_helpers {
 
 /** Constructs the full directory path for a table given the parameters. */
@@ -963,7 +968,7 @@ namespace indexer_helpers {
          * second.first is btree
          * second.second are the index columns
          */
-        std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The mutable secondary index btrees.
+        SecondaryIndexesCache _secondary_indexes; ///< The mutable secondary index btrees.
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
         ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index.
 

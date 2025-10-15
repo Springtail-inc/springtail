@@ -808,14 +808,15 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::Page::insert(TuplePtr tuple,
                                ExtentSchemaPtr schema,
-                               std::function<void(const Extent::Row&)> post_insert_handler)
+                               MutationHandlerPtr post_insert_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // if the page is empty, do an _append() which handles the empty extent case
         if (_empty()) {
-            _append(tuple, schema, post_insert_handler);
+            _append(tuple, schema, post_insert_handler, handler_context);
             return;
         }
 
@@ -855,7 +856,7 @@ StorageCache::PageCache::background_cleaner()
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
         if (post_insert_handler) {
-            post_insert_handler(row);
+            post_insert_handler(row, handler_context);
         }
 
         // check for split
@@ -865,19 +866,21 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::Page::append(TuplePtr tuple,
                                ExtentSchemaPtr schema,
-                               std::function<void(const Extent::Row&)> post_append_handler)
+                               MutationHandlerPtr post_append_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // perform the internal append
-        _append(tuple, schema, post_append_handler);
+        _append(tuple, schema, post_append_handler, handler_context);
     }
 
     void
     StorageCache::Page::_append(TuplePtr tuple,
                                 ExtentSchemaPtr schema,
-                                std::function<void(const Extent::Row&)> post_append_handler)
+                                MutationHandlerPtr post_append_handler,
+                                void* handler_context)
 
     {
         // if the page is empty, create an empty extent to back it
@@ -892,7 +895,7 @@ StorageCache::PageCache::background_cleaner()
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
             if (post_append_handler) {
-                post_append_handler(row);
+                post_append_handler(row, handler_context);
             }
 
             return;
@@ -910,7 +913,7 @@ StorageCache::PageCache::background_cleaner()
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
         if (post_append_handler) {
-            post_append_handler(row);
+            post_append_handler(row, handler_context);
         }
 
         // check for split
@@ -920,8 +923,9 @@ StorageCache::PageCache::background_cleaner()
     bool
     StorageCache::Page::upsert(TuplePtr tuple,
                                ExtentSchemaPtr schema,
-                               std::function<void(const Extent::Row&)> pre_upsert_handler,
-                               std::function<void(const Extent::Row&)> post_upsert_handler)
+                               MutationHandlerPtr pre_upsert_handler,
+                               MutationHandlerPtr post_upsert_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -938,7 +942,7 @@ StorageCache::PageCache::background_cleaner()
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
             if (post_upsert_handler) {
-                post_upsert_handler(row);
+                post_upsert_handler(row, handler_context);
             }
 
             return true;
@@ -983,7 +987,7 @@ StorageCache::PageCache::background_cleaner()
             auto row = *row_i;
 
             if (pre_upsert_handler) {
-                pre_upsert_handler(row);
+                pre_upsert_handler(row, handler_context);
             }
 
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
@@ -992,7 +996,7 @@ StorageCache::PageCache::background_cleaner()
             internal_row_id_f->set_uint64(&row, existing_internal_row_id);
 
             if (post_upsert_handler) {
-                post_upsert_handler(row);
+                post_upsert_handler(row, handler_context);
             }
 
         } else {
@@ -1002,7 +1006,7 @@ StorageCache::PageCache::background_cleaner()
             did_insert = true;
 
             if (post_upsert_handler) {
-                post_upsert_handler(row);
+                post_upsert_handler(row, handler_context);
             }
         }
 
@@ -1016,8 +1020,9 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::Page::update(TuplePtr tuple,
                                ExtentSchemaPtr schema,
-                               std::function<void(const Extent::Row&)> pre_update_handler,
-                               std::function<void(const Extent::Row&)> post_update_handler)
+                               MutationHandlerPtr pre_update_handler,
+                               MutationHandlerPtr post_update_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -1059,7 +1064,7 @@ StorageCache::PageCache::background_cleaner()
         auto row = *row_i;
 
         if (pre_update_handler) {
-            pre_update_handler(row);
+            pre_update_handler(row, handler_context);
         }
 
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
@@ -1068,7 +1073,7 @@ StorageCache::PageCache::background_cleaner()
         internal_row_id_f->set_uint64(&row, existing_internal_row_id);
 
         if (post_update_handler) {
-            post_update_handler(row);
+            post_update_handler(row, handler_context);
         }
 
         // check for split
@@ -1078,7 +1083,8 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::Page::remove(TuplePtr key,
                                ExtentSchemaPtr schema,
-                               std::function<void(const Extent::Row&)> post_remove_handler)
+                               MutationHandlerPtr post_remove_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -1109,7 +1115,7 @@ StorageCache::PageCache::background_cleaner()
         DCHECK(FieldTuple(schema->get_sort_fields(), const_cast<Extent::Row *>(&*row_i)).equal_strict(*key));
 
         if (post_remove_handler) {
-            post_remove_handler(*row_i);
+            post_remove_handler(*row_i, handler_context);
         }
 
         // remove the row
@@ -1125,7 +1131,8 @@ StorageCache::PageCache::background_cleaner()
     bool
     StorageCache::Page::try_remove_by_scan(TuplePtr value,
                                            ExtentSchemaPtr schema,
-                                           std::function<void(const Extent::Row&)> post_remove_handler)
+                                           MutationHandlerPtr post_remove_handler,
+                                           void* handler_context)
     {
         bool found = false;
 
@@ -1166,7 +1173,7 @@ StorageCache::PageCache::background_cleaner()
         (*extent)->remove(it);
 
         if (post_remove_handler) {
-            post_remove_handler(*it);
+            post_remove_handler(*it, handler_context);
         }
 
         // if the extent has become empty, remove it from the page
