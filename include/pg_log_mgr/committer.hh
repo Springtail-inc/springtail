@@ -87,6 +87,17 @@ namespace springtail::committer {
 
     private:
         /**
+         * Scan forward through the results deque to find the final XID for each database
+         * in the upcoming batch. Stops at the first non-XACT_MSG message (batch boundary).
+         * @param start_it Iterator to start scanning from
+         * @param end_it Iterator marking the end of the deque
+         * @return Map of db_id to final_xid for each database in the batch
+         */
+        std::map<uint64_t, uint64_t> _scan_batch_final_xids(
+            std::deque<std::shared_ptr<XidReady>>::iterator start_it,
+            std::deque<std::shared_ptr<XidReady>>::iterator end_it);
+
+        /**
          * Clear the SysTblMgr::Client cache for any tables with DDL mutations.
          */
         void _invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls);
@@ -162,7 +173,22 @@ namespace springtail::committer {
         );
 
         /**
-         * Handle XACT_MSG and RECONCILE_INDEX message types.
+         * Handle RECONCILE_INDEX message type in isolation.
+         * This commits any pending batch, processes the reconciliation, and commits it.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         * @param completed_xid The most recent XID we completed processing
+         * @param keep_alive Reference to the coordinator keep-alive
+         */
+        void _handle_index_reconciliation(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id,
+            uint64_t& completed_xid,
+            std::atomic<uint64_t>& keep_alive
+        );
+
+        /**
+         * Handle XACT_MSG message types.
          * @param result The XidReady message to process
          * @param db_id The database ID
          * @param completed_xid The most recent XID we completed processing
@@ -182,8 +208,7 @@ namespace springtail::committer {
         struct BatchState {
             std::map<uint64_t, MutableTablePtr> table_cache;  ///< tid → MutableTable
             std::vector<std::shared_ptr<XidReady>> xid_results;  ///< All XidReady messages for this db
-            uint64_t first_xid = 0;
-            uint64_t last_xid = 0;
+            uint64_t final_xid = 0;  ///< The final XID where this batch will commit (determined upfront)
         };
 
         /**

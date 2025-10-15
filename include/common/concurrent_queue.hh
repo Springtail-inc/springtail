@@ -1,10 +1,11 @@
 #pragma once
 
-#include <queue>
+#include <deque>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
 #include <memory>
+#include <vector>
 
 namespace springtail {
     /**
@@ -93,7 +94,7 @@ namespace springtail {
             }
 
             Tptr entry = _queue.front();
-            _queue.pop();
+            _queue.pop_front();
 
             write_lock.unlock();
 
@@ -114,7 +115,7 @@ namespace springtail {
             }
 
             Tptr entry = _queue.front();
-            _queue.pop();
+            _queue.pop_front();
 
             write_lock.unlock();
 
@@ -126,10 +127,10 @@ namespace springtail {
         /**
          * @brief Pop all entries from queue in one operation, optionally waiting for entries
          * @param seconds timeout in seconds
-         * @return std::queue<Tptr> all entries currently in queue, empty queue if no entries
+         * @return std::deque<Tptr> all entries currently in queue, empty deque if no entries
          *         found either due to timeout or shutdown
          */
-        std::queue<Tptr> pop_all(uint32_t seconds = 0)
+        std::deque<Tptr> pop_all(uint32_t seconds = 0)
         {
             std::unique_lock<std::mutex> write_lock{_mutex};
             while (_queue.empty() && !_shutdown) {
@@ -139,7 +140,7 @@ namespace springtail {
                     _cv_pop.wait_for(write_lock, std::chrono::seconds(seconds));
                     if (_queue.empty() && !_shutdown) {
                         // timeout
-                        return std::queue<Tptr>();
+                        return std::deque<Tptr>();
                     }
                 } else {
                     // wait indefinitely
@@ -152,11 +153,11 @@ namespace springtail {
                 if (_shutdown) {
                     _cv_shutdown.notify_all();
                 }
-                return std::queue<Tptr>();
+                return std::deque<Tptr>();
             }
 
-            // Efficiently extract all items by swapping with an empty queue
-            std::queue<Tptr> result;
+            // Efficiently extract all items by swapping with an empty deque
+            std::deque<Tptr> result;
             std::swap(_queue, result);
 
             write_lock.unlock();
@@ -213,9 +214,7 @@ namespace springtail {
         /** clear the queue */
         void clear() {
             std::unique_lock<std::mutex> write_lock{_mutex};
-            while (!_queue.empty()) {
-                _queue.pop();
-            }
+            _queue.clear();
         }
 
         /** is queue shutdown */
@@ -235,7 +234,7 @@ namespace springtail {
         /** condition variable to wait on empty for shutdown */
         std::condition_variable _cv_shutdown;
         /** internal queue */
-        std::queue<Tptr> _queue;
+        std::deque<Tptr> _queue;
         /** shutdown flag */
         std::atomic<bool> _shutdown = false;
 
@@ -248,7 +247,7 @@ namespace springtail {
             }
 
             // push entry
-            _queue.push(entry);
+            _queue.push_back(entry);
 
             // notify condition variable
             _cv_pop.notify_one();

@@ -899,6 +899,8 @@ namespace indexer_helpers {
     TableMetadata
     MutableTable::finalize()
     {
+        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Finalize {} {}", _id, _target_xid);
+
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
         if (_empty_page) {

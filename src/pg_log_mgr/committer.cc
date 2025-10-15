@@ -69,9 +69,9 @@ namespace springtail::committer {
             _batch_state.clear();
 
             // process all messages, grouping by db_id and handling special cases
-            while (!results.empty()) {
-                auto result = results.front();
-                results.pop();
+            // use iterator-based loop to allow peeking ahead for batch boundaries
+            for (auto it = results.begin(); it != results.end(); ++it) {
+                auto result = *it;
 
                 uint64_t db_id = result->db();
 
@@ -98,10 +98,8 @@ namespace springtail::committer {
 
                 auto token_1 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
 
-                // handle a TABLE_SYNC_START - commit any pending batch for this db first
-                if (result->type() == XidReady::Type::TABLE_SYNC_START) {
-                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Stop committing due to table sync: {}", db_id);
-
+                // if the message isn't an XACT then make sure we've done a commit
+                if (result->type() != XidReady::Type::XACT_MSG) {
                     // commit any pending batch for this database before blocking
                     auto batch_it = _batch_state.find(db_id);
                     if (batch_it != _batch_state.end()) {
@@ -109,6 +107,11 @@ namespace springtail::committer {
                         _commit_batch(db_id, batch_it->second, completed_xid, keep_alive);
                         _batch_state.erase(batch_it);
                     }
+                }
+
+                // handle a TABLE_SYNC_START - commit any pending batch for this db first
+                if (result->type() == XidReady::Type::TABLE_SYNC_START) {
+                    LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Stop committing due to table sync: {}", db_id);
 
                     // stop performing commits on this db until the table syncs are complete and aligned
                     _block_commit.insert(db_id);
@@ -132,26 +135,37 @@ namespace springtail::committer {
                 // note: no need to commit batch since SYNC_START already blocked commits
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                     result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
+
                     CHECK_GT(result->swap().xid(), completed_xid);
                     _handle_table_sync_message(result, db_id);
                     continue;
                 }
 
-                // handle RECONCILE_INDEX - must commit pending batch first since reconciliation
-                // depends on previous XIDs being committed
+                // handle RECONCILE_INDEX - process in isolation
                 if (result->type() == XidReady::Type::RECONCILE_INDEX) {
-                    auto batch_it = _batch_state.find(db_id);
-                    if (batch_it != _batch_state.end()) {
-                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1,
-                                  "Committing batch before RECONCILE_INDEX for db {}", db_id);
-                        _commit_batch(db_id, batch_it->second, completed_xid, keep_alive);
-                        _batch_state.erase(batch_it);
-                        // update completed_xid for this database
-                        completed_xid = _completed_xids[db_id];
+                    _handle_index_reconciliation(result, db_id, completed_xid, keep_alive);
+                    continue;
+                }
+
+                // handle XACT_MSG - process mutations and accumulate in batch
+                // Check if this is the first XACT_MSG in a new batch (final_xid not yet set)
+                if (result->type() == XidReady::Type::XACT_MSG) {
+                    auto& batch = _batch_state[db_id];
+
+                    // If final_xid is not set, this is the start of a new batch - scan ahead
+                    if (batch.final_xid == 0) {
+                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "First XACT_MSG in batch for db {}, scanning ahead for final_xids", db_id);
+
+                        // Scan from current position to find final_xid for all databases in this batch
+                        auto final_xids = _scan_batch_final_xids(it, results.end());
+
+                        // Set final_xid for all databases found in the scan
+                        for (auto& [scan_db_id, final_xid] : final_xids) {
+                            _batch_state[scan_db_id].final_xid = final_xid;
+                        }
                     }
                 }
 
-                // handle XACT_MSG or RECONCILE_INDEX - process mutations and accumulate in batch
                 _handle_transaction_message(result, db_id, completed_xid, keep_alive);
             }
 
@@ -172,6 +186,40 @@ namespace springtail::committer {
 
         _indexer.reset();
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committer shutdown");
+    }
+
+    std::map<uint64_t, uint64_t>
+    Committer::_scan_batch_final_xids(
+        std::deque<std::shared_ptr<XidReady>>::iterator start_it,
+        std::deque<std::shared_ptr<XidReady>>::iterator end_it)
+    {
+        std::map<uint64_t, uint64_t> final_xids;
+
+        for (auto it = start_it; it != end_it; ++it) {
+            auto& result = *it;
+
+            // Skip INDEX_RECOVERY_TRIGGER as it doesn't participate in batching
+            if (result->type() == XidReady::Type::INDEX_RECOVERY_TRIGGER) {
+                continue;
+            }
+
+            // Stop at batch boundary (non-XACT_MSG)
+            if (result->type() != XidReady::Type::XACT_MSG) {
+                break;
+            }
+
+            // Track last XACT_MSG per database - this becomes final_xid for that db
+            uint64_t db_id = result->db();
+            uint64_t xid = result->xact().xid();
+            final_xids[db_id] = xid;
+        }
+
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Scanned batch: found {} databases", final_xids.size());
+        for (auto& [db_id, final_xid] : final_xids) {
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "  db {} final_xid {}", db_id, final_xid);
+        }
+
+        return final_xids;
     }
 
     void
@@ -195,36 +243,19 @@ namespace springtail::committer {
 
             Coordinator::get_instance()->register_thread(daemon_type, "committer");
 
-            sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, batch.last_xid, metadata);
+            sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, batch.final_xid, metadata);
         }
 
         // process each XID in the batch
         for (auto& result : batch.xid_results) {
-            uint64_t xid = 0;
-            uint64_t pg_xid = 0;
-            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
-                xid = result->reconcile().xid();
-            } else {
-                xid = result->xact().xid();
-                pg_xid = result->xact().pg_xid();
-            }
+            CHECK(result->type() == XidReady::Type::XACT_MSG);
+            uint64_t xid = result->xact().xid();
+            uint64_t pg_xid = result->xact().pg_xid();
 
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processing batch XID: {}@{}", db_id, xid);
 
             // get DDL changes for this XID
             nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
-
-            // handle index operations
-            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
-
-            // Trigger index reconciliation for the earliest pending XID
-            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
-                _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
-            }
-
-            if (!index_requests.empty()) {
-                _indexer->process_requests(db_id, xid, index_requests);
-            }
 
             if (!completed_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
@@ -233,7 +264,7 @@ namespace springtail::committer {
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
-            bool is_last_xid = (xid == batch.last_xid);
+            bool is_last_xid = (xid == batch.final_xid);
 
             if (!_block_commit.contains(db_id)) {
                 // only finalize system metadata once at the end
@@ -247,11 +278,6 @@ namespace springtail::committer {
                 // Check and notify vacuumer about dropped tables
                 if (!completed_ddls.is_null()) {
                     _expire_table_drops(db_id, completed_ddls, xid);
-                }
-
-                // Check and notify vacuumer about dropped indexes
-                if (!index_requests.empty()) {
-                    _expire_index_drops(db_id, index_requests, xid);
                 }
 
                 // Sync expired extents on the XID with vacuum
@@ -279,9 +305,8 @@ namespace springtail::committer {
 
             _completed_xids[db_id] = xid;
 
-            if (result->type() != XidReady::Type::RECONCILE_INDEX) {
-                result->notify_tracker(xid);
-            }
+            // notify tracker (all XIDs in batch are XACT_MSG)
+            result->notify_tracker(xid);
 
             // evict from write cache
             WriteCacheServer::get_instance()->evict_xid(db_id, xid);
@@ -289,8 +314,74 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
         }
 
+        // Collect all index requests across all XIDs in the batch
+        std::list<proto::IndexProcessRequest> combined_index_requests;
+        for (auto& result : batch.xid_results) {
+            uint64_t xid = result->xact().xid();
+
+            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
+            if (!index_requests.empty()) {
+                // Append to combined list
+                combined_index_requests.splice(combined_index_requests.end(), index_requests);
+            }
+        }
+
+        // Process all index requests once at the final XID
+        if (!combined_index_requests.empty()) {
+            auto final_xid = _completed_xids[db_id];
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processing {} index requests for batch at final_xid {}",
+                      combined_index_requests.size(), final_xid);
+
+            // Handle all index operations at final_xid
+            _indexer->process_requests(db_id, final_xid, combined_index_requests);
+
+            // Check and notify vacuumer about dropped indexes (use final_xid for all)
+            _expire_index_drops(db_id, combined_index_requests, final_xid);
+        }
+
         // clear the table cache for this batch
         batch.table_cache.clear();
+    }
+
+    void
+    Committer::_handle_index_reconciliation(
+        const std::shared_ptr<XidReady>& result,
+        uint64_t db_id,
+        uint64_t& completed_xid,
+        std::atomic<uint64_t>& keep_alive)
+    {
+        CHECK(result->type() == XidReady::Type::RECONCILE_INDEX);
+        uint64_t xid = result->reconcile().xid();
+
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1,
+                  "Handling RECONCILE_INDEX in isolation: {}@{}", db_id, xid);
+
+        // Step 1: Process index reconciliation (no table mutations for reconciliation XIDs)
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
+        LOG_INFO("Process RECONCILE_INDEX XID: {}@{}", db_id, xid);
+        assert(xid > completed_xid);
+
+        // Trigger index reconciliation
+        _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
+
+        // Step 2: Finalize and commit the reconciliation XID
+        if (!_block_commit.contains(db_id)) {
+            // Finalize system metadata after index reconciliation
+            sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
+
+            // Commit the reconciliation XID (no DDL changes for reconciliation)
+            xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, xid, false);
+        } else {
+            // Record mapping if commits are blocked
+            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, xid, false);
+        }
+
+        _completed_xids[db_id] = xid;
+
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "RECONCILE_INDEX XID completed: {}@{}", db_id, xid);
+
+        // Update completed_xid for caller
+        completed_xid = xid;
     }
 
     void
@@ -358,16 +449,10 @@ namespace springtail::committer {
                                            uint64_t completed_xid,
                                            std::atomic<uint64_t>& keep_alive)
     {
-        // note: from here we know we have an XACT_MSG or RECONCILE_INDEX
-        // XXX: Once we confirm we can commit the index at table's last XID safely,
-        //      we can remove the type RECONCILE_INDEX
-        CHECK(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
-        uint64_t xid = 0;
-        if (result->type() == XidReady::Type::RECONCILE_INDEX) {
-            xid = result->reconcile().xid();
-        } else {
-            xid = result->xact().xid();
-        }
+        // note: from here we know we have an XACT_MSG
+        CHECK(result->type() == XidReady::Type::XACT_MSG);
+        uint64_t xid = result->xact().xid();
+
         auto token_4 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
         LOG_INFO("Process XID: {}@{}", db_id, xid);
         assert(xid > completed_xid);
@@ -375,10 +460,7 @@ namespace springtail::committer {
         // accumulate this XID in the batch state
         auto& batch = _batch_state[db_id];
         batch.xid_results.push_back(result);
-        if (batch.first_xid == 0) {
-            batch.first_xid = xid;
-        }
-        batch.last_xid = xid;
+        // Note: final_xid is set when the first XACT_MSG of a batch is encountered in run()
 
         // check if there were DDL mutations as part of this txn, invalidate the schema cache
         // accordingly
@@ -612,11 +694,12 @@ namespace springtail::committer {
             table = table_it->second;
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Reusing table {} from batch cache", tid);
         } else {
-            // create new mutable table with target_xid set to last xid in batch
-            uint64_t target_xid = (batch.last_xid > 0) ? batch.last_xid : xid;
-            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, target_xid);
+            // create new mutable table with target_xid set to final_xid
+            // All operations in this batch will be applied at the final XID
+            CHECK_GT(batch.final_xid, 0);
+            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid);
             batch.table_cache[tid] = table;
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, target_xid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, batch.final_xid);
         }
 
         // retrieve extents and apply the mutations to them
