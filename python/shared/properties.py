@@ -104,7 +104,6 @@ class Properties:
             self.redis_host = os.environ.get('REDIS_HOST', 'localhost')
             self.redis_port = int(os.environ.get('REDIS_PORT', 6379))
             self.redis_user = os.environ.get('REDIS_USER', 'default')
-            self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', '0'))
             self.redis_password = os.environ.get('REDIS_PASSWORD', None)
             self.redis_data_db = int(os.environ.get('REDIS_USER_DATABASE_ID', 1))
             self.redis_config_db = int(os.environ.get('REDIS_CONFIG_DATABASE_ID', 0))

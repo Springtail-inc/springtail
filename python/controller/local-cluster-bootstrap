@@ -1,5 +1,6 @@
 #!/bin/bash
-# Note: We assume the following env vars are set:
+# Note:
+# We assume the following env vars are set:
 # POSTGRES_USER, POSTGRES_PASSWORD, FDW_USER, FDW_USER_PASSWORD
 # REDIS_HOST, REDIS_PORT, REDIS_USER, REDIS_PASSWORD
 # DATABASE_INSTANCE_ID, ORGANIZATION_ID, ACCOUNT_ID
@@ -43,7 +44,7 @@ if [ -z "$SYSTEM_SETTINGS_GITSHA" ]; then
 fi
 
 # 4. Populate initial config info.
-if [ -z "$DISABLE_SSL" ]; then
+if [ -z "$DISABLE_SSL_FLAG" ]; then
   ./stctl config init \
     --primary-db-host primary \
     --system-settings-gitsha "$SYSTEM_SETTINGS_GITSHA" \

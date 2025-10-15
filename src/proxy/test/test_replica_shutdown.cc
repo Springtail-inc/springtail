@@ -14,10 +14,10 @@ namespace {
 
     class TestEnvironment : public ::testing::Environment {
     public:
-        virtual void SetUp() {
-            springtail_init_test();
+        void SetUp() override {
+            springtail_init_test(LOG_PROXY);
         }
-        virtual void TearDown() {
+        void TearDown() override {
             springtail_shutdown();
         }
     };
@@ -65,6 +65,11 @@ namespace {
                 Session::Type::REPLICA, _session_id_counter++, db_id, database, user->username());
             session->set_instance(shared_from_this());
 
+            {
+                std::unique_lock lock(_active_sessions_mutex);
+                _active_sessions[session->id()] = session;
+            }
+
             std::cout << "Allocated MockServerSession ID " << session->id() << " for user " << user->username()
                       << " on database " << database << " from instance " << replica_id() << std::endl;
 
@@ -80,7 +85,7 @@ namespace {
     /** Testable DatabaseReplicaSet that exposes protected methods */
     class TestableReplicaSet : public DatabaseReplicaSet {
     public:
-        TestableReplicaSet() : DatabaseReplicaSet(5, DatabasePool::PoolConfig({10, 5, 300})) {}
+        TestableReplicaSet() : DatabaseReplicaSet(DatabasePool::PoolConfig({10, 5, 300})) {}
 
         // override allocate_session to always use replica1 for testing
         // also allocate using the TestDatabaseInstance
@@ -91,19 +96,13 @@ namespace {
             const std::string &replica_id)
         {
             // try to use replica1 first, then replica2 if not found
-            auto it = _replicas.find(replica_id);
-            if (it == _replicas.end()) {
+            auto instance = get_replica_instance(replica_id);
+            if (!instance) {
                 return nullptr;
             }
 
-            TestDatabaseInstancePtr replica = std::dynamic_pointer_cast<TestDatabaseInstance>(it->second);
+            TestDatabaseInstancePtr replica = std::dynamic_pointer_cast<TestDatabaseInstance>(instance);
             auto session = replica->allocate_session(user, db_id, parameters, database);
-
-            // add session to instance map
-            _sessions[replica][db_id].push_back(session);
-
-            // incr count of sessions for instance
-            _instance_sessions[replica]++;
 
             return session;
         }
@@ -118,59 +117,53 @@ namespace {
 
         /** Add a test replica instance directly */
         void add_test_replica(const std::string &replica_id, TestDatabaseInstancePtr instance) {
-            std::unique_lock lock(_base_mutex);
-            _replicas[replica_id] = instance;
-            _instance_sessions[instance] = 0; // Initialize session count
+            add_instance(instance);
         }
 
         /** Get replica count for testing */
         size_t get_replica_count() const {
             std::shared_lock lock(_base_mutex);
-            return _replicas.size();
+            return _active_instances.size();
         }
 
         /** Get shutdown pending count for testing */
         size_t get_shutdown_pending_count() const {
             std::shared_lock lock(_base_mutex);
-            return _shutdown_pending_replicas.size();
+            return _shutdown_pending_instances.size();
         }
 
         /** Check if replica is in active set */
         bool has_active_replica(const std::string &replica_id) const {
             std::shared_lock lock(_base_mutex);
-            return _replicas.contains(replica_id);
+            for (const auto &instance : _active_instances) {
+                if (instance->replica_id() == replica_id) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /** Check if replica is in shutdown pending set */
         bool has_shutdown_pending_replica(DatabaseInstancePtr replica) const {
             std::shared_lock lock(_base_mutex);
-            return _shutdown_pending_replicas.contains(replica);
+            return _shutdown_pending_instances.contains(replica);
         }
 
         /** Get instance session count for testing */
         int get_instance_session_count(DatabaseInstancePtr instance) const {
             std::shared_lock lock(_base_mutex);
-            auto it = _instance_sessions.find(instance);
-            return (it != _instance_sessions.end()) ? it->second : 0;
+            return instance->all_session_count();
         }
 
         /** Check if instance exists in tracking maps */
         bool has_instance_in_tracking(DatabaseInstancePtr instance) const {
             std::shared_lock lock(_base_mutex);
-            return _instance_sessions.contains(instance) || _sessions.contains(instance);
-        }
-
-        /** Get sessions map for testing */
-        std::map<DatabaseInstancePtr, std::map<uint64_t, std::list<ServerSessionWeakPtr>>> get_sessions_map() const {
-            std::shared_lock lock(_base_mutex);
-            return _sessions;
+            return _active_instances.contains(instance);
         }
 
         /** Manually remove instance for testing cleanup scenarios */
         void test_remove_instance(DatabaseInstancePtr instance) {
-            std::unique_lock lock(_base_mutex);
-            instance->initiate_shutdown(); // Ensure instance is marked inactive
-            DatabaseSet::_remove_instance(instance);
+            instance->initiate_shutdown();
         }
     };
     using TestableReplicaSetPtr = std::shared_ptr<TestableReplicaSet>;
@@ -220,7 +213,7 @@ namespace {
     TEST_F(ReplicaShutdownTest, InitiateShutdownWithoutSessions) {
         // Test initiating shutdown when replica has no active sessions
         EXPECT_TRUE(replica1->is_active());
-        EXPECT_EQ(replica1->get_pool()->size(), 0);
+        EXPECT_EQ(replica1->pooled_session_count(), 0);
 
         // Initiate shutdown
         replica_set->initiate_replica_shutdown("replica1");
@@ -244,20 +237,26 @@ namespace {
         }
 
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 3);
+        EXPECT_EQ(replica1->pooled_session_count(), 0);
+        EXPECT_EQ(replica1->active_session_count(), 3);
+        EXPECT_EQ(replica1->all_session_count(), 3);
 
         // Release sessions to pool
         for (auto& session : sessions) {
             replica_set->release_session(session, false); // Don't deallocate - add to pool
         }
+        sessions.clear();
 
         // Verify sessions are in pool
-        EXPECT_EQ(replica1->get_pool()->size(), 3);
+        EXPECT_EQ(replica1->all_session_count(), 3);
+        EXPECT_EQ(replica1->pooled_session_count(), 3);
+        EXPECT_EQ(replica1->active_session_count(), 0); // All sessions should be removed
 
         // Initiate shutdown
         replica_set->initiate_replica_shutdown("replica1");
 
         // Verify shutdown behavior
-        EXPECT_EQ(replica1->get_pool()->size(), 0);
+        EXPECT_EQ(replica1->all_session_count(), 0);
         EXPECT_FALSE(replica1->is_active());
         EXPECT_FALSE(replica_set->has_active_replica("replica1"));
         EXPECT_FALSE(replica_set->has_shutdown_pending_replica(replica1));
@@ -275,7 +274,7 @@ namespace {
 
         // Verify active session tracking
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 3);
-        EXPECT_EQ(replica1->get_pool()->size(), 0); // No pooled sessions yet
+        EXPECT_EQ(replica1->pooled_session_count(), 0); // No pooled sessions yet
 
         // Initiate shutdown
         replica_set->initiate_replica_shutdown("replica1");
@@ -286,7 +285,7 @@ namespace {
         EXPECT_TRUE(replica_set->has_shutdown_pending_replica(replica1));
 
         // Pool should be empty (was already empty, remains empty)
-        EXPECT_EQ(replica1->get_pool()->size(), 0);
+        EXPECT_EQ(replica1->pooled_session_count(), 0);
 
         // Active sessions should still be tracked
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 3);
@@ -295,9 +294,10 @@ namespace {
         for (auto& session : active_sessions) {
             replica_set->release_session(session, false); // Try to pool, but should be deallocated
         }
+        active_sessions.clear();
 
         // Verify sessions were deallocated instead of pooled
-        EXPECT_EQ(replica1->get_pool()->size(), 0);
+        EXPECT_EQ(replica1->pooled_session_count(), 0);
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 0);
 
         // Instance should be fully removed from tracking when session count reaches 0
@@ -306,14 +306,10 @@ namespace {
     }
 
     TEST_F(ReplicaShutdownTest, PooledSessionRetrievalExcludesShutdownPendingInstances) {
-        // Create pooled sessions on both replicas
-        std::vector<ServerSessionPtr> sessions1, sessions2;
-
         // Create sessions on replica1 and pool them
         for (int i = 0; i < 3; ++i) {
             auto session = replica_set->allocate_session(test_user, 1, {}, "test_db");
             ASSERT_NE(session, nullptr);
-            sessions1.push_back(session);
             replica_set->release_session(session, false); // Pool the session
         }
 
@@ -321,13 +317,12 @@ namespace {
         for (int i = 0; i < 2; ++i) {
             auto session = replica_set->allocate_session_on_replica(test_user, 1, {}, "test_db", "replica2");
             ASSERT_NE(session, nullptr);
-            sessions2.push_back(session);
             replica_set->release_session(session, false); // Pool the session
         }
 
         // Verify both pools have sessions
-        EXPECT_EQ(replica1->get_pool()->size(), 3);
-        EXPECT_EQ(replica2->get_pool()->size(), 2);
+        EXPECT_EQ(replica1->pooled_session_count(), 3);
+        EXPECT_EQ(replica2->pooled_session_count(), 2);
 
         // Initiate shutdown on replica1
         replica_set->initiate_replica_shutdown("replica1");
@@ -347,7 +342,7 @@ namespace {
         }
 
         // Verify replica1's pool was cleared during shutdown
-        EXPECT_EQ(replica1->get_pool()->size(), 0);
+        EXPECT_EQ(replica1->pooled_session_count(), 0);
     }
 
     TEST_F(ReplicaShutdownTest, MultipleReplicasShutdown) {
@@ -382,10 +377,12 @@ namespace {
         for (auto& session : sessions1) {
             replica_set->release_session(session, true);
         }
+        sessions1.clear();
 
         for (auto& session : sessions2) {
             replica_set->release_session(session, true);
         }
+        sessions2.clear();
 
         // Both instances should be fully removed
         EXPECT_FALSE(replica_set->has_instance_in_tracking(replica1));
@@ -402,7 +399,7 @@ namespace {
 
     TEST_F(ReplicaShutdownTest, MixedActiveAndPooledSessions) {
         // Create a mix of active and pooled sessions
-        std::vector<ServerSessionPtr> active_sessions, pooled_sessions;
+        std::vector<ServerSessionPtr> active_sessions;
 
         // Create some active sessions
         for (int i = 0; i < 2; ++i) {
@@ -415,19 +412,18 @@ namespace {
         for (int i = 0; i < 3; ++i) {
             auto session = replica_set->allocate_session(test_user, 1, {}, "test_db");
             ASSERT_NE(session, nullptr);
-            pooled_sessions.push_back(session);
             replica_set->release_session(session, false); // Pool it
         }
 
         // Verify state before shutdown
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 5); // 2 active + 3 pooled
-        EXPECT_EQ(replica1->get_pool()->size(), 3);
+        EXPECT_EQ(replica1->pooled_session_count(), 3);
 
         // Initiate shutdown
         replica_set->initiate_replica_shutdown("replica1");
 
         // Pool should be cleared immediately
-        EXPECT_EQ(replica1->get_pool()->size(), 0);
+        EXPECT_EQ(replica1->pooled_session_count(), 0);
 
         // Active sessions should still be tracked
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 2); // Only active sessions remain
@@ -436,6 +432,7 @@ namespace {
         for (auto& session : active_sessions) {
             replica_set->release_session(session, false);
         }
+        active_sessions.clear();
 
         // All sessions should be gone and instance removed
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 0);
@@ -455,11 +452,12 @@ namespace {
         }
 
         // Pool one session and keep two active
-        replica_set->release_session(sessions[0], false);
+        replica_set->release_session(sessions.back(), false);
+        sessions.pop_back();
         // sessions[1] and sessions[2] remain active
 
         // Verify initial state
-        EXPECT_EQ(replica1->get_pool()->size(), 1);
+        EXPECT_EQ(replica1->pooled_session_count(), 1);
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 3);
         EXPECT_TRUE(replica1->is_active());
 
@@ -470,16 +468,18 @@ namespace {
         EXPECT_FALSE(replica1->is_active()); // Instance marked inactive
         EXPECT_FALSE(replica_set->has_active_replica("replica1")); // Removed from active replicas
         EXPECT_TRUE(replica_set->has_shutdown_pending_replica(replica1)); // Added to shutdown pending
-        EXPECT_EQ(replica1->get_pool()->size(), 0); // Pool cleared
+        EXPECT_EQ(replica1->pooled_session_count(), 0); // Pool cleared
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 2); // Only active sessions remain
 
         // Simulate gradual session completion (as would happen in production)
-        replica_set->release_session(sessions[1], false);
+        replica_set->release_session(sessions.back(), false);
+        sessions.pop_back();
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 1);
         EXPECT_TRUE(replica_set->has_shutdown_pending_replica(replica1)); // Still pending
 
         // Release final session
-        replica_set->release_session(sessions[2], false);
+        replica_set->release_session(sessions.back(), false);
+        sessions.pop_back();
 
         // Instance should be completely removed now
         EXPECT_EQ(replica_set->get_instance_session_count(replica1), 0);

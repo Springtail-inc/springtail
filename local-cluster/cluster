@@ -156,7 +156,7 @@ sub_up() {
   if docker buildx version > /dev/null 2>&1; then
     docker buildx build -f docker/Dockerfile.controller -t "local-cluster-controller:latest" --load .
   else
-    docker build -f docker/Dockerfile.controller -t "local-cluster-controller:latest" --load .
+    docker build -f docker/Dockerfile.controller -t "local-cluster-controller:latest" .
   fi
   # 4.2 Build the PG Custom postgres-custom:16 if it does not exist
   # This image carries the Certificates for SSL connections
@@ -165,7 +165,7 @@ sub_up() {
     if docker buildx version > /dev/null 2>&1; then
       docker buildx build -f docker/Dockerfile.pg16 -t "postgres-custom:16" --load .
     else
-      docker build -f docker/Dockerfile.pg16 -t "postgres-custom:16" --load .
+      docker build -f docker/Dockerfile.pg16 -t "postgres-custom:16" .
     fi
   fi
 
@@ -229,11 +229,32 @@ sub_up() {
 }
 
 sub_down() {
-  run_compose down proxy ingestion fdw controller redis aws-mock -v
-  run_compose down primary -v
-  docker network rm springtail_local_cluster_network > /dev/null 2>&1 || true
-  docker network prune -f
-  docker image prune -f
+  service="${1:-}"; shift || true
+  case "$service" in
+    springtail|"")
+      log "Stopping and removing all Springtail services but keeping primary and other dependencies"
+      run_compose down proxy ingestion fdw -v
+      ;;
+    proxy|ingestion|fdw|controller|redis|aws-mock)
+      log "Stopping and removing service $service and its dependencies"
+      run_compose down "$service" -v
+      ;;
+    primary)
+      log "Stopping and removing primary and its dependencies"
+      run_compose down primary
+      ;;
+    all)
+      log "Stopping and removing all services and their dependencies"
+      run_compose down proxy ingestion fdw controller redis aws-mock -v
+      run_compose down primary -v
+      docker network rm springtail_local_cluster_network > /dev/null 2>&1 || true
+      docker network prune -f
+      docker image prune -f
+      ;;
+    *)
+      die "Usage: cluster down [all|primary|proxy|ingestion|fdw|controller|redis|aws-mock]"
+      ;;
+  esac
 }
 
 sub_status() {

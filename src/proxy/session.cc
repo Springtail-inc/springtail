@@ -37,7 +37,7 @@ namespace springtail::pg_proxy {
 
     Session::Session(ProxyConnectionPtr connection)
         : _connection(connection),
-          _state(STARTUP),
+          _state(State::STARTUP),
           _type(Type::CLIENT),
           _id(session_id++)
     {}
@@ -49,7 +49,7 @@ namespace springtail::pg_proxy {
                      const std::unordered_map<std::string, std::string> &parameters,
                      Type type)
         : _connection(connection),
-          _state(STARTUP),
+          _state(State::STARTUP),
           _type(type),
           _user(user),
           _database(database),
@@ -202,12 +202,12 @@ namespace springtail::pg_proxy {
         if (!_is_shadow) {
             n = _associated_session->get_connection()->write(buffer, 5);
             CHECK_EQ(n, 5);
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Streamed header to remote session: code={}, msg_length={}", (_type == CLIENT ? 'C': 'S'), _id, code, msg_length);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Streamed header to remote session: code={}, msg_length={}", (_type == Type::CLIENT ? 'C': 'S'), _id, code, msg_length);
         }
 
         // iterate reading buffer from local session and write to remote session
         while (msg_length > 0) {
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Reading {} bytes from local socket", (_type == CLIENT ? 'C': 'S'), _id, std::min(msg_length, 4096));
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Reading {} bytes from local socket", (_type == Type::CLIENT ? 'C': 'S'), _id, std::min(msg_length, 4096));
 
             // throws exception on error
             int read_length = std::min(msg_length, 4096);
@@ -224,7 +224,7 @@ namespace springtail::pg_proxy {
                 // log the buffer as outgoing from associated session
                 _associated_session->_log_buffer(false, code, n, buffer, seq_id, n == msg_length);
 
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Streamed {} bytes to remote session", (_type == CLIENT ? 'C': 'S'), _id, m);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Streamed {} bytes to remote session", (_type == Type::CLIENT ? 'C': 'S'), _id, m);
             }
 
             msg_length -= n;
@@ -234,7 +234,7 @@ namespace springtail::pg_proxy {
     void
     Session::_send_to_remote_session(char code, const BufferPtr buffer, uint64_t seq_id)
     {
-        if (_state == RESET_SESSION) {
+        if (_state == State::RESET_SESSION) {
             // if we are in reset session state, we don't send any data
             return;
         }

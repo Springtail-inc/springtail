@@ -296,7 +296,7 @@ namespace springtail {
                 if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
                     return static_cast<int64_t>(std::filesystem::file_size(path));
                 } else {
-                    LOG_ERROR("Given {} doesn't exist or not a regular file", path);
+                    LOG_WARN("Given {} doesn't exist or not a regular file", path);
                     return -1;
                 }
             } catch (const std::filesystem::filesystem_error& e) {

@@ -500,7 +500,7 @@ namespace springtail::committer {
         while (true) {
             // XXX would be better if we could perform an async prefetch to reduce IO latency
             WriteCacheTableSet::Metadata md;
-            auto &&extent_list = WriteCacheServer::get_instance()->get_extents(db_id, tid, xid, 1, extent_cursor, md);
+            auto &&extent_list = WriteCacheServer::get_instance()->get_extents(db_id, tid, xid, 1000, extent_cursor, md);
             // TODO: this should probably be done after we verified that extent_list is not empty
             if (!min_md || md.pg_commit_ts < min_md->pg_commit_ts) {
                 min_md = md;

@@ -96,7 +96,7 @@
         mode: "0644"
         content: |
           [program:{{ service_name }}]
-          command=/bin/bash -lc 'set -a; source /etc/postgresql/{{ pg_version }}/{{ username }}/environment; exec {{ pg_bin_path }}/postgres -D {{ pg_data_location }}'
+          command=/bin/bash -lc 'set -a; exec {{ pg_bin_path }}/postgres -D {{ pg_data_location }} -c external_pid_file=/opt/springtail/pids/postmaster.pid'
           ; ↑ load env file, export vars (set -a), then exec postgres in foreground
           
           user={{ username }}
@@ -174,3 +174,8 @@
         dropdb --maintenance-db="{{ default_maintenance_db }}" postgres
       become: yes
       become_user: "{{ username }}"
+
+    - name: Amend the PGDATABASE env to the related env file
+      ansible.builtin.shell: |
+        echo "PGDATABASE={{ default_maintenance_db }}" >> /etc/environment
+        supervisorctl reread && supervisorctl update
