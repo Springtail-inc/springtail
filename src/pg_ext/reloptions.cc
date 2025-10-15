@@ -2,13 +2,13 @@
 #include <vector>
 #include <mutex>
 
-static std::vector<IntReloption> reloptions_registry;
-static std::mutex registry_mutex;
+std::vector<IntReloption> _reloptions_registry;
+std::mutex _registry_mutex;
 
 void add_local_int_reloption(const char *name, const char *desc, int default_val,
                              int min_val, int max_val) {
-    std::lock_guard<std::mutex> guard(registry_mutex);
-    reloptions_registry.push_back(IntReloption{
+    std::lock_guard guard(_registry_mutex);
+    _reloptions_registry.push_back(IntReloption{
         .name = name,
         .description = desc,
         .default_val = default_val,
@@ -18,8 +18,8 @@ void add_local_int_reloption(const char *name, const char *desc, int default_val
 }
 
 IntReloption* get_local_int_reloption(const char *name) {
-    std::lock_guard<std::mutex> guard(registry_mutex);
-    for (auto& opt : reloptions_registry) {
+    std::lock_guard guard(_registry_mutex);
+    for (auto& opt : _reloptions_registry) {
         if (opt.name == std::string(name))
             return &opt;
     }
