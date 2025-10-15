@@ -80,14 +80,14 @@ errfinish(const char *filename, int lineno, const char *funcname)
 }
 
 bool
-errsave_start(struct Node *context, const char *domain)
+errsave_start(const struct Node *context, const char *domain)
 {
     LOG_ERROR("Errsave - Start %s", domain);
     return true;
 }
 
 void
-errsave_finish(struct Node *context, const char *filename, int lineno,
+errsave_finish(const struct Node *context, const char *filename, int lineno,
 			   const char *funcname)
 {
     LOG_ERROR("Errsave - Finish %s, Line: %d, Function: %s", filename, lineno, funcname);

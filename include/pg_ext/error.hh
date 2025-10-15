@@ -20,6 +20,6 @@ extern "C" PGEXT_API int errmsg_internal(const char *fmt, ...);
 extern "C" PGEXT_API int pg_fprintf(FILE *stream, const char *fmt,...);
 extern "C" PGEXT_API bool GetDefaultCharSignedness(void);
 
-extern "C" PGEXT_API void errsave_finish(const char *filename, int lineno, const char *funcname);
+extern "C" PGEXT_API void errsave_finish(const struct Node *context, const char *filename, int lineno, const char *funcname);
 extern "C" PGEXT_API void errdetail(const char *fmt, ...);
-extern "C" PGEXT_API void errsave_start(const char *filename, int lineno, const char *funcname);
+extern "C" PGEXT_API bool errsave_start(const struct Node *context, const char *domain);

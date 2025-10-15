@@ -1968,8 +1968,11 @@ void EncodeDateTime(struct pg_tm *tm,
 
             if (print_tz)
             {
-                if (tzn)
-                    write_str(std::string_view(" " + std::string(tzn, std::min(strlen(tzn), size_t(MAXTZLEN)))));
+                if (tzn){
+					size_t tznlen = strnlen(tzn, MAXTZLEN);
+                    write_str(" ");
+                    write_str(std::string_view(tzn, tznlen));
+				}
                 else
                     str = EncodeTimezone(str, tz, style);
             }

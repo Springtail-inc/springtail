@@ -25,8 +25,9 @@
 
 char *lowerstr(const char *str) {
     if (!str) return nullptr;
-    // NOSONAR: 'str' is expected to be a valid NUL-terminated C string
-    return lowerstr_with_len(str, std::strlen(str));
+
+    size_t len = strnlen(str, MAX_SAFE_LEN);
+    return lowerstr_with_len(str, len);
 }
 
 static inline unsigned char tolower_ascii(unsigned char c)
@@ -91,8 +92,7 @@ char *upperstr(const char *str) {
         LOG_ERROR("Invalid arguments to upperstr");
         return nullptr;
     }
-    // NOSONAR: 'str' is expected to be a valid NUL-terminated C string
-    return upperstr_with_len(str, std::strlen(str));
+    return upperstr_with_len(str, strnlen(str, MAX_SAFE_LEN));
 }
 
 char *upperstr_with_len(const char *str, int len) {
@@ -384,19 +384,18 @@ void appendStringInfoChar(StringInfo str, char ch) {
     str->data[str->len] = '\0';
 }
 
-void appendStringInfoString(StringInfo str, const char *s) {
-    if (!str || !s) {
-        LOG_ERROR("Invalid arguments to appendStringInfoString");
+void appendStringInfoString(StringInfo str, std::string_view s) {
+    if (!str) {
+        LOG_ERROR("Invalid argument: str is null");
         return;
     }
 
-    // NOSONAR: 's' is expected to be a valid NUL-terminated C string by contract
-    size_t slen = strlen(s);
-    if (str->len + slen + 1 > str->maxlen) {
-        enlargeStringInfo(str, slen + 1);
-    }
-    std::strcat(str->data, s);
-    str->len += slen;
+    if (str->len + s.size() + 1 > str->maxlen)
+        enlargeStringInfo(str, s.size() + 1);
+
+    std::memcpy(str->data + str->len, s.data(), s.size());
+    str->len += s.size();
+    str->data[str->len] = '\0';
 }
 
 int

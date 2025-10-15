@@ -18,6 +18,7 @@ set(LIB_PGEXT_SOURCES
     sort.cc
     crc.cc
     reloptions.cc
+    heaptuple.cc
     float.cc
     numeric.cc
     node.cc
