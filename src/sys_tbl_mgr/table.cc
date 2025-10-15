@@ -307,11 +307,11 @@ namespace indexer_helpers {
         _look_aside_schema = _schema->create_index_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys);
         // Initialize look aside index
         it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
-        CHECK(it != roots.end());
-
-        _look_aside_index = std::make_shared<BTree>(_table_dir / constant::INDEX_LOOK_ASIDE_FILE, xid,
-                _look_aside_schema,
-                it->extent_id, get_max_extent_size_secondary());
+        if (it != roots.end()) {
+            _look_aside_index = std::make_shared<BTree>(_table_dir / constant::INDEX_LOOK_ASIDE_FILE, xid,
+                    _look_aside_schema,
+                    it->extent_id, get_max_extent_size_secondary());
+        }
     }
 
     bool
@@ -621,7 +621,8 @@ namespace indexer_helpers {
                                const std::vector<Index> &secondary,
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
-                               bool for_gc)
+                               bool for_gc,
+                               bool initialize_look_aside)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
@@ -723,24 +724,16 @@ namespace indexer_helpers {
         _use_empty = _primary_index->empty();
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
-        std::vector<std::string> look_aside_keys;
-        look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
-
-        _look_aside_schema = _schema->create_index_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys);
-
-        _look_aside_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_LOOK_ASIDE_FILE,
-                look_aside_keys,
-                _look_aside_schema,
-                _target_xid, get_max_extent_size_secondary());
-
         // find look-aside index root
         auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
 
         // initialize the look-aside index
         if (la_it != roots.end() && la_it->extent_id != constant::UNKNOWN_EXTENT) {
+            create_look_aside_root();
             LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init with root: {}", la_it->extent_id);
             _look_aside_index->init(la_it->extent_id);
-        } else {
+        } else if (initialize_look_aside) {
+            create_look_aside_root();
             LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init empty");
             _look_aside_index->init_empty();
         }
@@ -1053,6 +1046,25 @@ namespace indexer_helpers {
                                 _table_dir / constant::ROOTS_FILE);
 
         return metadata;
+    }
+
+    MutableBTreePtr
+    MutableTable::create_look_aside_root()
+    {
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, 0, false);
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
+
+        std::vector<std::string> look_aside_keys;
+        look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
+
+        _look_aside_schema = _schema->create_index_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys);
+        _look_aside_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_LOOK_ASIDE_FILE,
+                look_aside_keys,
+                _look_aside_schema,
+                _target_xid, get_max_extent_size_secondary());
+
+        return _look_aside_index;
     }
 
     MutableBTreePtr

@@ -118,7 +118,8 @@ namespace springtail::committer {
         void _drop(const Key& key, const IndexParams& idx, uint64_t end_xid);
 
         bool _was_dropped(const Key& key);
-        void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid);
+        void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx,
+                uint64_t end_xid, MutableBTreePtr look_aside_root);
 
         // work state
         std::condition_variable_any _cv;
@@ -147,7 +148,21 @@ namespace springtail::committer {
             Key _key;
             IndexParams _idx;
             uint64_t _tid;
+            MutableBTreePtr _look_aside_root;
         };
+
+        /**
+         * Map indicating if a thread is building look-aside index for the table,
+         * useful when multiple index creation are in progress and want to allow first index only
+         * to create look aside index along with it
+         */
+        std::unordered_map<uint64_t, bool> _look_aside_build_tracker;
+
+        /**
+         * Mutex to have safe access for _look_aside_build_tracker
+         */
+        std::mutex _look_aside_mutex;
+
         /**
          * @brief Tracks pending index reconciliation tasks by db_id and xid.
          *

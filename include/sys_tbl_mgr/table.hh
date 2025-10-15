@@ -670,7 +670,8 @@ namespace indexer_helpers {
                      const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
-                     bool for_gc = false);
+                     bool for_gc = false,
+                     bool initialize_look_aside = false);
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -779,6 +780,18 @@ namespace indexer_helpers {
          * @param index_columns Positions of the index columns.
          */
         MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns);
+
+        /**
+         * Create a btree that can be used for look aside index.
+         */
+        MutableBTreePtr create_look_aside_root();
+
+        /**
+         * Returns the look aside index of the table.
+         */
+        MutableBTreePtr look_aside_index() const {
+            return _look_aside_index;
+        }
 
         /**
          * Returns the requested index BTree of the table based on the index ID in the "indexes" table.

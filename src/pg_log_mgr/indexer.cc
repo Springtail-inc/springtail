@@ -197,7 +197,7 @@ namespace springtail::committer {
             if (params.is_status(IndexStatus::BUILDING)) {
                 _add_to_pending_reconciliation(_build(st, key, params));
             } else {
-                _add_to_pending_reconciliation(IndexState{nullptr, key, params, std::numeric_limits<uint64_t>::max()});
+                _add_to_pending_reconciliation(IndexState{nullptr, key, params, std::numeric_limits<uint64_t>::max(), nullptr});
             }
         }
         LOG_INFO("Indexer thread joined");
@@ -249,6 +249,12 @@ namespace springtail::committer {
         DCHECK(meta != nullptr);
         auto it = std::ranges::find_if(meta->roots,
                 [&](auto const& v) { return index_id == v.index_id; });
+
+        auto is_last_index = std::all_of(meta->roots.begin(), meta->roots.end(),
+                [&](auto const& r) {
+                return (r.index_id == constant::INDEX_PRIMARY || r.index_id == constant::INDEX_LOOK_ASIDE || r.index_id == index_id);
+                });
+
         // Erase roots if present, roots wont be there if index drop came in before processing build,
         // and in that case, proceed for making index DELETED
         if (it != meta->roots.end()) {
@@ -266,8 +272,19 @@ namespace springtail::committer {
             }
             root->truncate();
             root->finalize();
+
+            if (is_last_index) {
+                auto look_aside_root = table->look_aside_index();
+                look_aside_root->truncate();
+                look_aside_root->finalize();
+            }
         }
+
         server->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
+        if (is_last_index) {
+            meta->roots.emplace_back(constant::INDEX_LOOK_ASIDE, constant::UNKNOWN_EXTENT);
+            server->update_roots(db_id, info.table_id(), end_xid, *meta);
+        }
 
         // Cleanup table-index map
         _remove_index_key(db_id, info.table_id(), key);
@@ -298,6 +315,22 @@ namespace springtail::committer {
         auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid);
         MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols);
         root->init_empty();
+
+        auto look_aside_index = mutable_table->look_aside_index();
+        bool build_look_aside = false;
+
+        if (!look_aside_index) {
+            std::unique_lock g(_look_aside_mutex);
+
+            auto la_tracker_it = _look_aside_build_tracker.find(tid);
+            if (la_tracker_it == _look_aside_build_tracker.end()) {
+                look_aside_index = mutable_table->create_look_aside_root();
+                look_aside_index->init_empty();
+                _look_aside_build_tracker[tid] = true;
+                build_look_aside = true;
+            }
+        }
+
         key_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
 
         auto internal_row_id_f = mutable_table->schema()->get_field(constant::INTERNAL_ROW_ID);
@@ -308,14 +341,55 @@ namespace springtail::committer {
 
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexing build in progress: {}:{}", db_id, index_id);
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
+
+        if (build_look_aside) {
+            std::vector<std::string> look_aside_keys;
+            look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
+            auto la_key_fields = mutable_table->schema()->get_fields(look_aside_keys);
+            auto la_value_fields = std::make_shared<FieldArray>(2);
+            uint64_t current_extent_id = 0;
+            uint32_t current_row_id = 0;
+            for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
+                if (st.stop_requested()) {
+                    look_aside_index->truncate();
+                    return {nullptr, key, idx, tid};
+                }
+
+                auto extent_id = row_i.extent_id();
+
+                if (extent_id != current_extent_id) {
+                    // We are scanning in primary key order. It guarantees that
+                    // row IDs start from zero and be in ascending order for
+                    // each new extent. Note: The extent IDs (offsets) may
+                    // be at any order.
+                    current_extent_id = extent_id;
+                    current_row_id = 0;
+                }
+                (*la_value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+                (*la_value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(current_row_id);
+
+                // insert key
+                auto &&row = *row_i;
+                auto &&svalue = std::make_shared<KeyValueTuple>(la_key_fields, la_value_fields, &row);
+                look_aside_index->insert(svalue);
+
+                ++current_row_id;
+                ++row_cnt;
+            }
+        }
+
+        row_cnt = 0;
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
                 root->truncate();
-                return {nullptr, key, idx, tid};
+                if (build_look_aside) {
+                    look_aside_index->truncate();
+                }
+                return {nullptr, key, idx, tid, look_aside_index};
             }
             // check if the index was dropped
             if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
-                return {root, key, idx, tid};
+                return {root, key, idx, tid, look_aside_index};
             }
 
             // insert key
@@ -327,7 +401,7 @@ namespace springtail::committer {
             ++row_cnt;
         }
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
-        return {root, key, idx, tid};
+        return {root, key, idx, tid, look_aside_index};
     }
 
     std::vector<uint32_t>
@@ -362,7 +436,8 @@ namespace springtail::committer {
     }
 
     void
-    Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid)
+    Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx,
+            uint64_t end_xid, MutableBTreePtr look_aside_root)
     {
         auto [db_id, index_id] = key;
         auto tid = idx._index_request.index().table_id();
@@ -385,6 +460,10 @@ namespace springtail::committer {
             if (root) {
                 root->truncate();
                 root->finalize();
+                if (look_aside_root) {
+                    look_aside_root->truncate();
+                    look_aside_root->finalize();
+                }
             }
         } else {
             // Index should be at NOT_READY / BEING_DELETED to be processed
@@ -397,6 +476,10 @@ namespace springtail::committer {
                 // If IndexStatus is ABORTING - Drop came before build was even picked,
                 //                              mark the state as DELETED
 
+                if (look_aside_root) {
+                    look_aside_root->truncate();
+                    look_aside_root->finalize();
+                }
                 if (work_item.is_status(IndexStatus::ABORTING)) {
                     server->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
                 }
@@ -406,6 +489,10 @@ namespace springtail::committer {
                 if (work_item.is_status(IndexStatus::BUILDING)) {
                     auto meta = server->get_roots(db_id, tid, end_xid);
                     meta->roots.clear();
+                    if (look_aside_root) {
+                        auto la_extent_id = look_aside_root->finalize();
+                        meta->roots.emplace_back(constant::INDEX_LOOK_ASIDE, la_extent_id);
+                    }
                     meta->roots.emplace_back(key.second, extent_id);
                     server->update_roots(db_id, tid, end_xid, *meta);
                     server->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
@@ -415,6 +502,10 @@ namespace springtail::committer {
                     // may have got finalized while we were building.
                     root->truncate();
                     root->finalize();
+                    if (look_aside_root) {
+                        look_aside_root->truncate();
+                        look_aside_root->finalize();
+                    }
                     server->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
                 }
             }
@@ -505,7 +596,7 @@ namespace springtail::committer {
             // since btree inserts have a possibility of partial flush,
             // we will do full flush of root once at whichever stage it is in,
             // truncate and flush again
-            _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid);
+            _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid, idx_state._look_aside_root);
         } else {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index reconciliation in progress: {}:{}", db_id, index_id);
 
@@ -575,7 +666,7 @@ namespace springtail::committer {
             invalidated_eids.clear();
 
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Initiating Index commit: {}:{}", db_id, index_id);
-            _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid);
+            _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid, idx_state._look_aside_root);
         }
 
         // Remove XID from the tracker
@@ -602,6 +693,13 @@ namespace springtail::committer {
                 }
             }
         }
+
+        // Clear look aside index tracker
+        {
+            std::unique_lock g(_look_aside_mutex);
+            _look_aside_build_tracker.erase(table_id);
+        }
+
     }
 
 }  // namespace springtail::gc
