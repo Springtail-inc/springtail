@@ -113,7 +113,7 @@ class Coordinator:
         if self.production:
             # Install binaries
             try:
-                if state == CoordinatorState.STARTUP or state == CoordinatorState.RELOAD:
+                if state == CoordinatorState.STARTUP:
                     # Install binaries
                     self.logger.debug("Installing binaries")
                     self.production.install_binaries(config_gitsha)
@@ -123,7 +123,7 @@ class Coordinator:
                     self.props.set_coordinator_state(CoordinatorState.RELOADING)
 
                     # loader will restart the coordinator when ready
-                    if state == CoordinatorState.STARTUP and not self.manual:
+                    if not self.manual:
                         sys.exit(0)
             except Exception as e:
                 raise ValueError("Failed to install binaries: " + str(e))

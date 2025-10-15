@@ -272,7 +272,7 @@ private:
     /**
      * Clears the cache of namespace objects.  Called by finalize().
      * */
-    void _clear_namespace_info(uint64_t db_id);
+    void _clear_namespace_info(uint64_t db_id, uint64_t xid);
 
     // CACHE FOR ROOTS / STATS
 
@@ -297,6 +297,7 @@ private:
                          uint64_t table_id,
                          const XidLsn& xid,
                          RootsCacheRecordPtr roots_info);
+
 
     /**
      * Clears the cache of TableCacheRecord objects.  Called by finalize() once the system tables
@@ -771,6 +772,21 @@ private:
     std::unordered_map<uint64_t, std::unordered_map<std::string, XidLsnToNamespaceInfoMap>>
         _namespace_name_cache;
 
+    /** This is kind of an one element cache to speed up the common case of
+     * of moving XID forward and accessing the same table.
+     */
+    std::unordered_map<uint64_t, ///< db_id
+        std::pair<uint64_t, ///< xid
+            std::unordered_map<std::string,  ///< namespace_name
+                NamespaceCacheRecordPtr>>> _last_namespace_update_by_name;
+
+    /** This is kind of an one element cache to speed up the common case of
+     * of moving XID forward and accessing the same table.
+     */
+    std::unordered_map<uint64_t, ///< db_id
+        std::pair<uint64_t, ///< xid
+            std::unordered_map<uint64_t,  ///< namespace_id
+                NamespaceCacheRecordPtr>>> _last_namespace_update_by_id;
     /**
      * Cache of unapplied user defined type changes by type ID.
      * Stored as a map of DB -> Type ID -> XID/LSN (in reverse order) -> UserTypeInfo
@@ -793,6 +809,18 @@ private:
      */
     using XidLsnToRootsInfoMap = std::map<XidLsn, RootsCacheRecordPtr, std::greater<XidLsn>>;
     std::unordered_map<uint64_t, std::unordered_map<uint64_t, XidLsnToRootsInfoMap>> _roots_cache;
+
+    /** This is kind of an one element cache to speed up the common case of
+     * of moving XID forward and accessing the same table.
+     */
+    struct TableStats {
+        uint64_t row_count;
+    };
+    std::unordered_map<uint64_t, ///< db_id
+        // xid - map
+        std::pair<uint64_t, ///< table_id
+            std::unordered_map<uint64_t, TableStats>>>
+        _last_table_stats_update;
 
     /**
      * Cache of unapplied schema changes.

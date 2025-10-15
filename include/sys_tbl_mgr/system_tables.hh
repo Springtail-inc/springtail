@@ -131,7 +131,8 @@ public:
         static constexpr uint32_t XID = 2;
         static constexpr uint32_t EXTENT_ID = 3;
         static constexpr uint32_t SNAPSHOT_XID = 4;
-        static constexpr uint64_t INTERNAL_ROW_ID = 5;
+        static constexpr uint32_t END_OFFSET = 5;
+        static constexpr uint64_t INTERNAL_ROW_ID = 6;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -140,15 +141,17 @@ public:
                               uint64_t xid,
                               uint64_t extent_id,
                               uint64_t snapshot_xid,
+                              uint64_t end_offset,
                               uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(6);
+            auto fields = std::make_shared<FieldArray>(7);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(EXTENT_ID) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
             fields->at(SNAPSHOT_XID) = std::make_shared<ConstTypeField<uint64_t>>(snapshot_xid);
             fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+            fields->at(END_OFFSET) = std::make_shared<ConstTypeField<uint64_t>>(end_offset);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -328,21 +331,18 @@ public:
         static constexpr uint32_t TABLE_ID = 0;
         static constexpr uint32_t XID = 1;
         static constexpr uint32_t ROW_COUNT = 2;
-        static constexpr uint32_t END_OFFSET = 3;
-        static constexpr uint32_t LAST_INTERNAL_ROW_ID = 4;
-        static constexpr uint64_t INTERNAL_ROW_ID = 5;
+        static constexpr uint32_t LAST_INTERNAL_ROW_ID = 3;
+        static constexpr uint64_t INTERNAL_ROW_ID = 4;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
         static TuplePtr tuple(uint64_t table_id, uint64_t xid, uint64_t row_count,
-                uint64_t end_offset, uint64_t last_internal_row_id,
-                uint64_t internal_row_id)
+                uint64_t last_internal_row_id, uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(6);
+            auto fields = std::make_shared<FieldArray>(5);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(ROW_COUNT) = std::make_shared<ConstTypeField<uint64_t>>(row_count);
-            fields->at(END_OFFSET) = std::make_shared<ConstTypeField<uint64_t>>(end_offset);
             fields->at(LAST_INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(last_internal_row_id);
             fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
