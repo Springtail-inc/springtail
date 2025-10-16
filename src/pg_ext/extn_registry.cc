@@ -104,11 +104,13 @@ PgExtnRegistry::init_libraries(uint64_t db_id,
 }
 
 bool
-PgExtnRegistry::comparator_func(uint64_t type_oid,
-                                std::string_view op_str,
+PgExtnRegistry::comparator_func(const ComparatorContext* context,
                                 const std::span<const char> &lhval,
                                 const std::span<const char> &rhval)
 {
+    auto type_oid = context->type_oid;
+    auto op_str = context->op_str;
+
     auto extn_registry = PgExtnRegistry::get_instance();
 
     auto type = extn_registry->get_type_by_oid(type_oid);
@@ -116,9 +118,9 @@ PgExtnRegistry::comparator_func(uint64_t type_oid,
     Datum leftDatum = extn_registry->binary_to_datum(lhval, type_oid, -1);
     Datum rightDatum = extn_registry->binary_to_datum(rhval, type_oid, -1);
 
-    auto comparator_func = extn_registry->get_operator_func_by_oper_name(op_str.data());
+    auto operator_func = extn_registry->get_operator_func_by_oper_name(op_str.data());
 
-    Datum result = DirectFunctionCall3(comparator_func, leftDatum, rightDatum, ObjectIdGetDatum(0));
+    Datum result = DirectFunctionCall3(operator_func, leftDatum, rightDatum, ObjectIdGetDatum(0));
 
     auto leftDatumString = extn_registry->datum_to_string(leftDatum, type_oid);
     auto rightDatumString = extn_registry->datum_to_string(rightDatum, type_oid);

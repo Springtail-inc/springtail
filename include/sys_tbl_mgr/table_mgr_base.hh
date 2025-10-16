@@ -24,7 +24,7 @@ namespace springtail {
          * @return TablePtr - pointer to the table object
          */
         virtual TablePtr
-        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, ComparatorFunc compartor_func) = 0;
+        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ComparatorCallback comparator_callback = {}) = 0;
 
         /**
          * Retrieve the column metadata for a given table at a given XID/LSN.
@@ -55,7 +55,7 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, ComparatorFunc compartor_func, bool allow_undefined = false) = 0;
+                          const XidLsn &xid, const ComparatorCallback comparator_callback, bool allow_undefined = false) = 0;
 
 
     protected:

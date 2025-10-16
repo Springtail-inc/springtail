@@ -10,13 +10,13 @@ namespace springtail {
                                ExtentSchemaPtr schema,
                                uint64_t xid,
                                uint64_t max_extent_size,
-                               ComparatorFunc comparator_func)
+                               const ComparatorCallback comparator_callback)
         : _file(file),
           _sort_keys(keys),
           _xid(xid),
           _max_extent_size(max_extent_size),
           _finalized(true),
-          _comparator_func(comparator_func)
+          _comparator_callback(comparator_callback)
     {
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         uint64_t size = Json::get_or<uint64_t>(json, "btree_cache_size", 512);
@@ -25,7 +25,7 @@ namespace springtail {
         _cache = std::make_shared<PageCache>(size);
 
         // initialize the schema information
-        _init_schemas(schema, keys, comparator_func);
+        _init_schemas(schema, keys, comparator_callback);
     }
 
     void
@@ -1385,7 +1385,7 @@ MutableBTree::_async_flush_finish(PagePtr page,
     void
     MutableBTree::_init_schemas(ExtentSchemaPtr schema,
                                 const std::vector<std::string> &keys,
-                                ComparatorFunc comparator_func)
+                                const ComparatorCallback comparator_callback)
     {
         _leaf_schema = schema;
 
@@ -1396,7 +1396,7 @@ MutableBTree::_async_flush_finish(PagePtr page,
         // construct the schema for the branches
         // note: don't need a valid sql_type for the internal nodes since they aren't exposed
         SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);
-        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys, comparator_func, false);
+        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys, comparator_callback, false);
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_mutable_fields(keys);

@@ -688,14 +688,15 @@ namespace springtail
             }
         }
 
-        auto schema = std::make_shared<ExtentSchema>(_schema.columns, PgExtnRegistry::get_instance()->comparator_func);
+        ComparatorCallback comparator_callback = {PgExtnRegistry::get_instance()->comparator_func};
+        auto schema = std::make_shared<ExtentSchema>(_schema.columns, comparator_callback);
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
                                                                   schema, _schema.secondary_keys);
 
         // mark the copy as inflight and record the snapshot details
         // note: we create a version of the schema that may contain undefined data so that we can
         //       correctly record updates with unchanged data from the replication stream
-        auto update_schema = std::make_shared<ExtentSchema>(_schema.columns, PgExtnRegistry::get_instance()->comparator_func, true);
+        auto update_schema = std::make_shared<ExtentSchema>(_schema.columns, comparator_callback, true);
         pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
                                                                snapshot_details, update_schema);
 

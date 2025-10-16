@@ -3,14 +3,24 @@
 #include <string>
 #include <limits>
 #include <cstdint>
-#include <functional>
 #include <span>
 
 namespace springtail {
-    using ComparatorFunc = std::function<bool(int32_t type_oid,
-                                              std::string_view op_str,
-                                              const std::span<const char> &lhval,
-                                              const std::span<const char> &rhval)>;
+    struct ComparatorContext {
+        uint64_t db_id;
+        uint64_t xid;
+        int32_t type_oid;
+        std::string_view op_str;
+    };
+
+    struct ComparatorCallback {
+        using Func = bool (*)(const ComparatorContext*,
+                              const std::span<const char>&,
+                              const std::span<const char>&);
+
+        Func func;
+        ComparatorContext context = {};
+    };
 }
 
 namespace springtail::constant {

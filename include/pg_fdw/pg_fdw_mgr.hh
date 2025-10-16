@@ -308,11 +308,10 @@ namespace springtail::pg_fdw {
          * @brief Lookup enum user type from cache based on oid and index
          * @param db_id db_id of the database
          * @param oid pg oid of type (in springtail)
-         * @param index enum index
          * @param xid xid for this request
          * @return user type pointer
          */
-        UserTypePtr _enum_cache_lookup(uint64_t db_id,
+        static UserTypePtr _enum_cache_lookup(uint64_t db_id,
                                        int32_t oid,
                                        uint64_t xid);
 
@@ -335,26 +334,17 @@ namespace springtail::pg_fdw {
                                     Datum value);
 
         /** Helper to get type oid */
-        Oid _get_type_oid(uint64_t db_id,
-                          uint64_t xid,
-                          uint64_t type_oid);
+        static Oid _get_type_oid(uint64_t db_id,
+                                 uint64_t xid,
+                                 uint64_t type_oid);
 
         /** Helper to resolve type information */
-        Form_pg_type _resolve_type_information(Oid oid);
-
-        /** Helper to convert a postgres extension data type to string */
-        std::string _print_function(uint64_t db_id,
-                                    uint64_t xid,
-                                    uint64_t type_oid,
-                                    const std::span<const char> &val);
+        static Form_pg_type _resolve_type_information(Oid oid);
 
         /** Helper to perform the comparator function based on the extension type oid */
-        bool _comparator_function(uint64_t db_id,
-                                  uint64_t xid,
-                                  uint64_t type_oid,
-                                  std::string_view op_str,
-                                  const std::span<const char> &lhs_value,
-                                  const std::span<const char> &rhs_value);
+        static bool _comparator_function(const ComparatorContext* ctx,
+                                         const std::span<const char> &lhs_value,
+                                         const std::span<const char> &rhs_value);
 
         /** Helper to convert field to PG Datum */
         Datum _get_datum_from_field(const PgFdwState *state,

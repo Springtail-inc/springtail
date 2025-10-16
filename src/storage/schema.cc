@@ -5,7 +5,7 @@ namespace springtail {
 
     void
     ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns,
-                            ComparatorFunc comparator_func,
+                            const ComparatorCallback comparator_callback,
                             bool allow_undefined)
     {
         // track how many primary key columns there are
@@ -105,8 +105,8 @@ namespace springtail {
                 break;
 
             case (SchemaType::EXTENSION): {
-                if ( comparator_func ) {
-                    field = std::make_shared<ExtentField>(column.type, byte_pos, comparator_func, column.pg_type);
+                if ( comparator_callback.func != nullptr ) {
+                    field = std::make_shared<ExtentField>(column.type, byte_pos, comparator_callback, column.pg_type);
                 } else {
                     field = std::make_shared<ExtentField>(column.type, byte_pos);
                 }
@@ -176,7 +176,7 @@ namespace springtail {
     ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
                                 const std::vector<SchemaColumn> &new_columns,
                                 const std::vector<std::string> &sort_columns,
-                                ComparatorFunc comparator_func,
+                                const ComparatorCallback comparator_callback,
                                 bool allow_undefined) const
     {
         // create SchemaColumn entries for the existing fields
@@ -220,7 +220,7 @@ namespace springtail {
         }
 
         // create the new ExtentSchema
-        return std::make_shared<ExtentSchema>(all_columns, comparator_func, allow_undefined);
+        return std::make_shared<ExtentSchema>(all_columns, comparator_callback, allow_undefined);
     }
 
     std::shared_ptr<std::vector<FieldPtr>>
@@ -289,12 +289,12 @@ namespace springtail {
         return fields;
     }
 
-    VirtualSchema::VirtualSchema(const SchemaMetadata &meta, ComparatorFunc comparator_func)
+    VirtualSchema::VirtualSchema(const SchemaMetadata &meta, const ComparatorCallback comparator_callback)
     {
         std::map<uint32_t, std::string> name_map;
 
         // generate the extent schema from the base columns
-        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, comparator_func, false);
+        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, comparator_callback, false);
 
         // get a copy of the fields from the extent schema
         for (auto &column : meta.columns) {

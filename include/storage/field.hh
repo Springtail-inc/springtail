@@ -3,6 +3,7 @@
 #include <type_traits>
 #include <bit>
 #include <fmt/format.h>
+#include <common/constants.hh>
 
 #include <absl/log/check.h>
 #include <pg_repl/pg_types.hh>
@@ -520,22 +521,22 @@ namespace springtail {
               _bool_bitmask(static_cast<char>(1) << bool_bit)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, ComparatorFunc const& comparator_func, int32_t type_oid)
+        ExtentField(SchemaType type, uint32_t offset, const ComparatorCallback comparator_callback, int32_t type_oid)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
               _offset(offset),
-              _comparator_func(comparator_func),
+              _comparator_callback(comparator_callback),
               _type_oid(type_oid)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, ComparatorFunc const& comparator_func, int32_t type_oid)
+        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, const ComparatorCallback comparator_callback, int32_t type_oid)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
               _offset(offset),
               _bool_bitmask(static_cast<char>(1) << bool_bit),
-              _comparator_func(comparator_func),
+              _comparator_callback(comparator_callback),
               _type_oid(type_oid)
         { }
 
@@ -833,11 +834,18 @@ namespace springtail {
                           const std::span<const char> &lhval,
                           const std::span<const char> &rhval) const override
         {
-            if (!_comparator_func){
+            // Ensure comparator function is available
+            if (_comparator_callback.func == nullptr) {
                 return false;
             }
 
-            return _comparator_func(_type_oid, op_str, lhval, rhval);
+            // Build a local context for this comparison to respect const correctness
+            ComparatorContext ctx = _comparator_callback.context;
+            ctx.type_oid = _type_oid;
+            ctx.op_str = op_str;
+
+            // Invoke comparator with pointer to context as required by the signature
+            return _comparator_callback.func(&ctx, lhval, rhval);
         }
 
     private:
@@ -880,7 +888,7 @@ namespace springtail {
         uint32_t _undefined_offset;
         uint8_t _undefined_bitmask;
 
-        ComparatorFunc _comparator_func;
+        ComparatorCallback _comparator_callback;
         int32_t _type_oid;
     };
     using ExtentFieldPtr = std::shared_ptr<ExtentField>;
@@ -903,12 +911,12 @@ namespace springtail {
     private:
         T _value;
         bool is_extn;
-        ComparatorFunc _comparator_func;
+        ComparatorCallback _comparator_callback;
         int32_t _type_oid;
 
     public:
-        explicit ConstTypeField(const T &value, bool is_extn = false, ComparatorFunc const& comparator_func = nullptr, int32_t type_oid = 0)
-            : _value(value), is_extn(is_extn), _comparator_func(comparator_func), _type_oid(type_oid)
+        explicit ConstTypeField(const T &value, bool is_extn = false, ComparatorCallback const& comparator_callback = {}, int32_t type_oid = 0)
+            : _value(value), is_extn(is_extn), _comparator_callback(comparator_callback), _type_oid(type_oid)
         { }
 
         SchemaType get_type() const override {
@@ -1061,11 +1069,18 @@ namespace springtail {
                                const std::span<const char> &lhval,
                                const std::span<const char> &rhval) const override
         {
-            if (!_comparator_func){
+            // Ensure comparator function is available
+            if (_comparator_callback.func == nullptr) {
                 return false;
             }
 
-            return _comparator_func(_type_oid, op_str, lhval, rhval);
+            // Build a local context for this comparison to respect const correctness
+            ComparatorContext ctx = _comparator_callback.context;
+            ctx.type_oid = _type_oid;
+            ctx.op_str = op_str;
+
+            // Invoke comparator with pointer to context as required by the signature
+            return _comparator_callback.func(&ctx, lhval, rhval);
         }
     };
 

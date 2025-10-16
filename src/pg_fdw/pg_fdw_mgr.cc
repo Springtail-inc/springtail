@@ -415,13 +415,10 @@ namespace springtail::pg_fdw {
         // when the function exits.
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
 
-        auto comparator_func = [tr, this](uint64_t type_oid,
-                                              std::string_view op_str,
-                                              const std::span<const char> &lhval,
-                                              const std::span<const char> &rhval) {
-            return _comparator_function(tr.db_id, tr.xid, type_oid, op_str, lhval, rhval);
-        };
-        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, comparator_func);
+        ComparatorContext comparator_context = {tr.db_id, tr.xid};
+        ComparatorCallback comparator_callback = {_comparator_function, comparator_context};
+
+        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, comparator_callback);
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
@@ -1591,25 +1588,27 @@ namespace springtail::pg_fdw {
         if (!HeapTupleIsValid(tup)) {
             elog(ERROR, "FDW: cache lookup failed for extn type %u", oid);
         }
-        Form_pg_type typeForm = (Form_pg_type) GETSTRUCT(tup);
+        auto typeForm = (Form_pg_type) GETSTRUCT(tup);
         ReleaseSysCache(tup);
 
         return typeForm;
     }
 
     bool
-    PgFdwMgr::_comparator_function(uint64_t db_id,
-                                   uint64_t xid,
-                                   uint64_t type_oid,
-                                   std::string_view op_str,
+    PgFdwMgr::_comparator_function(const ComparatorContext* ctx,
                                    const std::span<const char> &lhs_value,
                                    const std::span<const char> &rhs_value)
     {
+        uint64_t db_id = ctx->db_id;
+        uint64_t xid = ctx->xid;
+        uint64_t type_oid = ctx->type_oid;
+        std::string_view op_str = ctx->op_str;
+
         // Resolve the Oid of the field type
         Oid oid = _get_type_oid(db_id, xid, type_oid);
 
         // Get the pgForm for the type
-        Form_pg_type typeForm = _resolve_type_information(oid);
+        auto typeForm = _resolve_type_information(oid);
 
         // Get the Oid of the operator
         char *op_str_c = const_cast<char*>(op_str.data());
@@ -1619,7 +1618,7 @@ namespace springtail::pg_fdw {
         if (!HeapTupleIsValid(tuple)) {
             elog(ERROR, "cache lookup failed for operator %u", opOid);
         }
-        Form_pg_operator oprForm = (Form_pg_operator) GETSTRUCT(tuple);
+        auto oprForm = (Form_pg_operator) GETSTRUCT(tuple);
         Oid funcOid = oprForm->oprcode;
         std::string op_name = oprForm->oprname.data;
         ReleaseSysCache(tuple);
@@ -2153,13 +2152,11 @@ namespace springtail::pg_fdw {
                     if (column.type == SchemaType::EXTENSION) {
                         // if the type is an extension type, get the extension value instead of the enum value
                         std::vector<char> extension_value = _get_extension_data_from_pg(state, qual->base.typeoid, qual->value);
-                        auto comparator_func = [this, state](int32_t type_oid,
-                                                                       std::string_view op_str,
-                                                                       const std::span<const char> &lhval,
-                                                                       const std::span<const char> &rhval) {
-                            return _comparator_function(state->db_id, state->xid, type_oid, op_str, lhval, rhval);
-                        };
-                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true, comparator_func, column.pg_type);
+
+                        ComparatorContext comparator_context = {state->db_id, state->xid};
+                        ComparatorCallback comparator_callback = {_comparator_function, comparator_context};
+
+                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true, comparator_callback, column.pg_type);
                     } else {
                         Oid oid = DatumGetObjectId(qual->value);
                         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1,
@@ -2207,6 +2204,8 @@ namespace springtail::pg_fdw {
     UserTypePtr
     PgFdwMgr::_enum_cache_lookup(uint64_t db_id, int32_t oid, uint64_t xid)
     {
+        static LruObjectCache<int32_t, UserType> _user_type_cache(MAX_USER_TYPE_CACHE);
+
         // first check the _user_type_cache for the oid
         LOG_DEBUG(LOG_FDW,LOG_LEVEL_DEBUG1,  "Enum cache lookup for oid: {}", oid);
 

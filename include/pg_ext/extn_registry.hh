@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include <common/logging.hh>
+#include <common/constants.hh>
 #include <pg_ext/fmgr.hh>
 #include <pg_repl/libpq_connection.hh>
 
@@ -140,14 +141,12 @@ public:
     /**
      * Compare two datums - Using the comparator function of the extension type
      * Looks up the comparator function using the type oid and operation name string
-     * @param type_oid The oid of the type
-     * @param op_str The operator string
+     * @param context The comparator context
      * @param lhval The left hand value
      * @param rhval The right hand value
      * @return The result of the comparison
      */
-    static bool comparator_func(uint64_t type_oid,
-                                std::string_view op_str,
+    static bool comparator_func(const ComparatorContext* context,
                                 const std::span<const char> &lhval,
                                 const std::span<const char> &rhval);
 private:

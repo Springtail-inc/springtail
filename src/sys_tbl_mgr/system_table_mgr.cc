@@ -40,7 +40,7 @@ SystemTableMgr::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &acce
 }
 
 std::shared_ptr<ExtentSchema>
-SystemTableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid, ComparatorFunc compartor_func, bool allow_undefined)
+SystemTableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid, const ComparatorCallback comparator_callback, bool allow_undefined)
 {
     return _get_extent_schema(table_id);
 }
@@ -90,7 +90,7 @@ SystemTableMgr::_get_secondary_keys() {
 }
 
 TablePtr
-SystemTableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, ComparatorFunc compartor_func)
+SystemTableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ComparatorCallback comparator_callback)
 {
     DCHECK(table_id < constant::MAX_SYSTEM_TABLE_ID);
     // initialize the system tables using the look-aside root files
