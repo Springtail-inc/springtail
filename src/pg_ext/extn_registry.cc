@@ -48,7 +48,7 @@ PgExtnRegistry::get_operator_func_by_oid(uint32_t oid) const
 }
 
 PGFunction
-PgExtnRegistry::get_operator_func_by_oper_name(const std::string& oper_name) const
+PgExtnRegistry::get_operator_func_by_oper_name(const char* oper_name) const
 {
     auto it = _oper_name_to_func.find(oper_name);
     if (it == _oper_name_to_func.end()) {
@@ -118,7 +118,7 @@ PgExtnRegistry::comparator_func(const ComparatorContext* context,
     Datum leftDatum = extn_registry->binary_to_datum(lhval, type_oid, -1);
     Datum rightDatum = extn_registry->binary_to_datum(rhval, type_oid, -1);
 
-    auto operator_func = extn_registry->get_operator_func_by_oper_name(op_str.data());
+    auto operator_func = extn_registry->get_operator_func_by_oper_name(op_str);
 
     Datum result = DirectFunctionCall3(operator_func, leftDatum, rightDatum, ObjectIdGetDatum(0));
 

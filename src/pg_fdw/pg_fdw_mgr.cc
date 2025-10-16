@@ -1602,7 +1602,7 @@ namespace springtail::pg_fdw {
         uint64_t db_id = ctx->db_id;
         uint64_t xid = ctx->xid;
         uint64_t type_oid = ctx->type_oid;
-        std::string_view op_str = ctx->op_str;
+        const char* op_str = ctx->op_str;
 
         // Resolve the Oid of the field type
         Oid oid = _get_type_oid(db_id, xid, type_oid);
@@ -1611,8 +1611,8 @@ namespace springtail::pg_fdw {
         auto typeForm = _resolve_type_information(oid);
 
         // Get the Oid of the operator
-        char *op_str_c = const_cast<char*>(op_str.data());
-        Oid opOid = OpernameGetOprid(list_make1(makeString(op_str_c)), typeForm->oid, typeForm->oid);
+        char *opname = pstrdup(op_str);
+        Oid opOid = OpernameGetOprid(list_make1(makeString(opname)), typeForm->oid, typeForm->oid);
 
         HeapTuple tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(opOid));
         if (!HeapTupleIsValid(tuple)) {

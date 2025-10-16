@@ -1507,8 +1507,8 @@ localsub(struct state const *sp, pg_time_t const *timep,
 struct pg_tm *
 pg_localtime(const pg_time_t *timep, const pg_tz *tz)
 {
-	struct pg_tm tm;
-	return localsub(&tz->state, timep, &tm);
+    static thread_local struct pg_tm tm;
+    return localsub(&tz->state, timep, &tm);
 }
 
 void

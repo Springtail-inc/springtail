@@ -106,7 +106,7 @@ namespace springtail {
             throw TypeError("Getting extension type unsupported for this field.");
         }
 
-        virtual bool compare_extension(std::string_view op_str,
+        virtual bool compare_extension(const char* op_str,
                                        const std::span<const char> &lhval,
                                        const std::span<const char> &rhval) const
         {
@@ -208,7 +208,7 @@ namespace springtail {
             case SchemaType::EXTENSION: {
                 auto lhval = this->get_extension(lhs_row);
                 auto rhval = rhs->get_extension(rhs_row);
-                char op_str[] = "<";
+                const char* op_str = "<";
                 auto cmp = this->compare_extension(op_str, lhval, rhval);
                 return cmp;
             }
@@ -304,7 +304,7 @@ namespace springtail {
             case SchemaType::EXTENSION: {
                 auto lhval = this->get_extension(lhs_row);
                 auto rhval = rhs->get_extension(rhs_row);
-                char op_str[] = "=";
+                const char* op_str = "=";
                 auto cmp = this->compare_extension(op_str, lhval, rhval);
                 return cmp;
             }
@@ -830,7 +830,7 @@ namespace springtail {
         }
 
         bool
-        compare_extension(std::string_view op_str,
+        compare_extension(const char* op_str,
                           const std::span<const char> &lhval,
                           const std::span<const char> &rhval) const override
         {
@@ -1065,7 +1065,7 @@ namespace springtail {
             }
         }
 
-        bool compare_extension(std::string_view op_str,
+        bool compare_extension(const char* op_str,
                                const std::span<const char> &lhval,
                                const std::span<const char> &rhval) const override
         {

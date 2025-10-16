@@ -10,7 +10,7 @@ namespace springtail {
         uint64_t db_id;
         uint64_t xid;
         int32_t type_oid;
-        std::string_view op_str;
+        const char* op_str;
     };
 
     struct ComparatorCallback {

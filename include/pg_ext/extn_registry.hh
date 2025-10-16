@@ -106,7 +106,7 @@ public:
      * @param oper_name The operator name
      * @return The operator function
      */
-    PGFunction get_operator_func_by_oper_name(const std::string& oper_name) const;
+    PGFunction get_operator_func_by_oper_name(const char* oper_name) const;
     /**
      * Get the operator function by proc name
      * @param proc_name The proc name

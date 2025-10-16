@@ -1,5 +1,5 @@
-#include <memory>
 #include <pg_ext/hash.hh>
+#include <pg_ext/memory.hh>
 
 static uint64_t default_hash_func(const void *key, size_t len) {
     uint64_t hash = 14695981039346656037uLL;
@@ -48,10 +48,10 @@ void *hash_search(HTAB *htab, const void *key, HASHACTION action, bool *found) {
 
         if (!entry.occupied) {
             if (action == HASH_ENTER) {
-                entry.key = std::malloc(htab->keysize);
+                entry.key = palloc(htab->keysize);
                 std::memcpy(entry.key, key, htab->keysize);
 
-                entry.value = std::calloc(1, htab->entrysize);
+                entry.value = palloc(htab->entrysize);
                 entry.occupied = true;
                 htab->count++;
 
