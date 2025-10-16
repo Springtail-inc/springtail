@@ -4,8 +4,7 @@
 
 const char * const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", nullptr};
 const char * const days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", nullptr};
-pg_tz *session_timezone = nullptr;
-struct pg_tm tm;
+
 const int DateOrder = DATEORDER_MDY;
 
 DateADT
@@ -1214,7 +1213,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
  int
  tzload(const char *name, char *canonname, struct state *sp, bool doextend)
  {
-     auto *lsp = (union local_storage *) malloc(sizeof(union local_storage));
+     auto *lsp = (union local_storage *) palloc(sizeof(union local_storage));
 
      if (!lsp)
          return -1;
@@ -1400,7 +1399,7 @@ gmtsub(pg_time_t const *timep, int32_t offset,
 	if (gmtptr == nullptr)
 	{
 		/* Allocate on first use */
-		gmtptr = (struct state *) malloc(sizeof(struct state));
+		gmtptr = (struct state *) palloc(sizeof(struct state));
 		if (gmtptr == nullptr)
 			return nullptr;		/* errno should be set by malloc */
 		gmtload(gmtptr);
@@ -1508,6 +1507,7 @@ localsub(struct state const *sp, pg_time_t const *timep,
 struct pg_tm *
 pg_localtime(const pg_time_t *timep, const pg_tz *tz)
 {
+	struct pg_tm tm;
 	return localsub(&tz->state, timep, &tm);
 }
 
@@ -1558,9 +1558,9 @@ timestamp2tm(Timestamp dt, int *tzp, struct pg_tm *tm, fsec_t *fsec, const char 
 	Timestamp	time;
 	pg_time_t	utime;
 
-	/* Use session timezone if caller asks for default */
-	if (attimezone == nullptr)
-		attimezone = session_timezone;
+	// XXX Check this
+	// if (attimezone == nullptr)
+	// 	attimezone = session_timezone;
 
 	time = dt;
 	TMODULO(time, date, USECS_PER_DAY);

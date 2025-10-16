@@ -298,8 +298,6 @@ union local_storage
 extern const char * const months[];
 extern const char * const days[];
 extern const int DateOrder;
-extern pg_tz *session_timezone;
-extern struct pg_tm tm;
 
 extern "C" PGEXT_API DateADT DatumGetDateADT(Datum X);
 extern "C" PGEXT_API TimeADT DatumGetTimeADT(Datum X);
