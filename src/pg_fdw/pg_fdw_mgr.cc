@@ -416,9 +416,9 @@ namespace springtail::pg_fdw {
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
 
         auto comparator_func = [tr, this](uint64_t type_oid,
-                                                            std::string_view op_str,
-                                                            const std::span<const char> &lhval,
-                                                            const std::span<const char> &rhval) -> bool {
+                                              std::string_view op_str,
+                                              const std::span<const char> &lhval,
+                                              const std::span<const char> &rhval) {
             return _comparator_function(tr.db_id, tr.xid, type_oid, op_str, lhval, rhval);
         };
         TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, comparator_func);
@@ -705,16 +705,6 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
 
-        // auto comparator_func = [this, db_id, xid](uint64_t type_oid,
-        //                                                     std::string_view op_str,
-        //                                                     const std::span<const char> &lhval,
-        //                                                     const std::span<const char> &rhval) -> bool {
-        //     return _comparator_function(db_id, xid, type_oid, op_str, lhval, rhval);
-        // };
-        // TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid, comparator_func);
-        // PgFdwState *state = new PgFdwState{table, db_id, tid, xid};
-
-        // return state;
         // This c'tor uses PG memory API's to allocate List
         // and adds db_id, tid and xid to it. SpringtailPlanState
         // never deletes the PG List object. It's safe because
@@ -2163,12 +2153,13 @@ namespace springtail::pg_fdw {
                     if (column.type == SchemaType::EXTENSION) {
                         // if the type is an extension type, get the extension value instead of the enum value
                         std::vector<char> extension_value = _get_extension_data_from_pg(state, qual->base.typeoid, qual->value);
-                        auto comparator_func = [this, state, column](std::string_view op_str,
-                                                             const std::span<const char> &lhval,
-                                                             const std::span<const char> &rhval) -> bool {
-                            return _comparator_function(state->db_id, state->xid, column.pg_type, op_str, lhval, rhval);
+                        auto comparator_func = [this, state](int32_t type_oid,
+                                                                       std::string_view op_str,
+                                                                       const std::span<const char> &lhval,
+                                                                       const std::span<const char> &rhval) {
+                            return _comparator_function(state->db_id, state->xid, type_oid, op_str, lhval, rhval);
                         };
-                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true, comparator_func);
+                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true, comparator_func, column.pg_type);
                     } else {
                         Oid oid = DatumGetObjectId(qual->value);
                         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1,

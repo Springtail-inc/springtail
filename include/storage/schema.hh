@@ -213,7 +213,7 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, ComparatorFunc comparator_func = nullptr, bool allow_undefined = false) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, ComparatorFunc const& comparator_func = nullptr, bool allow_undefined = false) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
@@ -227,7 +227,7 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, ComparatorFunc comparator_func = nullptr, bool allow_undefined = false)
+        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, ComparatorFunc const& comparator_func = nullptr, bool allow_undefined = false)
         {
             _populate(columns, comparator_func, allow_undefined);
         }

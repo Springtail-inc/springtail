@@ -229,7 +229,7 @@ namespace springtail {
               ExtentSchemaPtr schema,
               uint64_t root_offset,
               uint64_t max_extent_size,
-              ComparatorFunc comparator_func = nullptr);
+              ComparatorFunc const& comparator_func = nullptr);
 
         BTree() = delete;
 

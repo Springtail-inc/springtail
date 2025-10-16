@@ -2,6 +2,7 @@
 
 #include <type_traits>
 #include <bit>
+#include <fmt/format.h>
 
 #include <absl/log/check.h>
 #include <pg_repl/pg_types.hh>
@@ -519,21 +520,23 @@ namespace springtail {
               _bool_bitmask(static_cast<char>(1) << bool_bit)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, FieldComparisonFunc comparator_func)
+        ExtentField(SchemaType type, uint32_t offset, ComparatorFunc const& comparator_func, int32_t type_oid)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
               _offset(offset),
-              _comparator_func(comparator_func)
+              _comparator_func(comparator_func),
+              _type_oid(type_oid)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, FieldComparisonFunc comparator_func)
+        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, ComparatorFunc const& comparator_func, int32_t type_oid)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
               _offset(offset),
               _bool_bitmask(static_cast<char>(1) << bool_bit),
-              _comparator_func(comparator_func)
+              _comparator_func(comparator_func),
+              _type_oid(type_oid)
         { }
 
         void
@@ -834,7 +837,7 @@ namespace springtail {
                 return false;
             }
 
-            return _comparator_func(op_str, lhval, rhval);
+            return _comparator_func(_type_oid, op_str, lhval, rhval);
         }
 
     private:
@@ -877,7 +880,8 @@ namespace springtail {
         uint32_t _undefined_offset;
         uint8_t _undefined_bitmask;
 
-        FieldComparisonFunc _comparator_func;
+        ComparatorFunc _comparator_func;
+        int32_t _type_oid;
     };
     using ExtentFieldPtr = std::shared_ptr<ExtentField>;
 
@@ -899,11 +903,12 @@ namespace springtail {
     private:
         T _value;
         bool is_extn;
-        FieldComparisonFunc _comparator_func;
+        ComparatorFunc _comparator_func;
+        int32_t _type_oid;
 
     public:
-        explicit ConstTypeField(const T &value, bool is_extn = false, FieldComparisonFunc comparator_func = nullptr)
-            : _value(value), is_extn(is_extn), _comparator_func(comparator_func)
+        explicit ConstTypeField(const T &value, bool is_extn = false, ComparatorFunc const& comparator_func = nullptr, int32_t type_oid = 0)
+            : _value(value), is_extn(is_extn), _comparator_func(comparator_func), _type_oid(type_oid)
         { }
 
         SchemaType get_type() const override {
@@ -1060,7 +1065,7 @@ namespace springtail {
                 return false;
             }
 
-            return _comparator_func(op_str, lhval, rhval);
+            return _comparator_func(_type_oid, op_str, lhval, rhval);
         }
     };
 

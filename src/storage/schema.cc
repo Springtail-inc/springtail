@@ -105,15 +105,8 @@ namespace springtail {
                 break;
 
             case (SchemaType::EXTENSION): {
-                // XXX comparator_func is mandatory for extension types
                 if ( comparator_func ) {
-                    // Override the compartor function if its present
-                    auto updated_comparator_func = [column, comparator_func](std::string_view op_str,
-                                                                             const std::span<const char> &lhval,
-                                                                             const std::span<const char> &rhval) -> bool {
-                        return comparator_func(column.pg_type, op_str, lhval, rhval);
-                    };
-                    field = std::make_shared<ExtentField>(column.type, byte_pos, updated_comparator_func);
+                    field = std::make_shared<ExtentField>(column.type, byte_pos, comparator_func, column.pg_type);
                 } else {
                     field = std::make_shared<ExtentField>(column.type, byte_pos);
                 }
