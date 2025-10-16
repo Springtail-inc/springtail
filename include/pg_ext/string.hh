@@ -15,7 +15,7 @@
 #undef pg_strerror_r
 #endif
 
-#define MAX_SAFE_LEN 1024 * 1024
+constexpr int MAX_SAFE_LEN = 1024 * 1024;
 
 typedef struct varlena text;
 typedef struct StringInfoData

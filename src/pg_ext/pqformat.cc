@@ -89,7 +89,7 @@ pq_sendtext(StringInfo buf, const char *str, int slen)
         // Converted string is NUL-terminated by converter; still, be defensive
         int plen = (int)strnlen(p, slen); /* cap to original length */
         appendBinaryStringInfo(buf, p, plen);
-        free(p);
+        pfree(p);
     }
     else {
         appendBinaryStringInfo(buf, str, slen);
