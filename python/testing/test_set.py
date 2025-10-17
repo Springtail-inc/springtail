@@ -33,12 +33,14 @@ class TestSet:
                  build_dir: str,
                  test_params: dict,
                  overlay: None | str,
-                 test_files: list[str] = []) -> None:
+                 test_files: list[str] = [],
+                 valgrind_daemons: list[str] = []) -> None:
         """Initialize the test set"""
         self._directory = directory
         self._config_file = config_file
         self._build_dir = build_dir
         self._test_params = test_params
+        self._valgrind_daemons = valgrind_daemons
         self._name = (overlay if overlay is not None else "default") + ' - ' + os.path.basename(self._directory)
         self._skip = False
 
@@ -180,7 +182,7 @@ class TestSet:
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
-        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=False, postgres_only=False, do_fdw_install=False)
+        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=False, postgres_only=False, do_fdw_install=False, valgrind_daemons=self._valgrind_daemons)
 
         # stop the background mutations and verify correctness
         success = self._config.stop_background()

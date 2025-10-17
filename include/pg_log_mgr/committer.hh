@@ -178,13 +178,11 @@ namespace springtail::committer {
          * @param result The XidReady message to process
          * @param db_id The database ID
          * @param completed_xid The most recent XID we completed processing
-         * @param keep_alive Reference to the coordinator keep-alive
          */
         void _handle_index_reconciliation(
             const std::shared_ptr<XidReady>& result,
             uint64_t db_id,
-            uint64_t& completed_xid,
-            std::atomic<uint64_t>& keep_alive
+            uint64_t& completed_xid
         );
 
         /**
@@ -192,13 +190,11 @@ namespace springtail::committer {
          * @param result The XidReady message to process
          * @param db_id The database ID
          * @param completed_xid The most recent XID we completed processing
-         * @param keep_alive Reference to the coordinator keep-alive
          */
         void _handle_transaction_message(
             const std::shared_ptr<XidReady>& result,
             uint64_t db_id,
-            uint64_t completed_xid,
-            std::atomic<uint64_t>& keep_alive
+            uint64_t completed_xid
         );
 
     private:
@@ -216,13 +212,11 @@ namespace springtail::committer {
          * @param db_id The database ID
          * @param batch The batch state to commit
          * @param completed_xid The XID we started from
-         * @param keep_alive Reference to the coordinator keep-alive
          */
         void _commit_batch(
             uint64_t db_id,
             BatchState& batch,
-            uint64_t completed_xid,
-            std::atomic<uint64_t>& keep_alive
+            uint64_t completed_xid
         );
 
     private:

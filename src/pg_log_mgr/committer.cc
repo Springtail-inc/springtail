@@ -39,7 +39,7 @@ namespace springtail::committer {
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
 
         // register the thread on startup
-        auto &keep_alive = coordinator->register_thread(daemon_type, "committer");
+        coordinator->register_thread(daemon_type, "committer");
 
         // initiate the worker threads
         for (int i = 0; i < _worker_count; i++) {
@@ -56,6 +56,7 @@ namespace springtail::committer {
         // enter a loop polling for data from the write cache
         while (!_shutdown) {
             // update the coordinator
+            auto &keep_alive = coordinator->find_thread(daemon_type, "committer");
             Coordinator::mark_alive(keep_alive);
 
             // figure out if there are XIDs to process
@@ -104,7 +105,7 @@ namespace springtail::committer {
                     auto batch_it = _batch_state.find(db_id);
                     if (batch_it != _batch_state.end()) {
                         uint64_t completed_xid = _completed_xids[db_id];
-                        _commit_batch(db_id, batch_it->second, completed_xid, keep_alive);
+                        _commit_batch(db_id, batch_it->second, completed_xid);
                         _batch_state.erase(batch_it);
                     }
                 }
@@ -143,7 +144,7 @@ namespace springtail::committer {
 
                 // handle RECONCILE_INDEX - process in isolation
                 if (result->type() == XidReady::Type::RECONCILE_INDEX) {
-                    _handle_index_reconciliation(result, db_id, completed_xid, keep_alive);
+                    _handle_index_reconciliation(result, db_id, completed_xid);
                     continue;
                 }
 
@@ -166,13 +167,13 @@ namespace springtail::committer {
                     }
                 }
 
-                _handle_transaction_message(result, db_id, completed_xid, keep_alive);
+                _handle_transaction_message(result, db_id, completed_xid);
             }
 
             // commit all accumulated batches
             for (auto& [db_id, batch] : _batch_state) {
                 uint64_t completed_xid = _completed_xids[db_id];
-                _commit_batch(db_id, batch, completed_xid, keep_alive);
+                _commit_batch(db_id, batch, completed_xid);
             }
         }
 
@@ -226,25 +227,22 @@ namespace springtail::committer {
     Committer::_commit_batch(
         uint64_t db_id,
         BatchState& batch,
-        uint64_t completed_xid,
-        std::atomic<uint64_t>& keep_alive)
+        uint64_t completed_xid)
     {
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committing batch for db {} with {} XIDs",
                   db_id, batch.xid_results.size());
 
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+        Coordinator::get_instance()->unregister_thread(daemon_type, "committer");
+
         // finalize all tables in the batch
         for (auto& [tid, table] : batch.table_cache) {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Finalizing table {}", tid);
-
-            constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
-            Coordinator::get_instance()->unregister_thread(daemon_type, "committer");
-
             auto metadata = table->finalize();
-
-            Coordinator::get_instance()->register_thread(daemon_type, "committer");
-
             sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, batch.final_xid, metadata);
         }
+
+        Coordinator::get_instance()->register_thread(daemon_type, "committer");
 
         // process each XID in the batch
         for (auto& result : batch.xid_results) {
@@ -347,8 +345,7 @@ namespace springtail::committer {
     Committer::_handle_index_reconciliation(
         const std::shared_ptr<XidReady>& result,
         uint64_t db_id,
-        uint64_t& completed_xid,
-        std::atomic<uint64_t>& keep_alive)
+        uint64_t& completed_xid)
     {
         CHECK(result->type() == XidReady::Type::RECONCILE_INDEX);
         uint64_t xid = result->reconcile().xid();
@@ -446,8 +443,7 @@ namespace springtail::committer {
     void
     Committer::_handle_transaction_message(const std::shared_ptr<XidReady>& result,
                                            uint64_t db_id,
-                                           uint64_t completed_xid,
-                                           std::atomic<uint64_t>& keep_alive)
+                                           uint64_t completed_xid)
     {
         // note: from here we know we have an XACT_MSG
         CHECK(result->type() == XidReady::Type::XACT_MSG);
@@ -498,6 +494,8 @@ namespace springtail::committer {
             }
 
             // update the coordinator
+            constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+            auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, "committer");
             Coordinator::mark_alive(keep_alive);
         }
 
@@ -508,6 +506,8 @@ namespace springtail::committer {
             boost::unique_lock lock(_mutex);
             while (!_cv.wait_for(lock, boost::chrono::seconds(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT),
                                  [this]() { return _tid_set.empty(); })) {
+                constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+                auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, "committer");
                 Coordinator::mark_alive(keep_alive); // update the coordinator
             }
         }

@@ -796,6 +796,14 @@ MutableBTree::lower_bound(TuplePtr search_key,
     {
         // clear all of the entries from the cache without flushing them
         _cache->lookup.clear();
+
+        // Evict any dirty pages from the StorageCache before clearing the LRU
+        for (auto &page : _cache->lru) {
+            if (page->is_dirty()) {
+                page->evict_cache_page();
+            }
+        }
+
         _cache->lru.clear();
         _cache->size = 0;
     }
