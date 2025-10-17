@@ -112,11 +112,11 @@ char *upperstr_with_len(const char *str, int len) {
     return result;
 }
 
-int pg_snprintf(char *str, size_t count, const char *fmt, ...) {
+int pg_snprintf(char *str, size_t count, const char *fmt, ...) { // NOSONAR: pg_func - Needs ellipsis
     va_list args;
     va_start(args, fmt);
-    // NOSONAR: fmt is controlled internally, not from user input
-    int result = vsnprintf(str, count, fmt, args);
+    int result = vsnprintf(str, count, fmt, args); // NOSONAR: fmt is controlled internally, not from user input
+
     va_end(args);
     return result;
 }
@@ -247,7 +247,7 @@ initStringInfo(StringInfo str)
 {
 	int			size = 1024;	/* initial default buffer size */
 
-	str->data = (char *) malloc(size);
+	str->data = (char *) palloc(size);
 	str->maxlen = size;
 	resetStringInfo(str);
 }
@@ -286,7 +286,7 @@ enlargeStringInfo(StringInfo str, int needed)
     }
 
     /* Now realloc the buffer */
-    str->data = (char *)realloc(str->data, newlen);
+    str->data = (char *)realloc(str->data, newlen); // NOSONAR - realloc is used for memory management for pg
     if (!str->data)
         throw std::bad_alloc();
 
@@ -319,7 +319,7 @@ appendStringInfoVA(StringInfo str, const char *fmt, va_list args)
 }
 
 void
-appendStringInfo(StringInfo str, const char *fmt, ...)
+appendStringInfo(StringInfo str, const char *fmt, ...) // NOSONAR: pg_func - Needs ellipsis
 {
     int save_errno = errno;
 
@@ -330,7 +330,7 @@ appendStringInfo(StringInfo str, const char *fmt, ...)
         /* Try to format the data. */
         errno = save_errno;
         va_start(args, fmt);
-        needed = appendStringInfoVA(str, fmt, args);
+        needed = appendStringInfoVA(str, fmt, args); // NOSONAR: Fmt is validated
         va_end(args);
 
         if (needed == 0) {

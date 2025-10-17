@@ -123,7 +123,7 @@ has_fn_opclass_options(FmgrInfo *fcinfo)
 char *
 strdup_cxx(const std::string &str)
 {
-    char *result = static_cast<char *>(malloc(str.size() + 1));
+    char *result = static_cast<char *>(palloc(str.size() + 1));
     if (result) {
         std::memcpy(result, str.c_str(), str.size() + 1);
     }

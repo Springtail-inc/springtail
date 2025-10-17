@@ -62,7 +62,7 @@ GucManager::reserve_prefix(std::string_view prefix)
 }  // namespace pgext
 
 // Global GucManager instance
-static pgext::GucManager g_guc_manager;
+static pgext::GucManager g_guc_manager; // NOSONAR - GUC Manager class
 
 void
 DefineCustomRealVariable(const char *name,

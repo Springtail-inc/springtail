@@ -11,7 +11,7 @@
 //// EXPORTED INTERFACES
 
 // Context management
-extern "C" PGEXT_API void *CurrentMemoryContext;
+extern "C" PGEXT_API void *CurrentMemoryContext; // NOSONAR - Memory context should be global
 
 extern "C" PGEXT_API void *AllocSetContextCreateInternal(void *parent,
                                                          const char *name,
@@ -59,7 +59,7 @@ private:
     /** Definition of a memory block. */
     struct MemoryBlock {
         explicit MemoryBlock(size_t block_size) {
-            memory = static_cast<char*>(std::malloc(block_size));
+            memory = static_cast<char*>(std::malloc(block_size)); // NOSONAR - malloc is used for memory management for pg
             if (!memory) {
                 throw std::bad_alloc();
             }
@@ -69,7 +69,7 @@ private:
 
         ~MemoryBlock() {
             if (memory) {
-                std::free(memory);
+                std::free(memory); // NOSONAR - free is used for memory management for pg
                 memory = nullptr;
             }
         }
@@ -89,7 +89,7 @@ private:
         MemoryBlock& operator=(MemoryBlock&& other) noexcept {
             if (this != &other) {
                 if (memory) {
-                    std::free(memory);
+                    std::free(memory); // NOSONAR - free is used for memory management for pg
                 }
                 memory = other.memory;
                 size = other.size;

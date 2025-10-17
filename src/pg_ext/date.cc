@@ -166,7 +166,7 @@ detzcode64(const char *const codep)
 }
 
 #ifndef SYSTEMTZDIR
-static char tzdirpath[MAXPGPATH];
+static const char tzdirpath[MAXPGPATH];
 #endif
 
 static const char *

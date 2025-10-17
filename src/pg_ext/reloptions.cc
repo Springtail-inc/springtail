@@ -2,8 +2,8 @@
 #include <vector>
 #include <mutex>
 
-std::vector<IntReloption> _reloptions_registry;
-std::mutex _registry_mutex;
+std::vector<IntReloption> _reloptions_registry; // NOSONAR
+std::mutex _registry_mutex; // NOSONAR
 
 void add_local_int_reloption(const char *name, const char *desc, int default_val,
                              int min_val, int max_val) {

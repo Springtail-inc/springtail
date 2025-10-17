@@ -7,7 +7,7 @@
 #define FLEXIBLE_ARRAY_MEMBER
 constexpr int LIST_INITIAL_ALLOC = 4;
 
-union ListCell
+union ListCell // NOSONAR: XXX Need to use std::variant
 {
 	void	   *ptr_value;
 	int			int_value;

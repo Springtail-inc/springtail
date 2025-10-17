@@ -5,7 +5,7 @@
 #include <signal.h>
 #include <cstdio>
 
-extern "C" PGEXT_API volatile sig_atomic_t InterruptPending;
+extern "C" PGEXT_API volatile sig_atomic_t InterruptPending; // NOSONAR
 extern "C" PGEXT_API void ProcessInterrupts();
 
 

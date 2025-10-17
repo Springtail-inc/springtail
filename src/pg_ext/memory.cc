@@ -6,7 +6,7 @@
 // namespace pgext {
 
 // Define the global memory context
-MemoryContext TopMemoryContext(nullptr, "TopMemoryContext", 8192, 1048576);
+MemoryContext TopMemoryContext(nullptr, "TopMemoryContext", 8192, 1048576); // NOSONAR - Global memory management
 
 MemoryContext::MemoryContext(MemoryContext* parent,
                              std::string_view name,
@@ -141,7 +141,7 @@ MemoryContext::free(void* ptr)
 // } // namespace pgext
 
 // // Global memory context pointer
-void* CurrentMemoryContext = &TopMemoryContext;
+void* CurrentMemoryContext = &TopMemoryContext; // NOSONAR - Global memory management
 
 // Implementation of exported functions
 void*
