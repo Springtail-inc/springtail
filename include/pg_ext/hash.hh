@@ -9,11 +9,11 @@
 #include <vector>
 
 /* hash_search operations */
-typedef enum {
+enum class HASHACTION {
     HASH_FIND,
     HASH_ENTER,
     HASH_REMOVE
-} HASHACTION;
+};
 
 struct HashEntry {
     void *key;
@@ -31,17 +31,17 @@ struct HTAB {
     size_t count;
 };
 
-typedef struct HASHCTL {
+struct HASHCTL {
     size_t keysize;
     size_t entrysize;
     uint64_t (*hash_func)(const void *key, size_t keysize);
     bool (*match_func)(const void *key1, const void *key2, size_t keysize);
-} HASHCTL;
+};
 
-typedef struct HASH_SEQ_STATUS {
+struct HASH_SEQ_STATUS {
     HTAB *htab;
     size_t position;
-} HASH_SEQ_STATUS;
+};
 
 #define UINT32_ALIGN_MASK (sizeof(uint32_t) - 1)
 #define rot(x,k) (x << k) | (x >> (32 - k))

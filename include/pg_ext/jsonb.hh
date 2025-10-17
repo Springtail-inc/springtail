@@ -61,10 +61,10 @@ constexpr uint32_t JENTRY_ISCONTAINER		= 0x50000000;	/* array or object */
      ((jsonbval)->type == jbvType::jbvDatetime)))
 
 /* Forward declarations */
-typedef struct JsonbPair JsonbPair;
-typedef struct JsonbValue JsonbValue;
-typedef struct JsonbContainer JsonbContainer;
-typedef uint32_t JEntry;
+struct JsonbPair;
+struct JsonbValue;
+struct JsonbContainer;
+using JEntry = uint32_t;
 
 enum class JsonTokenType
 {
@@ -180,7 +180,7 @@ struct Jsonb
 	JsonbContainer root;
 };
 struct JsonbValue {
-    enum jbvType type; /* Influences sort order */
+    jbvType type; /* Influences sort order */
 
     union {
         Numeric numeric;

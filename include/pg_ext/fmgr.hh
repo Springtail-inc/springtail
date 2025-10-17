@@ -14,7 +14,7 @@ struct NullableDatum {
     bool isnull;
 };
 
-typedef char *Pointer;
+using Pointer = char *;
 
 static inline Pointer
 DatumGetPointer(Datum X)
@@ -132,19 +132,20 @@ CharGetDatum(char X)
 )
 
 /* Type categories for get_call_result_type and siblings */
-typedef enum TypeFuncClass {
+enum class TypeFuncClass {
     TYPEFUNC_SCALAR,           /* scalar result type */
     TYPEFUNC_COMPOSITE,        /* determinable rowtype result */
     TYPEFUNC_COMPOSITE_DOMAIN, /* domain over determinable rowtype result */
     TYPEFUNC_RECORD,           /* indeterminate rowtype result */
     TYPEFUNC_OTHER             /* bogus type, eg pseudotype */
-} TypeFuncClass;
+};
 
-typedef struct FunctionCallInfoBaseData *FunctionCallInfo;
-typedef Datum (*PGFunction)(FunctionCallInfo fcinfo);
+struct FunctionCallInfoBaseData;
+using FunctionCallInfo = FunctionCallInfoBaseData *;
+using PGFunction = Datum (*)(FunctionCallInfo fcinfo);
 
-typedef struct Node *fmNodePtr;
-typedef struct FmgrInfo {
+using fmNodePtr = struct Node *;
+struct FmgrInfo {
     PGFunction fn_addr;           /* pointer to function or handler to be called */
     Oid fn_oid;                   /* OID of function (NOT of handler, if any) */
     short fn_nargs;               /* number of input args (0..FUNC_MAX_ARGS) */
@@ -154,13 +155,13 @@ typedef struct FmgrInfo {
     void *fn_extra;               /* extra space for use by handler */
     MemoryContext fn_mcxt; /* memory context to store fn_extra in */
     fmNodePtr fn_expr;            /* expression parse tree for call, or NULL */
-} FmgrInfo;
+};
 
 constexpr int32_t FIELDNO_FUNCTIONCALLINFODATA_ISNULL = 4;
 constexpr int32_t FIELDNO_FUNCTIONCALLINFODATA_ARGS = 6;
 constexpr int32_t FIELDNO_HEAPTUPLEDATA_DATA = 3;
 
-typedef struct FunctionCallInfoBaseData {
+struct FunctionCallInfoBaseData {
     FmgrInfo *flinfo;     /* ptr to lookup info used for this call */
     fmNodePtr context;    /* pass info about context of call */
     fmNodePtr resultinfo; /* pass or return extra info about result */
@@ -168,7 +169,7 @@ typedef struct FunctionCallInfoBaseData {
     bool isnull; /* function must set true if result is NULL */
     short nargs; /* # arguments actually passed */
     NullableDatum args[FLEXIBLE_ARRAY_MEMBER];
-} FunctionCallInfoBaseData;
+};
 
 struct FunctionCallInfoData {
     FmgrInfo fn;
@@ -180,7 +181,7 @@ struct FunctionCallInfoData {
     int nargs;
 };
 
-typedef struct FuncCallContext {
+struct FuncCallContext {
     uint64_t call_cntr;
 
     uint64_t max_calls;
@@ -191,7 +192,7 @@ typedef struct FuncCallContext {
     MemoryContext multi_call_memory_ctx;
     TupleDesc tuple_desc;
 
-} FuncCallContext;
+};
 
 #define SizeForFunctionCallInfo(nargs) \
     (offsetof(FunctionCallInfoBaseData, args) + sizeof(NullableDatum) * (nargs))

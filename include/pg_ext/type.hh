@@ -7,7 +7,7 @@
 #include <pg_ext/list.hh>
 
 // Forward declare FmgrInfo
-typedef struct FmgrInfo FmgrInfo;
+struct FmgrInfo;
 
 constexpr uint32_t TYPECACHE_DOMAIN_BASE_INFO = 0x01000;
 

@@ -20,7 +20,7 @@ transformExpr(ParseState *pstate, Node *expr, ParseExprKind exprKind)
     ParseExprKind sv_expr_kind;
 
     /* Save and restore identity of expression type we're parsing */
-    assert(exprKind != EXPR_KIND_NONE);
+    assert(exprKind != ParseExprKind::EXPR_KIND_NONE);
 
     sv_expr_kind = pstate->p_expr_kind;
     pstate->p_expr_kind = exprKind;

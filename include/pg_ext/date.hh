@@ -8,13 +8,13 @@
 
 #include <common/logging.hh>
 
-typedef int32_t DateADT;
-typedef int64_t TimeADT;
-typedef int32_t fsec_t;
-typedef int64_t Timestamp;
-typedef int64_t TimestampTz;
-typedef int64_t TimeOffset;
-typedef int64_t pg_time_t;
+using DateADT = int32_t;
+using TimeADT = int64_t;
+using fsec_t = int32_t;
+using Timestamp = int64_t;
+using TimestampTz = int64_t;
+using TimeOffset = int64_t;
+using pg_time_t = int64_t;
 
 constexpr int MAXDATELEN = 128;
 constexpr int MAXTZLEN = 10;

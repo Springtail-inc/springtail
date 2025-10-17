@@ -195,7 +195,7 @@ OutputFunctionCall(FmgrInfo *flinfo, Datum val)
 TypeFuncClass
 get_call_result_type(FunctionCallInfo fcinfo, Oid *resultTypeId, TupleDesc *resultTupleDesc)
 {
-    return TYPEFUNC_SCALAR;
+    return TypeFuncClass::TYPEFUNC_SCALAR;
 }
 
 Oid

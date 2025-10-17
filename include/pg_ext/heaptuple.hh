@@ -6,7 +6,7 @@
 #include <pg_ext/common.hh>
 
 // Forward declare FmgrInfo
-typedef struct FmgrInfo FmgrInfo;
+struct FmgrInfo;
 
 /*
  * information stored in t_infomask:
@@ -37,27 +37,27 @@ struct ItemPointerData {
     BlockIdData ip_blkid;
     uint16_t ip_posid;
 };
-typedef ItemPointerData *ItemPointer;
+using ItemPointer = ItemPointerData *;
 
-typedef struct {
+struct FormData_pg_attribute {
     // XXX Stubbed for now
-} FormData_pg_attribute;
+};
 
-typedef int16_t AttrNumber;
+using AttrNumber = int16_t;
 
-typedef struct ConstrCheck {
+struct ConstrCheck {
     char *ccname;
     char *ccbin; /* nodeToString representation of expr */
     bool ccvalid;
     bool ccnoinherit; /* this is a non-inheritable constraint */
-} ConstrCheck;
+};
 
-typedef struct AttrDefault {
+struct AttrDefault {
     AttrNumber adnum;
     char *adbin; /* nodeToString representation of expr */
-} AttrDefault;
+};
 
-typedef struct TupleConstr {
+struct TupleConstr {
     AttrDefault *defval;         /* array */
     ConstrCheck *check;          /* array */
     struct AttrMissing *missing; /* missing attributes values, NULL if none */
@@ -65,7 +65,7 @@ typedef struct TupleConstr {
     uint16_t num_check;
     bool has_not_null;
     bool has_generated_stored;
-} TupleConstr;
+};
 
 struct TupleDescData {
     int natts;           /* number of attributes in the tuple */
@@ -76,7 +76,7 @@ struct TupleDescData {
     /* attrs[N] is the description of Attribute Number N+1 */
     FormData_pg_attribute attrs[FLEXIBLE_ARRAY_MEMBER];
 };
-typedef struct TupleDescData *TupleDesc;
+using TupleDesc = TupleDescData *;
 
 struct AttInMetadata {
     TupleDesc tupdesc;
@@ -85,7 +85,7 @@ struct AttInMetadata {
     int32_t *atttypmods;
 };
 
-typedef struct HeapTupleData *HeapTuple;
+using HeapTuple = struct HeapTupleData *;
 
 struct HeapTupleFields
 {
@@ -138,7 +138,7 @@ struct HeapTupleHeaderData
 
 	/* MORE DATA FOLLOWS AT END OF STRUCT */
 };
-typedef struct HeapTupleHeaderData *HeapTupleHeader;
+using HeapTupleHeader = struct HeapTupleHeaderData *;
 
 struct HeapTupleData {
     uint32_t t_len;         /* length of *t_data */

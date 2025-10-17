@@ -5,7 +5,7 @@
 #include <pg_ext/node.hh>
 #include <pg_ext/fmgr.hh>
 
-typedef struct DomainIOData {
+struct DomainIOData {
     Oid domain_type;
     /* Data needed to call base type's input function */
     Oid typiofunc;
@@ -18,7 +18,7 @@ typedef struct DomainIOData {
     // pgext::ExprContext *econtext;
     /* Memory context this cache is in */
     MemoryContext mcxt;
-} DomainIOData;
+};
 
 extern "C" PGEXT_API void domain_check(Oid domainoid, Datum value, bool isnull);
 extern "C" PGEXT_API void domain_check_input(Datum value,

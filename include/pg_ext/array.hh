@@ -6,12 +6,12 @@
 #include <cstddef>
 #include <cstdint>
 
-typedef struct ArrayType {
+struct ArrayType {
     int32_t vl_len_;    /* varlena header (do not touch directly!) */
     int ndim;         /* # of dimensions */
     int32_t dataoffset; /* offset to data, or 0 if no bitmap */
     Oid elemtype;     /* element type OID */
-} ArrayType;
+};
 
 #define ARR_SIZE(a) VARSIZE(a)
 #define ARR_NDIM(a) ((a)->ndim)

@@ -17,21 +17,21 @@
 
 constexpr int MAX_SAFE_LEN = 1024 * 1024;
 
-typedef struct varlena text;
-typedef struct StringInfoData
+using text = struct varlena;
+struct StringInfoData
 {
 	char	   *data;
 	int			len;
 	int			maxlen;
 	int			cursor;
-} StringInfoData;
+};
 
-typedef StringInfoData *StringInfo;
-typedef struct varlena bytea;
+using StringInfo = StringInfoData *;
+using bytea = struct varlena;
 
-typedef struct ParseState {
+struct ParseState {
     const char *p_sourcetext;
-} ParseState;
+};
 
 #define appendStringInfoCharMacro(str, ch) \
     (((str)->len + 1 >= (str)->maxlen)     \

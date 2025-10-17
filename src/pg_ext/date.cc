@@ -165,20 +165,12 @@ detzcode64(const char *const codep)
 	return result;
 }
 
-#ifndef SYSTEMTZDIR
-static const char tzdirpath[MAXPGPATH];
-#endif
-
 static const char *
 pg_TZDIR(void)
 {
-#ifndef SYSTEMTZDIR
-	/* normal case: timezone stuff is under our share dir */
-	return tzdirpath;
-#else
 	/* we're configured to use system's timezone database */
-	return SYSTEMTZDIR;
-#endif
+	// XXX Need to fix
+	return "";
 }
 
 int

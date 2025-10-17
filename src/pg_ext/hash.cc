@@ -47,7 +47,7 @@ void *hash_search(HTAB *htab, const void *key, HASHACTION action, bool *found) {
         }
 
         if (!entry.occupied) {
-            if (action == HASH_ENTER) {
+            if (action == HASHACTION::HASH_ENTER) {
                 entry.key = palloc(htab->keysize);
                 std::memcpy(entry.key, key, htab->keysize);
 
@@ -57,7 +57,7 @@ void *hash_search(HTAB *htab, const void *key, HASHACTION action, bool *found) {
 
                 if (found) *found = false;
                 return entry.value;
-            } else if (action == HASH_FIND || action == HASH_REMOVE) {
+            } else if (action == HASHACTION::HASH_FIND || action == HASHACTION::HASH_REMOVE) {
                 if (found) *found = false;
                 return nullptr;
             }

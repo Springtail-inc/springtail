@@ -4,8 +4,8 @@
 #include <vector>
 #include <string>
 
-typedef int regcolor_t;
-typedef int regstate_t;
+using regcolor_t = int;
+using regstate_t = int;
 
 struct regex_arc_t {
     regstate_t from;

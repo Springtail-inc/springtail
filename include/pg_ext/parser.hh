@@ -4,21 +4,21 @@
 #include <pg_ext/export.hh>
 #include <pg_ext/node.hh>
 
-typedef enum CoercionForm {
+enum class CoercionForm {
     COERCE_EXPLICIT_CALL, /* display as a function call */
     COERCE_EXPLICIT_CAST, /* display as an explicit cast */
     COERCE_IMPLICIT_CAST, /* implicit cast, so hide it */
     COERCE_SQL_SYNTAX     /* display with SQL-mandated special syntax */
-} CoercionForm;
+};
 
-typedef enum CoercionContext {
+enum class CoercionContext {
     COERCION_IMPLICIT,   /* coercion in context of expression */
     COERCION_ASSIGNMENT, /* coercion in context of assignment */
     COERCION_PLPGSQL,    /* if no assignment cast, use CoerceViaIO */
     COERCION_EXPLICIT    /* explicit cast operation */
-} CoercionContext;
+};
 
-typedef enum ParseExprKind {
+enum class ParseExprKind {
     EXPR_KIND_NONE = 0,             /* "not in an expression" */
     EXPR_KIND_OTHER,                /* reserved for extensions */
     EXPR_KIND_JOIN_ON,              /* JOIN ON */
@@ -63,7 +63,7 @@ typedef enum ParseExprKind {
     EXPR_KIND_COPY_WHERE,           /* WHERE condition in COPY FROM */
     EXPR_KIND_GENERATED_COLUMN,     /* generation expression for a column */
     EXPR_KIND_CYCLE_MARK,           /* cycle mark value */
-} ParseExprKind;
+};
 
 struct ParseState {
     ParseExprKind p_expr_kind;
