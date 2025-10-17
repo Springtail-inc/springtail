@@ -34,7 +34,7 @@ pg_leftmost_one_pos32(uint32_t word)
 int
 decimalLength32(const uint32_t v)
 {
-	int			t;
+	int			t = 0;
 	static const uint32_t PowersOfTen[] = {
 		1, 10, 100,
 		1000, 10000, 100000,
@@ -53,7 +53,7 @@ decimalLength32(const uint32_t v)
 int
 pg_ultoa_n(uint32_t value, char *a)
 {
-	int			olength,
+	int			olength = 0,
 				i = 0;
 
 	/* Degenerate case */
@@ -118,7 +118,7 @@ pg_ultostr(char *str, uint32_t value)
 char *
 pg_ultostr_zeropad(char *str, uint32_t value, int32_t minwidth)
 {
-	int			len;
+	int			len = 0;
 
 	assert(minwidth > 0);
 

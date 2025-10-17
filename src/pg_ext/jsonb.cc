@@ -592,7 +592,7 @@ pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 	JsonbValue *res = nullptr;
 	JsonbValue v;
 	JsonbIteratorToken tok;
-	int i;
+	int i = 0;
 
 	if (jbval && (seq == JsonbIteratorToken::WJB_ELEM || seq == JsonbIteratorToken::WJB_VALUE) && jbval->type == jbvType::jbvObject)
 	{
@@ -864,8 +864,8 @@ json_lex_number(JsonLexContext *lex, char *s,
 bool
 IsValidJsonNumber(const char *str, int len)
 {
-	bool		numeric_error;
-	int			total_len;
+	bool		numeric_error = false;
+	int			total_len = 0;
 	JsonLexContext dummy_lex;
 
 	if (len <= 0)
@@ -896,7 +896,7 @@ IsValidJsonNumber(const char *str, int len)
 int
 reserveFromBuffer(StringInfo buffer, int len)
 {
-	int			offset;
+	int			offset = 0;
 
 	/* Make more room if needed */
 	enlargeStringInfo(buffer, len);
@@ -926,7 +926,7 @@ copyToBuffer(StringInfo buffer, int offset, const char *data, int len)
 void
 appendToBuffer(StringInfo buffer, const char *data, int len)
 {
-	int			offset;
+	int			offset = 0;
 
 	offset = reserveFromBuffer(buffer, len);
 	copyToBuffer(buffer, offset, data, len);
@@ -935,9 +935,9 @@ appendToBuffer(StringInfo buffer, const char *data, int len)
 short
 padBufferToInt(StringInfo buffer)
 {
-	int			padlen,
-				p,
-				offset;
+	int			padlen = 0,
+				p = 0,
+				offset = 0;
 
 	padlen = INTALIGN(buffer->len) - buffer->len;
 
@@ -976,10 +976,10 @@ convertJsonbValue(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
 void
 convertJsonbArray(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
 {
-	int			base_offset;
-	int			jentry_offset;
-	int			totallen;
-	uint32_t		containerhead;
+	int			base_offset = 0;
+	int			jentry_offset = 0;
+	int			totallen = 0;
+	uint32_t		containerhead = 0;
 	int			nElems = val->val.array.nElems;
 
 	/* Remember where in the buffer this array starts. */
@@ -1053,11 +1053,11 @@ convertJsonbArray(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
 void
 convertJsonbObject(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
 {
-	int			base_offset;
-	int			jentry_offset;
-	int			i;
-	int			totallen;
-	uint32_t		containerheader;
+	int			base_offset = 0;
+	int			jentry_offset = 0;
+	int			i = 0;
+	int			totallen = 0;
+	uint32_t		containerheader = 0;
 	int			nPairs = val->val.object.nPairs;
 
 	/* Remember where in the buffer this object starts. */

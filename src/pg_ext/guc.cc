@@ -33,7 +33,7 @@ GucManager::set_option(std::string_view name,
     }
 
     // Parse and set the value
-    double new_value;
+    double new_value = 0.0;
     auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), new_value);
     if (ec != std::errc()) {
         throw std::runtime_error("Invalid value for GUC variable: " + std::string(name));

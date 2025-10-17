@@ -255,7 +255,7 @@ initStringInfo(StringInfo str)
 void
 enlargeStringInfo(StringInfo str, int needed)
 {
-    int         newlen;
+    int         newlen = 0;
     int         required = str->len + needed + 1;  // +1 for null terminator
 
     if (needed < 0 ||
@@ -296,8 +296,8 @@ enlargeStringInfo(StringInfo str, int needed)
 int
 appendStringInfoVA(StringInfo str, const char *fmt, va_list args)
 {
-    int avail;
-    size_t nprinted;
+    int avail = 0;
+    size_t nprinted = 0;
 
     assert(str != nullptr);
 

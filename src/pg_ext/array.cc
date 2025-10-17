@@ -29,7 +29,7 @@ ArrayCheckBoundsSafe(int ndim, const int *dims, const int *lb, struct Node *esco
     int i;
 
     for (i = 0; i < ndim; i++) {
-        int32_t sum;
+        int32_t sum = 0;
 
         if (pg_add_s32_overflow(dims[i], lb[i], &sum)) {
             LOG_ERROR("array lower bound is too large: %d", lb[i]);
@@ -72,7 +72,7 @@ ArrayCastAndSet(Datum src,
 				char typalign,
 				char *dest)
 {
-	int			inc;
+	int			inc = 0;
 
 	if (typlen > 0)
 	{
@@ -155,11 +155,11 @@ construct_md_array(Datum *elems,
                    char elmalign)
 {
     ArrayType *result;
-    bool hasnulls;
-    int32_t nbytes;
-    int32_t dataoffset;
+    bool hasnulls = false;
+    int32_t nbytes = 0;
+    int32_t dataoffset = 0;
     int i;
-    int nelems;
+    int nelems = 0;
 
     if (ndims < 0) { /* we do allow zero-dimension arrays */
         LOG_ERROR("invalid number of dimensions: %d", ndims);
@@ -234,9 +234,9 @@ construct_array(Datum *elems, int nelems, Oid elmtype, int elmlen, bool elmbyval
 ArrayType *
 construct_array_builtin(Datum *elems, int nelems, Oid elmtype)
 {
-    int elmlen;
-    bool elmbyval;
-    char elmalign;
+    int elmlen = 0;
+    bool elmbyval = false;
+    char elmalign = 0;
 
     switch (elmtype) {
         case CHAROID:
@@ -354,10 +354,10 @@ deconstruct_array(ArrayType *array,
 {
 	Datum	   *elems;
 	bool	   *nulls;
-	int			nelems;
+	int			nelems = 0;
 	char	   *p;
-	uint8_t	   *bitmap;
-	int			bitmask;
+	uint8_t	   *bitmap = nullptr;
+	int			bitmask = 1;
 	int			i;
 
 	assert(ARR_ELEMTYPE(array) == elmtype);
@@ -408,9 +408,9 @@ deconstruct_array(ArrayType *array,
 void
 deconstruct_array_builtin(ArrayType *array, Oid elmtype, Datum **elemsp, bool **nullsp, int *nelemsp)
 {
-    int elmlen;
-    bool elmbyval;
-    char elmalign;
+    int elmlen = 0;
+    bool elmbyval = false;
+    char elmalign = 0;
 
     switch (elmtype) {
         case CHAROID:
@@ -477,9 +477,9 @@ int ArrayGetNItems(int ndim, const int *dims) {
 bool
 array_contains_nulls(ArrayType *array)
 {
-    int nelems;
-    uint8_t *bitmap;
-    int bitmask;
+    int nelems = 0;
+    uint8_t *bitmap = nullptr;
+    int bitmask = 1;
 
     /* Easy answer if there's no null bitmap */
     if (!ARR_HASNULL(array)) {
