@@ -467,7 +467,7 @@ deconstruct_array_builtin(ArrayType *array, Oid elmtype, Datum **elemsp, bool **
 }
 
 int ArrayGetNItems(int ndim, const int *dims) {
-    int nitems = 1;
+    auto nitems = 1;
     for (int i = 0; i < ndim; i++) {
         nitems *= dims[i];
     }

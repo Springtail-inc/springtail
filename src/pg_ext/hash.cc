@@ -97,10 +97,10 @@ uint32_t hash_bytes(const unsigned char *k, int keylen) {
 uint64_t
 hash_bytes_extended(const unsigned char *k, int keylen, uint64_t seed)
 {
-    uint32_t a = 0;
-    uint32_t b = 0;
-    uint32_t c = 0;
-    uint32_t len = 0;
+    auto a = 0u;
+    auto b = 0u;
+    auto c = 0u;
+    auto len = 0u;
 
 	/* Set up the internal state */
     len = keylen;

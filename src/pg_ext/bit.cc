@@ -2,7 +2,7 @@
 
 int pg_popcount(const char* buf, int len)
 {
-    int count = 0;
+    auto count = 0;
     for (int i = 0; i < len; ++i)
     {
         count += pg_number_of_ones[static_cast<uint8_t>(buf[i])];
@@ -12,7 +12,7 @@ int pg_popcount(const char* buf, int len)
 
 uint64_t pg_popcount_slow(const char *buf, int bytes)
 {
-	uint64_t popcnt = 0;
+	auto popcnt = 0ULL;
 	while (bytes--)
     popcnt += pg_number_of_ones[(unsigned char) *buf++];
 	return popcnt;
@@ -25,7 +25,7 @@ uint64_t pg_popcount_optimized(const char *buf, int bytes)
 
 uint64_t pg_popcount64_slow(uint64_t word)
 {
-	uint64_t popcnt = 0;
+	auto popcnt = 0ULL;
 	while (word)
 	{
 		popcnt += word & 1;
@@ -36,7 +36,7 @@ uint64_t pg_popcount64_slow(uint64_t word)
 
 uint64_t pg_popcount64(const char *buf, int bytes)
 {
-	uint64_t popcnt = 0;
+	auto popcnt = 0ULL;
 
     const auto *words = (const uint64_t *) buf;
 

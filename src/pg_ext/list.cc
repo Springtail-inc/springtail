@@ -73,7 +73,7 @@ List *list_concat(List *list1, List *list2) {
 List *list_delete_cell(List *list, const ListCell *cell_to_delete) {
     if (!list || !cell_to_delete) return list;
 
-    int index = -1;
+    auto index = -1;
     for (int i = 0; i < list->length; ++i) {
         if (&list->elements[i] == cell_to_delete) {
             index = i;

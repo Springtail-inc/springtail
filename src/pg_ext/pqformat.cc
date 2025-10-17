@@ -140,7 +140,7 @@ pq_endtypsend(StringInfo buf)
 uint32_t
 pq_getmsgint(StringInfo msg, int b)
 {
-    uint32_t result = 0;
+    auto result = 0u;
     char n8 = 0;
     uint16_t n16 = 0;
     uint32_t n32 = 0;
