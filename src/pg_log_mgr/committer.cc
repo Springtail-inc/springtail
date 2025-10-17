@@ -216,9 +216,11 @@ namespace springtail::committer {
         }
 
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Scanned batch: found {} databases", final_xids.size());
+#if DEBUG
         for (auto& [db_id, final_xid] : final_xids) {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "  db {} final_xid {}", db_id, final_xid);
         }
+#endif
 
         return final_xids;
     }
