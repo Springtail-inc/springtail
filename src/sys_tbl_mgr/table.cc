@@ -128,7 +128,7 @@ namespace indexer_helpers {
         };
 
         std::shared_ptr<ExtentSchema>
-        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns, const ComparatorCallback comparator_callback = {})
+        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns, const ComparatorCallback &comparator_callback = {})
         {
 
             // get the column names in the order they appear in the index
@@ -153,7 +153,7 @@ namespace indexer_helpers {
                  const std::vector<Index> &secondary,
                  const TableMetadata &metadata,
                  ExtentSchemaPtr schema,
-                 const ComparatorCallback comparator_callback)
+                 const ComparatorCallback &comparator_callback)
         : _db_id(db_id),
           _id(table_id),
           _xid(xid),
@@ -550,7 +550,7 @@ namespace indexer_helpers {
     }
 
     BTreePtr
-    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ComparatorCallback comparator_callback)
+    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ComparatorCallback &comparator_callback)
     {
         auto index_schema = _create_index_schema(_schema, index_columns, comparator_callback);
         auto btree = std::make_shared<BTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
@@ -571,7 +571,7 @@ namespace indexer_helpers {
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
                                bool for_gc,
-                               const ComparatorCallback comparator_callback)
+                               const ComparatorCallback &comparator_callback)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),

@@ -6,7 +6,7 @@
 namespace springtail {
 
     TablePtr
-    TableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ComparatorCallback comparator_callback)
+    TableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ComparatorCallback &comparator_callback)
     {
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
@@ -46,7 +46,7 @@ namespace springtail {
                                 uint64_t access_xid,
                                 uint64_t target_xid,
                                 bool for_gc,
-                                const ComparatorCallback comparator_callback)
+                                const ComparatorCallback &comparator_callback)
     {
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
@@ -88,7 +88,7 @@ namespace springtail {
                                  uint64_t snapshot_xid,
                                  ExtentSchemaPtr schema,
                                  const std::vector<Index>& secondary_keys,
-                                 const ComparatorCallback comparator_callback)
+                                 const ComparatorCallback &comparator_callback)
     {
         TableMetadata tbl_meta{};
         tbl_meta.snapshot_xid = snapshot_xid;
@@ -142,7 +142,7 @@ namespace springtail {
 
     std::shared_ptr<ExtentSchema>
     TableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id,
-                                const XidLsn &xid, const ComparatorCallback comparator_callback, bool allow_undefined)
+                                const XidLsn &xid, const ComparatorCallback &comparator_callback, bool allow_undefined)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
             return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, comparator_callback, allow_undefined);

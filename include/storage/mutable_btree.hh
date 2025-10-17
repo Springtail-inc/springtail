@@ -91,7 +91,7 @@ namespace springtail {
                      ExtentSchemaPtr schema,
                      uint64_t xid,
                      uint64_t max_extent_size,
-                     const ComparatorCallback comparator_callback = {});
+                     const ComparatorCallback &comparator_callback = {});
 
         MutableBTree() = delete;
 
@@ -775,7 +775,7 @@ namespace springtail {
          * @param schema The schema of the rows in the leaf extents.
          * @param keys The list of columns that make up the sort key of the tree.
          */
-        void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys, const ComparatorCallback comparator_callback = {});
+        void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys, const ComparatorCallback &comparator_callback = {});
 
         //// ITERATOR SUPPORT
     public:

@@ -13,7 +13,7 @@ namespace springtail {
          * constructed at lsn == MAX_LSN within the provided xid.
          */
         virtual TablePtr
-        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ComparatorCallback comparator_callback = {}) override;
+        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ComparatorCallback &comparator_callback = {}) override;
 
         /**
          * Retrieve the column metadata for a given table at a given XID/LSN.
@@ -33,7 +33,7 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, const ComparatorCallback comparator_callback, bool allow_undefined = false) override;
+                          const XidLsn &xid, const ComparatorCallback &comparator_callback, bool allow_undefined = false) override;
 
     private:
         /**
@@ -65,7 +65,7 @@ namespace springtail {
                         const std::vector<Index> &secondary,
                         const TableMetadata &metadata,
                         ExtentSchemaPtr schema,
-                        const ComparatorCallback comparator_callback) :
+                        const ComparatorCallback &comparator_callback) :
             Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, comparator_callback) {}
 
         /**

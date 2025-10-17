@@ -7,7 +7,7 @@ namespace springtail {
                  ExtentSchemaPtr schema,
                  uint64_t root_offset,
                  uint64_t max_extent_size,
-                 const ComparatorCallback comparator_callback)
+                 const ComparatorCallback &comparator_callback)
         : _file(file),
           _xid(xid),
           _leaf_schema(schema),

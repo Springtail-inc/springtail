@@ -10,7 +10,7 @@ namespace springtail {
                                ExtentSchemaPtr schema,
                                uint64_t xid,
                                uint64_t max_extent_size,
-                               const ComparatorCallback comparator_callback)
+                               const ComparatorCallback &comparator_callback)
         : _file(file),
           _sort_keys(keys),
           _xid(xid),
@@ -1385,7 +1385,7 @@ MutableBTree::_async_flush_finish(PagePtr page,
     void
     MutableBTree::_init_schemas(ExtentSchemaPtr schema,
                                 const std::vector<std::string> &keys,
-                                const ComparatorCallback comparator_callback)
+                                const ComparatorCallback &comparator_callback)
     {
         _leaf_schema = schema;
 

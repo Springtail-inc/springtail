@@ -26,9 +26,7 @@ pg_add_s32_overflow(int32_t a, int32_t b, int32_t *result)
 bool
 ArrayCheckBoundsSafe(int ndim, const int *dims, const int *lb, struct Node *escontext)
 {
-    int i;
-
-    for (i = 0; i < ndim; i++) {
+    for (int i = 0; i < ndim; i++) {
         int32_t sum = 0;
 
         if (pg_add_s32_overflow(dims[i], lb[i], &sum)) {
@@ -107,12 +105,11 @@ CopyArrayEls(ArrayType *array,
 	uint8_t	   *bitmap = ARR_NULLBITMAP(array);
 	int			bitval = 0;
 	int			bitmask = 1;
-	int			i;
 
 	if (typbyval)
 		freedata = false;
 
-	for (i = 0; i < nitems; i++)
+	for (int i = 0; i < nitems; i++)
 	{
 		if (nulls && nulls[i])
 		{

@@ -5,7 +5,7 @@ namespace springtail {
 
     void
     ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns,
-                            const ComparatorCallback comparator_callback,
+                            const ComparatorCallback &comparator_callback,
                             bool allow_undefined)
     {
         // track how many primary key columns there are
@@ -176,7 +176,7 @@ namespace springtail {
     ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
                                 const std::vector<SchemaColumn> &new_columns,
                                 const std::vector<std::string> &sort_columns,
-                                const ComparatorCallback comparator_callback,
+                                const ComparatorCallback &comparator_callback,
                                 bool allow_undefined) const
     {
         // create SchemaColumn entries for the existing fields
@@ -289,7 +289,7 @@ namespace springtail {
         return fields;
     }
 
-    VirtualSchema::VirtualSchema(const SchemaMetadata &meta, const ComparatorCallback comparator_callback)
+    VirtualSchema::VirtualSchema(const SchemaMetadata &meta, const ComparatorCallback &comparator_callback)
     {
         std::map<uint32_t, std::string> name_map;
 

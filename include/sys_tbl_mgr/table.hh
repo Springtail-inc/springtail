@@ -435,7 +435,7 @@ namespace indexer_helpers {
             const std::vector<Index> &secondary,
             const TableMetadata &metadata,
             ExtentSchemaPtr schema,
-            const ComparatorCallback comparator_callback = {});
+            const ComparatorCallback &comparator_callback = {});
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -595,7 +595,7 @@ namespace indexer_helpers {
          * Creates read-only index of the table.
          */
         BTreePtr
-        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ComparatorCallback comparator_callback = {});
+        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ComparatorCallback &comparator_callback = {});
 
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
@@ -647,7 +647,7 @@ namespace indexer_helpers {
             const TableMetadata &metadata,
             ExtentSchemaPtr schema,
             bool for_gc = false,
-            const ComparatorCallback comparator_callback = {});
+            const ComparatorCallback &comparator_callback = {});
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it

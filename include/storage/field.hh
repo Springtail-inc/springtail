@@ -521,7 +521,7 @@ namespace springtail {
               _bool_bitmask(static_cast<char>(1) << bool_bit)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, const ComparatorCallback comparator_callback, int32_t type_oid)
+        ExtentField(SchemaType type, uint32_t offset, const ComparatorCallback &comparator_callback, int32_t type_oid)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
@@ -530,7 +530,7 @@ namespace springtail {
               _type_oid(type_oid)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, const ComparatorCallback comparator_callback, int32_t type_oid)
+        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, const ComparatorCallback &comparator_callback, int32_t type_oid)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
