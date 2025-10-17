@@ -113,7 +113,7 @@ class Coordinator:
         if self.production:
             # Install binaries
             try:
-                if state == CoordinatorState.STARTUP or state == CoordinatorState.RELOAD:
+                if state == CoordinatorState.STARTUP:
                     # Install binaries
                     self.logger.debug("Installing binaries")
                     self.production.install_binaries(config_gitsha)
@@ -123,7 +123,7 @@ class Coordinator:
                     self.props.set_coordinator_state(CoordinatorState.RELOADING)
 
                     # loader will restart the coordinator when ready
-                    if state == CoordinatorState.STARTUP and not self.manual:
+                    if not self.manual:
                         sys.exit(0)
             except Exception as e:
                 raise ValueError("Failed to install binaries: " + str(e))
@@ -203,28 +203,6 @@ class Coordinator:
         # this will exit on a SIGINT or SIGTERM
         self.logger.debug("Scheduler entering monitor loop")
         self.scheduler.monitor_timeouts()
-
-        # shutdown all components
-        self.logger.info("Shutting down all components")
-        self.scheduler.shutdown()
-
-    def shutdown(self, signum: int = 0):
-        """
-        Shutdown the coordinator.
-        """
-        # set shutdown flag
-        self.shutdown_event.set()
-
-        # shutdown scheduler
-        if self.scheduler:
-            self.logger.info(f"Received signal {signum}, shutting down...")
-            self.scheduler.shutdown()
-
-        # make sure everything is shutdown
-        stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
-
-        if self.production:
-            self.production.send_sns('shutdown')
 
     def _check_properties(self, props: Properties) -> None:
         """
@@ -332,6 +310,21 @@ def setup_props(yaml_config: dict) -> Properties:
 
     return props
 
+def make_signal_handler(coordinator):
+    """
+    Create signal handler function and return it.
+    """
+    def signal_handler(signum, frame):
+        """
+        Shutdown the coordinator.
+        """
+        logger.info(f"Received signal {signum}, shutting down...")
+        coordinator.shutdown_event.set()
+
+        if coordinator.scheduler:
+            coordinator.scheduler.shutdown()
+    return signal_handler
+
 
 if __name__ == "__main__":
     """Main entry point for the coordinator script."""
@@ -368,16 +361,19 @@ if __name__ == "__main__":
         [f"{k}={v}" for k, v in vars(args).items()]
     ))
 
-    # Set up signal handlers
-    def signal_handler(signum, frame):
-        coordinator.shutdown(signum)
-
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    handler = make_signal_handler(coordinator)
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
 
     try:
         coordinator.startup()
+
+        # make sure everything is shutdown
+        stop_daemons(coordinator.props.get_pid_path(), ALL_DAEMONS)
+
+        if coordinator.production:
+            coordinator.production.send_sns('shutdown')
+
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error(f"An error occurred during startup: {e}")
