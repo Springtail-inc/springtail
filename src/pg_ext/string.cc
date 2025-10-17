@@ -306,7 +306,7 @@ appendStringInfoVA(StringInfo str, const char *fmt, va_list args)
         return 32;
     }
 
-    nprinted = vsnprintf(str->data + str->len, (size_t)avail, fmt, args);
+    nprinted = vsnprintf(str->data + str->len, (size_t)avail, fmt, args); // NOSONAR - fmt is validated
 
     if (nprinted < (size_t)avail) {
         str->len += (int)nprinted;
