@@ -452,7 +452,8 @@ def start_replication(props : Properties, build_dir : str) -> None:
 
 def start_fdw_daemons(props : Properties,
                       build_dir : str,
-                      config_file : Optional[str] = None) -> None:
+                      config_file : Optional[str] = None,
+                      valgrind_daemons: List[str] = []) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
     mount_path = props.get_mount_path()
@@ -486,16 +487,18 @@ def start_fdw_daemons(props : Properties,
     # set state to initialize
     props.set_fdw_state(Properties.FDW_STATE_INITIALIZE)
     print("Starting pg_ddl_daemon...")
-    start_daemons(build_dir, FDW_DAEMONS)
+    start_daemons(build_dir, FDW_DAEMONS, valgrind_daemons=valgrind_daemons,
+                  pid_path=props.get_pid_path(), log_path=props.get_log_path())
     # wait for the fdw state to be running; set by ddl mgr once init is done
     props.wait_for_fdw_state(Properties.FDW_STATE_RUNNING)
 
 
-def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> None:
+def start_proxy(props : Properties, build_dir : str, restart: bool = False, valgrind_daemons: List[str] = []) -> None:
     """Start the proxy."""
     # Start the proxy
     print("Starting proxy...")
-    start_daemons(build_dir, PROXY_DAEMONS, restart)
+    start_daemons(build_dir, PROXY_DAEMONS, restart, valgrind_daemons=valgrind_daemons,
+                  pid_path=props.get_pid_path(), log_path=props.get_log_path())
 
 
 def wait_for_running(props : Properties) -> None:
@@ -652,7 +655,8 @@ def restart(props: Properties,
             build_dir: str,
             db_id: Optional[int] = None,
             start_xid: Optional[int] = None,
-            unarchive_logs: bool = False) -> None:
+            unarchive_logs: bool = False,
+            valgrind_daemons: List[str] = []) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_SHUTDOWN)
@@ -690,7 +694,8 @@ def restart(props: Properties,
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
-    start_daemons(build_dir, CORE_DAEMONS)
+    start_daemons(build_dir, CORE_DAEMONS, valgrind_daemons=valgrind_daemons,
+                  pid_path=props.get_pid_path(), log_path=props.get_log_path())
 
     # wait for running state
     print("\nWaiting for running state...")
@@ -698,11 +703,11 @@ def restart(props: Properties,
 
     # start the fdw daemons (e.g., ddl manager to import schemas)
     print("\nStarting FDW daemons...")
-    start_fdw_daemons(props, build_dir)
+    start_fdw_daemons(props, build_dir, valgrind_daemons=valgrind_daemons)
     fixup_log_perms(props)
 
     # start the proxy
-    start_proxy(props, build_dir, True)
+    start_proxy(props, build_dir, True, valgrind_daemons=valgrind_daemons)
 
     print("\nSpringtail system restarted successfully.")
 
@@ -713,7 +718,8 @@ def start(config_file: str,
           do_cleanup: bool = True,
           do_init: bool = True,
           postgres_only: bool = False,
-          do_fdw_install: bool = True) -> None:
+          do_fdw_install: bool = True,
+          valgrind_daemons: List[str] = []) -> None:
     """Main function to start the Springtail system."""
     # must do init if we are performing cleanup
     if do_cleanup:
@@ -763,7 +769,8 @@ def start(config_file: str,
 
         # start daemons with XID if specified
         print("\nStarting daemons...")
-        start_daemons(build_dir, CORE_DAEMONS)
+        start_daemons(build_dir, CORE_DAEMONS, valgrind_daemons=valgrind_daemons,
+                      pid_path=props.get_pid_path(), log_path=props.get_log_path())
 
         # wait for running state
         print("\nWaiting for running state...")
@@ -771,11 +778,11 @@ def start(config_file: str,
 
         # start the fdw daemons (e.g., ddl manager to import schemas)
         print("\nStarting FDW daemons...")
-        start_fdw_daemons(props, build_dir, config_file)
+        start_fdw_daemons(props, build_dir, config_file, valgrind_daemons=valgrind_daemons)
         fixup_log_perms(props)
 
         # start the proxy
-        start_proxy(props, build_dir)
+        start_proxy(props, build_dir, valgrind_daemons=valgrind_daemons)
         print("\nSpringtail system started successfully.")
 
     else:

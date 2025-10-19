@@ -88,7 +88,7 @@ namespace {
 
 
             // create a mutable table
-            auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, _tid, access_xid, target_xid, false);
+            auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, _tid, access_xid, target_xid);
 
             // insert a number of rows
             populate_table(mtable, _data);
