@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <chrono>
 
+#include <common/constants.hh>
 #include <storage/cache.hh>
 #include <storage/interval_tree.hh>
 #include <storage/vacuumer.hh>
@@ -780,6 +781,54 @@ Vacuumer::_run_recovery()
 }
 
 void
+Vacuumer::_cleanup_expired_roots_files(uint64_t cutoff_xid, const std::filesystem::path& table_dir)
+{
+    // Only process if directory exists
+    if (!std::filesystem::exists(table_dir)) {
+        return;
+    }
+
+    // Scan the table directory for roots files
+    for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
+        if (!entry.is_regular_file() && !entry.is_symlink()) {
+            continue;
+        }
+
+        auto filename = entry.path().filename().string();
+
+        // Skip the symlink files (roots and roots.tmp)
+        if (filename == "roots" || filename == "roots.tmp") {
+            continue;
+        }
+
+        // Only process files that match "roots.{xid}" pattern
+        if (!filename.starts_with("roots.")) {
+            continue;
+        }
+
+        try {
+            // Extract XID from filename (e.g., "roots.123" -> 123)
+            uint64_t file_xid = std::stoull(filename.substr(6)); // skip "roots."
+
+            // Delete file if its XID is below the cutoff
+            if (file_xid < cutoff_xid) {
+                std::error_code ec;
+                std::filesystem::remove(entry.path(), ec);
+                if (ec) {
+                    LOG_ERROR("Failed to remove roots file {}: {}", entry.path().string(), ec.message());
+                } else {
+                    LOG_DEBUG(LOG_VACUUM, LOG_LEVEL_DEBUG1, "Removed expired roots file: {}", entry.path().string());
+                }
+            }
+        } catch (const std::exception& e) {
+            // Skip files with invalid XID numbers
+            LOG_WARN("Skipping invalid roots file {}: {}", filename, e.what());
+            continue;
+        }
+    }
+}
+
+void
 Vacuumer::run_vacuum_once()
 {
     std::unique_lock lock(_mutex);
@@ -993,6 +1042,69 @@ Vacuumer::_do_vacuum_run()
             _update_global_vacuum_file(expired_extents_map, expired_snapshots_map);
         }
         /*------------- End of log rotation ------------------------------------------------------------- */
+
+        /*------------- Cleanup expired roots files for system tables ----------------------------------- */
+        // Collect all unique database IDs that were processed in this vacuum run
+        std::set<uint64_t> processed_dbs;
+        for (const auto& [file, _] : expired_extents_map) {
+            uint64_t db_id = _get_db_id_from_path(file);
+            if (db_id != std::numeric_limits<uint64_t>::max()) {
+                processed_dbs.insert(db_id);
+            }
+        }
+
+        // For each processed database, clean up old roots files in system tables
+        for (uint64_t db_id : processed_dbs) {
+            uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_id);
+            if (cutoff_xid == 0) {
+                continue;
+            }
+
+            // Get the table base directory path from any file in expired_extents_map
+            // Path format: {table_base}/{db_id}/{table_id}-{snapshot_xid}/file
+            // We need to go up to find the db directory, then iterate system tables
+            for (const auto& [file, _] : expired_extents_map) {
+                if (_get_db_id_from_path(file) != db_id) {
+                    continue;
+                }
+
+                // Navigate up to the database directory
+                // file = /path/to/table/{db_id}/{table_id}-{snapshot_xid}/raw
+                auto db_dir = file.parent_path().parent_path();
+
+                // Iterate through all table directories in this database
+                if (std::filesystem::exists(db_dir) && std::filesystem::is_directory(db_dir)) {
+                    for (const auto& table_entry : std::filesystem::directory_iterator(db_dir)) {
+                        if (!table_entry.is_directory()) {
+                            continue;
+                        }
+
+                        // Extract table_id from directory name format: "{table_id}-{snapshot_xid}"
+                        std::string table_dir_name = table_entry.path().filename().string();
+                        size_t dash_pos = table_dir_name.find('-');
+                        if (dash_pos == std::string::npos) {
+                            continue;
+                        }
+
+                        try {
+                            uint64_t table_id = std::stoull(table_dir_name.substr(0, dash_pos));
+
+                            // Only process system tables
+                            if (table_id <= constant::MAX_SYSTEM_TABLE_ID) {
+                                _cleanup_expired_roots_files(cutoff_xid, table_entry.path());
+                            }
+                        } catch (const std::exception&) {
+                            // Skip directories with invalid table_id format
+                            continue;
+                        }
+                    }
+                }
+
+                // Only need to process one file per database to find the db_dir
+                break;
+            }
+        }
+        /*------------- End of roots file cleanup ------------------------------------------------------- */
 
         LOG_INFO("Vacuum completed");
     }
