@@ -63,11 +63,6 @@ namespace springtail::pg_proxy {
         } else {
             _db_id = constant::INVALID_DB_ID;
         }
-
-        // fixup the password for the user if connecting to a FDW
-        if (type == Type::REPLICA) {
-            UserMgr::get_instance()->set_user_fdw_password(_user);
-        }
     }
 
     void

@@ -126,6 +126,12 @@ namespace springtail::pg_proxy {
             return _password_type;
         }
 
+        /** get password and type */
+        std::pair<const std::string&, PasswordType> get_password_and_type() const {
+            std::shared_lock lock(_user_mutex);
+            return {_password, _password_type};
+        }
+
         /**
          * @brief Add database to user's list of connected databases
          * @param name - database name
@@ -206,7 +212,7 @@ namespace springtail::pg_proxy {
          * @brief Update the user with the FDW password from the _proxy_to_fdw_user
          * @param user UserPtr user
          */
-        void set_user_fdw_password(UserPtr user);
+        UserLoginPtr get_replica_login(UserPtr user);
 
     protected:
         /**

@@ -255,8 +255,8 @@ namespace springtail::pg_proxy {
         }
     }
 
-    void
-    UserMgr::set_user_fdw_password(UserPtr user)
+    UserLoginPtr
+    UserMgr::get_replica_login(UserPtr user)
     {
         std::shared_lock lock(_mutex);
         if (_proxy_to_fdw_user == nullptr) {
@@ -264,8 +264,15 @@ namespace springtail::pg_proxy {
             DCHECK(false);
         }
 
-        user->set_password(_proxy_to_fdw_user->password(), _proxy_to_fdw_user->password_type());
+        auto username = user->username();
+        auto password_and_type = _proxy_to_fdw_user->get_password_and_type();
+        auto login = std::make_shared<UserLogin>(username,
+                                                 password_and_type.second,
+                                                 password_and_type.first);
+
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Set FDW password for user: {}", user->username());
+
+        return login;
     }
 
     void

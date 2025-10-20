@@ -158,10 +158,16 @@ public:
           _user(user),
           _database(database),
           _db_prefix(db_prefix),
-          _login(user->get_user_login()),
           _type(type),
           _parameters(parameters)
-    {}
+    {
+        if (_type == Session::Type::REPLICA) {
+            // modify the login for replica FDW login
+            _login = UserMgr::get_instance()->get_replica_login(_user);
+        } else {
+            _login = user->get_user_login();
+        }
+    }
 
     /**
      * @brief Send startup message
