@@ -1,27 +1,10 @@
-#include <fmt/core.h>
-#include <limits>
-#include <memory>
-#include <vector>
-
-#include <common/common.hh>
-#include <common/coordinator.hh>
-#include <common/logging.hh>
-#include <common/open_telemetry.hh>
-#include <common/properties.hh>
-#include <common/redis.hh>
-
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/pg_repl_connection.hh>
-#include <pg_repl/pg_copy_table.hh>
-
+#include <common/time_trace.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
-#include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
 #include <pg_log_mgr/pg_log_recovery.hh>
 #include <pg_log_mgr/sync_tracker.hh>
-
-#include <xid_mgr/xid_mgr_server.hh>
 #include <storage/vacuumer.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -138,6 +121,8 @@ namespace springtail::pg_log_mgr {
         uint64_t lsn = INVALID_LSN;
         bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
         if (do_init) {
+            PgLogCoordinator::get_instance()->cleanup_database_dir(_db_id);
+
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Started in init state");
             _startup_init();
             _wal_buffer_flag = true;
@@ -585,6 +570,9 @@ namespace springtail::pg_log_mgr {
             return false;
         } catch (const PgConnectionError &e) {
             LOG_ERROR("Error reading data from pg: {}", e.what());
+            if (_shutdown) {
+                return false;
+            }
             // try reconnecting
             try {
                 auto now = common::get_time_in_millis();
@@ -602,7 +590,7 @@ namespace springtail::pg_log_mgr {
 
                     // shutdown
                     Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-                    PgLogCoordinator::get_instance()->shutdown();
+                    abort();
                     return false;
                 }
 
@@ -618,7 +606,7 @@ namespace springtail::pg_log_mgr {
                 LOG_ERROR("Error reconnecting to pg: {}", e.what());
                 // shutdown
                 Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-                PgLogCoordinator::get_instance()->shutdown();
+                abort();
                 return false;
             }
         }
@@ -818,7 +806,7 @@ namespace springtail::pg_log_mgr {
 
                 _internal_state.set(STATE_RUNNING);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Sync to complete");
-                
+
                 continue;
             }
 

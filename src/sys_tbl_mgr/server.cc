@@ -781,9 +781,6 @@ Server::revert(uint64_t db_id, uint64_t xid)
     request.set_db_id(db_id);
     request.set_xid(xid);
 
-    // ensure that we don't have a partially committed XID currently in-memory
-    CHECK(_write[db_id].empty());
-
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got revert() -- db {} xid {}", db_id,
                 request.xid());
 
@@ -792,6 +789,12 @@ Server::revert(uint64_t db_id, uint64_t xid)
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
     Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
     table_base = Properties::make_absolute_path(table_base);
+
+    boost::shared_lock write_lock(_write_mutex);
+    boost::shared_lock read_lock(_write_mutex);
+
+    // ensure that we don't have a partially committed XID currently in-memory
+    CHECK(_write[db_id].empty());
 
     // go through each system table and adjust it's roots symlink to point to the correct file for
     // the committed XID
@@ -1114,6 +1117,29 @@ void
 Server::invalidate_db(uint64_t db_id, const XidLsn &xid)
 {
     _schema_object_cache->invalidate_db(db_id, xid);
+}
+
+void
+Server::remove_db(uint64_t db_id)
+{
+    boost::unique_lock write_lock(_write_mutex);
+    boost::unique_lock read_lock(_read_mutex);
+    boost::unique_lock lock(_mutex);
+    {
+        boost::unique_lock lock(_xid_mutex);
+        _read_xid.erase(db_id);
+        _write_xid.erase(db_id);
+    }
+    _write.erase(db_id);
+    _read.erase(db_id);
+    _namespace_name_cache.erase(db_id);
+    _namespace_id_cache.erase(db_id);
+    _usertype_id_cache.erase(db_id);
+    _table_cache.erase(db_id);
+    _roots_cache.erase(db_id);
+    _schema_cache.erase(db_id);
+    _index_cache.erase(db_id);
+    _schema_object_cache->remove_db(db_id);
 }
 
 proto::IndexesInfo

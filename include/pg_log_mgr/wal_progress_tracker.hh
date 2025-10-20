@@ -1,9 +1,5 @@
 #pragma once
 
-#include <chrono>
-#include <map>
-#include <memory>
-#include <mutex>
 #include <shared_mutex>
 
 #include <common/logging.hh>
@@ -60,7 +56,7 @@ namespace springtail::pg_log_mgr {
          *
          * @param pg_xid - Postgres Xid
          */
-        std::optional<Timestamps> 
+        std::optional<Timestamps>
         find_ts(int32_t pg_xid) const
         {
             // acquire shared lock for read accessd
@@ -202,6 +198,18 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "pg_xid_ts = {}, xid_ts = {},  min timestamp = {}, returning timestamp = {}",
                 pg_xid_ts, xid_ts, min_ts, (min_ts == UINT64_MAX)? 0 : min_ts);
             return (min_ts == UINT64_MAX)? 0 : min_ts;
+        }
+
+        /**
+         * @brief Get how many XIDs have not been committed yet.
+         *
+         * @return uint32_t - number of uncommitted XIDs
+         */
+        uint32_t
+        get_inflight_xid_count()
+        {
+            std::shared_lock<std::shared_mutex> lock(_mt);
+            return _xid_to_ts.size();
         }
 
     private:

@@ -1,18 +1,11 @@
-#include <common/constants.hh>
-#include <common/coordinator.hh>
-#include <common/logging.hh>
-#include <pg_log_mgr/pg_redis_xact.hh>
-#include <proto/pg_copy_table.pb.h>
-#include <chrono>
-#include <memory>
+#include <common/time_trace.hh>
+#include <pg_log_mgr/committer.hh>
 #include <redis/db_state_change.hh>
+#include <storage/vacuumer.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
-
-#include <pg_log_mgr/committer.hh>
-#include <storage/vacuumer.hh>
 
 namespace springtail::committer {
 
@@ -24,6 +17,15 @@ namespace springtail::committer {
         auto it =
             std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
         return it != meta->roots.end();
+    }
+
+    void
+    Committer::remove_db(uint64_t db_id)
+    {
+        _indexer->remove_db(db_id);
+        std::unique_lock lock(_main_mutex);
+        _db_to_timestamp.erase(db_id);
+        _completed_xids.erase(db_id);
     }
 
     void
@@ -77,6 +79,7 @@ namespace springtail::committer {
                 continue;
             }
 
+            std::unique_lock lock(_main_mutex);
             uint64_t timestamp = result->timestamp();
             uint64_t stored_timestamp = 0;
             auto emplace_result = _db_to_timestamp.try_emplace(db_id, timestamp);

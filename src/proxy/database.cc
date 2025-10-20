@@ -1060,6 +1060,8 @@ namespace springtail::pg_proxy
 
         // remove from primary set
         _primary_set->remove_database(db_id);
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Removed database (id, name): ({}, {})", db_id, db_name);
     }
 
     std::optional<std::string>

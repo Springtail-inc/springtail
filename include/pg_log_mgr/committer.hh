@@ -1,30 +1,10 @@
 #pragma once
 
-#include <thread>
-
-#include <boost/thread.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
-
-#include <common/concurrent_queue.hh>
-#include <common/constants.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/properties.hh>
-#include <common/time_trace.hh>
-#include <common/event_frequency.hh>
-
-#include <redis/redis_ddl.hh>
-#include <redis/redis_containers.hh>
-
-#include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/indexer.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
-
-#include <pg_repl/index_reconcile_request.hh>
-
+#include <pg_log_mgr/xid_ready.hh>
+#include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_index.hh>
 
@@ -78,6 +58,13 @@ namespace springtail::committer {
 
         /** Perform cleanup on a failed thread. */
         void cleanup();
+
+        /**
+         * @brief Remove database realted data stored by committer.
+         *
+         * @param db_id database id
+         */
+        void remove_db(uint64_t db_id);
 
         // constants for the coordinator thread IDs
         constexpr static const std::string_view THREAD_TYPE = "commit";
@@ -180,9 +167,6 @@ namespace springtail::committer {
 
         std::set<uint64_t> _tid_set; ///< Set of in-flight tables being processed.
 
-        /** Cache of mutable tables that are in-flight. */
-        std::map<uint64_t, MutableTablePtr> _table_map;
-
         /** The most recently completed XID by db.  Note: if we are in a table sync, this may be
             ahead of the most recently committed XID at the XidMgr. */
         std::map<uint64_t, uint64_t> _completed_xids;
@@ -198,6 +182,8 @@ namespace springtail::committer {
          */
         std::unique_ptr<Indexer> _indexer;
 
+        /** main mutext data structures access */
+        std::mutex _main_mutex;
         /**
          * @brief shared_ptr to the index requests manager to get
          * index requests (create/drop) for an XID per db

@@ -6,8 +6,10 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/xid_ready.hh>
 
-#include <write_cache/write_cache_server.hh>
 #include <storage/vacuumer.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+#include <write_cache/write_cache_server.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -161,6 +163,20 @@ namespace springtail::pg_log_mgr {
     }
 
     void
+    PgLogCoordinator::cleanup_database_dir(uint64_t db_id)
+    {
+        std::filesystem::path table_path = TableMgr::get_instance()->get_table_base() / std::to_string(db_id);
+        // Remove database directory and everything inside it
+        std::error_code ec;
+        std::filesystem::remove_all(table_path, ec);
+        if (ec) {
+            LOG_INFO("Removed database directory {}", table_path.c_str());
+        } else {
+            LOG_ERROR("Failed to removed database directory {}", table_path.c_str());
+        }
+    }
+
+    void
     PgLogCoordinator::_remove_database(uint64_t db_id)
     {
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Removing database {}", db_id);
@@ -180,10 +196,20 @@ namespace springtail::pg_log_mgr {
         // Remove index reconciliation queue for the db
         _index_reconciliation_queue_mgr->remove_queue(db_id);
 
+        _committer->remove_db(db_id);
+
         // Cleanup from vacuumer
         Vacuumer::get_instance()->cleanup_db(db_id);
 
         // Cleanup write cache
         WriteCacheServer::get_instance()->drop_database(db_id);
+
+        // Cleanup database in xid manager
+        xid_mgr::XidMgrServer::get_instance()->cleanup(db_id);
+
+        // Cleanup database in sys table manager
+        sys_tbl_mgr::Server::get_instance()->remove_db(db_id);
+
+        cleanup_database_dir(db_id);
     }
 }

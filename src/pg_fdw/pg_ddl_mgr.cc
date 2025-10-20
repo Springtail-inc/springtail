@@ -1,28 +1,15 @@
-#include <common/counter.hh>
-#include <common/common.hh>
-#include <common/coordinator.hh>
-#include <common/json.hh>
-#include <common/logging.hh>
-#include <common/open_telemetry.hh>
-#include <common/properties.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/constants.hh>
-
-#include <redis/db_state_change.hh>
 #include <redis/redis_ddl.hh>
-
-#include <pg_repl/exception.hh>
-#include <pg_repl/libpq_connection.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr_client.hh>
 
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_ddl_mgr.hh>
 
 #include <pg_fdw/constants.hh>
+#include <pg_fdw/pg_fdw_ddl_common.hh>
 #include <pg_fdw/pg_xid_collector.hh>
 
 namespace springtail::pg_fdw {
@@ -1740,7 +1727,6 @@ namespace springtail::pg_fdw {
 
         auto &ns_row = *table_iter;
         uint64_t ns_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&ns_row);
-        std::string ns_name(ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&ns_row));
         uint64_t ns_xid = ns_fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&ns_row);
         bool ns_exists = ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&ns_row);
         DCHECK(ns_xid <= xid);
@@ -1801,6 +1787,11 @@ namespace springtail::pg_fdw {
             db_name = db_name_opt.value();
         }
 
+        {
+            std::unique_lock<std::mutex> lock(_db_name_mutex);
+            _db_name_map.emplace(db_id, db_name);
+        }
+
         LibPqConnectionPtr conn = nullptr;
         if (check_exists) {
             // check if the database already exists in the fdw
@@ -1847,15 +1838,23 @@ namespace springtail::pg_fdw {
     PgDDLMgr::_remove_replicated_database(uint64_t db_id)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        std::shared_lock shared_lock(_db_mutex);
-        if (!_db_xid_map.contains(db_id)) {
-            return;
+        {
+            std::shared_lock shared_lock(_db_mutex);
+            if (!_db_xid_map.contains(db_id)) {
+                return;
+            }
         }
-        shared_lock.unlock();
 
-        // read db_config to get database name
-        nlohmann::json db_config = Properties::get_db_config(db_id);
-        std::string db_name = db_config["name"];
+        std::string db_name;
+        {
+            std::unique_lock<std::mutex> lock(_db_name_mutex);
+            auto it = _db_name_map.find(db_id);
+            if (it == _db_name_map.end()) {
+                return;
+            }
+            db_name = it->second;
+            _db_name_map.erase(it);
+        }
 
         // drop database
         LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
@@ -1865,8 +1864,16 @@ namespace springtail::pg_fdw {
         conn->disconnect();
 
         // remove it from internal storage
-        std::unique_lock unique_lock(_db_mutex);
-        _db_xid_map.erase(db_id);
+        {
+            std::unique_lock unique_lock(_db_mutex);
+            _db_xid_map.erase(db_id);
+        }
+
+        // remove connections from connection cache
+        {
+            std::unique_lock<std::mutex> conn_lock(_fdw_conn_cache_mutex);
+            _fdw_conn_cache.evict(db_id);
+        }
     }
 
     std::string

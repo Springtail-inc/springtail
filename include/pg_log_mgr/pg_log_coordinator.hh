@@ -1,16 +1,9 @@
 #pragma once
 
-#include <cstdint>
-#include <map>
-#include <mutex>
-
 #include <common/init.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/committer.hh>
-#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
-#include <pg_log_mgr/index_requests_manager.hh>
-#include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -22,6 +15,14 @@ namespace springtail::pg_log_mgr {
          *
          */
         void init();
+
+        /**
+         * @brief Cleanup database directory for given database id
+         *
+         * @param db_id database id
+         */
+        void
+        cleanup_database_dir(uint64_t db_id);
 
     private:
         friend class Singleton<PgLogCoordinator>;

@@ -180,6 +180,11 @@ public:
      */
     void invalidate_db(uint64_t db_id, const XidLsn &xid);
 
+    /**
+     * Remove the data stored by the server for the given database id
+     */
+    void remove_db(uint64_t db_id);
+
 private:
     Server();
     ~Server() override = default;

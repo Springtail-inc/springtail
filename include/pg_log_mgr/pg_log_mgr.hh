@@ -1,36 +1,14 @@
 #pragma once
 
-#include <cstdint>
-#include <memory>
-#include <filesystem>
-#include <thread>
-#include <atomic>
-
-#include <fmt/format.h>
-
-#include <common/concurrent_queue.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/filesystem.hh>
-#include <common/properties.hh>
 #include <common/state_synchronizer.hh>
-#include <common/time_trace.hh>
-#include <common/event_frequency.hh>
 
-#include <pg_repl/pg_repl_msg.hh>
-#include <pg_repl/pg_copy_table.hh>
 #include <pg_repl/table_sync_request.hh>
-#include <pg_repl/index_reconcile_request.hh>
 
-#include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
-#include <pg_log_mgr/index_requests_manager.hh>
 
 #include <pg_log_mgr/pg_redis_xact.hh>
-#include <pg_log_mgr/committer.hh>
 
 #include <redis/db_state_change.hh>
 
@@ -141,6 +119,12 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "writer thread joined");
             _reader_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "reader thread joined");
+
+            // Wait till pg_log_reader drained the queue and has no inflight commits
+            while(!_pg_log_reader->is_done()) {
+                usleep(100);
+            }
+
             _table_copy_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "copy thread joined");
             _reconciliation_thread.join();
