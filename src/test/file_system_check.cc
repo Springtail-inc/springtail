@@ -329,7 +329,6 @@ FSCheck::_read_tables(uint64_t db_id, uint64_t max_xid)
                 }
                 uint64_t xid = stats_fields->at(sys_tbl::TableStats::Data::XID)->get_uint64(&row);
                 uint64_t row_count = stats_fields->at(sys_tbl::TableStats::Data::ROW_COUNT)->get_uint64(&row);
-                uint64_t end_offset = stats_fields->at(sys_tbl::TableStats::Data::END_OFFSET)->get_uint64(&row);
                 _record_max_xid(xid);
 
                 if (xid < table_xid) {
@@ -340,9 +339,9 @@ FSCheck::_read_tables(uint64_t db_id, uint64_t max_xid)
                     break;
                 }
 
-                FSStats stats{xid, row_count, end_offset};
+                FSStats stats{xid, row_count};
                 xid_to_stats[xid] = stats;
-                LOG_INFO("\tAdded stats for xid {}, row_count {}, end_offser {}", xid, row_count, end_offset);
+                LOG_INFO("\tAdded stats for xid {}, row_count {}", xid, row_count);
             }
             _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).xid_to_stats = xid_to_stats;
         }
@@ -579,7 +578,6 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
     std::vector<TableRoot> roots;
     uint64_t root_sxid = constant::INVALID_XID;
     uint64_t row_count = 0;
-    uint64_t end_offset = 0;
     std::vector<Index> secondary_indexes;
     for (const auto &[index_id, fs_index]: fs_table.id_to_index) {
         const struct Index index = fs_index.index;
@@ -617,7 +615,6 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
             root_sxid = last_root->snapshot_xid;
             CHECK(last_stat != nullptr);
             row_count = last_stat->row_count;
-            end_offset = last_stat->end_offset;
             continue;
         }
         secondary_indexes.push_back(index);
@@ -632,14 +629,13 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
     tbl_meta.roots = roots;
 
     tbl_meta.stats.row_count = row_count;
-    tbl_meta.stats.end_offset = end_offset;
     tbl_meta.snapshot_xid = root_sxid;
 
     auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
                                 schema->get_sort_keys(), secondary_indexes, tbl_meta, schema);
 
-    LOG_INFO("\tValidata Table indexes for table {}, dir: {}, row_count: {}, end_offset: {}, sxid: {}",
-            table->id(), table->get_dir_path().c_str(), row_count, end_offset, root_sxid);
+    LOG_INFO("\tValidata Table indexes for table {}, dir: {}, row_count: {}, sxid: {}",
+            table->id(), table->get_dir_path().c_str(), row_count, root_sxid);
 
     // 6. Validate primary index extent
     _validate_primary_extent(table, schema);

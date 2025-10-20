@@ -461,6 +461,9 @@ namespace springtail::committer {
         std::scoped_lock lock(_pending_reconciliation_map_mtx);
 
         auto db_it = _pending_idx_reconciliation_map.find(db_id);
+        if (db_it == _pending_idx_reconciliation_map.end()) {
+            return; // we assume the work was completed earlier
+        }
         CHECK(db_it != _pending_idx_reconciliation_map.end());
 
         auto& xid_map = db_it->second;

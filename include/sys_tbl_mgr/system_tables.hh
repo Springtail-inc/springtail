@@ -128,6 +128,7 @@ public:
         static constexpr uint32_t XID = 2;
         static constexpr uint32_t EXTENT_ID = 3;
         static constexpr uint32_t SNAPSHOT_XID = 4;
+        static constexpr uint32_t END_OFFSET = 5;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -135,14 +136,16 @@ public:
                               uint64_t index_id,
                               uint64_t xid,
                               uint64_t extent_id,
-                              uint64_t snapshot_xid)
+                              uint64_t snapshot_xid,
+                              uint64_t end_offset)
         {
-            auto fields = std::make_shared<FieldArray>(5);
+            auto fields = std::make_shared<FieldArray>(6);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(EXTENT_ID) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
             fields->at(SNAPSHOT_XID) = std::make_shared<ConstTypeField<uint64_t>>(snapshot_xid);
+            fields->at(END_OFFSET) = std::make_shared<ConstTypeField<uint64_t>>(end_offset);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -316,17 +319,15 @@ public:
         static constexpr uint32_t TABLE_ID = 0;
         static constexpr uint32_t XID = 1;
         static constexpr uint32_t ROW_COUNT = 2;
-        static constexpr uint32_t END_OFFSET = 3;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
-        static TuplePtr tuple(uint64_t table_id, uint64_t xid, uint64_t row_count, uint64_t end_offset)
+        static TuplePtr tuple(uint64_t table_id, uint64_t xid, uint64_t row_count)
         {
-            auto fields = std::make_shared<FieldArray>(4);
+            auto fields = std::make_shared<FieldArray>(3);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(ROW_COUNT) = std::make_shared<ConstTypeField<uint64_t>>(row_count);
-            fields->at(END_OFFSET) = std::make_shared<ConstTypeField<uint64_t>>(end_offset);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };

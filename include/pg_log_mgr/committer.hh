@@ -73,6 +73,17 @@ namespace springtail::committer {
 
     private:
         /**
+         * Scan forward through the results deque to find the final XID for each database
+         * in the upcoming batch. Stops at the first non-XACT_MSG message (batch boundary).
+         * @param start_it Iterator to start scanning from
+         * @param end_it Iterator marking the end of the deque
+         * @return Map of db_id to final_xid for each database in the batch
+         */
+        std::map<uint64_t, uint64_t> _scan_batch_final_xids(
+            std::deque<std::shared_ptr<XidReady>>::iterator start_it,
+            std::deque<std::shared_ptr<XidReady>>::iterator end_it);
+
+        /**
          * Clear the SysTblMgr::Client cache for any tables with DDL mutations.
          */
         void _invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls);
@@ -137,6 +148,63 @@ namespace springtail::committer {
          */
         bool _shift_to_xid(SchemaMetadata &meta, const XidLsn &xid);
 
+        /**
+         * Handle TABLE_SYNC_COMMIT and TABLE_SYNC_SWAP message types.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         */
+        void _handle_table_sync_message(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id
+        );
+
+        /**
+         * Handle RECONCILE_INDEX message type in isolation.
+         * This commits any pending batch, processes the reconciliation, and commits it.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         * @param completed_xid The most recent XID we completed processing
+         */
+        void _handle_index_reconciliation(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id,
+            uint64_t& completed_xid
+        );
+
+        /**
+         * Handle XACT_MSG message types.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         * @param completed_xid The most recent XID we completed processing
+         */
+        void _handle_transaction_message(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id,
+            uint64_t completed_xid
+        );
+
+    private:
+        /**
+         * Batch state tracked per database during batch processing
+         */
+        struct BatchState {
+            std::map<uint64_t, MutableTablePtr> table_cache;  ///< tid → MutableTable
+            std::vector<std::shared_ptr<XidReady>> xid_results;  ///< All XidReady messages for this db
+            uint64_t final_xid = 0;  ///< The final XID where this batch will commit (determined upfront)
+        };
+
+        /**
+         * Commits all accumulated changes for a single database batch.
+         * @param db_id The database ID
+         * @param batch The batch state to commit
+         * @param completed_xid The XID we started from
+         */
+        void _commit_batch(
+            uint64_t db_id,
+            BatchState& batch,
+            uint64_t completed_xid
+        );
+
     private:
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
@@ -145,6 +213,11 @@ namespace springtail::committer {
          * Table worker threads in the committer
          */
         uint32_t _worker_count;
+
+        /**
+         * Batch processing state per database. Maps db_id → BatchState
+         */
+        std::map<uint64_t, BatchState> _batch_state;
 
         /**
          * Indexer worker threads to process indexes

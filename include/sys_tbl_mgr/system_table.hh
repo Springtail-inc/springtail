@@ -54,10 +54,9 @@ namespace springtail {
                            const std::vector<std::string> &primary_key,
                            const std::vector<Index> &secondary,
                            const TableMetadata &metadata,
-                           ExtentSchemaPtr schema,
-                           bool for_gc = false) :
+                           ExtentSchemaPtr schema) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, for_gc) {}
+                         secondary, metadata, schema) {}
 
         /**
          * Truncate function call is empty as we are not going to truncate system tables.
