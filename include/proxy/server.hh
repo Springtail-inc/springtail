@@ -25,7 +25,7 @@ namespace springtail::pg_proxy {
     {
         friend class Singleton<ProxyServer>;
     public:
-        enum MODE : int8_t {
+        enum class MODE : int8_t {
             NORMAL=0,   ///< normal mode, read-write splitting
             PRIMARY=1,  ///< primary mode, all traffic to primary
             SHADOW=2    ///< shadow mode, replica shadows primary and logs

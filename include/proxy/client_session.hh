@@ -73,7 +73,7 @@ namespace springtail::pg_proxy {
          * @brief Get the shadow session
          * @return ServerSessionPtr shadow session
          */
-        ServerSessionPtr get_shadow_session() {
+        ServerSessionPtr get_shadow_session() const {
             if (_shadow_mode && _replica_session != nullptr) {
                 return _replica_session;
             }
@@ -84,7 +84,7 @@ namespace springtail::pg_proxy {
          * @brief Get the primary session
          * @return ServerSessionPtr primary session
          */
-        ServerSessionPtr get_primary_session() {
+        ServerSessionPtr get_primary_session() const {
             return _primary_session;
         }
 
@@ -92,7 +92,7 @@ namespace springtail::pg_proxy {
          * @brief Get the replica session
          * @return ServerSessionPtr replica session
          */
-        ServerSessionPtr get_replica_session() {
+        ServerSessionPtr get_replica_session() const {
             return _replica_session;
         }
 

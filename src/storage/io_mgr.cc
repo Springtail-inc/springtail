@@ -91,8 +91,8 @@ namespace springtail {
     }
 
     std::shared_ptr<IOFile>
-    IOMgr::lookup(const std::filesystem::path &path,
-                  bool is_compressed)
+    IOMgr::get_file(const std::filesystem::path &path,
+                    bool is_compressed)
     {
         // lock cache
         std::scoped_lock<std::mutex> lock(_cache_mutex);
@@ -113,6 +113,12 @@ namespace springtail {
         return file;
     }
 
+    void
+    IOMgr::put_file(std::shared_ptr<IOFile> file)
+    {
+        // mark file object as no longer in use
+        file->decr_in_use();
+    }
 
     void
     IOMgr::remove(const std::filesystem::path &path)

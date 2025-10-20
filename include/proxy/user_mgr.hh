@@ -202,6 +202,12 @@ namespace springtail::pg_proxy {
          */
         UserPtr get_user(const std::string &username, const std::string &database) const;
 
+        /**
+         * @brief Update the user with the FDW password from the _proxy_to_fdw_user
+         * @param user UserPtr user
+         */
+        void set_user_fdw_password(UserPtr user);
+
     protected:
         /**
          * @brief Wake up internal thread.
@@ -264,6 +270,8 @@ namespace springtail::pg_proxy {
 
         std::mutex _sleep_mutex;                ///< mutex for sleep
         std::condition_variable _sleep_cv;      ///< condition variable for sleep
+
+        UserPtr _proxy_to_fdw_user;             ///< user for role proxy_to_fdw
 
         /**
          * @brief Add new user to the user map

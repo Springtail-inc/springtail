@@ -173,11 +173,6 @@ namespace springtail::pg_proxy {
 
                     LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Found user: {}, {}, {}", username, role, type);
 
-                    // only add users with role database
-                    if (role != "database") {
-                        continue;
-                    }
-
                     PasswordType password_type;
                     if (type == PASSWORD_STRING_TEXT) {
                         password_type = TEXT;
@@ -187,6 +182,20 @@ namespace springtail::pg_proxy {
                         password_type = SCRAM;
                     } else {
                         LOG_WARN("Unknown password type: {}", type);
+                        continue;
+                    }
+
+                    if (role == "proxy_to_fdw") {
+                        // create special user for role proxy_to_fdw
+                        std::unique_lock lock(_mutex);
+                        _proxy_to_fdw_user = std::make_shared<User>(username, password, password_type);
+                        DCHECK_EQ(type, PASSWORD_STRING_TEXT);
+                        LOG_INFO("Created special user for role proxy_to_fdw: {}", username);
+                        continue;
+                    }
+
+                    // only add users with role database
+                    if (role != "database") {
                         continue;
                     }
 
@@ -244,6 +253,19 @@ namespace springtail::pg_proxy {
                 _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
             }
         }
+    }
+
+    void
+    UserMgr::set_user_fdw_password(UserPtr user)
+    {
+        std::shared_lock lock(_mutex);
+        if (_proxy_to_fdw_user == nullptr) {
+            LOG_ERROR("Proxy to FDW user not set, cannot set FDW password for user: {}", user->username());
+            DCHECK(false);
+        }
+
+        user->set_password(_proxy_to_fdw_user->password(), _proxy_to_fdw_user->password_type());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Set FDW password for user: {}", user->username());
     }
 
     void

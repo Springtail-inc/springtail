@@ -30,6 +30,7 @@
 #include <proxy/logger.hh>
 #include <proxy/server.hh>
 #include <proxy/server_session.hh>
+#include <proxy/database.hh>
 
 namespace springtail::pg_proxy {
 
@@ -109,25 +110,71 @@ namespace springtail::pg_proxy {
                 [this]([[maybe_unused]] const std::string &path,
                         [[maybe_unused]] const httplib::Params &params,
                         nlohmann::json &json_response) {
+
                     if (!ProxyServer::_has_instance()) {
                         json_response =  R"({})";
                         return;
                     }
-                    json_response = {
-                        {"socket_fd", _socket},
-                        {"event_fd", _efd},
-                        {"id", _id},
-                        {"sessions", nlohmann::json::object()}
-                    };
-                    for (const auto &[fd, session]: _sessions) {
-                        json_response["sessions"][std::to_string(fd)] = {
-                            {"name", session->name() },
-                            {"database", std::format("{}:{}", session->database(),session->database_id())},
-                            {"ready", session->is_ready()}
-                        };
+
+                    std::string mode;
+                    switch (this->_mode) {
+                        case MODE::NORMAL:
+                            mode = "NORMAL";
+                            break;
+                        case MODE::SHADOW:
+                            mode = "SHADOW";
+                            break;
+                        case MODE::PRIMARY:
+                            mode = "PRIMARY";
+                            break;
                     }
-                });
+
+                    // get primary/replica set info
+                    auto db_mgr = DatabaseMgr::get_instance();
+                    nlohmann::json primary_json = nullptr;
+                    nlohmann::json replica_json = nullptr;
+
+                    auto primary_set = db_mgr->primary_set();
+                    if (primary_set) {
+                        primary_json = primary_set->to_json();
+                    }
+
+                    auto replica_set = db_mgr->replica_set();
+                    if (replica_set) {
+                        replica_json = replica_set->to_json();
+                    }
+
+                    std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
+
+                    // _sessions maps may have multiple entries for the same client session
+                    std::set<SessionPtr> client_sessions;
+                    for (const auto &[fd, session]: _sessions) {
+                        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Admin /info request session: fd={}, id={}", fd, session->id());
+                        client_sessions.insert(session);
+                    }
+
+                    // go through the unique client sessions and get their JSON
+                    nlohmann::json sessions_array = nlohmann::json::array();
+                    for (const auto &session: client_sessions) {
+                        sessions_array.push_back(session->to_json());
+                    }
+
+                    json_response = nlohmann::json::object({
+                        {"id", _id},
+                        {"mode", mode},
+                        {"ssl_enabled", _enable_ssl},
+                        {"thread_pool_size", _thread_pool->pool_size()},
+                        {"queue_size", _thread_pool->queue_size()},
+                        {"primary", primary_json},
+                        {"replicas", replica_json},
+                        {"client_count", static_cast<int>(client_sessions.size())},
+                        {"client_sessions", sessions_array}
+                    });
+
+                    LOG_INFO("Admin /info request response: {}", json_response.dump());
+            });
         }
+
         LOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
     }
 
@@ -681,6 +728,7 @@ namespace springtail::pg_proxy {
         _sessions.erase(socket);
 
         // then do the insert; <socket, session>
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Inserting socket {}, session_id: {} into sessions map", socket, new_session->id());
         auto ins_res = _sessions.insert(std::make_pair(socket, new_session));
         CHECK(ins_res.second);
 

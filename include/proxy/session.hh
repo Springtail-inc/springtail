@@ -299,6 +299,18 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Get JSON representation of session; used by admin server
+         * @return nlohmann::json JSON object representing session
+         */
+        nlohmann::json to_json() const;
+
+        /**
+         * @brief Get brief JSON representation of session; used by admin server
+         * @return nlohmann::json JSON object representing session
+         */
+        nlohmann::json _to_json_brief() const;
+
+        /**
          * @brief Does this session have a closed connection
          * @return true if connection is closed
          * @return false if connection is open
