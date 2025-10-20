@@ -761,9 +761,6 @@ namespace {
         // Enable vacuum tracking
         Vacuumer::get_instance()->enable_tracking_extents();
 
-        // Track starting XID
-        uint64_t start_xid = _xid.xid;
-
         // XID 1: Create first user table
         // This will update system tables (TableNames, TableRoots, etc.) and create roots.{xid} files
         uint64_t tid1 = 200001;

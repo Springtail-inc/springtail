@@ -819,7 +819,7 @@ Vacuumer::_cleanup_expired_roots_files(uint64_t cutoff_xid, const std::filesyste
                 if (ec) {
                     LOG_ERROR("Failed to remove roots file {}: {}", entry.path().string(), ec.message());
                 } else {
-                    LOG_DEBUG(LOG_VACUUM, LOG_LEVEL_DEBUG1, "Removed expired roots file: {}", entry.path().string());
+                    LOG_INFO("Removed expired roots file: {}", entry.path().string());
                 }
             }
         } catch (const std::exception& e) {
