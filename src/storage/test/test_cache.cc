@@ -82,7 +82,7 @@ namespace {
         uint64_t xid = 1;
 
         // get() an empty Page
-        auto page = cache->get(file, constant::UNKNOWN_EXTENT, xid, constant::LATEST_XID, constant::MAX_EXTENT_SIZE);
+        auto page = cache->get(0, file, constant::UNKNOWN_EXTENT, xid, constant::LATEST_XID, constant::MAX_EXTENT_SIZE);
 
         // populate data into the Page
         csv::CSVReader reader("test_btree_simple.csv");
@@ -119,7 +119,7 @@ namespace {
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
-            page = cache->get(file, offset, xid, constant::LATEST_XID, constant::MAX_EXTENT_SIZE);
+            page = cache->get(0, file, offset, xid, constant::LATEST_XID, constant::MAX_EXTENT_SIZE);
 
             for (auto row : *page.ptr()) {
                 if (prev != "") {
@@ -142,7 +142,7 @@ namespace {
 
         // get() an empty Page
         {
-            auto page = cache->get(file, constant::UNKNOWN_EXTENT, xid, constant::LATEST_XID, constant::MAX_EXTENT_SIZE);
+            auto page = cache->get(0, file, constant::UNKNOWN_EXTENT, xid, constant::LATEST_XID, constant::MAX_EXTENT_SIZE);
 
             // populate data into the Page
             for (int i = 0; i < 10; i++) {
@@ -164,7 +164,7 @@ namespace {
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
-            auto page = cache->get(file, offset, xid, constant::LATEST_XID, constant::MAX_EXTENT_SIZE);
+            auto page = cache->get(0, file, offset, xid, constant::LATEST_XID, constant::MAX_EXTENT_SIZE);
 
             for (auto row : *page.ptr()) {
                 if (prev != "") {

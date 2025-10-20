@@ -605,7 +605,7 @@ namespace springtail {
              * access XID defines the start / end XIDs for the new page.  If the target XID is the
              * same as the access XID, then the page is not going to be rolled forward.
              */
-            Page(const std::filesystem::path &file, uint64_t extent_id,
+            Page(uint64_t database_id, const std::filesystem::path &file, uint64_t extent_id,
                  uint64_t start_xid, uint64_t end_xid, const std::vector<uint64_t> &offsets,
                  uint64_t max_extent_size);
 
@@ -613,7 +613,8 @@ namespace springtail {
              * Constructor for creating an empty page.  Starts marked dirty and uses the provided
              * XID as the start, end and target XID for the page.
              */
-            Page(const std::filesystem::path &file, uint64_t xid, uint64_t max_extent_size);
+            Page(uint64_t database_id, const std::filesystem::path &file, uint64_t xid,
+                 uint64_t max_extent_size);
 
             /**
              * Writes all of the dirty in-memory extents to disk and returns the full set of extent
@@ -1020,6 +1021,9 @@ namespace springtail {
             /** A flag indicating if the page is clean or dirty. */
             bool _is_dirty;
 
+            /** The database that this page belongs to. */
+            uint64_t _database_id;
+
             /** The file that this page is associated with. */
             std::filesystem::path _file;
 
@@ -1192,19 +1196,20 @@ namespace springtail {
             /**
              * Retrieve a Page object from the cache.
              *
+             * @param database_id The database that the page belongs to.
              * @param file The file from which to retrieve the page.
              * @param extent_id The extent ID to retrieve from the file.
              * @param access_xid The XID at which the extent ID is being read.
              * @param target_xid The XID at which the page will operate and perform mutations.
              */
-            PagePtr get(const std::filesystem::path &file, uint64_t extent_id,
+            PagePtr get(uint64_t database_id, const std::filesystem::path &file, uint64_t extent_id,
                         uint64_t access_xid, uint64_t target_xid, uint64_t max_extent_size);
 
             /**
              * Retrieve an empty Page object from the cache for a given file, operating at the
              * provided XID.
              */
-            PagePtr get_empty(const std::filesystem::path &file, uint64_t xid, uint64_t max_extent_size);
+            PagePtr get_empty(uint64_t database_id, const std::filesystem::path &file, uint64_t xid, uint64_t max_extent_size);
 
             /**
              * Returns a page to the cache.  Optionally registers a callback that will be called
@@ -1228,6 +1233,13 @@ namespace springtail {
              * Used to implement table truncate.
              */
             void drop_file(const std::filesystem::path &file);
+
+            /**
+             * Evicts all pages and extents associated with a given database.
+             * Marks all extents as INVALID so they are automatically cleaned up when released.
+             * Assumes no new operations for this database will be performed during eviction.
+             */
+            void evict_for_database(uint64_t database_id);
 
             /**
              * The background cleaner thread.
@@ -1258,6 +1270,18 @@ namespace springtail {
             PagePtr _try_get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
 
             /**
+             * Helper to get the list of files associated with a database.
+             * Acquires lock briefly, returns copy of file list.
+             */
+            std::vector<std::filesystem::path> _get_files_for_database(uint64_t database_id);
+
+            /**
+             * Helper to evict all pages for a given database file.
+             * Marks all extents as INVALID before eviction so they auto-cleanup when released.
+             */
+            void _evict_pages_for_database_file(const std::filesystem::path &file, uint64_t database_id);
+
+            /**
              * Helper to try and evict a dirty page from the cache.  Will silently fail if there is a
              * registered flush_callback that does not succeed.
              */
@@ -1272,7 +1296,7 @@ namespace springtail {
              * Helper to create a Page in the cache, potentially evicting another page to make space
              * for this new page.
              */
-            PagePtr _create(const std::filesystem::path &file, uint64_t extent_id,
+            PagePtr _create(uint64_t database_id, const std::filesystem::path &file, uint64_t extent_id,
                             uint64_t xid, const std::vector<uint64_t> &offsets,
                             uint64_t max_extent_size);
 
@@ -1293,6 +1317,9 @@ namespace springtail {
 
             /** List of pages with flush callbacks for each file. */
             std::map<std::filesystem::path, std::list<PagePtr>> _flush_list;
+
+            /** Map of database_id to the set of files used by that database. */
+            std::map<uint64_t, std::set<std::filesystem::path>> _database_files;
 
             uint64_t _max_size; ///< The max number of pages in the cache.
             uint64_t _size; ///< The current number of pages in the cache.
@@ -1321,6 +1348,7 @@ namespace springtail {
          *
          * Note that the returned Page is pinned until is it put() back into the cache.
          *
+         * @param database_id The database that the page belongs to.
          * @param file The file to read the page from.
          * @param extent_id The extent_id that this page represents.  If UNKNOWN then creates an
          *                  empty page that will be appended to the file on flush.
@@ -1339,7 +1367,8 @@ namespace springtail {
          *                 the same in-flight dirty page to other callers.
          * @return The retrieved Page object.
          */
-        SafePagePtr get(const std::filesystem::path &file,
+        SafePagePtr get(uint64_t database_id,
+                        const std::filesystem::path &file,
                         uint64_t extent_id,
                         uint64_t access_xid,
                         uint64_t target_xid,
@@ -1359,6 +1388,13 @@ namespace springtail {
          * support truncate.
          */
         void drop_for_truncate(const std::filesystem::path &file);
+
+        /**
+         * Evict all pages and extents associated with a given database.
+         * Marks all extents as INVALID so they are automatically cleaned up when released.
+         * Assumes no new operations for this database will be performed during eviction.
+         */
+        void evict_for_database(uint64_t database_id);
 
         void validate() const {
             _data_cache->validate();

@@ -43,7 +43,8 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     }
 
     StorageCache::SafePagePtr
-    StorageCache::get(const std::filesystem::path &file,
+    StorageCache::get(uint64_t database_id,
+                      const std::filesystem::path &file,
                       uint64_t extent_id,
                       uint64_t access_xid,
                       uint64_t target_xid,
@@ -64,12 +65,12 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            return {_page_cache.get(), _page_cache->get_empty(file, target_xid, max_extent_size), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get_empty(database_id, file, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid) {
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get(database_id, file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // if the target is ahead of the access, but there is roll-forward request, then it means
@@ -78,7 +79,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get(database_id, file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -126,9 +127,16 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         _metric_counters->increment<metrics::StorageCache::DropCalls>();
     }
 
+    void
+    StorageCache::evict_for_database(uint64_t database_id)
+    {
+        _page_cache->evict_for_database(database_id);
+    }
+
 
     StorageCache::PagePtr
-    StorageCache::PageCache::get(const std::filesystem::path &file,
+    StorageCache::PageCache::get(uint64_t database_id,
+                                 const std::filesystem::path &file,
                                  uint64_t extent_id,
                                  uint64_t access_xid,
                                  uint64_t target_xid,
@@ -155,18 +163,19 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
         // note: not in the cache, need to create a new Page
-        return _create(file, extent_id, target_xid, { extent_id }, max_extent_size);
+        return _create(database_id, file, extent_id, target_xid, { extent_id }, max_extent_size);
     }
 
     StorageCache::PagePtr
-    StorageCache::PageCache::get_empty(const std::filesystem::path &file,
+    StorageCache::PageCache::get_empty(uint64_t database_id,
+                                       const std::filesystem::path &file,
                                        uint64_t xid, uint64_t max_extent_size)
     {
         LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
         _make_page_space();
-        return std::make_shared<Page>(file, xid, max_extent_size);
+        return std::make_shared<Page>(database_id, file, xid, max_extent_size);
     }
 
     void
@@ -433,7 +442,8 @@ StorageCache::PageCache::background_cleaner()
     }
 
     StorageCache::PagePtr
-    StorageCache::PageCache::_create(const std::filesystem::path &file,
+    StorageCache::PageCache::_create(uint64_t database_id,
+                                     const std::filesystem::path &file,
                                      uint64_t extent_id,
                                      uint64_t xid,
                                      const std::vector<uint64_t> &offsets,
@@ -442,10 +452,13 @@ StorageCache::PageCache::background_cleaner()
         LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
 
         // create the page object with the given <file, extent_id> valid at the requested XID
-        auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets, max_extent_size);
+        auto page = std::make_shared<Page>(database_id, file, extent_id, xid, xid, offsets, max_extent_size);
 
         // add it to the cache; note: use count starts at 1
         _cache[page->key()][xid] = page;
+
+        // register this file with the database
+        _database_files[database_id].insert(file);
 
         // make space for the page; evict if we need to make space
         // note: we do this after creating the Page to avoid a race where two people might create
@@ -626,7 +639,8 @@ StorageCache::PageCache::background_cleaner()
         return page_i->second;
     }
 
-    StorageCache::Page::Page(const std::filesystem::path &file,
+    StorageCache::Page::Page(uint64_t database_id,
+                             const std::filesystem::path &file,
                              uint64_t extent_id,
                              uint64_t start_xid,
                              uint64_t end_xid,
@@ -634,6 +648,7 @@ StorageCache::PageCache::background_cleaner()
                              uint64_t max_extent_size)
         : _use_count(1),
           _is_dirty(false),
+          _database_id(database_id),
           _file(file),
           _extent_id(extent_id),
           _start_xid(start_xid),
@@ -646,10 +661,12 @@ StorageCache::PageCache::background_cleaner()
         }
     }
 
-    StorageCache::Page::Page(const std::filesystem::path &file,
+    StorageCache::Page::Page(uint64_t database_id,
+                             const std::filesystem::path &file,
                              uint64_t xid, uint64_t max_extent_size)
         : _use_count(1),
           _is_dirty(false),
+          _database_id(database_id),
           _file(file),
           _extent_id(constant::UNKNOWN_EXTENT),
           _start_xid(xid),
@@ -1984,6 +2001,110 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
     {
         _extent = StorageCache::get_instance()->_data_cache->get(file, ref, mark_dirty);
         DCHECK(_extent);
+    }
+
+    std::vector<std::filesystem::path>
+    StorageCache::PageCache::_get_files_for_database(uint64_t database_id)
+    {
+        boost::unique_lock lock(_mutex);
+
+        auto db_i = _database_files.find(database_id);
+        if (db_i == _database_files.end()) {
+            return {};
+        }
+
+        // Return a copy of the file set as a vector
+        return std::vector<std::filesystem::path>(db_i->second.begin(), db_i->second.end());
+    }
+
+    void
+    StorageCache::PageCache::_evict_pages_for_database_file(const std::filesystem::path &file,
+                                                             uint64_t database_id)
+    {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_evict_pages_for_database_file file={} database_id={}",
+                  file, database_id);
+
+        boost::unique_lock lock(_mutex);
+
+        // Iterate through all pages for this file and mark their extents as INVALID
+        auto file_key_i = _cache.find(CacheKey(0, file.native())); // extent_id doesn't matter for this lookup
+        if (file_key_i != _cache.end()) {
+            auto &xid_map = file_key_i->second;
+            for (auto &xid_entry : xid_map) {
+                auto page = xid_entry.second;
+                if (page->_database_id == database_id) {
+                    // Mark all extents in this page as INVALID so they auto-cleanup when released
+                    for (auto &ref : page->_extents) {
+                        auto extent = ref.lock_cached();
+                        if (extent) {
+                            extent->_state = CacheExtent::State::INVALID;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Now evict all pages for this file similar to drop_file()
+        auto file_i = _flush_list.find(file);
+        if (file_i != _flush_list.end()) {
+            auto &drop_pages = file_i->second;
+            bool done = false;
+            auto page_i = drop_pages.begin();
+
+            if (page_i == drop_pages.end()) {
+                _flush_list.erase(file_i);
+            } else {
+                auto data_cache = StorageCache::get_instance()->_data_cache;
+                while (!done) {
+                    auto page = *page_i;
+
+                    // Only evict pages for this database
+                    if (page->_database_id == database_id) {
+                        // clear the associated dirty extents from the cache
+                        for (auto &ref : page->_extents) {
+                            auto extent = ref.lock_cached();
+                            if (extent && extent->state() == CacheExtent::State::DIRTY) {
+                                data_cache->drop_dirty(extent);
+                                data_cache->put(extent);
+                            }
+                        }
+
+                        // remove the page from the flush list
+                        drop_pages.erase(page->_flush_pos);
+                    }
+
+                    // get the next dirty page
+                    page_i = drop_pages.begin();
+                    if (page_i == drop_pages.end()) {
+                        _flush_list.erase(file);
+                        done = true;
+                    }
+                }
+            }
+        }
+
+        // Remove the file from the database tracking
+        auto db_i = _database_files.find(database_id);
+        if (db_i != _database_files.end()) {
+            db_i->second.erase(file);
+            if (db_i->second.empty()) {
+                _database_files.erase(db_i);
+            }
+        }
+    }
+
+    void
+    StorageCache::PageCache::evict_for_database(uint64_t database_id)
+    {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "PageCache::evict_for_database database_id={}", database_id);
+
+        // Get the list of files for this database (with brief lock)
+        auto &&files = _get_files_for_database(database_id);
+
+        // Evict pages for each file (lock is re-acquired per file)
+        for (const auto &file : files) {
+            _evict_pages_for_database_file(file, database_id);
+        }
     }
 
 }
