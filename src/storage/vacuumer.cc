@@ -790,6 +790,22 @@ Vacuumer::_cleanup_expired_roots_files(uint64_t cutoff_xid, const std::filesyste
         return;
     }
 
+    // Read the current roots symlink to determine which file to preserve
+    auto roots_symlink = table_dir / "roots";
+    std::filesystem::path current_roots_file;
+    if (std::filesystem::exists(roots_symlink) && std::filesystem::is_symlink(roots_symlink)) {
+        std::error_code ec;
+        current_roots_file = std::filesystem::read_symlink(roots_symlink, ec);
+        if (ec) {
+            LOG_ERROR("Failed to read roots symlink {}: {}", roots_symlink.string(), ec.message());
+            // Continue anyway - we'll still clean up old files
+        } else {
+            // Resolve to just the filename
+            current_roots_file = current_roots_file.filename();
+            LOG_INFO("Current roots file (will be preserved): {}", current_roots_file.string());
+        }
+    }
+
     // Scan the table directory for roots files
     for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
         if (!entry.is_regular_file() && !entry.is_symlink()) {
@@ -805,6 +821,12 @@ Vacuumer::_cleanup_expired_roots_files(uint64_t cutoff_xid, const std::filesyste
 
         // Only process files that match "roots.{xid}" pattern
         if (!filename.starts_with("roots.")) {
+            continue;
+        }
+
+        // Skip the current roots file that the symlink points to
+        if (!current_roots_file.empty() && filename == current_roots_file.string()) {
+            LOG_INFO("Preserving current roots file: {}", entry.path().string());
             continue;
         }
 
@@ -1053,18 +1075,17 @@ Vacuumer::_do_vacuum_run()
         table_dir = Properties::make_absolute_path(table_dir);
 
         // Get all active database IDs
-        auto database_ids = Properties::get_database_ids();
+        auto&& databases = Properties::get_databases();
 
         // For each active database, clean up old roots files in all system tables
-        for (uint64_t db_id : database_ids) {
+        for (const auto& [db_id, db_name] : databases) {
             // Get cutoff_xid for this database
             uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_id);
             if (cutoff_xid == 0) {
                 continue;
             }
 
-            LOG_DEBUG(LOG_VACUUM, LOG_LEVEL_DEBUG1,
-                     "Cleaning up system table roots files for db_id={}, cutoff_xid={}",
+            LOG_INFO("Cleaning up system table roots files for db_id={}, cutoff_xid={}",
                      db_id, cutoff_xid);
 
             // Iterate through all defined system tables

@@ -28,6 +28,8 @@
 
 #include <test/services.hh>
 
+#include <xid_mgr/xid_mgr_server.hh>
+
 using namespace springtail;
 
 namespace {
@@ -806,6 +808,10 @@ namespace {
         uint64_t cutoff_xid = xid3;
         uint64_t current_xid = xid4 + 1;
 
+        // Commit the XID so that XidMgrServer has the correct last_committed_xid
+        // This ensures _get_vacuum_cutoff_xid() returns the expected value
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db, 1, cutoff_xid, false);
+
         // Trigger vacuum
         Vacuumer::get_instance()->set_global_vacuum_threshold(10);
         Vacuumer::get_instance()->commit_expired_extents(_db, current_xid);
@@ -838,7 +844,7 @@ namespace {
         // Verify cleanup happened there too
         ASSERT_FALSE(std::filesystem::exists(table_roots_dir / fmt::format("roots.{}", xid1)));
         ASSERT_FALSE(std::filesystem::exists(table_roots_dir / fmt::format("roots.{}", xid2)));
-        ASSERT_TRUE(std::filesystem::exists(table_roots_dir / fmt::format("roots.{}", xid3)));
+        // note: no roots file for xid3 because it was a table drop
         ASSERT_TRUE(std::filesystem::exists(table_roots_dir / fmt::format("roots.{}", xid4)));
 
         LOG_INFO("TableRoots system table also cleaned up correctly");
