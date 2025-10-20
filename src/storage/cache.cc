@@ -1625,6 +1625,30 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         extent->_state = CacheExtent::State::INVALID;
     }
 
+    void
+    StorageCache::DataCache::invalidate_clean(CacheExtentPtr extent)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // note: extent must be CLEAN or MUTABLE for this to be a valid operation
+        CHECK(extent->_state == CacheExtent::State::CLEAN ||
+              extent->_state == CacheExtent::State::MUTABLE);
+        CHECK_EQ(extent->_use_count, 1);
+
+        // remove from the appropriate cache
+        if (extent->_state == CacheExtent::State::CLEAN) {
+            _clean_cache.erase(extent->key());
+        } else {
+            // MUTABLE extents are in the dirty_cache
+            _dirty_cache.erase(extent->_cache_id);
+            _cache_id_map.erase(extent->_cache_id);
+        }
+
+        // mark the extent as no longer valid to ensure it doesn't get released back into the cache
+        // by a concurrent user
+        extent->_state = CacheExtent::State::INVALID;
+    }
+
     std::pair<StorageCache::ExtentRef, StorageCache::ExtentRef>
     StorageCache::DataCache::split(CacheExtentPtr extent, ExtentSchemaPtr schema)
     {
@@ -2026,24 +2050,6 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
 
         boost::unique_lock lock(_mutex);
 
-        // Iterate through all pages for this file and mark their extents as INVALID
-        auto file_key_i = _cache.find(CacheKey(0, file.native())); // extent_id doesn't matter for this lookup
-        if (file_key_i != _cache.end()) {
-            auto &xid_map = file_key_i->second;
-            for (auto &xid_entry : xid_map) {
-                auto page = xid_entry.second;
-                if (page->_database_id == database_id) {
-                    // Mark all extents in this page as INVALID so they auto-cleanup when released
-                    for (auto &ref : page->_extents) {
-                        auto extent = ref.lock_cached();
-                        if (extent) {
-                            extent->_state = CacheExtent::State::INVALID;
-                        }
-                    }
-                }
-            }
-        }
-
         // Now evict all pages for this file similar to drop_file()
         auto file_i = _flush_list.find(file);
         if (file_i != _flush_list.end()) {
@@ -2060,12 +2066,18 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
 
                     // Only evict pages for this database
                     if (page->_database_id == database_id) {
-                        // clear the associated dirty extents from the cache
+                        // clear the associated extents from the cache
                         for (auto &ref : page->_extents) {
                             auto extent = ref.lock_cached();
-                            if (extent && extent->state() == CacheExtent::State::DIRTY) {
-                                data_cache->drop_dirty(extent);
-                                data_cache->put(extent);
+                            if (extent) {
+                                if (extent->state() == CacheExtent::State::DIRTY) {
+                                    data_cache->drop_dirty(extent);
+                                    data_cache->put(extent);
+                                } else if (extent->state() == CacheExtent::State::CLEAN ||
+                                          extent->state() == CacheExtent::State::MUTABLE) {
+                                    data_cache->invalidate_clean(extent);
+                                    data_cache->put(extent);
+                                }
                             }
                         }
 

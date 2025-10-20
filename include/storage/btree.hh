@@ -154,7 +154,7 @@ namespace springtail {
                         uint64_t child_id = _btree->_branch_child_f->get_uint64(&*(_node->row_i));
 
                         // read the extent
-                        auto child = cache->get(_btree->_file, child_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+                        auto child = cache->get(_btree->_database_id, _btree->_file, child_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                         // create a node for the child an move to it
                         auto last = child->last();

@@ -446,6 +446,12 @@ namespace springtail {
             void drop_dirty(CacheExtentPtr extent);
 
             /**
+             * Invalidates the provided CLEAN or MUTABLE extent, removing it from the clean_cache
+             * and marking it as invalid. Similar to drop_dirty() but for clean/mutable pages.
+             */
+            void invalidate_clean(CacheExtentPtr extent);
+
+            /**
              * Splits the provided extent into two new extents, each holding roughly half of the
              * rows.  The provided extent is invalidated and references to the two new DIRTY extents
              * are returned.
