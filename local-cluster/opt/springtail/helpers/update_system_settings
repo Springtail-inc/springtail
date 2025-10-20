@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Fetch system settings, formats it and opens up an text editor, after which
+# validates the changes and updates the system settings back to Redis.
+# Usage:
+#   ./update_system_settings [<dbInstanceId>]
+# If the dbInstanceId is not provided, it will use the value of the DATABASE_INSTANCE_ID env vars
+# This script requires the following environment variables to be set:
+#   REDIS_HOST, REDIS_PORT, REDIS_USER, REDIS_PASSWORD
+# Check environement variables
+if [ -z "$REDIS_HOST" ] || [ -z "$REDIS_PORT" ] || [ -z "$REDIS_USER" ] || [ -z "$REDIS_PASSWORD" ]; then
+  echo "Required environment variables REDIS_HOST, REDIS_PORT, REDIS_USER, or REDIS_PASSWORD are not set."
+  exit 1
+fi
+
+. st_common
+
+dbInstanceId="${1:-${DATABASE_INSTANCE_ID}}"
+
+if [ -z "$dbInstanceId" ]; then
+  echo "No dbInstanceId provided and DATABASE_INSTANCE_ID is not set."
+  exit 1
+fi
+
+if [ "$dbInstanceId" = "-h" ] || [ "$dbInstanceId" = "--help" ] ; then
+  echo "Usage: $0 [<dbInstanceId>]"
+  echo "If dbInstanceId is not provided, it will use the value of the DATABASE_INSTANCE_ID env var."
+  echo "This script requires the following environment variables to be set:"
+  echo "  REDIS_HOST, REDIS_PORT, REDIS_USER, REDIS_PASSWORD"
+  echo "It will first fetch the system settings from Redis, then open a text editor to edit the settings."
+  echo "After editing, it will validate the JSON format and update the system settings back to Redis, if all good."
+  exit 0
+fi
+
+redis_item_key="${dbInstanceId}":instance_config
+redis_sub_key="system_settings"
+
+sfile="$(mktemp -t system_settings.XXXXXX)"
+fetched=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --user "$REDIS_USER" -a "$REDIS_PASSWORD" \
+  --no-auth-warning --raw \
+  HMGET "$redis_item_key" "$redis_sub_key")
+
+if [ -z "$fetched" ]; then
+  echo "Failed to fetch system settings from Redis."
+  exit 1
+fi
+if ! echo "$fetched"  | jq -r . > "$sfile" ; then
+  echo "Failed to parse system settings JSON."
+  rm -f "$sfile"
+  exit 1
+fi
+
+# Grabs the mtime of the sfile to check if it has been modified
+sfile_mtime=$(stat -c %Y "$sfile")
+
+# Checks if GIT_EDITOR, EDITOR or VISUAL is set, otherwise defaults to `vim`
+editor="${GIT_EDITOR:-${EDITOR:-${VISUAL:-vim}}}"
+if [ ! -x "$(command -v "$editor")" ]; then
+  editor=vim
+fi
+$editor "$sfile"
+if [ $? -ne 0 ]; then
+  echo "Editor exception occurred. Aborting."
+  rm -f "$sfile"
+  exit 0
+fi
+# Checks if the editor was closed without saving changes
+if [ "$(stat -c %Y "$sfile")" -eq "$sfile_mtime" ]; then
+  echo "No changes made to system settings. Abort."
+  rm -f "$sfile"
+  exit 0
+fi
+# Validates the JSON format
+if ! jq empty "$sfile" >/dev/null 2>&1; then
+  echo "Invalid JSON format. Abort."
+  rm -f "$sfile"
+  exit 1
+fi
+
+# Sends the updated system settings back to Redis
+redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --user "$REDIS_USER" -a "$REDIS_PASSWORD" \
+  --no-auth-warning \
+  HMSET "$redis_item_key" "$redis_sub_key" "$(jq -c . < "$sfile")"
+
+refetched=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --user "$REDIS_USER" -a "$REDIS_PASSWORD" \
+  --no-auth-warning --raw \
+  HMGET "$redis_item_key" "$redis_sub_key")
+
+banner_less " Updated System Settings (feteched) " "$(echo "$refetched" | jq -r .)"
+
+rm -f "$sfile"
