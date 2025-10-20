@@ -9,6 +9,8 @@
 #include <storage/interval_tree.hh>
 #include <storage/vacuumer.hh>
 
+#include <sys_tbl_mgr/system_tables.hh>
+
 #include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail {
@@ -1044,64 +1046,39 @@ Vacuumer::_do_vacuum_run()
         /*------------- End of log rotation ------------------------------------------------------------- */
 
         /*------------- Cleanup expired roots files for system tables ----------------------------------- */
-        // Collect all unique database IDs that were processed in this vacuum run
-        std::set<uint64_t> processed_dbs;
-        for (const auto& [file, _] : expired_extents_map) {
-            uint64_t db_id = _get_db_id_from_path(file);
-            if (db_id != std::numeric_limits<uint64_t>::max()) {
-                processed_dbs.insert(db_id);
-            }
-        }
+        // Get the table directory from properties
+        nlohmann::json storage_config = Properties::get(Properties::STORAGE_CONFIG);
+        std::filesystem::path table_dir;
+        Json::get_to<std::filesystem::path>(storage_config, "table_dir", table_dir);
+        table_dir = Properties::make_absolute_path(table_dir);
 
-        // For each processed database, clean up old roots files in system tables
-        for (uint64_t db_id : processed_dbs) {
+        // Get all active database IDs
+        auto database_ids = Properties::get_database_ids();
+
+        // For each active database, clean up old roots files in all system tables
+        for (uint64_t db_id : database_ids) {
+            // Get cutoff_xid for this database
             uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_id);
             if (cutoff_xid == 0) {
                 continue;
             }
 
-            // Get the table base directory path from any file in expired_extents_map
-            // Path format: {table_base}/{db_id}/{table_id}-{snapshot_xid}/file
-            // We need to go up to find the db directory, then iterate system tables
-            for (const auto& [file, _] : expired_extents_map) {
-                if (_get_db_id_from_path(file) != db_id) {
-                    continue;
+            LOG_DEBUG(LOG_VACUUM, LOG_LEVEL_DEBUG1,
+                     "Cleaning up system table roots files for db_id={}, cutoff_xid={}",
+                     db_id, cutoff_xid);
+
+            // Iterate through all defined system tables
+            for (uint32_t system_table_id : sys_tbl::TABLE_IDS) {
+                // System tables use snapshot_xid = 1
+                // Directory format: {table_dir}/{db_id}/{table_id}-{snapshot_xid}
+                std::string db_dir_name = std::to_string(db_id);
+                std::string system_table_dir_name = fmt::format("{}-1", system_table_id);
+                auto system_table_path = table_dir / db_dir_name / system_table_dir_name;
+
+                if (std::filesystem::exists(system_table_path) &&
+                    std::filesystem::is_directory(system_table_path)) {
+                    _cleanup_expired_roots_files(cutoff_xid, system_table_path);
                 }
-
-                // Navigate up to the database directory
-                // file = /path/to/table/{db_id}/{table_id}-{snapshot_xid}/raw
-                auto db_dir = file.parent_path().parent_path();
-
-                // Iterate through all table directories in this database
-                if (std::filesystem::exists(db_dir) && std::filesystem::is_directory(db_dir)) {
-                    for (const auto& table_entry : std::filesystem::directory_iterator(db_dir)) {
-                        if (!table_entry.is_directory()) {
-                            continue;
-                        }
-
-                        // Extract table_id from directory name format: "{table_id}-{snapshot_xid}"
-                        std::string table_dir_name = table_entry.path().filename().string();
-                        size_t dash_pos = table_dir_name.find('-');
-                        if (dash_pos == std::string::npos) {
-                            continue;
-                        }
-
-                        try {
-                            uint64_t table_id = std::stoull(table_dir_name.substr(0, dash_pos));
-
-                            // Only process system tables
-                            if (table_id <= constant::MAX_SYSTEM_TABLE_ID) {
-                                _cleanup_expired_roots_files(cutoff_xid, table_entry.path());
-                            }
-                        } catch (const std::exception&) {
-                            // Skip directories with invalid table_id format
-                            continue;
-                        }
-                    }
-                }
-
-                // Only need to process one file per database to find the db_dir
-                break;
             }
         }
         /*------------- End of roots file cleanup ------------------------------------------------------- */

@@ -126,15 +126,15 @@ namespace {
     std::filesystem::path
     SysTblMgr_Test::_get_system_table_dir(uint64_t system_table_id)
     {
-        // Get the table base directory from properties
+        // Get the table directory from properties
         nlohmann::json storage_config = Properties::get(Properties::STORAGE_CONFIG);
-        std::filesystem::path table_base;
-        Json::get_to<std::filesystem::path>(storage_config, "table_base", table_base);
-        table_base = Properties::make_absolute_path(table_base);
+        std::filesystem::path table_dir;
+        Json::get_to<std::filesystem::path>(storage_config, "table_dir", table_dir);
+        table_dir = Properties::make_absolute_path(table_dir);
 
         // System tables use snapshot_xid = 1
-        // Directory format: {table_base}/{db_id}/{table_id}-{snapshot_xid}
-        return table_helpers::get_table_dir(table_base, _db, system_table_id, 1);
+        // Directory format: {table_dir}/{db_id}/{table_id}-{snapshot_xid}
+        return table_helpers::get_table_dir(table_dir, _db, system_table_id, 1);
     }
 
     PgMsgDropIndex SysTblMgr_Test::_drop_index(uint64_t index_id)
