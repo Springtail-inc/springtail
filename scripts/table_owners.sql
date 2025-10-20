@@ -172,8 +172,12 @@ DECLARE
     FROM
         __pg_springtail_current_table_owner_snapshot AS cur
     FULL OUTER JOIN
-        __pg_springtail_triggers.table_owner_snapshot_history AS prev
-        ON (cur.table_oid = prev.table_oid AND prev.fdw_id = fdw_id_var)
+    (
+        SELECT *
+        FROM __pg_springtail_triggers.table_owner_snapshot_history
+        WHERE fdw_id = fdw_id_var
+    ) AS prev
+    ON (cur.table_oid = prev.table_oid)
     WHERE
         cur.table_oid IS NULL
         OR prev.table_oid IS NULL
