@@ -6,7 +6,7 @@
 # If the dbInstanceId is not provided, it will use the value of the DATABASE_INSTANCE_ID env vars
 # This script requires the following environment variables to be set:
 #   REDIS_HOST, REDIS_PORT, REDIS_USER, REDIS_PASSWORD
-# Check environement variables
+# Check environment variables
 if [ -z "$REDIS_HOST" ] || [ -z "$REDIS_PORT" ] || [ -z "$REDIS_USER" ] || [ -z "$REDIS_PASSWORD" ]; then
   echo "Required environment variables REDIS_HOST, REDIS_PORT, REDIS_USER, or REDIS_PASSWORD are not set."
   exit 1
@@ -85,6 +85,6 @@ refetched=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --user "$REDIS_USER" -a 
   --no-auth-warning --raw \
   HMGET "$redis_item_key" "$redis_sub_key")
 
-banner_less " Updated System Settings (feteched) " "$(echo "$refetched" | jq -r .)"
+banner_less " Updated System Settings (fetched) " "$(echo "$refetched" | jq -r .)"
 
 rm -f "$sfile"

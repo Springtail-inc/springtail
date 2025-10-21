@@ -5,7 +5,7 @@
 # while the actual content is displayed below it, with `less` command for easy reading and navigation.
 # Example usage:
 #   banner "My Banner" "This is the content of the banner. It can be multiple lines long."
-# Dependencies: tmux, les
+# Dependencies: tmux, less
 banner_less() {
   local banner="$1"
   local content="$2"
@@ -24,7 +24,7 @@ banner_less() {
      tmux set-option status-bg green; \
      tmux set-option status-fg black; \
      tmux set-option status-right ''; \
-     tmux set-option status-left-length 100;
+     tmux set-option status-left-length 100; \
      tmux set-option window-status-format ''; \
      tmux set-option window-status-current-format ''; \
      tmux set-option status-left \"$banner\"; \

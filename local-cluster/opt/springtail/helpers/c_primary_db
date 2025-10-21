@@ -8,8 +8,8 @@ db=${1:-postgres}
 hostinfo=$(redis-cli --raw -h "$REDIS_HOST" -p "$REDIS_PORT" --user "$REDIS_USER" -a "$REDIS_PASSWORD" HMGET "${DATABASE_INSTANCE_ID}:instance_config" primary_db 2>/dev/null)
 cred=$(aws secretsmanager get-secret-value --secret-id "sk/${ORGANIZATION_ID}/${ACCOUNT_ID}/aws/dbi/${DATABASE_INSTANCE_ID}/primary_db_password" | jq -r '.SecretString | fromjson' | jq -r '.[] | select(.role == "replication")')
 
-host=$(echo $hostinfo | jq -r ".host")
-port=$(echo $hostinfo | jq -r ".port")
+host=$(echo "$hostinfo" | jq -r ".host")
+port=$(echo "$hostinfo" | jq -r ".port")
 username=$(jq -nr --argjson o "$cred" '$o.username')
 password=$(jq -nr --argjson o "$cred" '$o.password')
 PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$username" -d "$db"
