@@ -298,7 +298,7 @@ namespace springtail::committer {
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
         ComparatorCallback comparator_callback = {PgExtnRegistry::get_instance()->comparator_func};
-        auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid, false, comparator_callback);
+        auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid, comparator_callback);
         MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols);
         root->init_empty();
         key_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
