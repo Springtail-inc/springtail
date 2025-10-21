@@ -1552,8 +1552,8 @@ namespace springtail::pg_fdw {
     std::string
     datum_to_string(Datum value, Oid pg_oid)
     {
-        Oid out_func_oid;
-        bool is_varlena;
+        Oid out_func_oid = 0;
+        bool is_varlena = false;
         getTypeOutputInfo(pg_oid, &out_func_oid, &is_varlena);
 
         char *cstring = OidOutputFunctionCall(out_func_oid, value);

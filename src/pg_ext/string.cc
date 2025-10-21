@@ -51,15 +51,16 @@ pg_mblen(const char *mbstr)
 
 char *lowerstr_with_len(const char *str, int len) {
     if (!str || len <= 0) {
-        char *empty = (char *)palloc(1);
+        auto *empty = (char *)palloc(1);
         if (empty) empty[0] = '\0';
         return empty;
     }
 
-    char *buf = (char *)palloc((size_t)len + 1);  // +1 for null terminator
+    auto *buf = (char *)palloc((size_t)len + 1);  // +1 for null terminator
     if (!buf) return nullptr;
 
-    int i = 0, o = 0;
+    int i = 0;
+    int o = 0;
 
     while (i < len) {
         int m = pg_mblen(str + i);
@@ -101,7 +102,7 @@ char *upperstr_with_len(const char *str, int len) {
         return nullptr;
     }
 
-    char *result = (char *)palloc(len + 1);
+    auto *result = (char *)palloc(len + 1);
     if (!result) return nullptr;
 
     for (size_t i = 0; i < len; i++) {
@@ -127,7 +128,7 @@ int pg_database_encoding_max_length(void) {
 
 int pg_mb2wchar_with_len(const char *from, wchar_t *to, int len) {
     int count = 0;
-    const unsigned char *s = (const unsigned char *)from;
+    const auto *s = (const unsigned char *)from;
 
     while (len > 0 && *s) {
         int mblen = pg_mblen((const char *)s);
@@ -206,19 +207,19 @@ int t_isalnum(const char *ptr) {
 
 int t_isspace(const char *p) {
     if (!p || !*p) return 0;
-    unsigned char c = (unsigned char)*p;
+    auto c = (unsigned char)*p;
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
 
 int t_isdigit(const char *p) {
     if (!p || !*p) return 0;
-    unsigned char c = (unsigned char)*p;
+    auto c = (unsigned char)*p;
     return c >= '0' && c <= '9';
 }
 
 int t_isalpha(const char *p) {
     if (!p || !*p) return 0;
-    unsigned char c = (unsigned char)*p;
+    auto c = (unsigned char)*p;
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
@@ -325,7 +326,7 @@ appendStringInfo(StringInfo str, const char *fmt, ...) // NOSONAR: pg_func - Nee
 
     for (;;) {
         va_list args;
-        int needed;
+        int needed = 0;
 
         /* Try to format the data. */
         errno = save_errno;
@@ -408,7 +409,7 @@ errposition(int cursorpos)
 int
 parser_errposition(ParseState *pstate, int location)
 {
-    int pos;
+    int pos = 0;
 
     /* No-op if location was not provided */
     if (location < 0) {
@@ -436,7 +437,7 @@ scanner_isspace(char ch)
 
 text
 *cstring_to_text_with_len(const char *s, int len){
-    text *result = (text *)palloc(len + VARHDRSZ);
+    auto *result = (text *)palloc(len + VARHDRSZ);
 
     SET_VARSIZE(result, len + VARHDRSZ);
     memcpy(VARDATA(result), s, len);
@@ -448,8 +449,8 @@ int
 pg_strcasecmp(const char *s1, const char *s2)
 {
     for (;;) {
-        unsigned char ch1 = (unsigned char)*s1++;
-        unsigned char ch2 = (unsigned char)*s2++;
+        auto ch1 = (unsigned char)*s1++;
+        auto ch2 = (unsigned char)*s2++;
 
         if (ch1 != ch2) {
             if (ch1 >= 'A' && ch1 <= 'Z') {

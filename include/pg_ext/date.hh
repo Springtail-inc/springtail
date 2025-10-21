@@ -289,7 +289,7 @@ union local_storage
 
 		/* A temporary state used for parsing a TZ string in the file.  */
 		struct state st;
-	}			u;
+	} u;
 
 	/* We don't need the "fullname" member */
 };

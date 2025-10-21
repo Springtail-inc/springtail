@@ -16,8 +16,8 @@ Node *coerce_to_target_type(ParseState *pstate,
 Node *
 transformExpr(ParseState *pstate, Node *expr, ParseExprKind exprKind)
 {
-    Node *result;
-    ParseExprKind sv_expr_kind;
+    Node *result = nullptr;
+    ParseExprKind sv_expr_kind = ParseExprKind::EXPR_KIND_NONE;
 
     /* Save and restore identity of expression type we're parsing */
     assert(exprKind != ParseExprKind::EXPR_KIND_NONE);

@@ -218,11 +218,8 @@ construct_md_array(Datum *elems,
 ArrayType *
 construct_array(Datum *elems, int nelems, Oid elmtype, int elmlen, bool elmbyval, char elmalign)
 {
-    int dims[1];
-    int lbs[1];
-
-    dims[0] = nelems;
-    lbs[0] = 1;
+    int dims[1] = { nelems };
+    int lbs[1] = { 1 };    
 
     return construct_md_array(elems, nullptr, 1, dims, lbs, elmtype, elmlen, elmbyval, elmalign);
 }

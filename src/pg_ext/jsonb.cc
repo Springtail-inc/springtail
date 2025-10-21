@@ -590,8 +590,8 @@ pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 {
 	JsonbIterator *it = nullptr;
 	JsonbValue *res = nullptr;
-	JsonbValue v;
-	JsonbIteratorToken tok;
+	JsonbValue v = {};
+	JsonbIteratorToken tok = JsonbIteratorToken::WJB_DONE;
 	int i = 0;
 
 	if (jbval && (seq == JsonbIteratorToken::WJB_ELEM || seq == JsonbIteratorToken::WJB_VALUE) && jbval->type == jbvType::jbvObject)
@@ -1190,8 +1190,8 @@ convertJsonbScalar(StringInfo buffer, JEntry *header, JsonbValue *scalarVal)
 
 		case jbvType::jbvDatetime:
 			{
-				char		buf[MAXDATELEN + 1];
-				size_t		len;
+				char		buf[MAXDATELEN + 1] = {0};
+				size_t		len = 0;
 
 				JsonEncodeDateTime(buf,
 								   scalarVal->val.datetime.value,
@@ -1281,10 +1281,8 @@ JsonbValueToJsonb(JsonbValue *val)
 void
 escape_json(StringInfo buf, const char *str)
 {
-    const char *p;
-
     appendStringInfoCharMacro(buf, '"');
-    for (p = str; *p; p++) {
+    for (auto p = str; *p; p++) {
         switch (*p) {
             case '\b':
                 appendStringInfoString(buf, "\\b");

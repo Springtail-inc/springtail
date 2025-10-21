@@ -36,7 +36,7 @@ MemoryContext::_alloc_large(size_t size)
 void*
 MemoryContext::alloc(size_t size)
 {
-    void *ptr;
+    void *ptr = nullptr;
 
     // check if it's a large block
     if (size > _max_size) {

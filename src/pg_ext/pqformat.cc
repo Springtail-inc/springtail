@@ -76,7 +76,7 @@ pg_server_to_client(const char *s, int len = 0)
 void
 pq_sendtext(StringInfo buf, const char *str, int slen)
 {
-    char *p;
+    char *p = nullptr;
 
     if (!str || slen <= 0) {
         LOG_ERROR("Invalid arguments to pq_sendtext");
