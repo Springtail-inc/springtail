@@ -10,20 +10,25 @@
 
 #include <common/init.hh>
 #include <common/constants.hh>
+#include <common/filesystem.hh>
 #include <common/json.hh>
 #include <common/object_cache.hh>
 #include <common/properties.hh>
 #include <common/threaded_test.hh>
 
 #include <storage/schema.hh>
+#include <storage/vacuumer.hh>
 #include <storage/xid.hh>
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
+#include <sys_tbl_mgr/table.hh>
 
 #include <test/services.hh>
+
+#include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
 
@@ -71,6 +76,7 @@ namespace {
         PgMsgIndex _create_index(uint64_t tid, const std::string& name, uint64_t index_id);
         PgMsgDropIndex _drop_index(uint64_t index_id);
         void _set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
+        std::filesystem::path _get_system_table_dir(uint64_t system_table_id);
 
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
         sys_tbl_mgr::Server *_server = sys_tbl_mgr::Server::get_instance();
@@ -117,6 +123,20 @@ namespace {
         auto xid = _next_lsn();
         _server->set_index_state(_db, xid, table_id, index_id, state);
         _client->invalidate_table(_db, table_id, xid);
+    }
+
+    std::filesystem::path
+    SysTblMgr_Test::_get_system_table_dir(uint64_t system_table_id)
+    {
+        // Get the table directory from properties
+        nlohmann::json storage_config = Properties::get(Properties::STORAGE_CONFIG);
+        std::filesystem::path table_dir;
+        Json::get_to<std::filesystem::path>(storage_config, "table_dir", table_dir);
+        table_dir = Properties::make_absolute_path(table_dir);
+
+        // System tables use snapshot_xid = 1
+        // Directory format: {table_dir}/{db_id}/{table_id}-{snapshot_xid}
+        return table_helpers::get_table_dir(table_dir, _db, system_table_id, 1);
     }
 
     PgMsgDropIndex SysTblMgr_Test::_drop_index(uint64_t index_id)
@@ -735,5 +755,98 @@ namespace {
         for (auto &thread : threads) {
             thread.join();
         }
+    }
+
+    // Test that the vacuumer properly cleans up old roots files from system tables
+    TEST_F(SysTblMgr_Test, VacuumSystemTableRoots)
+    {
+        // Enable vacuum tracking
+        Vacuumer::get_instance()->enable_tracking_extents();
+
+        // XID 1: Create first user table
+        // This will update system tables (TableNames, TableRoots, etc.) and create roots.{xid} files
+        uint64_t tid1 = 200001;
+        _create_table(tid1, "vacuum_test_table_1");
+        _finalize();
+        uint64_t xid1 = _xid.xid - 1;
+
+        // XID 2: Create second user table
+        uint64_t tid2 = 200002;
+        _create_table(tid2, "vacuum_test_table_2");
+        _finalize();
+        uint64_t xid2 = _xid.xid - 1;
+
+        // XID 3: Drop first table
+        _drop_table(tid1, "vacuum_test_table_1");
+        _finalize();
+        uint64_t xid3 = _xid.xid - 1;
+
+        // XID 4: Create third table
+        uint64_t tid3 = 200003;
+        _create_table(tid3, "vacuum_test_table_3");
+        _finalize();
+        uint64_t xid4 = _xid.xid - 1;
+
+        // Get the system table directory (using TableNames as our test subject)
+        auto table_names_dir = _get_system_table_dir(sys_tbl::TableNames::ID);
+        LOG_INFO("System table directory: {}", table_names_dir.string());
+
+        // Verify roots files exist before vacuum
+        auto roots_xid1 = table_names_dir / fmt::format("roots.{}", xid1);
+        auto roots_xid2 = table_names_dir / fmt::format("roots.{}", xid2);
+        auto roots_xid3 = table_names_dir / fmt::format("roots.{}", xid3);
+        auto roots_xid4 = table_names_dir / fmt::format("roots.{}", xid4);
+
+        ASSERT_TRUE(std::filesystem::exists(roots_xid1)) << "Expected roots file for XID " << xid1;
+        ASSERT_TRUE(std::filesystem::exists(roots_xid2)) << "Expected roots file for XID " << xid2;
+        ASSERT_TRUE(std::filesystem::exists(roots_xid3)) << "Expected roots file for XID " << xid3;
+        ASSERT_TRUE(std::filesystem::exists(roots_xid4)) << "Expected roots file for XID " << xid4;
+
+        LOG_INFO("All roots files exist before vacuum: {}, {}, {}, {}", xid1, xid2, xid3, xid4);
+
+        // Set cutoff_xid to xid3 - this means xid1 and xid2 should be cleaned up
+        uint64_t cutoff_xid = xid3;
+        uint64_t current_xid = xid4 + 1;
+
+        // Commit the XID so that XidMgrServer has the correct last_committed_xid
+        // This ensures _get_vacuum_cutoff_xid() returns the expected value
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db, 1, cutoff_xid, false);
+
+        // Trigger vacuum
+        Vacuumer::get_instance()->set_global_vacuum_threshold(10);
+        Vacuumer::get_instance()->commit_expired_extents(_db, current_xid);
+        Vacuumer::get_instance()->run_vacuum_once();
+
+        LOG_INFO("Vacuum completed with cutoff_xid={}", cutoff_xid);
+
+        // Verify old roots files (< cutoff_xid) are deleted
+        ASSERT_FALSE(std::filesystem::exists(roots_xid1))
+            << "Expected roots file for XID " << xid1 << " to be deleted (< cutoff_xid=" << cutoff_xid << ")";
+        ASSERT_FALSE(std::filesystem::exists(roots_xid2))
+            << "Expected roots file for XID " << xid2 << " to be deleted (< cutoff_xid=" << cutoff_xid << ")";
+
+        // Verify recent roots files (>= cutoff_xid) remain
+        ASSERT_TRUE(std::filesystem::exists(roots_xid3))
+            << "Expected roots file for XID " << xid3 << " to remain (>= cutoff_xid=" << cutoff_xid << ")";
+        ASSERT_TRUE(std::filesystem::exists(roots_xid4))
+            << "Expected roots file for XID " << xid4 << " to remain (>= cutoff_xid=" << cutoff_xid << ")";
+
+        // Verify the roots symlink still exists
+        auto roots_symlink = table_names_dir / "roots";
+        ASSERT_TRUE(std::filesystem::exists(roots_symlink)) << "Expected roots symlink to exist";
+
+        LOG_INFO("Vacuum test passed: Old roots files deleted, recent ones preserved");
+
+        // Also verify TableRoots system table
+        auto table_roots_dir = _get_system_table_dir(sys_tbl::TableRoots::ID);
+        LOG_INFO("Checking TableRoots system table directory: {}", table_roots_dir.string());
+
+        // Verify cleanup happened there too
+        ASSERT_FALSE(std::filesystem::exists(table_roots_dir / fmt::format("roots.{}", xid1)));
+        ASSERT_FALSE(std::filesystem::exists(table_roots_dir / fmt::format("roots.{}", xid2)));
+        // note: no roots file for xid3 because it was a table drop
+        ASSERT_TRUE(std::filesystem::exists(table_roots_dir / fmt::format("roots.{}", xid4)));
+
+        LOG_INFO("TableRoots system table also cleaned up correctly");
     }
 }

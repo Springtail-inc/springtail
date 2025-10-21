@@ -45,7 +45,6 @@ namespace springtail {
                                 uint64_t table_id,
                                 uint64_t access_xid,
                                 uint64_t target_xid,
-                                bool for_gc,
                                 const ComparatorCallback &comparator_callback)
     {
         // check the system tables
@@ -79,7 +78,7 @@ namespace springtail {
 
         return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_indexes,
-                                                  *tbl_meta, schema, for_gc, comparator_callback);
+                                                  *tbl_meta, schema, comparator_callback);
     }
 
     MutableTablePtr
@@ -104,7 +103,7 @@ namespace springtail {
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema, false, comparator_callback);
+                                                  tbl_meta, schema, comparator_callback);
     }
 
     std::map<uint32_t, SchemaColumn>

@@ -22,7 +22,8 @@ def generate_tests(test_folder: str,
                    config_file: str,
                    build_dir: str,
                    test_params: Optional[dict],
-                   overlay: Optional[str]) -> list[TestSet]:
+                   overlay: Optional[str],
+                   valgrind_daemons: list[str] = []) -> list[TestSet]:
     """
     Generates a list of TestSet objects based on the provided configuration and test inputs.
 
@@ -71,7 +72,7 @@ def generate_tests(test_folder: str,
                     raise ValueError(f"Test file {test_file_path} does not exists")
 
         logging.info(f'Processing test set {ts}')
-        test = TestSet(os.path.join(test_folder, ts), config_file, build_dir, test_params, overlay, test_files)
+        test = TestSet(os.path.join(test_folder, ts), config_file, build_dir, test_params, overlay, test_files, valgrind_daemons)
         if test.skip():
             logging.warning(f'Skipping test set {ts}')
         else:
@@ -87,7 +88,8 @@ def generate_tests_for_overlay(test_folder: str,
                                test_set: Optional[list[str]],
                                test_files: list[str],
                                default_config: dict,
-                               overlay: Optional[str]) -> list[TestSet]:
+                               overlay: Optional[str],
+                               valgrind_daemons: list[str] = []) -> list[TestSet]:
     """
     Generates a list of TestSet objects using overlay-specific configurations.
 
@@ -142,7 +144,7 @@ def generate_tests_for_overlay(test_folder: str,
             json.dump(merged_config, f, indent=2)
 
     # generate tests
-    return generate_tests(test_folder, test_set, test_files, config_json_path, build_dir, overlay_params, overlay)
+    return generate_tests(test_folder, test_set, test_files, config_json_path, build_dir, overlay_params, overlay, valgrind_daemons)
 
 
 def try_generate_junit(junit_file: str, test_sets: list[TestSet]) -> None:
@@ -168,6 +170,7 @@ def parse_arguments():
     parser.add_argument('-j', '--junit', type=str, help='Output test results to the specified JUnit XML file')
     parser.add_argument('-o', '--overlay', type=str, help='Run using a specific overlay config')
     parser.add_argument('--skip-downloads', action='store_true', help='Skip downloading the test files from S3')
+    parser.add_argument('--valgrind', type=str, help='Comma-separated list of daemon names to run with valgrind (e.g., pg_log_mgr_daemon,proxy)')
     parser.add_argument('test_set', type=str, nargs='?', help='Limit to a specific test set')
     parser.add_argument('test_case', type=str, nargs='*', help='Limit to specific test cases from the test set')
     args = parser.parse_args()
@@ -179,6 +182,12 @@ def parse_arguments():
     # Do not use "default" configuration if we want to run specific overlay and/or test cases
     if args.config == "default" and (args.overlay or args.test_set or args.test_case):
         args.config = None
+
+    # Parse valgrind daemon list
+    if args.valgrind:
+        args.valgrind = [d.strip() for d in args.valgrind.split(',')]
+    else:
+        args.valgrind = []
 
     return args
 
@@ -240,10 +249,10 @@ if __name__ == "__main__":
                     logging.error(f'Configuration "{args.config}": test_sets is empty')
                     raise ValueError(f'Configuration "{args.config}" test_sets is empty')
 
-            tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, [], default_config, overlay)
+            tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, [], default_config, overlay, args.valgrind)
     else:
         test_sets = [args.test_set] if args.test_set is not None else None
-        tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, args.test_case, default_config, args.overlay)
+        tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, args.test_case, default_config, args.overlay, args.valgrind)
 
     # sync the test data files
     helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),

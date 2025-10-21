@@ -570,15 +570,13 @@ namespace indexer_helpers {
                                const std::vector<Index> &secondary,
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
-                               bool for_gc,
                                const ComparatorCallback &comparator_callback)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
       _target_xid(target_xid),
       _primary_key(primary_key),
-      _schema(schema),
-      _for_gc(for_gc)
+      _schema(schema)
     {
         std::vector<TableRoot> roots;
         _snapshot_xid = metadata.snapshot_xid;
@@ -905,12 +903,19 @@ namespace indexer_helpers {
     TableMetadata
     MutableTable::finalize()
     {
+        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Finalize {} {}", _id, _target_xid);
+
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
         if (_empty_page) {
-            _flush_and_populate_indexes(_empty_page->ptr());
-            // this will release the page to the cache
-            _empty_page.reset();
+            // if the empty page is empty, then we don't need to do anything here
+            if (!(*_empty_page)->empty()) {
+                _flush_and_populate_indexes(_empty_page->ptr());
+                DCHECK(!(*_empty_page)->dirty());
+
+                // this will release the page to the cache
+                _empty_page.reset();
+            }
         }
 
         // flush the dirty data pages of the table to disk
@@ -933,26 +938,29 @@ namespace indexer_helpers {
         metadata.stats.end_offset = end_offset;
 
         // store the roots into a look-aside root file
-        // XXX maybe we only need to do this for system tables?  or even just the table_roots table?
-        auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size(), _roots_schema->field_types());
-        for (auto root : metadata.roots) {
-            auto &&row = extent->append();
-            _roots_root_f->set_uint64(&row, root.extent_id);
-            _roots_index_id_f->set_uint64(&row, root.index_id);
+        // Only maintain roots files for system tables (table_id <= MAX_SYSTEM_TABLE_ID)
+        // User tables rely on metadata.roots stored in the system tables
+        if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
+            auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size(), _roots_schema->field_types());
+            for (auto root : metadata.roots) {
+                auto &&row = extent->append();
+                _roots_root_f->set_uint64(&row, root.extent_id);
+                _roots_index_id_f->set_uint64(&row, root.index_id);
+            }
+            auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
+            auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
+                                                           IOMgr::IO_MODE::APPEND, true);
+
+            // flush and wait for completion
+            extent->async_flush(root_handle).wait();
+            root_handle->sync();
+
+            // swap the symlink
+            std::filesystem::create_symlink(_table_dir / filename,
+                                            _table_dir / constant::ROOTS_TMP_FILE);
+            std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
+                                    _table_dir / constant::ROOTS_FILE);
         }
-        auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
-        auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
-                                                       IOMgr::IO_MODE::APPEND, true);
-
-        // flush and wait for completion
-        extent->async_flush(root_handle).wait();
-        root_handle->sync();
-
-        // swap the symlink
-        std::filesystem::create_symlink(_table_dir / filename,
-                                        _table_dir / constant::ROOTS_TMP_FILE);
-        std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
-                                _table_dir / constant::ROOTS_FILE);
 
         return metadata;
     }

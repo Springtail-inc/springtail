@@ -415,6 +415,14 @@ namespace springtail {
             }
 
             /**
+             * Evicts the underlying cache page from the StorageCache.  Used during cache clear
+             * to ensure dirty pages are properly evicted.
+             */
+            void evict_cache_page() {
+                _cache_page.evict();
+            }
+
+            /**
              * Returns the on-disk XID of the page.
              */
             uint64_t xid() const {

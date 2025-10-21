@@ -3,6 +3,7 @@ import shutil
 import time
 import socket
 import http.client
+import subprocess
 from typing import Dict, List, Optional
 
 from common import (
@@ -216,7 +217,12 @@ def stop_postgres() -> None:
             raise Exception("Failed to stop the postgres process, timedout")
 
 
-def start_daemons(build_dir : str, daemons : List[tuple], restart : bool = True) -> None:
+def start_daemons(build_dir : str,
+                  daemons : List[tuple],
+                  restart : bool = True,
+                  valgrind_daemons: List[str] = [],
+                  pid_path: Optional[str] = None,
+                  log_path: Optional[str] = None) -> None:
     """Start the daemons."""
     # Check if the daemons are already running
     daemon_names = [daemon[0] for daemon in daemons]
@@ -228,29 +234,84 @@ def start_daemons(build_dir : str, daemons : List[tuple], restart : bool = True)
             print("All daemons are already running.")
             return
 
+    # Track valgrind parent PIDs
+    valgrind_pids = {}
+
     # start the daemons
     # daemon is a tuple of (name, path, args)
     for daemon in daemons:
+        daemon_name = daemon[0]
         cmd_dir = os.path.join(build_dir, daemon[1])
 
         if not os.path.exists(cmd_dir):
-            raise Exception(f"Daemon {daemon[0]} not found: {cmd_dir}")
+            raise Exception(f"Daemon {daemon_name} not found: {cmd_dir}")
 
-        args = ['--daemonize']
-        if len(daemon) > 2:
-            args += daemon[2].split(',')
+        # Check if this daemon should be run with valgrind
+        use_valgrind = daemon_name in valgrind_daemons
 
-        print(f"Starting daemon: {daemon[0]} with args {args}")
-        run_command(cmd_dir, args)
+        if use_valgrind:
+            if not pid_path or not log_path:
+                raise Exception(f"Cannot start {daemon_name} with valgrind: pid_path and log_path must be provided")
+
+            # Build valgrind command
+            valgrind_log = os.path.join(log_path, f'{daemon_name}.valgrind.log')
+            cmd = ['valgrind', '--tool=memcheck', '--leak-check=no', '--track-origins=yes',
+                   f'--log-file={valgrind_log}', cmd_dir]
+
+            # Add daemon-specific args (but not --daemonize)
+            if len(daemon) > 2:
+                cmd += daemon[2].split(',')
+
+            print(f"Starting daemon: {daemon_name} with valgrind, log: {valgrind_log}")
+
+            # Start process in background and capture PID
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Store the valgrind PID for verification
+            valgrind_pids[daemon_name] = proc.pid
+
+            # Write PID file with the valgrind PID (for cleanup)
+            pid_file = os.path.join(pid_path, f'{daemon_name}.pid')
+            with open(pid_file, 'w') as f:
+                f.write(str(proc.pid))
+
+            print(f"Started {daemon_name} with valgrind, PID: {proc.pid}")
+        else:
+            # Normal daemon start with --daemonize
+            args = ['--daemonize']
+            if len(daemon) > 2:
+                args += daemon[2].split(',')
+
+            print(f"Starting daemon: {daemon_name} with args {args}")
+            run_command(cmd_dir, args)
 
         time.sleep(2)
 
-    # check if all daemons are running
-    (all_running, not_running) = check_daemons_running(daemon_names)
-    if not all_running:
-        for name in not_running:
-            print(f"Daemon {name} failed to start")
-        raise Exception("Failed to start all daemons")
+    # Check if all daemons are running
+    # For valgrind daemons, check by PID; for normal daemons, check by name
+    non_valgrind_daemons = [name for name in daemon_names if name not in valgrind_daemons]
+
+    # Check non-valgrind daemons by name
+    if non_valgrind_daemons:
+        (all_running, not_running) = check_daemons_running(non_valgrind_daemons)
+        if not all_running:
+            for name in not_running:
+                print(f"Daemon {name} failed to start")
+            raise Exception("Failed to start all daemons")
+
+    # Check valgrind daemons by verifying the PID is still running
+    import psutil
+    for daemon_name, pid in valgrind_pids.items():
+        try:
+            proc = psutil.Process(pid)
+            if proc.is_running():
+                print(f"Daemon {daemon_name} confirmed running under valgrind (PID: {pid})")
+            else:
+                print(f"Daemon {daemon_name} failed to start - valgrind process not running")
+                raise Exception(f"Daemon {daemon_name} failed to start")
+        except psutil.NoSuchProcess:
+            print(f"Daemon {daemon_name} failed to start - valgrind process {pid} not found")
+            raise Exception(f"Daemon {daemon_name} failed to start")
 
 
 def running_daemons(daemons : List[tuple]) -> List[Dict]:
