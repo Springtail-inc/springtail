@@ -435,7 +435,7 @@ transtime(const int year, const struct rule *const rulep,
 			d = rulep->r_day - dow;
 			if (d < 0)
 				d += DAYSPERWEEK;
-			for (i = 1; i < rulep->r_week; ++i)
+			for (int i = 1; i < rulep->r_week; ++i)
 			{
 				if (d + DAYSPERWEEK >=
 					mon_lengths[(int) leapyear][rulep->r_mon - 1])
@@ -827,6 +827,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
             union local_storage *lsp)
  {
      int			fid = 0;
+		 int			i = 0;
      ssize_t		nread = 0;
      union input_buffer *up = &lsp->u.u;
      int			tzheadsize = sizeof(struct tzhead);
@@ -902,7 +903,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
           * TIME_T_MIN.
           */
          timecnt = 0;
-         for (i = 0; i < sp->timecnt; ++i)
+         for (int i = 0; i < sp->timecnt; ++i)
          {
              int64_t		at
              = stored == 4 ? detzcode(p) : detzcode64(p);

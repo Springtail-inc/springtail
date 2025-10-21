@@ -45,7 +45,7 @@ public:
     };
 
     void define_real(std::string_view name, double *value_addr);
-    void set_option(std::string_view name, std::string_view value, GucContext context = PGC_USERSET);
+    void set_option(std::string_view name, std::string_view value, GucContext context = GucContext::PGC_USERSET);
     void reserve_prefix(std::string_view prefix);
 
 private:

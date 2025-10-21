@@ -58,13 +58,13 @@ void ProcessInterrupts() {
     if (InterruptPending) {
         InterruptPending = false;
         // Handle interrupt - in this case we'll just log it
-        std::print(stderr, "Process interrupt received\n");
+        LOG_ERROR("Process interrupt received");
     }
 }
 
 bool errstart(int elevel, const char *domain) {
     (void)elevel; // silence unused parameter warning
-    std::print(stderr, "\nError started at (domain: %s)", domain ? domain : "none");
+    LOG_ERROR("\nError started at (domain: %s)", domain ? domain : "none");
     return true;
 }
 
