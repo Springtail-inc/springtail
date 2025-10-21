@@ -116,15 +116,14 @@ EncodeDateOnly(struct pg_tm *tm, int style, char *str)
 static int32_t
 detzcode(const char *const codep)
 {
-	int32_t		result;
-	int			i;
+	int32_t		result = 0;
 	int32_t		one = 1;
 	int32_t		halfmaxval = one << (32 - 2);
 	int32_t		maxval = halfmaxval - 1 + halfmaxval;
 	int32_t		minval = -1 - maxval;
 
 	result = codep[0] & 0x7f;
-	for (i = 1; i < 4; ++i)
+	for (int i = 1; i < 4; ++i)
 		result = (result << 8) | (codep[i] & 0xff);
 
 	if (codep[0] & 0x80)
@@ -142,15 +141,14 @@ detzcode(const char *const codep)
 static int64_t
 detzcode64(const char *const codep)
 {
-	uint64_t	result;
-	int			i;
+	uint64_t	result = 0;
 	int64_t		one = 1;
 	int64_t		halfmaxval = one << (64 - 2);
 	int64_t		maxval = halfmaxval - 1 + halfmaxval;
 	int64_t		minval = -TWOS_COMPLEMENT(int64_t) - maxval;
 
 	result = codep[0] & 0x7f;
-	for (i = 1; i < 8; ++i)
+	for (int i = 1; i < 8; ++i)
 		result = (result << 8) | (codep[i] & 0xff);
 
 	if (codep[0] & 0x80)
@@ -194,7 +192,7 @@ pg_open_tzfile(const char *name, char *canonname)
 static const char *
 getzname(const char *strp)
 {
-	char		c;
+	char		c = 0;
 
 	while ((c = *strp) != '\0' && !is_digit(c) && c != ',' && c != '-' &&
 		   c != '+')
@@ -205,7 +203,7 @@ getzname(const char *strp)
 static const char *
 getqzname(const char *strp, const int delim)
 {
-	int			c;
+	int			c	= 0;
 
 	while ((c = *strp) != '\0' && c != delim)
 		++strp;
@@ -215,8 +213,8 @@ getqzname(const char *strp, const int delim)
 static const char *
 getnum(const char *strp, int *const nump, const int min, const int max)
 {
-	char		c;
-	int			num;
+	char		c	= 0;
+	int			num = 0;
 
 	if (strp == nullptr || !is_digit(c = *strp))
 		return nullptr;
@@ -237,7 +235,7 @@ getnum(const char *strp, int *const nump, const int min, const int max)
 static const char *
 getsecs(const char *strp, int32_t *const secsp)
 {
-	int			num;
+	int			num = 0;
 
 	/*
 	 * 'HOURSPERDAY * DAYSPERWEEK - 1' allows quasi-Posix rules like
@@ -375,15 +373,14 @@ static int32_t
 transtime(const int year, const struct rule *const rulep,
 		  const int32_t offset)
 {
-	bool		leapyear;
-	int32_t		value;
-	int			i;
-	int			d,
-				m1,
-				yy0,
-				yy1,
-				yy2,
-				dow;
+	bool		leapyear = false;
+	int32_t		value = 0;
+	int			d = 0;
+	int			m1 = 0;
+	int			yy0 = 0;
+	int			yy1 = 0;
+	int			yy2 = 0;
+	int			dow = 0;
 
 	INITIALIZE(value);
 	leapyear = isleap(year);
@@ -450,7 +447,7 @@ transtime(const int year, const struct rule *const rulep,
 			 * "d" is the day-of-month (zero-origin) of the day we want.
 			 */
 			value = d * SECSPERDAY;
-			for (i = 0; i < rulep->r_mon - 1; ++i)
+			for (int i = 0; i < rulep->r_mon - 1; ++i)
 				value += mon_lengths[(int) leapyear][i] * SECSPERDAY;
 			break;
 	}
@@ -466,15 +463,15 @@ transtime(const int year, const struct rule *const rulep,
 bool
 tzparse(const char *name, struct state *sp, bool lastditch)
 {
-	const char *stdname;
+	const char *stdname = nullptr;
 	const char *dstname = nullptr;
-	size_t		stdlen;
-	size_t		dstlen;
-	size_t		charcnt;
-	int32_t		stdoffset;
-	int32_t		dstoffset;
-	char	   *cp;
-	bool		load_ok;
+	size_t		stdlen = 0;
+	size_t		dstlen = 0;
+	size_t		charcnt = 0;
+	int32_t		stdoffset = 0;
+	int32_t		dstoffset = 0;
+	char	   *cp = nullptr;
+	bool		load_ok = false;
 
 	stdname = name;
     if (lastditch)
@@ -775,7 +772,7 @@ tzparse(const char *name, struct state *sp, bool lastditch)
 static bool
 typesequiv(const struct state *sp, int a, int b)
 {
-	bool		result;
+	bool		result = false;
 
 	if (sp == nullptr ||
 		a < 0 || a >= sp->typecnt ||
@@ -800,10 +797,8 @@ typesequiv(const struct state *sp, int a, int b)
 static int64_t
 leapcorr(struct state const *sp, pg_time_t t)
 {
-	struct lsinfo const *lp;
-	int			i;
-
-	i = sp->leapcnt;
+	struct lsinfo const *lp = nullptr;
+	int			i = sp->leapcnt;
 	while (--i >= 0)
 	{
 		lp = &sp->lsis[i];
@@ -831,10 +826,8 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
  tzloadbody(char const *name, char *canonname, struct state *sp, bool doextend,
             union local_storage *lsp)
  {
-     int			i;
-     int			fid;
-     int			stored;
-     ssize_t		nread;
+     int			fid = 0;
+     ssize_t		nread = 0;
      union input_buffer *up = &lsp->u.u;
      int			tzheadsize = sizeof(struct tzhead);
 
@@ -864,7 +857,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
      }
      if (close(fid) < 0)
          return errno;
-     for (stored = 4; stored <= 8; stored *= 2)
+     for (int stored = 4; stored <= 8; stored *= 2)
      {
          int32_t		ttisstdcnt = detzcode(up->tzhead.tzh_ttisstdcnt);
          int32_t		ttisutcnt = detzcode(up->tzhead.tzh_ttisutcnt);
@@ -1009,7 +1002,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
                  ttisp->tt_ttisstd = *p++;
              }
          }
-         for (i = 0; i < sp->typecnt; ++i)
+         for (int i = 0; i < sp->typecnt; ++i)
          {
              struct ttinfo *ttisp;
 
@@ -1291,10 +1284,10 @@ timesub(const pg_time_t *timep, int32_t offset,
 	rem = *timep % SECSPERDAY;
 	while (tdays < 0 || tdays >= year_lengths[isleap(y)])
 	{
-		int			newy;
-		pg_time_t	tdelta;
-		int			idelta;
-		int			leapdays;
+		int			newy = 0;
+		pg_time_t	tdelta = 0;
+		int			idelta = 0;
+		int			leapdays = 0;
 
 		tdelta = tdays / DAYSPERLYEAR;
 		if (!((!TYPE_SIGNED(pg_time_t) || INT_MIN <= tdelta)
@@ -1415,9 +1408,9 @@ static struct pg_tm *
 localsub(struct state const *sp, pg_time_t const *timep,
 		 struct pg_tm *const tmp)
 {
-	const struct ttinfo *ttisp;
-	int			i;
-	struct pg_tm *result;
+	const struct ttinfo *ttisp = nullptr;
+	int			i = 0;
+	struct pg_tm *result = nullptr;
 	const pg_time_t t = *timep;
 
 	if (sp == nullptr)
@@ -1426,8 +1419,8 @@ localsub(struct state const *sp, pg_time_t const *timep,
 		(sp->goahead && t > sp->ats[sp->timecnt - 1]))
 	{
 		pg_time_t	newt = t;
-		pg_time_t	seconds;
-		pg_time_t	years;
+		pg_time_t	seconds = 0;
+		pg_time_t	years = 0;
 
 		if (t < sp->ats[0])
 			seconds = sp->ats[0] - t;
@@ -1506,10 +1499,10 @@ pg_localtime(const pg_time_t *timep, const pg_tz *tz)
 void
 j2date(int jd, int *year, int *month, int *day)
 {
-	unsigned int julian;
-	unsigned int quad;
-	unsigned int extra;
-	int			y;
+	unsigned int julian = 0;
+	unsigned int quad = 0;
+	unsigned int extra = 0;
+	int			y = 0;
 
 	julian = jd;
 	julian += 32044;
@@ -1739,9 +1732,9 @@ void EncodeSpecialDate(DateADT dt, char* str)
 static char *
 EncodeTimezone(char *str, int tz, int style)
 {
-	int			hour,
-				min,
-				sec;
+	int			hour = 0;
+	int			min = 0;
+	int			sec = 0;
 
 	sec = abs(tz);
 	min = sec / SECS_PER_MINUTE;
@@ -1830,8 +1823,8 @@ AppendTimestampSeconds(char *cp, struct pg_tm *tm, fsec_t fsec)
 int
 date2j(int year, int month, int day)
 {
-	int			julian;
-	int			century;
+	int			julian = 0;
+	int			century = 0;
 
 	if (month > 2)
 	{
@@ -1872,7 +1865,7 @@ void EncodeDateTime(struct pg_tm *tm,
                     int style,
                     char *str)
 {
-    int day;
+    int day = 0;
     assert(tm->tm_mon >= 1 && tm->tm_mon <= MONTHS_PER_YEAR);
 
     if (tm->tm_isdst < 0)

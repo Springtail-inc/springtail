@@ -83,8 +83,8 @@ float8in_internal(char *num, char **endptr_p,
 				  const char *type_name, const char *orig_string,
 				  struct Node *escontext)
 {
-	double		val;
-	char	   *endptr;
+	double		val = 0;
+	char	   *endptr = nullptr;
 
 	/* skip leading whitespace */
 	while (*num != '\0' && isspace((unsigned char) *num))

@@ -588,7 +588,7 @@ JsonbValue *
 pushJsonbValue(JsonbParseState **pstate, JsonbIteratorToken seq,
 			   JsonbValue *jbval)
 {
-	JsonbIterator *it;
+	JsonbIterator *it = nullptr;
 	JsonbValue *res = nullptr;
 	JsonbValue v;
 	JsonbIteratorToken tok;
@@ -707,9 +707,9 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 			break;
 		case TIMESTAMPOID:
 			{
-				Timestamp	timestamp;
+				Timestamp	timestamp = 0;
 				struct pg_tm tm;
-				fsec_t		fsec;
+				fsec_t		fsec = 0;
 
 				timestamp = DatumGetTimestamp(value);
 				/* Same as timestamp_out(), but forcing DateStyle */
@@ -935,16 +935,15 @@ appendToBuffer(StringInfo buffer, const char *data, int len)
 short
 padBufferToInt(StringInfo buffer)
 {
-	int			padlen = 0,
-				p = 0,
-				offset = 0;
+	int			padlen = 0;
+	int			offset = 0;
 
 	padlen = INTALIGN(buffer->len) - buffer->len;
 
 	offset = reserveFromBuffer(buffer, padlen);
 
 	/* padlen must be small, so this is probably faster than a memset */
-	for (p = 0; p < padlen; p++)
+	for (int p = 0; p < padlen; p++)
 		buffer->data[offset + p] = '\0';
 
 	return padlen;

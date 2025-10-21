@@ -3,7 +3,7 @@
 #include <pg_ext/export.hh>
 #include <pg_ext/fmgr.hh>
 
-typedef struct NumericData *Numeric;
+using struct NumericData *Numeric;
 typedef int16_t NumericDigit;
 
 struct NumericShort {

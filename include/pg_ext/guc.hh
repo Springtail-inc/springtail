@@ -10,7 +10,7 @@
 
 namespace pgext {
 
-enum GucContext : int {
+enum class GucContext : int {
     PGC_INTERNAL,
     PGC_POSTMASTER,
     PGC_SIGHUP,
@@ -18,7 +18,7 @@ enum GucContext : int {
     PGC_USERSET
 };
 
-enum GucSource : int {
+enum class GucSource : int {
     PGC_S_DEFAULT,
     PGC_S_DYNAMIC_DEFAULT,
     PGC_S_ENV_VAR,
@@ -40,7 +40,7 @@ enum GucSource : int {
  */
 class GucManager {
 public:
-    enum Type : int {
+    enum class Type : int {
         REAL = 0
     };
 

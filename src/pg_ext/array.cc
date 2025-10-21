@@ -151,11 +151,10 @@ construct_md_array(Datum *elems,
                    bool elmbyval,
                    char elmalign)
 {
-    ArrayType *result;
+    ArrayType *result = nullptr;
     bool hasnulls = false;
     int32_t nbytes = 0;
     int32_t dataoffset = 0;
-    int i;
     int nelems = 0;
 
     if (ndims < 0) { /* we do allow zero-dimension arrays */
@@ -178,7 +177,7 @@ construct_md_array(Datum *elems,
     /* compute required space */
     nbytes = 0;
     hasnulls = false;
-    for (i = 0; i < nelems; i++) {
+    for (int i = 0; i < nelems; i++) {
         if (nulls && nulls[i]) {
             hasnulls = true;
             continue;
@@ -311,7 +310,7 @@ construct_array_builtin(Datum *elems, int nelems, Oid elmtype)
 ArrayType *
 construct_empty_array(Oid elmtype)
 {
-	ArrayType  *result;
+	ArrayType  *result = nullptr;
 
 	result = (ArrayType *) palloc0(sizeof(ArrayType));
 	SET_VARSIZE(result, sizeof(ArrayType));
@@ -349,13 +348,12 @@ deconstruct_array(ArrayType *array,
 				  int elmlen, bool elmbyval, char elmalign,
 				  Datum **elemsp, bool **nullsp, int *nelemsp)
 {
-	Datum	   *elems;
-	bool	   *nulls;
+	Datum	   *elems = nullptr;
+	bool	   *nulls = nullptr;
 	int			nelems = 0;
-	char	   *p;
+	char	   *p = nullptr;
 	uint8_t	   *bitmap = nullptr;
 	int			bitmask = 1;
-	int			i;
 
 	assert(ARR_ELEMTYPE(array) == elmtype);
 
@@ -371,7 +369,7 @@ deconstruct_array(ArrayType *array,
 	bitmap = ARR_NULLBITMAP(array);
 	bitmask = 1;
 
-	for (i = 0; i < nelems; i++)
+	for (int i = 0; i < nelems; i++)
 	{
 		/* Get source element, checking for NULL */
 		if (bitmap && (*bitmap & bitmask) == 0)

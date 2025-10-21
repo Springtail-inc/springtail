@@ -14,7 +14,7 @@ volatile sig_atomic_t InterruptPending = false; // NOSONAR
  */
 static void errdetail_v(const char *fmt, va_list ap)
 {
-    char buf[1024];
+    char buf[1024] = "";
     int n = vsnprintf(buf, sizeof(buf), fmt ? fmt : "(null)", ap); // NOSONAR - Fmt is validated
     (void)n;
     LOG_ERROR("Errdetail %s", buf);
@@ -22,7 +22,7 @@ static void errdetail_v(const char *fmt, va_list ap)
 
 static int errmsg_v(const char *fmt, va_list ap)
 {
-    char buf[1024];
+    char buf[1024] = "";
     int n = vsnprintf(buf, sizeof(buf), fmt ? fmt : "(null)", ap); // NOSONAR - Fmt is validated
     (void)n;
     LOG_ERROR("Errmsg %s", buf);
@@ -31,7 +31,7 @@ static int errmsg_v(const char *fmt, va_list ap)
 
 static int errmsg_internal_v(const char *fmt, va_list ap)
 {
-    char buf[1024];
+    char buf[1024] = "";
     int n = vsnprintf(buf, sizeof(buf), fmt ? fmt : "(null)", ap);  // NOSONAR - Fmt is validated
     (void)n;
     LOG_ERROR("Errmsg internal %s", buf);
@@ -58,13 +58,13 @@ void ProcessInterrupts() {
     if (InterruptPending) {
         InterruptPending = false;
         // Handle interrupt - in this case we'll just log it
-        fprintf(stderr, "Process interrupt received\n");
+        std::print(stderr, "Process interrupt received\n");
     }
 }
 
 bool errstart(int elevel, const char *domain) {
     (void)elevel; // silence unused parameter warning
-    fprintf(stderr, "\nError started at (domain: %s)", domain ? domain : "none");
+    std::print(stderr, "\nError started at (domain: %s)", domain ? domain : "none");
     return true;
 }
 

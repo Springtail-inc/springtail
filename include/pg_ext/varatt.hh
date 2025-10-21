@@ -11,7 +11,7 @@ enum class vartag_external
 	VARTAG_ONDISK = 18
 };
 
-typedef union
+union varattrib_4b
 {
 	struct						/* Normal varlena (4-byte length) */
 	{
@@ -25,20 +25,21 @@ typedef union
 								 * compression method; see va_extinfo */
 		char		va_data[FLEXIBLE_ARRAY_MEMBER]; /* Compressed data */
 	}			va_compressed;
-} varattrib_4b;
+};
 
-typedef struct
+struct varattrib_1b
 {
 	uint8_t		va_header;
 	char		va_data[FLEXIBLE_ARRAY_MEMBER]; /* Data begins here */
-} varattrib_1b;
+};
 
-typedef struct
+struct varattrib_1b_e
 {
 	uint8_t		va_header;		/* Always 0x80 or 0x01 */
 	uint8_t		va_tag;			/* Type of datum */
 	char		va_data[FLEXIBLE_ARRAY_MEMBER]; /* Type-specific data */
-} varattrib_1b_e;
+};
+
 struct varatt_indirect
 {
 	struct varlena *pointer;	/* Pointer to in-memory varlena */
