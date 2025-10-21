@@ -8,6 +8,7 @@
 #include <common/constants.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
+#include <storage/cache_tracing.hh>
 #include "common/open_telemetry.hh"
 
 namespace springtail {
@@ -382,11 +383,9 @@ namespace springtail {
          */
         class DataCache {
         public:
-            DataCache(uint64_t max_size)
-                : _size(0),
-                  _max_size(max_size),
-                  _next_cache_id(0)
-            { }
+            DataCache(uint64_t max_size);
+
+            ~DataCache();
 
             void validate() const {
                 assert(_dirty_cache.size() + _clean_cache.size() == _size);
@@ -576,6 +575,14 @@ namespace springtail {
             uint64_t _size; ///< The current size of the cache.
             uint64_t _max_size; ///< The maximum allowed size of the cache.
             uint64_t _next_cache_id; ///< The next cache ID to assign.
+
+            // Hit rate tracking
+            std::atomic<uint64_t> _get_calls{0}; ///< Total calls to DataCache::get()
+            std::atomic<uint64_t> _cache_hits{0}; ///< Number of cache hits (extent found in memory)
+            std::atomic<uint64_t> _cache_misses{0}; ///< Number of cache misses (required disk IO)
+
+            // Cache tracing (optional - only instantiated if tracing is enabled)
+            std::optional<CacheTracer> _tracer;
         };
 
     public:
