@@ -1,0 +1,35 @@
+# Shared Bash functions
+
+# shellcheck disable=SC2034,SC2154
+# Function to display a banner with a message. The banner is displayed at the top of the terminal.
+# while the actual content is displayed below it, with `less` command for easy reading and navigation.
+# Example usage:
+#   banner "My Banner" "This is the content of the banner. It can be multiple lines long."
+# Dependencies: tmux, less
+banner_less() {
+  local banner="$1"
+  local content="$2"
+
+  # Use a temp file to hold the string content
+  local tmpfile
+  tmpfile=$(mktemp /tmp/bannerless.XXXXXX)
+
+  # Write the content to the temp file
+  echo -e "$content" > "$tmpfile"
+
+  # Create and attach tmux session with banner
+  tmux new-session -d -s temp_less \
+    "tmux set-option status-position top; \
+     tmux set-option status on; \
+     tmux set-option status-bg green; \
+     tmux set-option status-fg black; \
+     tmux set-option status-right ''; \
+     tmux set-option status-left-length 100; \
+     tmux set-option window-status-format ''; \
+     tmux set-option window-status-current-format ''; \
+     tmux set-option status-left \"$banner\"; \
+     less \"$tmpfile\"; \
+     rm -f \"$tmpfile\"; \
+     tmux kill-session -t temp_less"
+  tmux attach-session -t temp_less
+}

@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# shellcheck shell=sh
+# Usage: c_redis [redis-commands]
+set -e
+
+redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --user "$REDIS_USER" -a "$REDIS_PASSWORD" "$@"
