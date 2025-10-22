@@ -106,7 +106,7 @@ namespace springtail {
         if (_trace_enabled) {
             // Flush current trace extent if it has data (no mutex needed in destructor)
             if (_current_trace && _current_trace->row_count() > 0) {
-                _flush_trace_extent();
+                _flush_trace_extent(_current_trace);
             }
 
             // Wait for all pending async flushes to complete
@@ -222,9 +222,17 @@ namespace springtail {
 
         // Check if we need to flush (query the extent for its current size)
         if (_current_trace->byte_count() >= _flush_threshold) {
-            // Flush current extent asynchronously and create a new one
-            _flush_trace_extent();
+            // Deadlock prevention: Create new extent BEFORE releasing mutex to capture the old one
+            // This ensures the new extent is created while holding the lock, then we release
+            // the lock before calling async_flush() which may block on IO
+            auto extent_to_flush = _current_trace;
             _create_trace_extent();
+
+            // Release the lock before scheduling IO to allow IO callbacks (like record_hit)
+            // to acquire the lock without deadlocking
+            lock.unlock();
+            _flush_trace_extent(extent_to_flush);
+            // Lock will be released when it goes out of scope
         }
     }
 
@@ -233,8 +241,10 @@ namespace springtail {
         if (_trace_enabled) {
             boost::unique_lock lock(_mutex);
             if (_current_trace && _current_trace->row_count() > 0) {
-                _flush_trace_extent();
+                auto extent_to_flush = _current_trace;
                 _create_trace_extent();
+                lock.unlock();
+                _flush_trace_extent(extent_to_flush);
             }
         }
     }
@@ -274,9 +284,9 @@ namespace springtail {
         }
     }
 
-    void CacheTracer::_flush_trace_extent()
+    void CacheTracer::_flush_trace_extent(std::shared_ptr<Extent> extent_to_flush) noexcept
     {
-        if (!_current_trace || _current_trace->row_count() == 0) {
+        if (!extent_to_flush || extent_to_flush->row_count() == 0) {
             return;
         }
 
@@ -286,20 +296,20 @@ namespace springtail {
             std::filesystem::path output_file(filename);
 
             LOG_INFO("Flushing cache trace extent: {} rows, {} bytes to {}",
-                     _current_trace->row_count(),
-                     _current_trace->byte_count(),
+                     extent_to_flush->row_count(),
+                     extent_to_flush->byte_count(),
                      output_file.string());
 
             // Open file for writing
             auto handle = IOMgr::get_instance()->open(output_file, IOMgr::APPEND, true);
 
-            // Capture the extent to flush (move ownership to the async callback)
-            auto extent_to_flush = _current_trace;
-
             // Perform async flush and store the future
+            // Note: We're called without holding the mutex, so IO callbacks won't deadlock
             auto future = extent_to_flush->async_flush(handle);
-            _pending_flushes.push_back(std::move(future));
 
+            // We need to acquire the lock briefly to add to _pending_flushes
+            boost::unique_lock lock(_mutex);
+            _pending_flushes.push_back(std::move(future));
             _trace_sequence++;
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to flush cache trace extent: {}", e.what());

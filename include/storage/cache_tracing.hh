@@ -112,9 +112,10 @@ namespace springtail {
                                 uint64_t cache_id);
 
         /**
-         * Internal helper to flush the current trace extent to disk.
+         * Internal helper to flush a trace extent to disk.
+         * @param extent_to_flush The extent to flush (allows flushing old extent while creating new one)
          */
-        void _flush_trace_extent();
+        void _flush_trace_extent(std::shared_ptr<Extent> extent_to_flush) noexcept;
 
         /**
          * Gets the current timestamp in microseconds since epoch.
