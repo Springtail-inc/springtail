@@ -70,6 +70,11 @@ namespace springtail::committer {
               _index_requests_mgr(index_requests_mgr)
         {}
 
+        Committer(const Committer &) = delete;
+        Committer &operator=(const Committer &) = delete;
+        Committer(Committer &&) = delete;
+        Committer &operator=(Committer &&) = delete;
+
         /** Initiate the committer loop. */
         void run();
 
@@ -203,5 +208,60 @@ namespace springtail::committer {
          * index requests (create/drop) for an XID per db
          */
         std::shared_ptr<pg_log_mgr::IndexRequestsManager> _index_requests_mgr;
+
+        struct TableSyncProcessor
+        {
+            explicit TableSyncProcessor(size_t max_workers)
+            {
+                for (auto i = 0; i != max_workers; ++i) {
+                    _workers.emplace_back([this](std::stop_token st) { task(st); });
+                }
+            }
+            TableSyncProcessor(const TableSyncProcessor &) = delete;
+            TableSyncProcessor &operator=(const TableSyncProcessor &) = delete;
+            TableSyncProcessor(TableSyncProcessor &&) = delete;
+            TableSyncProcessor &operator=(TableSyncProcessor &&) = delete;
+
+            ~TableSyncProcessor() = default;
+
+            void add(MutableTablePtr table)
+            {
+                {
+                    std::unique_lock g(_m);
+                    _queue.push(table);
+                }
+                _cv.notify_one();
+            }
+
+        private:
+            void task(std::stop_token st)
+            {
+                while(!st.stop_requested()) {
+                    MutableTablePtr table;
+                    {
+                        std::unique_lock g(_m);
+                        if (!_cv.wait(g, st, [this]{ return !_queue.empty(); })) {
+                            break;
+                        }
+                        table = _queue.front();
+                        _queue.pop();
+                    }
+
+                    table->sync_data_and_indexes();
+                }
+                LOG_INFO("thread joined");
+            }
+
+            // work state
+            std::condition_variable_any _cv;
+            std::mutex _m;
+
+            std::queue<MutableTablePtr> _queue;
+
+            // workers
+            std::vector<std::jthread> _workers;
+        };
+
+        std::unique_ptr<TableSyncProcessor> _table_sync_processor;
     };
 }
