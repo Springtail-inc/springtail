@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sstream>
 
+#include <common/common.hh>
 #include <common/constants.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
@@ -209,7 +210,7 @@ namespace springtail {
         (*fields)[0]->set_uint8(&row, static_cast<uint8_t>(event_type));
 
         // Field 1: timestamp (uint64_t)
-        (*fields)[1]->set_uint64(&row, _get_timestamp_us());
+        (*fields)[1]->set_uint64(&row, common::get_time_in_micros());
 
         // Field 2: filename (text)
         (*fields)[2]->set_text(&row, filename.string());
@@ -314,13 +315,6 @@ namespace springtail {
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to flush cache trace extent: {}", e.what());
         }
-    }
-
-    uint64_t CacheTracer::_get_timestamp_us()
-    {
-        auto now = std::chrono::system_clock::now();
-        auto duration = now.time_since_epoch();
-        return std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
     }
 
     nlohmann::json CacheTracer::get_cache_metrics() const

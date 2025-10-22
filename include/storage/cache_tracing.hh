@@ -118,11 +118,6 @@ namespace springtail {
         void _flush_trace_extent(ExtentPtr extent_to_flush) noexcept;
 
         /**
-         * Gets the current timestamp in microseconds since epoch.
-         */
-        static uint64_t _get_timestamp_us();
-
-        /**
          * Creates a new trace extent with the appropriate schema.
          */
         void _create_trace_extent();
