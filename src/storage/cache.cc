@@ -1381,11 +1381,6 @@ StorageCache::PageCache::background_cleaner()
     {
     }
 
-    StorageCache::DataCache::~DataCache()
-    {
-        // CacheTracer destructor will handle flushing traces and printing statistics
-    }
-
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::get(const std::filesystem::path &file,
                                  const ExtentRef &ref,

@@ -12,7 +12,7 @@
 #include <storage/schema.hh>
 #include <storage/field.hh>
 
-extern char *program_invocation_name;
+extern char *program_invocation_name; // NOSONAR - declared as non-const in errno.h
 
 namespace springtail {
 
@@ -104,7 +104,10 @@ namespace springtail {
 
         // Flush any remaining trace data (only if trace enabled)
         if (_trace_enabled) {
-            flush();
+            // Flush current trace extent if it has data (no mutex needed in destructor)
+            if (_current_trace && _current_trace->row_count() > 0) {
+                _flush_trace_extent();
+            }
 
             // Wait for all pending async flushes to complete
             for (auto& future : _pending_flushes) {

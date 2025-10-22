@@ -383,9 +383,9 @@ namespace springtail {
          */
         class DataCache {
         public:
-            DataCache(uint64_t max_size);
+            explicit DataCache(uint64_t max_size);
 
-            ~DataCache();
+            ~DataCache() = default;
 
             /**
              * Returns cache metrics from the last 5 minutes.
