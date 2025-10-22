@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <absl/log/check.h>
 
 namespace springtail {
 

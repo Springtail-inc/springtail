@@ -6,6 +6,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include <admin_http/admin_server.hh>
 #include <common/json.hh>
 #include <common/open_telemetry.hh>
 #include <common/properties.hh>
@@ -22,6 +23,11 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
     StorageCache::~StorageCache()
     {
+        // Deregister /cache route from AdminServer
+        if (AdminServer::exists()) {
+            AdminServer::get_instance()->deregister_get_route("/cache");
+        }
+
         LOG_INFO("StorageCache delete");
     }
 
@@ -40,6 +46,17 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         int metrics_update_freq = Json::get_or<int>(json, "metrics_update_freq_sec", 10);
         _metric_counters = std::make_unique<MetricCounters>(
                 std::unordered_map<std::string, std::string>{}, metrics_update_freq);
+
+        // Register /cache route with AdminServer
+        if (AdminServer::exists()) {
+            AdminServer::get_instance()->register_get_route(
+                "/cache",
+                [this]([[maybe_unused]] const std::string &path,
+                       [[maybe_unused]] const httplib::Params &params,
+                       nlohmann::json &json_response) {
+                    json_response = _data_cache->get_cache_metrics();
+                });
+        }
     }
 
     StorageCache::SafePagePtr
@@ -218,6 +235,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     uint64_t
     StorageCache::PageCache::flush_file(const std::filesystem::path &file)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::flush_file file={}", file);
         boost::unique_lock lock(_mutex);
 
         StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::FlushCalls>();
@@ -317,6 +335,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     void
     StorageCache::PageCache::drop_file(const std::filesystem::path &file)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::drop_file file={}", file);
         boost::unique_lock lock(_mutex);
 
         StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::DropCalls>();
@@ -415,6 +434,8 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::PageCache::_put(PagePtr page)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_put file={} eid={} s_xid={} use_count={}",
+                  page->_file, page->_extent_id, page->_start_xid, page->_use_count.load());
         // decrement it's use count
         --(page->_use_count);
 
@@ -455,6 +476,8 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::PageCache::_try_evict_dirty(PagePtr page)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_evict_dirty file={} eid={} s_xid={} use_count={} is_dirty={}",
+                  page->_file, page->_extent_id, page->_start_xid, page->_use_count.load(), page->_is_dirty);
         // issue the associated callback for the page's eviction
         bool success = true;
         if (page->_flush_callback && page->_is_dirty) {
@@ -504,12 +527,12 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::PageCache::_evict_clean(PagePtr page)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_evict_clean file={} eid={} s_xid={} use_count={}",
+                  page->_file, page->_extent_id, page->_start_xid, page->_use_count.load());
         DCHECK(page->_use_count == 1);
         DCHECK(!page->_is_dirty);
 
         // remove the page from the cache
-        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "Page evict file {} eid {} xid {}",
-                            page->key().first, page->key().second, page->xid());
         auto cache_i = _cache.find(page->key());
         cache_i->second.erase(page->xid());
         if (cache_i->second.empty()) {
@@ -523,6 +546,8 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::PageCache::_make_page_space()
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_make_page_space size={} max_size={} dirty_lru_size={} clean_lru_size={}",
+                  _size, _max_size, _dirty_lru.size(), _clean_lru.size());
         // check if there's vacant space in the cache
         if (_size < _max_size) {
             ++_size;
@@ -570,23 +595,35 @@ StorageCache::PageCache::background_cleaner()
                                       uint64_t extent_id,
                                       uint64_t xid)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={}", file, extent_id, xid);
         TIME_TRACE_SCOPED(time_trace::traces, cache__try_get_total);
 
         // check for the key in the hash map
         std::pair<uint64_t, const std::string&> key{extent_id, file.native()};
         auto write_i = _cache.find(key);
         if (write_i == _cache.end()) {
+            LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={} - NOT FOUND in cache",
+                      file, extent_id, xid);
             return nullptr;
         }
 
         // check for the xid in the XID map
         auto page_i = write_i->second.lower_bound(xid);
         if (page_i == write_i->second.end()) {
+            LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={} - XID map end()",
+                      file, extent_id, xid);
             return nullptr;
         }
 
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={} - found page_xid={} page_ptr={} page_valid={}",
+                  file, extent_id, xid, page_i->first,
+                  static_cast<void*>(page_i->second.get()),
+                  page_i->second != nullptr);
+
         // check if the page is valid through the requested xid
         if (!page_i->second->check_xid_valid(xid)) {
+            LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={} - check_xid_valid FAILED",
+                      file, extent_id, xid);
             return nullptr;
         }
 
@@ -1423,6 +1460,14 @@ StorageCache::PageCache::background_cleaner()
 
     // DATA CACHE
 
+    StorageCache::DataCache::DataCache(uint64_t max_size)
+        : _size(0),
+          _max_size(max_size),
+          _next_cache_id(0),
+          _tracer()  // CacheTracer reads its own configuration from Properties
+    {
+    }
+
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::get(const std::filesystem::path &file,
                                  const ExtentRef &ref,
@@ -1469,6 +1514,9 @@ StorageCache::PageCache::background_cleaner()
             DCHECK(key_i != _cache_id_map.end());
             const auto& [_, value] = *key_i;
 
+            // Record cache MISS
+            _tracer.record_miss(value.second, value.first, cache_id);
+
             // note: no one should know about the cache ID except for the owning page, so this
             //       should never return nullptr since there should never be two concurrent readers
             extent = _read_extent(value.second, value.first, [this, cache_id](CacheExtentPtr extent) {
@@ -1481,6 +1529,9 @@ StorageCache::PageCache::background_cleaner()
             });
         } else {
             extent = dirty_i->second;
+
+            // Record cache HIT
+            _tracer.record_hit(extent->_file, extent->_extent_id, cache_id);
 
             // if the extent is being flushed, must block until complete
             if (extent->_state == CacheExtent::State::FLUSHING) {
@@ -1726,6 +1777,9 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
             if (cache_i != _clean_cache.end()) {
                 extent = cache_i->second;
 
+                // Record cache HIT
+                _tracer.record_hit(file, extent_id, 0);
+
                 // remove the entry from the LRU list
                 if (extent->_use_count == 0) {
                     {
@@ -1746,6 +1800,9 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
             // note: may return nullptr, indicating someone else just read the extent from disk and
             //       that we should check the cache again
             //
+            // Record cache MISS
+            _tracer.record_miss(file, extent_id, 0);
+
             extent = _read_extent(file, extent_id, [this, extent_id, &file](CacheExtentPtr ext) {
                     // insert the extent into the cache
                     // note: we don't place into the LRU list since the extent will be in-use
@@ -1827,6 +1884,9 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         // update the cache ID as pointing to the new extent ID
         this->_cache_id_map[extent->_cache_id] = extent->key();
 
+        // Record FLUSH event
+        _tracer.record_flush(extent->_file, extent->_extent_id, extent->_cache_id);
+
         // mark as MUTABLE so it's placed on the clean LRU
         extent->_state = CacheExtent::State::MUTABLE;
         DCHECK_GT(extent->_use_count, 0);
@@ -1890,6 +1950,9 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         // evict an extent to make space
         auto extent = _clean_lru.front();
         _clean_lru.pop_front();
+
+        // Record EVICTION event
+        _tracer.record_eviction(extent->_file, extent->_extent_id, extent->_cache_id);
 
         if (extent->_state == CacheExtent::State::CLEAN) {
             //TODO: consider changing to splice() that should be more efficient

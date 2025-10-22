@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <queue>
 
 #include <common/thread_pool.hh>
 
