@@ -224,7 +224,7 @@ sub_up() {
   fi
 
   # 7. compose up the local cluster (check either `docker-compose` or `docker compose` is available)
-  run_compose up -d primary redis controller-bootstrap controller proxy ingestion fdw --remove-orphans --build --wait controller ingestion proxy fdw --timeout 150
+  run_compose up -d primary redis controller-bootstrap controller proxy ingestion fdw1 fdw2 --remove-orphans --build --wait controller ingestion proxy fdw1 fdw2 --timeout 150
   ./cluster status
 }
 
@@ -249,7 +249,7 @@ sub_down() {
       run_compose down primary -v
       docker network rm springtail_local_cluster_network > /dev/null 2>&1 || true
       docker network prune -f
-      docker image prune -f
+      # docker image prune -f
       ;;
     *)
       die "Usage: cluster down [all|primary|proxy|ingestion|fdw|controller|redis|aws-mock]"

@@ -207,8 +207,12 @@ BEGIN
     FROM
         __pg_springtail_current_policy_snapshot AS cur
     FULL OUTER JOIN
-        __pg_springtail_triggers.policy_snapshot_history AS prev
-        ON (cur.policy_oid = prev.policy_oid AND prev.fdw_id = fdw_id_var)
+    (
+        SELECT *
+        FROM __pg_springtail_triggers.policy_snapshot_history
+        WHERE fdw_id = fdw_id_var
+    ) AS prev
+    ON (cur.policy_oid = prev.policy_oid)
     WHERE
         cur.policy_oid IS NULL -- Policy was removed
         OR prev.policy_oid IS NULL -- Policy was added

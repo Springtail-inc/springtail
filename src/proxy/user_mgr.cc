@@ -173,11 +173,6 @@ namespace springtail::pg_proxy {
 
                     LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Found user: {}, {}, {}", username, role, type);
 
-                    // only add users with role database
-                    if (role != "database") {
-                        continue;
-                    }
-
                     PasswordType password_type;
                     if (type == PASSWORD_STRING_TEXT) {
                         password_type = TEXT;
@@ -187,6 +182,30 @@ namespace springtail::pg_proxy {
                         password_type = SCRAM;
                     } else {
                         LOG_WARN("Unknown password type: {}", type);
+                        continue;
+                    }
+
+                    // handle special role proxy_to_fdw
+                    if (role == "proxy_to_fdw") {
+                        // see if we need to update the special user
+                        if (_proxy_to_fdw_user != nullptr) {
+                            auto password_and_type = _proxy_to_fdw_user->get_password_and_type();
+                            if (password_and_type.first == password &&
+                                password_and_type.second == password_type) {
+                                continue;
+                            }
+                        }
+
+                        // create special user for role proxy_to_fdw
+                        std::unique_lock lock(_mutex);
+                        _proxy_to_fdw_user = std::make_shared<User>(username, password, password_type);
+                        DCHECK_EQ(type, PASSWORD_STRING_TEXT);
+                        LOG_INFO("Created special user for role proxy_to_fdw: {}", username);
+                        continue;
+                    }
+
+                    // only add users with role database
+                    if (role != "database") {
                         continue;
                     }
 
@@ -244,6 +263,26 @@ namespace springtail::pg_proxy {
                 _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
             }
         }
+    }
+
+    UserLoginPtr
+    UserMgr::get_replica_login(UserPtr user)
+    {
+        std::shared_lock lock(_mutex);
+        if (_proxy_to_fdw_user == nullptr) {
+            LOG_ERROR("Proxy to FDW user not set, cannot set FDW password for user: {}", user->username());
+            DCHECK(false);
+        }
+
+        auto username = user->username();
+        auto password_and_type = _proxy_to_fdw_user->get_password_and_type();
+        auto login = std::make_shared<UserLogin>(username,
+                                                 password_and_type.second,
+                                                 password_and_type.first);
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Set FDW password for user: {}", user->username());
+
+        return login;
     }
 
     void

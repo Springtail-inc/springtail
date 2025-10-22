@@ -1,20 +1,28 @@
 import redis
 import sys
+import os
+
 
 if len(sys.argv) > 1:
     redis_db = sys.argv[1]
 else:
-    redis_db = 0
+    redis_db = os.environ.get('REDIS_CONFIG_DATABASE', 0)
 
 # Connect to the Redis server
-redis_host = 'localhost'
-redis_port = 6379
-redis_user = 'default'
-r = redis.StrictRedis(host=redis_host, port=redis_port, db=redis_db, encoding="utf-8", decode_responses=True)
+redis_host = os.environ.get('REDIS_HOST', 'localhost')
+redis_port = int(os.environ.get('REDIS_PORT', 6379))
+redis_user = os.environ.get('REDIS_USER', 'default')
+redis_password = os.environ.get('REDIS_PASSWORD', None)
+r = redis.StrictRedis(host=redis_host, port=redis_port,
+                      username=redis_user,
+                      db=redis_db, password=redis_password,
+                      encoding="utf-8", decode_responses=True)
 
-print(f"Dumping Redis database: {redis_db}\n")
+instance_id = os.environ.get('DATABASE_INSTANCE_ID', '1234')
 
-keys = r.keys('*')
+print(f"Dumping Redis database={redis_db}, instance_id={instance_id}\n")
+
+keys = r.keys(instance_id + ':*')
 for key in keys:
     type = r.type(key)
     val = None

@@ -70,7 +70,7 @@ namespace springtail::pg_proxy {
     {
         if (_running.test_and_set()) {
             LOG_ERROR("{} Session already running", name());
-            assert(0);
+            DCHECK(false) << "Session already running";
             return;
         }
 
@@ -85,6 +85,11 @@ namespace springtail::pg_proxy {
         if (!_connection->closed()) {
             ProxyServer::get_instance()->signal(shared_from_this());
         }
+    }
+
+    const std::string
+    Session::hostname() const {
+        return _instance ? _instance->hostname() : std::string{};
     }
 
     std::pair<char,int32_t>
@@ -297,6 +302,91 @@ namespace springtail::pg_proxy {
 
         logger->log_data(log_type, ProxyServer::get_instance()->id(),
                          id, seq_id, code, len, data, final);
+    }
+
+    nlohmann::json
+    Session::_to_json_brief() const
+    {
+        std::string state;
+        switch (_state) {
+            case State::STARTUP: state = "STARTUP"; break;
+            case State::AUTH_DONE: state = "AUTH_DONE"; break;
+            case State::AUTH_SERVER: state = "AUTH_SERVER"; break;
+            case State::READY: state = "READY"; break;
+            case State::QUERY: state = "QUERY"; break;
+            case State::ERROR: state = "ERROR"; break;
+            case State::RESET_SESSION:
+            case State::RESET_SESSION_READY:
+            case State::RESET_SESSION_PARAMS:
+                state = "RESET";
+                break;
+            default:
+                state = "OTHER";
+                break;
+        }
+
+        nlohmann::json j = nlohmann::json::object({
+            {"id", id()},
+            {"type", (type() == Type::CLIENT ? "CLIENT" : (type() == Type::PRIMARY ? "PRIMARY" : "REPLICA"))},
+            {"instance_hostname", _instance ? nlohmann::json(_instance->hostname()) : nlohmann::json(nullptr)},
+            {"state", std::format("{}:{}", state, static_cast<int8_t>(_state))}
+        });
+
+        return j;
+    }
+
+    nlohmann::json
+    Session::to_json() const
+    {
+        nlohmann::json connection_json = nullptr;
+        if (_connection) {
+            connection_json = {
+                {"endpoint", _connection->endpoint()},
+                {"ssl", _connection->is_ssl_enabled()},
+                {"socket",  _connection->get_socket()}
+            };
+        }
+
+        nlohmann::json associated_sessions = nlohmann::json::array();
+        if (_type == Type::CLIENT) {
+            auto client_session = static_cast<const ClientSession*>(this);
+            auto primary_session = client_session->get_primary_session();
+            auto replica_session = client_session->get_replica_session();
+            auto pending_session = client_session->get_pending_replica_session();
+            if (primary_session) {
+                associated_sessions.push_back(primary_session->_to_json_brief());
+            }
+
+            if (replica_session) {
+                associated_sessions.push_back(replica_session->_to_json_brief());
+            }
+
+            if (pending_session) {
+                auto pending_j = pending_session->_to_json_brief();
+                pending_j["pending"] = true;
+                associated_sessions.push_back(pending_j);
+            }
+        } else {
+            auto server_session = static_cast<const ServerSession*>(this);
+            // get_client_session performs a .lock on a weak ptr thus const_cast
+            auto client_session = const_cast<ServerSession*>(server_session)->get_client_session();
+            if (client_session) {
+                associated_sessions.push_back(client_session->_to_json_brief());
+            }
+        }
+
+        nlohmann::json j = _to_json_brief();
+        j.update(nlohmann::json::object({
+            {"database", database()},
+            {"database_id", database_id()},
+            {"user", _user ? nlohmann::json(_user->username()) : nlohmann::json(nullptr)},
+            {"associated_sessions", associated_sessions},
+            {"instance_hostname", _instance ? nlohmann::json(_instance->hostname()) : nlohmann::json(nullptr)},
+            {"connection", connection_json},
+            {"is_shadow", is_shadow()}
+        }));
+
+        return j;
     }
 
 } // namespace springtail::pg_proxy
