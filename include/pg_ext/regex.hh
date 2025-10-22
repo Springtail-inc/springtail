@@ -18,7 +18,7 @@ struct regex_t {
     std::vector<regex_arc_t> arcs;
     std::vector<regcolor_t> colors;
     regstate_t initial;
-    regstate_t final;
+    regstate_t final; // NOSONAR
     std::string error;
 };
 

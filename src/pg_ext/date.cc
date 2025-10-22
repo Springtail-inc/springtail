@@ -174,7 +174,7 @@ pg_TZDIR(void)
 int
 pg_open_tzfile(const char *name, char *canonname)
 {
-    char fullname[MAXPGPATH];
+    char fullname[MAXPGPATH] = "";
 
     if (canonname)
         strlcpy(canonname, name, TZ_STRLEN_MAX + 1);
@@ -213,21 +213,25 @@ getqzname(const char *strp, const int delim)
 static const char *
 getnum(const char *strp, int *const nump, const int min, const int max)
 {
-	char		c	= 0;
-	int			num = 0;
-
-	if (strp == nullptr || !is_digit(c = *strp))
+	if (strp == nullptr)
 		return nullptr;
-	num = 0;
+
+	char c = *strp;
+	if (!is_digit(c))
+		return nullptr;
+
+	int num = 0;
 	do
 	{
 		num = num * 10 + (c - '0');
 		if (num > max)
-			return nullptr;		/* illegal value */
+			return nullptr; /* illegal value */
 		c = *++strp;
 	} while (is_digit(c));
+
 	if (num < min)
-		return nullptr;			/* illegal value */
+		return nullptr; /* illegal value */
+
 	*nump = num;
 	return strp;
 }

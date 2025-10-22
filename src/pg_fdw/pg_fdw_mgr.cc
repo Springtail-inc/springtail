@@ -1527,7 +1527,7 @@ namespace springtail::pg_fdw {
         if (!HeapTupleIsValid(tup))
             elog(ERROR, "FDW: cache lookup failed for type %u", pg_oid);
 
-        Form_pg_type typ = (Form_pg_type) GETSTRUCT(tup);
+        auto typ = (Form_pg_type) GETSTRUCT(tup);
         Oid send_func_oid = typ->typsend;
         ReleaseSysCache(tup);
 
