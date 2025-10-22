@@ -2027,52 +2027,31 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         DCHECK(_extent);
     }
 
-    std::vector<std::filesystem::path>
-    StorageCache::PageCache::_get_files_for_database(uint64_t database_id)
-    {
-        boost::unique_lock lock(_mutex);
-
-        auto db_i = _database_files.find(database_id);
-        if (db_i == _database_files.end()) {
-            return {};
-        }
-
-        // Return a copy of the file set as a vector
-        return std::vector<std::filesystem::path>(db_i->second.begin(), db_i->second.end());
-    }
-
     void
-    StorageCache::PageCache::_evict_pages_for_database_file(const std::filesystem::path &file,
-                                                             uint64_t database_id)
+    StorageCache::PageCache::evict_for_database(uint64_t database_id)
     {
-        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_evict_pages_for_database_file file={} database_id={}",
-                  file, database_id);
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "PageCache::evict_for_database database_id={}", database_id);
 
-        // Extract the page list for this file while holding the lock
+        // Collect all pages for this database and get the file list while holding the lock
         std::list<PagePtr> pages_to_evict;
+        std::set<std::filesystem::path> files;
         {
             boost::unique_lock lock(_mutex);
 
-            auto file_i = _flush_list.find(file);
-            if (file_i != _flush_list.end()) {
-                auto &flush_pages = file_i->second;
-
-                // Collect all pages for this database
-                for (auto page_i = flush_pages.begin(); page_i != flush_pages.end(); ) {
-                    auto page = *page_i;
-
+            // Iterate through the entire _cache to find pages for this database
+            for (auto &cache_entry : _cache) {
+                for (auto &xid_entry : cache_entry.second) {
+                    auto page = xid_entry.second;
                     if (page->_database_id == database_id) {
                         pages_to_evict.push_back(page);
-                        page_i = flush_pages.erase(page_i);
-                    } else {
-                        ++page_i;
                     }
                 }
+            }
 
-                // If the flush list for this file is now empty, remove it
-                if (flush_pages.empty()) {
-                    _flush_list.erase(file_i);
-                }
+            // Get the files associated with this database
+            auto db_i = _database_files.find(database_id);
+            if (db_i != _database_files.end()) {
+                files = db_i->second;
             }
         }
 
@@ -2123,28 +2102,29 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
                 --_size;
             }
 
-            // Remove the file from the database tracking
-            auto db_i = _database_files.find(database_id);
-            if (db_i != _database_files.end()) {
-                db_i->second.erase(file);
-                if (db_i->second.empty()) {
-                    _database_files.erase(db_i);
+            // Clean up the flush list for all files associated with this database
+            for (const auto &file : files) {
+                auto file_i = _flush_list.find(file);
+                if (file_i != _flush_list.end()) {
+                    // Remove all pages for this database from the flush list
+                    auto &flush_pages = file_i->second;
+                    for (auto page_i = flush_pages.begin(); page_i != flush_pages.end(); ) {
+                        if ((*page_i)->_database_id == database_id) {
+                            page_i = flush_pages.erase(page_i);
+                        } else {
+                            ++page_i;
+                        }
+                    }
+
+                    // If the flush list for this file is now empty, remove it
+                    if (flush_pages.empty()) {
+                        _flush_list.erase(file_i);
+                    }
                 }
             }
-        }
-    }
 
-    void
-    StorageCache::PageCache::evict_for_database(uint64_t database_id)
-    {
-        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "PageCache::evict_for_database database_id={}", database_id);
-
-        // Get the list of files for this database (with brief lock)
-        auto &&files = _get_files_for_database(database_id);
-
-        // Evict pages for each file (lock is re-acquired per file)
-        for (const auto &file : files) {
-            _evict_pages_for_database_file(file, database_id);
+            // Remove the database from the tracking map
+            _database_files.erase(database_id);
         }
     }
 

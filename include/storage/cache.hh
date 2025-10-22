@@ -1253,14 +1253,22 @@ namespace springtail {
             void background_cleaner();
 
             /**
-             * Validate the cache state.
+             * Validate the cache state and return a map of database_id to page count.
              */
-            void validate() const {
+            std::unordered_map<uint64_t, uint64_t> validate() const {
                 uint32_t size = 0;
+                std::unordered_map<uint64_t, uint64_t> db_counts;
+
                 for (const auto &entry : _cache) {
                     size += entry.second.size();
+                    // Count pages per database
+                    for (const auto &xid_entry : entry.second) {
+                        db_counts[xid_entry.second->_database_id]++;
+                    }
                 }
                 CHECK_EQ(size, _clean_lru.size() + _dirty_lru.size());
+
+                return db_counts;
             }
 
         private:
@@ -1274,18 +1282,6 @@ namespace springtail {
              * then returns a nullptr.
              */
             PagePtr _try_get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
-
-            /**
-             * Helper to get the list of files associated with a database.
-             * Acquires lock briefly, returns copy of file list.
-             */
-            std::vector<std::filesystem::path> _get_files_for_database(uint64_t database_id);
-
-            /**
-             * Helper to evict all pages for a given database file.
-             * Marks all extents as INVALID before eviction so they auto-cleanup when released.
-             */
-            void _evict_pages_for_database_file(const std::filesystem::path &file, uint64_t database_id);
 
             /**
              * Helper to try and evict a dirty page from the cache.  Will silently fail if there is a
@@ -1402,9 +1398,9 @@ namespace springtail {
          */
         void evict_for_database(uint64_t database_id);
 
-        void validate() const {
+        std::unordered_map<uint64_t, uint64_t> validate() const {
             _data_cache->validate();
-            _page_cache->validate();
+            return _page_cache->validate();
         }
 
         using ExtentExpireNotifyFun = std::function<void(const std::filesystem::path&,
