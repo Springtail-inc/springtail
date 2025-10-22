@@ -280,16 +280,16 @@ namespace springtail {
             return;
         }
 
-        // Generate output filename with sequence number
-        std::string filename = fmt::format("{}.{:06d}", _output_path.string(), _trace_sequence);
-        std::filesystem::path output_file(filename);
-
-        LOG_INFO("Flushing cache trace extent: {} rows, {} bytes to {}",
-                 _current_trace->row_count(),
-                 _current_trace->byte_count(),
-                 output_file.string());
-
         try {
+            // Generate output filename with sequence number
+            std::string filename = fmt::format("{}.{:06d}", _output_path.string(), _trace_sequence);
+            std::filesystem::path output_file(filename);
+
+            LOG_INFO("Flushing cache trace extent: {} rows, {} bytes to {}",
+                     _current_trace->row_count(),
+                     _current_trace->byte_count(),
+                     output_file.string());
+
             // Open file for writing
             auto handle = IOMgr::get_instance()->open(output_file, IOMgr::APPEND, true);
 
