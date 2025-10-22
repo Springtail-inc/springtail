@@ -6,6 +6,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include <admin_http/admin_server.hh>
 #include <common/json.hh>
 #include <common/open_telemetry.hh>
 #include <common/properties.hh>
@@ -22,6 +23,11 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
     StorageCache::~StorageCache()
     {
+        // Deregister /cache route from AdminServer
+        if (AdminServer::exists()) {
+            AdminServer::get_instance()->deregister_get_route("/cache");
+        }
+
         LOG_INFO("StorageCache delete");
     }
 
@@ -40,6 +46,17 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         int metrics_update_freq = Json::get_or<int>(json, "metrics_update_freq_sec", 10);
         _metric_counters = std::make_unique<MetricCounters>(
                 std::unordered_map<std::string, std::string>{}, metrics_update_freq);
+
+        // Register /cache route with AdminServer
+        if (AdminServer::exists()) {
+            AdminServer::get_instance()->register_get_route(
+                "/cache",
+                [this]([[maybe_unused]] const std::string &path,
+                       [[maybe_unused]] const httplib::Params &params,
+                       nlohmann::json &json_response) {
+                    json_response = _data_cache->get_cache_metrics();
+                });
+        }
     }
 
     StorageCache::SafePagePtr
@@ -1359,67 +1376,14 @@ StorageCache::PageCache::background_cleaner()
     StorageCache::DataCache::DataCache(uint64_t max_size)
         : _size(0),
           _max_size(max_size),
-          _next_cache_id(0)
+          _next_cache_id(0),
+          _tracer()  // CacheTracer reads its own configuration from Properties
     {
-        // Initialize cache tracing if enabled
-        nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-        bool trace_enabled = Json::get_or<bool>(json, "cache_trace_enabled", false);
-
-        if (trace_enabled) {
-            // Parse trace event types
-            std::string event_types_str = Json::get_or<std::string>(json, "cache_trace_events", "hit,miss,flush,evict");
-            uint8_t event_mask = 0;
-
-            // Build event mask from comma-separated list
-            std::istringstream iss(event_types_str);
-            std::string event_type;
-            while (std::getline(iss, event_type, ',')) {
-                // Trim whitespace
-                event_type.erase(0, event_type.find_first_not_of(" \t"));
-                event_type.erase(event_type.find_last_not_of(" \t") + 1);
-
-                if (event_type == "hit") {
-                    event_mask |= (1u << static_cast<uint8_t>(CacheTracer::EventType::HIT));
-                } else if (event_type == "miss") {
-                    event_mask |= (1u << static_cast<uint8_t>(CacheTracer::EventType::MISS));
-                } else if (event_type == "flush") {
-                    event_mask |= (1u << static_cast<uint8_t>(CacheTracer::EventType::FLUSH));
-                } else if (event_type == "evict") {
-                    event_mask |= (1u << static_cast<uint8_t>(CacheTracer::EventType::EVICTION));
-                } else if (!event_type.empty()) {
-                    LOG_WARN("Unknown cache trace event type: {}", event_type);
-                }
-            }
-
-            std::string output_path = Json::get_or<std::string>(json, "cache_trace_output_path", "./cache_traces/trace.dat");
-            uint64_t flush_threshold = Json::get_or<uint64_t>(json, "cache_trace_flush_size", 1048576); // 1MB default
-
-            // Emplace the CacheTracer (construct in-place in the optional)
-            _tracer.emplace(event_mask, output_path, flush_threshold);
-        }
     }
 
     StorageCache::DataCache::~DataCache()
     {
-        // Destroy the cache tracer (will flush any remaining trace data)
-        _tracer.reset();
-
-        // Print DataCache statistics
-        uint64_t get_calls = _get_calls.load();
-        uint64_t cache_hits = _cache_hits.load();
-        uint64_t cache_misses = _cache_misses.load();
-        uint64_t non_direct_calls = cache_hits + cache_misses;
-
-        if (get_calls > 0) {
-            LOG_INFO("DataCache Statistics:");
-            LOG_INFO("  Total get() calls:     {}", get_calls);
-            LOG_INFO("  Non-direct calls:      {} ({:.2f}%)", non_direct_calls, (100.0 * non_direct_calls) / get_calls);
-            if (non_direct_calls > 0) {
-                double hit_rate = (100.0 * cache_hits) / non_direct_calls;
-                LOG_INFO("  Cache hits:            {} ({:.2f}%)", cache_hits, hit_rate);
-                LOG_INFO("  Cache misses:          {} ({:.2f}%)", cache_misses, 100.0 - hit_rate);
-            }
-        }
+        // CacheTracer destructor will handle flushing traces and printing statistics
     }
 
     StorageCache::CacheExtentPtr
@@ -1427,7 +1391,6 @@ StorageCache::PageCache::background_cleaner()
                                  const ExtentRef &ref,
                                  bool mark_dirty)
     {
-        ++_get_calls;
         boost::unique_lock lock(_mutex);
 
         // check if the the reference is valid
@@ -1465,15 +1428,12 @@ StorageCache::PageCache::background_cleaner()
         auto dirty_i = _dirty_cache.find(cache_id);
         if (dirty_i == _dirty_cache.end()) {
             // not in memory, so need to retrieve from disk
-            ++_cache_misses;
             auto key_i = _cache_id_map.find(cache_id);
             DCHECK(key_i != _cache_id_map.end());
             const auto& [_, value] = *key_i;
 
-            // Record cache MISS trace event
-            if (_tracer.has_value()) {
-                _tracer->record_event(CacheTracer::EventType::MISS, value.second, value.first, cache_id);
-            }
+            // Record cache MISS
+            _tracer.record_miss(value.second, value.first, cache_id);
 
             // note: no one should know about the cache ID except for the owning page, so this
             //       should never return nullptr since there should never be two concurrent readers
@@ -1486,13 +1446,10 @@ StorageCache::PageCache::background_cleaner()
                 _dirty_cache[cache_id] = extent;
             });
         } else {
-            ++_cache_hits;
             extent = dirty_i->second;
 
-            // Record cache HIT trace event
-            if (_tracer.has_value()) {
-                _tracer->record_event(CacheTracer::EventType::HIT, extent->_file, constant::UNKNOWN_EXTENT, cache_id);
-            }
+            // Record cache HIT
+            _tracer.record_hit(extent->_file, extent->_extent_id, cache_id);
 
             // if the extent is being flushed, must block until complete
             if (extent->_state == CacheExtent::State::FLUSHING) {
@@ -1736,13 +1693,10 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
             // search for the requested extent
             const auto cache_i = _clean_cache.find(key);
             if (cache_i != _clean_cache.end()) {
-                ++_cache_hits;
                 extent = cache_i->second;
 
-                // Record cache HIT trace event
-                if (_tracer.has_value()) {
-                    _tracer->record_event(CacheTracer::EventType::HIT, file, extent_id, 0);
-                }
+                // Record cache HIT
+                _tracer.record_hit(file, extent_id, 0);
 
                 // remove the entry from the LRU list
                 if (extent->_use_count == 0) {
@@ -1764,12 +1718,8 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
             // note: may return nullptr, indicating someone else just read the extent from disk and
             //       that we should check the cache again
             //
-            ++_cache_misses;
-
-            // Record cache MISS trace event
-            if (_tracer.has_value()) {
-                _tracer->record_event(CacheTracer::EventType::MISS, file, extent_id, 0);
-            }
+            // Record cache MISS
+            _tracer.record_miss(file, extent_id, 0);
 
             extent = _read_extent(file, extent_id, [this, extent_id, &file](CacheExtentPtr ext) {
                     // insert the extent into the cache
@@ -1852,10 +1802,8 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         // update the cache ID as pointing to the new extent ID
         this->_cache_id_map[extent->_cache_id] = extent->key();
 
-        // Record FLUSH trace event
-        if (_tracer.has_value()) {
-            _tracer->record_event(CacheTracer::EventType::FLUSH, extent->_file, extent->_extent_id, extent->_cache_id);
-        }
+        // Record FLUSH event
+        _tracer.record_flush(extent->_file, extent->_extent_id, extent->_cache_id);
 
         // mark as MUTABLE so it's placed on the clean LRU
         extent->_state = CacheExtent::State::MUTABLE;
@@ -1921,10 +1869,8 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         auto extent = _clean_lru.front();
         _clean_lru.pop_front();
 
-        // Record EVICTION trace event
-        if (_tracer.has_value()) {
-            _tracer->record_event(CacheTracer::EventType::EVICTION, extent->_file, extent->_extent_id, extent->_cache_id);
-        }
+        // Record EVICTION event
+        _tracer.record_eviction(extent->_file, extent->_extent_id, extent->_cache_id);
 
         if (extent->_state == CacheExtent::State::CLEAN) {
             //TODO: consider changing to splice() that should be more efficient
