@@ -898,8 +898,38 @@ namespace indexer_helpers {
         }
     }
 
+    void
+    MutableTable::sync_data_and_indexes()
+    {
+        auto data_handle = IOMgr::get_instance()->open(_data_file,
+                                                       IOMgr::IO_MODE::APPEND, true);
+
+        data_handle->sync();
+
+        _primary_index->sync();
+
+        // now flush the indexes, capturing the roots
+        for (auto &secondary : _secondary_indexes) {
+            secondary.second.first->sync();
+        }
+
+        auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
+        auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
+                                                       IOMgr::IO_MODE::APPEND, true);
+
+        // flush and wait for completion
+        root_handle->sync();
+
+        // swap the symlink
+        std::filesystem::create_symlink(_table_dir / filename,
+                                        _table_dir / constant::ROOTS_TMP_FILE);
+        std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
+                                _table_dir / constant::ROOTS_FILE);
+
+    }
+
     TableMetadata
-    MutableTable::finalize()
+    MutableTable::finalize(bool call_sync)
     {
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
@@ -914,11 +944,11 @@ namespace indexer_helpers {
 
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
-        metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
+        metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize(false)});
 
         // now flush the indexes, capturing the roots
         for (auto &secondary : _secondary_indexes) {
-            metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
+            metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize(false));
         }
 
         metadata.stats = _stats;
@@ -936,19 +966,19 @@ namespace indexer_helpers {
             _roots_root_f->set_uint64(&row, root.extent_id);
             _roots_index_id_f->set_uint64(&row, root.index_id);
         }
+
         auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
         auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
                                                        IOMgr::IO_MODE::APPEND, true);
 
         // flush and wait for completion
-        extent->async_flush(root_handle).wait();
         root_handle->sync();
+        extent->async_flush(root_handle).wait();
 
-        // swap the symlink
-        std::filesystem::create_symlink(_table_dir / filename,
-                                        _table_dir / constant::ROOTS_TMP_FILE);
-        std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
-                                _table_dir / constant::ROOTS_FILE);
+        if (call_sync) {
+            // just sync the data and indexes synchronously
+            sync_data_and_indexes();
+        }
 
         return metadata;
     }

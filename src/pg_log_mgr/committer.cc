@@ -16,6 +16,8 @@
 
 namespace springtail::committer {
 
+    static constexpr size_t MAX_TABLE_SYNC_JOBS = 1024;
+
     bool
     _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     {
@@ -34,6 +36,7 @@ namespace springtail::committer {
 
         // use the same worker count for Indexer
         _indexer = std::make_unique<Indexer>(_indexer_worker_count, _index_reconciliation_queue_mgr);
+        _table_sync_processor = std::make_unique<TableSyncProcessor>(_worker_count);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -281,6 +284,7 @@ namespace springtail::committer {
                 Vacuumer::get_instance()->commit_expired_extents(db_id, xid);
 
                 // commit the completed XID
+
                 xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
 
                 // push completed DDL changes to the FDWs
@@ -296,9 +300,10 @@ namespace springtail::committer {
             }
             _completed_xids[db_id] = xid;
 
-            if (result->type() != XidReady::Type::RECONCILE_INDEX) {
+            if(result->type() != XidReady::Type::RECONCILE_INDEX) {
                 result->notify_tracker(xid);
             }
+
             WriteCacheServer::get_instance()->evict_xid(db_id, xid);
 
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
@@ -313,6 +318,8 @@ namespace springtail::committer {
         coordinator->unregister_thread(daemon_type, "committer");
 
         _indexer.reset();
+        _table_sync_processor.reset();
+
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committer shutdown");
     }
 
@@ -533,7 +540,9 @@ namespace springtail::committer {
         time_trace::Trace finalize_trace;
         TIME_TRACE_START(finalize_trace);
         // finalize the table
-        auto &&metadata = table->finalize();
+        auto &&metadata = table->finalize(false);
+        _table_sync_processor->add(table);
+
         TIME_TRACE_STOP(finalize_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("finalize-xid_{}", xid), finalize_trace);
 

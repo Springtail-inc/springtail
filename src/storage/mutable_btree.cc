@@ -4,7 +4,6 @@
 #include <storage/mutable_btree.hh>
 
 namespace springtail {
-
     MutableBTree::MutableBTree(const std::filesystem::path &file,
                                const std::vector<std::string> &keys,
                                ExtentSchemaPtr schema,
@@ -199,7 +198,7 @@ namespace springtail {
     }
 
     uint64_t
-    MutableBTree::finalize()
+    MutableBTree::finalize(bool call_sync) 
     {
         // must have called init() or init_empty()
         assert(_root != nullptr);
@@ -215,9 +214,9 @@ namespace springtail {
             _root = new_root;
         }
 
-        // sync the file to ensure all data is written to disk
-        auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::WRITE, true);
-        handle->sync();
+        if (call_sync) {
+            sync();
+        }
 
         // mark the tree as finalized so that additional changes can't be made at this XID
         _finalized = true;
@@ -225,6 +224,14 @@ namespace springtail {
         // return the new extent_id of the root
         return _root->extent_id;
     }
+
+void 
+MutableBTree::sync() 
+{
+    // sync the file to ensure all data is written to disk
+    auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::WRITE, true);
+    handle->sync();
+}
 
 MutableBTree::NodePtr
 MutableBTree::_next_leaf(NodePtr node)
