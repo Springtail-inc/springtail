@@ -752,6 +752,7 @@ Server::finalize(uint64_t db_id, uint64_t xid)
     if (md_map.empty()) {
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Nothing to finalize: {}@{} >= {}", db_id, request.xid(),
                     write_xid);
+        return;
     }
 
     // block all read access while we swap access roots

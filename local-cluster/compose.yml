@@ -152,7 +152,7 @@ services:
     volumes:
       - data:/fsx:rw
       - ./etc/supervisor:/etc/supervisor:rw
-      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
+      - "./opt/springtail/helpers:${INSTALL_DIR}/helpers"
       - "ingestion_logs:${INSTALL_DIR}/logs:rw"
     restart: unless-stopped
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
@@ -192,7 +192,7 @@ services:
       - data:/fsx:ro
       - ./etc/supervisor:/etc/supervisor:rw
       - shadow_logs:/shadow_logs:rw
-      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
+      - "./opt/springtail/helpers:${INSTALL_DIR}/helpers"
       - "proxy_logs:${INSTALL_DIR}/logs:rw"
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:
@@ -273,8 +273,7 @@ services:
     volumes:
       - data:/fsx:ro
       - ./etc/supervisor:/etc/supervisor:rw
-      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
-      - "./opt/springtail/customize-pg.yml:${INSTALL_DIR}/customize-pg.yml:ro"
+      - "./opt/springtail/helpers:${INSTALL_DIR}/helpers"
       - "fdw_logs:${INSTALL_DIR}/logs:rw"
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:
