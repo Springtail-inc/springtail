@@ -71,22 +71,26 @@ namespace springtail {
             CacheExtent(const std::vector<std::shared_ptr<std::vector<char>>> &data,
                         const std::filesystem::path &file,
                         uint64_t extent_id,
-                        uint32_t extent_size)
+                        uint32_t extent_size,
+                        uint64_t database_id)
                 : Extent(data),
                   _file(file),
                   _extent_id(extent_id),
                   _extent_size(extent_size),
+                  _database_id(database_id),
                   _use_count(1),
                   _state(State::CLEAN),
                   _cache_id(0)
             { }
 
             CacheExtent(const ExtentHeader &header,
-                        const std::filesystem::path &file)
+                        const std::filesystem::path &file,
+                        uint64_t database_id)
                 : Extent(header),
                   _file(file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _extent_size(0), // no original extent
+                  _database_id(database_id),
                   _use_count(1),
                   _state(State::DIRTY),
                   _cache_id(0)
@@ -100,6 +104,7 @@ namespace springtail {
                   _file(extent._file),
                   _extent_id(constant::UNKNOWN_EXTENT), // extent now has no on-disk location
                   _extent_size(extent._extent_size), // maintain the original size
+                  _database_id(extent._database_id),
                   _use_count(1),
                   _state(State::DIRTY),
                   _cache_id(0)
@@ -113,6 +118,7 @@ namespace springtail {
                   _file(original._file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _extent_size(original._extent_size), // maintain the original size
+                  _database_id(original._database_id),
                   _use_count(1),
                   _state(State::DIRTY),
                   _cache_id(0)
@@ -153,6 +159,7 @@ namespace springtail {
             std::filesystem::path _file; ///< The file containing this extent.
             uint64_t _extent_id; ///< The extent_id of this extent.
             uint32_t _extent_size; ///< The original size of the extent on-disk.  Used for vacuuming.
+            uint64_t _database_id; ///< The database this extent belongs to.
 
             // note: the following are only used by the DataCache and are protected by it's mutex
 
@@ -226,8 +233,8 @@ namespace springtail {
             /**
              * Constructs a SafeExtent using this ExtentRef and the underlying data file.
              */
-            SafeExtent make_safe_extent(const std::filesystem::path &file) const {
-                return SafeExtent{ file, *this, false };
+            SafeExtent make_safe_extent(const std::filesystem::path &file, uint64_t database_id) const {
+                return SafeExtent{ file, *this, false, database_id };
             }
 
             /**
@@ -236,8 +243,8 @@ namespace springtail {
              * new MUTABLE extent.  In that case the underlying weak_ptr will be changed to point to
              * the new extent.
              */
-            SafeExtent make_dirty_safe_extent(const std::filesystem::path &file) {
-                SafeExtent e{ file, *this, true };
+            SafeExtent make_dirty_safe_extent(const std::filesystem::path &file, uint64_t database_id) {
+                SafeExtent e{ file, *this, true, database_id };
 
                 _id = (*e)->cache_id(); // update the reference with the cache ID of the extent
                 _clean = false; // mark this reference as dirty so we know it holds a cache ID
@@ -281,8 +288,8 @@ namespace springtail {
             }
 
             // create empty extent
-            SafeExtent(const std::filesystem::path &file, ExtentHeader hdr) {
-                _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr);
+            SafeExtent(const std::filesystem::path &file, ExtentHeader hdr, uint64_t database_id) {
+                _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr, database_id);
             }
 
             SafeExtent &operator=(const SafeExtent &other) {
@@ -342,7 +349,8 @@ namespace springtail {
 
             SafeExtent(const std::filesystem::path &file,
                        const ExtentRef &ref,
-                       bool mark_dirty);
+                       bool mark_dirty,
+                       uint64_t database_id);
 
         private:
             CacheExtentPtr _extent;
@@ -398,10 +406,11 @@ namespace springtail {
              * @param file The name of the underlying data file.
              * @param ref An ExtentRef object that provides details about the specific extent.
              * @param mark_dirty A flag indicating if the extent should be made available for mutation.
+             * @param database_id The database this extent belongs to.
              * @return A pointer to the extent.
              */
             CacheExtentPtr get(const std::filesystem::path &file,
-                               const ExtentRef &ref, bool mark_dirty);
+                               const ExtentRef &ref, bool mark_dirty, uint64_t database_id);
 
             /**
              * Increment the use count on a cache extent.
@@ -461,7 +470,13 @@ namespace springtail {
             /**
              * Returns an empty DIRTY extent tied to the provided file.
              */
-            CacheExtentPtr get_empty(const std::filesystem::path &file, const ExtentHeader &header);
+            CacheExtentPtr get_empty(const std::filesystem::path &file, const ExtentHeader &header, uint64_t database_id);
+
+            /**
+             * Evicts all extents associated with a given database.
+             * Marks extents as INVALID and removes them from caches.
+             */
+            void evict_for_database(uint64_t database_id);
 
         private:
             /**
@@ -471,9 +486,10 @@ namespace springtail {
              *
              * @param cache_id The unique cache ID of the extent.
              * @param mark_dirty Mark the extent as DIRTY while retrieving.
+             * @param database_id The database this extent belongs to.
              * @return A pointer to the extent.
              */
-            CacheExtentPtr _get(uint64_t cache_id, bool mark_dirty = false);
+            CacheExtentPtr _get(uint64_t cache_id, bool mark_dirty, uint64_t database_id);
 
             /**
              * Takes a direct pointer to a page and updates the internal cache structures to allow a
@@ -505,7 +521,7 @@ namespace springtail {
              * Helper to retrieve an extent from the clean cache.  If the provided key is not
              * cached, this function will retrieve the extent from disk.
              */
-            CacheExtentPtr _get_clean(const std::filesystem::path& file, uint64_t extent_id);
+            CacheExtentPtr _get_clean(const std::filesystem::path& file, uint64_t extent_id, uint64_t database_id);
 
             /**
              * Internal helper to make space for a new extent within the cache by evicting another extent.
@@ -549,7 +565,7 @@ namespace springtail {
              * the IO to read the extent is complete.
              */
             CacheExtentPtr _read_extent(const std::filesystem::path& file,
-                    uint64_t extent_id, std::function<void(CacheExtentPtr)> callback);
+                    uint64_t extent_id, uint64_t database_id, std::function<void(CacheExtentPtr)> callback);
 
             /**
              * Helper to create a new unique cache ID and associate it with the provided extent.
@@ -727,7 +743,7 @@ namespace springtail {
                     }
 
                     // retrieve the extent
-                    _extent = _extent_i->make_safe_extent(_page->_file);
+                    _extent = _extent_i->make_safe_extent(_page->_file, _page->_database_id);
 
                     // start at the first row
                     _row = (*_extent)->begin();
@@ -744,7 +760,7 @@ namespace springtail {
                     while ((*_extent)->end() - _row <= n) {
                         n -= (*_extent)->end() - _row;
                         ++_extent_i;
-                        _extent = _extent_i->make_safe_extent(_page->_file);
+                        _extent = _extent_i->make_safe_extent(_page->_file, _page->_database_id);
                         _row = (*_extent)->begin();
                     }
                     _row += n;
@@ -767,7 +783,7 @@ namespace springtail {
                     --_extent_i;
 
                     // retrieve the extent
-                    _extent = _extent_i->make_safe_extent(_page->_file);
+                    _extent = _extent_i->make_safe_extent(_page->_file, _page->_database_id);
 
                     // start at the last row
                     _row = (*_extent)->last();
@@ -806,7 +822,7 @@ namespace springtail {
                     }
 
                     // get the extent, potentially from the read cache
-                    _extent = _extent_i->make_safe_extent(_page->_file);
+                    _extent = _extent_i->make_safe_extent(_page->_file, _page->_database_id);
 
                     // get the first row in the extent
                     _row = (*_extent)->begin();
@@ -841,7 +857,7 @@ namespace springtail {
              */
             Iterator last() {
                 assert(!_extents.empty());
-                SafeExtent extent{ _extents.back().make_safe_extent(_file) };
+                SafeExtent extent{ _extents.back().make_safe_extent(_file, _database_id) };
                 auto row_i = (*extent)->last();
                 return Iterator(this, --_extents.end(), std::move(extent), row_i);
             }
@@ -963,7 +979,7 @@ namespace springtail {
              */
             ExtentHeader _header() const {
                 assert(!_extents.empty());
-                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
+                SafeExtent extent{ _extents.front().make_safe_extent(_file, _database_id) };
                 return (*extent)->header();
             }
 
@@ -983,7 +999,7 @@ namespace springtail {
                 }
 
                 // if one extent, and the extent is empty, then empty
-                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
+                SafeExtent extent{ _extents.front().make_safe_extent(_file, _database_id) };
                 return (*extent)->empty();
             }
 
