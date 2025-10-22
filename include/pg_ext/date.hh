@@ -158,8 +158,7 @@ constexpr int TZ_STRLEN_MAX = 255;
 #define TIME_T_MIN MINVAL(pg_time_t, TYPE_BIT(pg_time_t))
 #define TIME_T_MAX MAXVAL(pg_time_t, TYPE_BIT(pg_time_t))
 
-constexpr char WILDABBR[] = "   ";
-static const std::string wildabbr = WILDABBR;
+static const char wildabbr[] = "   ";
 
 static const char gmt[] = "GMT";
 
@@ -191,7 +190,7 @@ struct pg_tm
 	int			tm_yday;
 	int			tm_isdst;
 	long int	tm_gmtoff;
-	std::string tm_zone;
+	const char *tm_zone;
 };
 
 struct ttinfo
