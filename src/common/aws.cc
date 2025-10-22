@@ -18,7 +18,6 @@ namespace springtail {
         // get aws_mock_override from properties org_config
         _aws_secrets_overrides = Properties::get(Properties::AWS_USERS_OVERRIDE);
         if (!_aws_secrets_overrides.is_null()) {
-            LOG_INFO("AWS users override found in properties");
             return;
         }
 
@@ -35,7 +34,6 @@ namespace springtail {
         }
 
         if (!_aws_secrets_overrides.is_null()) {
-            LOG_INFO("Using AWS users override from properties");
             return _aws_secrets_overrides;
         }
 

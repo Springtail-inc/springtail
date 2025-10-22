@@ -217,7 +217,6 @@ namespace springtail::pg_proxy {
     protected:
         /**
          * @brief Wake up internal thread.
-         *
          */
         virtual void _internal_thread_shutdown() override
         {
@@ -226,7 +225,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Stop function for stopping UserMgr thread
-         *
          */
         void _internal_shutdown() override {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Stopping User Manager thread {}", _id);

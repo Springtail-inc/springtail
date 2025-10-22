@@ -96,6 +96,10 @@ namespace springtail::pg_proxy {
             return _replica_session;
         }
 
+        ServerSessionPtr get_pending_replica_session() const {
+            return _pending_replica_session;
+        }
+
         /**
          * @brief Get a shared pointer to this client session
          * @return std::shared_ptr<ClientSession> shared pointer to this client session
@@ -138,6 +142,11 @@ namespace springtail::pg_proxy {
          * @param session session that is shutting down
          */
         void server_shutdown(ServerSessionPtr session);
+
+        /**
+         * @brief Enqueue a failover notification message to this session
+         */
+        void queue_failover_notification();
 
     private:
 
@@ -278,8 +287,11 @@ namespace springtail::pg_proxy {
             return std::static_pointer_cast<ServerSession>(get_associated_session());
         }
 
-        /** Helper to switch failover replica session with replica session */
-        void _switch_failover_replica();
+        /**
+         * @brief Helper to switch failover replica session with replica session
+         * @return true if the switch was successful, false otherwise (requeue needed)
+         */
+        bool _switch_failover_replica();
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
 } // namespace springtail::pg_proxy

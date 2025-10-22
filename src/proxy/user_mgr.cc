@@ -185,7 +185,17 @@ namespace springtail::pg_proxy {
                         continue;
                     }
 
+                    // handle special role proxy_to_fdw
                     if (role == "proxy_to_fdw") {
+                        // see if we need to update the special user
+                        if (_proxy_to_fdw_user != nullptr) {
+                            auto password_and_type = _proxy_to_fdw_user->get_password_and_type();
+                            if (password_and_type.first == password &&
+                                password_and_type.second == password_type) {
+                                continue;
+                            }
+                        }
+
                         // create special user for role proxy_to_fdw
                         std::unique_lock lock(_mutex);
                         _proxy_to_fdw_user = std::make_shared<User>(username, password, password_type);

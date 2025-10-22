@@ -291,14 +291,6 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Enqueue a failover notification message to this session
-         */
-        void queue_failover_notification() {
-            std::lock_guard<std::mutex> lock(_notification_mutex);
-            _notification_queue.emplace(NotificationMsg{NotificationMsg::Type::NOTIFY_FAILOVER});
-        }
-
-        /**
          * @brief Get JSON representation of session; used by admin server
          * @return nlohmann::json JSON object representing session
          */
@@ -309,6 +301,12 @@ namespace springtail::pg_proxy {
          * @return nlohmann::json JSON object representing session
          */
         nlohmann::json _to_json_brief() const;
+
+        /**
+         * @brief Get hostname for this session
+         * @return std::string hostname
+         */
+        const std::string hostname() const;
 
         /**
          * @brief Does this session have a closed connection

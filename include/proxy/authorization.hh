@@ -163,6 +163,7 @@ public:
     {
         if (_type == Session::Type::REPLICA) {
             // modify the login for replica FDW login
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Using replica login for user {}", _id, _user->username());
             _login = UserMgr::get_instance()->get_replica_login(_user);
         } else {
             _login = user->get_user_login();

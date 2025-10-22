@@ -520,7 +520,7 @@ namespace springtail::pg_proxy {
             for (int i = 2; i < nfds + 2 && n > 0; i++) {
                 if (fds[i].revents & POLLIN) {
                     int fd = fds[i].fd;
-                    _add_runnable_fd(fd, runnable_sessions);
+                    _add_runnable_fd(fd, true, runnable_sessions);
                     n--;
                 }
             }
@@ -530,16 +530,16 @@ namespace springtail::pg_proxy {
             {
                 std::unique_lock<std::mutex> nlock(_notification_mutex);
                 for (auto fd : _notification_queue) {
-                    _add_runnable_fd(fd, runnable_sessions);
+                    _add_runnable_fd(fd, false, runnable_sessions);
                 }
                 _notification_pending = false;
                 _notification_queue.clear();
             }
 
-            // queue the sessions that are now session
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
+            // queue the sessions that are now runnable
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Queueing session {}", session->name());
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Queueing session {}", session->name());
                 _thread_pool->queue(session);
             }
 
@@ -575,12 +575,20 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ProxyServer::_add_runnable_fd(int fd, std::set<SessionPtr, Session::SessionComparator> &runnable_sessions)
+    ProxyServer::_add_runnable_fd(int fd,
+        bool has_data,
+        std::set<SessionPtr, Session::SessionComparator> &runnable_sessions)
     {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
 
+        // check if fd is in waiting sessions, if not it is already running
+        if (_waiting_sessions.contains(fd) == false) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Socket {} not in waiting sessions, ignoring", fd);
+            return;
+        }
+
         auto session_itr = _sessions.find(fd);
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fd);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Socket {} is now runnable", fd);
 
         // lookup fd in sessions map
         if (session_itr == _sessions.end()) {
@@ -591,8 +599,11 @@ namespace springtail::pg_proxy {
 
         // find session object and insert into session sessions
         auto session = session_itr->second;
-        // for this session update the set of fds that have data
-        session->add_fd(fd);
+
+        // for this session update the set of fds that have data; for notifications skip this
+        if (has_data) {
+            session->add_fd(fd);
+        }
 
         // insert into set of runnable sessions
         auto ins_res = runnable_sessions.insert(session);
@@ -605,7 +616,7 @@ namespace springtail::pg_proxy {
             CHECK(it != _session_sockets.end());
 
             for (auto socket : it->second) {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Removing socket {} from waiting sessions for {}", socket, session->name());
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Removing socket {} from waiting sessions for {}", socket, session->name());
                 _waiting_sessions.erase(socket);
             }
         }
@@ -669,8 +680,8 @@ namespace springtail::pg_proxy {
         auto session_itr = _session_sockets.find(session);
         if (session_itr != _session_sockets.end()) {
             // this is the primary session used for lookup
-            // go through the list of sockets and remove them
-            for (auto socket: session_itr->second) {
+            // go through the set of sockets and remove them
+            for (auto socket : session_itr->second) {
                 _waiting_sessions.erase(socket);
                 _sessions.erase(socket);
             }
@@ -698,9 +709,8 @@ namespace springtail::pg_proxy {
         // do a lookup in the session sockets list
         auto primary_itr = _session_sockets.find(itr->second);
         if (primary_itr != _session_sockets.end()) {
-            // remove the socket from the vector of sockets associated with the primary session
-            primary_itr->second.erase(std::remove(primary_itr->second.begin(),
-                primary_itr->second.end(), socket), primary_itr->second.end());
+            // remove the socket from the set of sockets associated with the primary session
+            primary_itr->second.erase(socket);
         }
     }
 
@@ -732,9 +742,13 @@ namespace springtail::pg_proxy {
         auto ins_res = _sessions.insert(std::make_pair(socket, new_session));
         CHECK(ins_res.second);
 
-        // then do the insert; <session, vector:socket>
-        auto res = _session_sockets.insert(std::make_pair(new_session, std::vector<int>()));
-        res.first->second.push_back(socket);
+        // then do the insert; <session, set<int>>
+        auto it = _session_sockets.find(new_session);
+        if (it != _session_sockets.end()) {
+            it->second.insert(socket);
+        } else {
+            _session_sockets.insert(std::make_pair(new_session, std::set<int>{socket}));
+        }
 
         if (waiting_session_insert) {
             _waiting_sessions.insert(socket);

@@ -646,6 +646,8 @@ namespace springtail::pg_proxy
             if (session != nullptr) {
                 auto client_session = session->get_client_session();
                 if (client_session != nullptr) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[DB:{}] Notifying client session S:{} of failover",
+                              to_string(), client_session->id());
                     // enqueue a failover notification to the client session, this is non-blocking
                     client_session->queue_failover_notification();
                 }
@@ -891,14 +893,14 @@ namespace springtail::pg_proxy
                 state == Properties::FDW_STATE_DRAINING) {
                 // initiate shutdown of the replica instance
                 _replica_set->initiate_replica_shutdown(replica_id);
-                return;
+                continue;
             }
 
             if (current_state == DatabaseInstance::State::NONE &&
                 state == Properties::FDW_STATE_RUNNING) {
                 // add the replica instance if not already present
                 add_replica(replica_id);
-                return;
+                continue;
             }
         }
     }

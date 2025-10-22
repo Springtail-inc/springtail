@@ -461,7 +461,7 @@ namespace springtail::pg_proxy {
          * @brief Get JSON representation of instance set; used by admin server
          * @return nlohmann::json
          */
-        nlohmann::json to_json() const {
+        virtual nlohmann::json to_json() const {
             nlohmann::json j = nlohmann::json::array();
             std::shared_lock lock(_base_mutex);
             for (const auto &instance: _active_instances) {
@@ -742,7 +742,7 @@ namespace springtail::pg_proxy {
          * @brief Get JSON representation of primary/standby set
          * @return nlohmann::json
          */
-        nlohmann::json to_json() const {
+        nlohmann::json to_json() const override {
             return _primary->to_json();
         }
 

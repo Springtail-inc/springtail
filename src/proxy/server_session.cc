@@ -146,6 +146,8 @@ namespace springtail::pg_proxy {
     {
         CHECK(_state == State::RESET_SESSION_READY || _state == State::RESET_SESSION_PARAMS);
 
+        LOG_INFO("[S:{}] Server session reset complete; ready for queries", _id);
+
         // set state to ready
         _seq_id = 0;
         _state = State::READY;

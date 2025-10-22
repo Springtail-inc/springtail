@@ -70,7 +70,7 @@ namespace springtail::pg_proxy {
     {
         if (_running.test_and_set()) {
             LOG_ERROR("{} Session already running", name());
-            assert(0);
+            DCHECK(false) << "Session already running";
             return;
         }
 
@@ -85,6 +85,11 @@ namespace springtail::pg_proxy {
         if (!_connection->closed()) {
             ProxyServer::get_instance()->signal(shared_from_this());
         }
+    }
+
+    const std::string
+    Session::hostname() const {
+        return _instance ? _instance->hostname() : std::string{};
     }
 
     std::pair<char,int32_t>
@@ -347,11 +352,19 @@ namespace springtail::pg_proxy {
             auto client_session = static_cast<const ClientSession*>(this);
             auto primary_session = client_session->get_primary_session();
             auto replica_session = client_session->get_replica_session();
+            auto pending_session = client_session->get_pending_replica_session();
             if (primary_session) {
                 associated_sessions.push_back(primary_session->_to_json_brief());
             }
+
             if (replica_session) {
                 associated_sessions.push_back(replica_session->_to_json_brief());
+            }
+
+            if (pending_session) {
+                auto pending_j = pending_session->_to_json_brief();
+                pending_j["pending"] = true;
+                associated_sessions.push_back(pending_j);
             }
         } else {
             auto server_session = static_cast<const ServerSession*>(this);
