@@ -219,7 +219,7 @@ services:
     networks:
       - local-cluster
     ports:
-      - "${HOST_PORT_FDW}:5432"
+      - "${HOST_PORT_FDW1}:5432"
     env_file:
       - ./env/env.services
       - ./env/env.setup
@@ -260,7 +260,7 @@ services:
     networks:
       - local-cluster
     ports:
-      - 45433:5432
+      - "${HOST_PORT_FDW2}:5432"
     env_file:
       - ./env/env.services
       - ./env/env.setup
