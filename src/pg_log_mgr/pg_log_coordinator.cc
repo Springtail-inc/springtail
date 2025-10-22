@@ -169,10 +169,11 @@ namespace springtail::pg_log_mgr {
         // Remove database directory and everything inside it
         std::error_code ec;
         std::filesystem::remove_all(table_path, ec);
-        if (ec) {
+        if (!ec) {
             LOG_INFO("Removed database directory {}", table_path.c_str());
         } else {
-            LOG_ERROR("Failed to removed database directory {}", table_path.c_str());
+            LOG_ERROR("Failed to removed database directory {}: error code {}, error message '{}'",
+                table_path.c_str(), ec.value(), ec.message());
         }
     }
 
@@ -209,6 +210,14 @@ namespace springtail::pg_log_mgr {
 
         // Cleanup database in sys table manager
         sys_tbl_mgr::Server::get_instance()->remove_db(db_id);
+
+        // Cleanup storage cache
+        StorageCache::get_instance()->evict_for_database(db_id);
+        // StorageCache::get_instance()->log_cache();
+
+        // create database path and clear out all file handlers in IOMgr that start with this path
+        std::filesystem::path db_path = TableMgr::get_instance()->get_table_base() / std::to_string(db_id);
+        IOMgr::get_instance()->drop_all_fh(db_path);
 
         cleanup_database_dir(db_id);
     }

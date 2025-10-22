@@ -136,10 +136,11 @@ XidMgrServer::cleanup(uint64_t db_id)
     // Remove database directory and everything inside it
     std::error_code ec;
     std::filesystem::remove_all(path, ec);
-    if (ec) {
+    if (!ec) {
         LOG_INFO("Removed database directory {}", path.c_str());
     } else {
-        LOG_ERROR("Failed to removed database directory {}", path.c_str());
+        LOG_ERROR("Failed to removed database directory {}: error code {}, error message '{}'",
+            path.c_str(), ec.value(), ec.message());
     }
 }
 

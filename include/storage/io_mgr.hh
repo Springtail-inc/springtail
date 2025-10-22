@@ -114,6 +114,13 @@ namespace springtail {
          */
         void put_decompressor(std::shared_ptr<Decompressor> decompressor);
 
+        /**
+         * @brief Drop all file handles for the file with the given prefix
+         *
+         * @param prefix file prefix
+         */
+        void drop_all_fh(const std::filesystem::path &prefix);
+
     protected:
 
         /**
