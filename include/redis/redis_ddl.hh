@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <shared_mutex>
+#include <map>
 #include <nlohmann/json.hpp>
 
 #include <common/redis.hh>
@@ -162,6 +164,12 @@ namespace springtail {
 
     private:
         std::shared_ptr<RedisClient> _redis;
+
+        // In-memory DDL storage: db_id -> (xid -> [ddl_statements])
+        // Used for the hot path between GC-1 (PgLogReader) and GC-2 (Committer)
+        // Entries are transient and cleared after precommit_ddl() moves them to Redis
+        std::map<uint64_t, std::map<uint64_t, std::vector<nlohmann::json>>> _ddl_cache;
+        mutable std::shared_mutex _ddl_cache_mutex;
     };
 
 }
