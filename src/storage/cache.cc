@@ -2048,59 +2048,88 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_evict_pages_for_database_file file={} database_id={}",
                   file, database_id);
 
-        boost::unique_lock lock(_mutex);
+        // Extract the page list for this file while holding the lock
+        std::list<PagePtr> pages_to_evict;
+        {
+            boost::unique_lock lock(_mutex);
 
-        // Now evict all pages for this file similar to drop_file()
-        auto file_i = _flush_list.find(file);
-        if (file_i != _flush_list.end()) {
-            auto &drop_pages = file_i->second;
-            bool done = false;
-            auto page_i = drop_pages.begin();
+            auto file_i = _flush_list.find(file);
+            if (file_i != _flush_list.end()) {
+                auto &flush_pages = file_i->second;
 
-            if (page_i == drop_pages.end()) {
-                _flush_list.erase(file_i);
-            } else {
-                auto data_cache = StorageCache::get_instance()->_data_cache;
-                while (!done) {
+                // Collect all pages for this database
+                for (auto page_i = flush_pages.begin(); page_i != flush_pages.end(); ) {
                     auto page = *page_i;
 
-                    // Only evict pages for this database
                     if (page->_database_id == database_id) {
-                        // clear the associated extents from the cache
-                        for (auto &ref : page->_extents) {
-                            auto extent = ref.lock_cached();
-                            if (extent) {
-                                if (extent->state() == CacheExtent::State::DIRTY) {
-                                    data_cache->drop_dirty(extent);
-                                    data_cache->put(extent);
-                                } else if (extent->state() == CacheExtent::State::CLEAN ||
-                                          extent->state() == CacheExtent::State::MUTABLE) {
-                                    data_cache->invalidate_clean(extent);
-                                    data_cache->put(extent);
-                                }
-                            }
-                        }
-
-                        // remove the page from the flush list
-                        drop_pages.erase(page->_flush_pos);
+                        pages_to_evict.push_back(page);
+                        page_i = flush_pages.erase(page_i);
+                    } else {
+                        ++page_i;
                     }
+                }
 
-                    // get the next dirty page
-                    page_i = drop_pages.begin();
-                    if (page_i == drop_pages.end()) {
-                        _flush_list.erase(file);
-                        done = true;
+                // If the flush list for this file is now empty, remove it
+                if (flush_pages.empty()) {
+                    _flush_list.erase(file_i);
+                }
+            }
+        }
+
+        // Now process the pages without holding the cache lock
+        auto data_cache = StorageCache::get_instance()->_data_cache;
+        for (auto &page : pages_to_evict) {
+            // clear the associated extents from the cache
+            for (auto &ref : page->_extents) {
+                auto extent = ref.lock_cached();
+                if (extent) {
+                    if (extent->state() == CacheExtent::State::DIRTY) {
+                        data_cache->drop_dirty(extent);
+                        data_cache->put(extent);
+                    } else if (extent->state() == CacheExtent::State::CLEAN ||
+                              extent->state() == CacheExtent::State::MUTABLE) {
+                        data_cache->invalidate_clean(extent);
+                        data_cache->put(extent);
                     }
                 }
             }
         }
 
-        // Remove the file from the database tracking
-        auto db_i = _database_files.find(database_id);
-        if (db_i != _database_files.end()) {
-            db_i->second.erase(file);
-            if (db_i->second.empty()) {
-                _database_files.erase(db_i);
+        // Re-acquire the lock to evict the Page objects themselves
+        {
+            boost::unique_lock lock(_mutex);
+
+            for (auto &page : pages_to_evict) {
+                // Evict the Page object from the PageCache
+                auto cache_i = _cache.find(page->key());
+                if (cache_i != _cache.end()) {
+                    cache_i->second.erase(page->xid());
+                    if (cache_i->second.empty()) {
+                        _cache.erase(cache_i);
+                    }
+                }
+
+                // Page must not be in use for safe eviction
+                DCHECK_EQ(page->_use_count, 0);
+
+                // Remove from LRU list
+                if (page->_is_dirty) {
+                    _dirty_lru.erase(page->_lru_pos);
+                } else {
+                    _clean_lru.erase(page->_lru_pos);
+                }
+
+                // Decrement the size counter
+                --_size;
+            }
+
+            // Remove the file from the database tracking
+            auto db_i = _database_files.find(database_id);
+            if (db_i != _database_files.end()) {
+                db_i->second.erase(file);
+                if (db_i->second.empty()) {
+                    _database_files.erase(db_i);
+                }
             }
         }
     }
