@@ -1,0 +1,4 @@
+#!/bin/bash
+pushd /opt/springtail/helpers || exit 1
+ls -l
+popd || exit 1
