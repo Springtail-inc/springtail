@@ -66,7 +66,12 @@ namespace springtail::pg_proxy {
         _wrap_error_handler([this, &fds] {
             do {
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Client session in run loop", _id);
+
                 // handle any pending notifications
+                // NOTE: notifications may not be processed right away if we are not in READY state or
+                // in the midst of a transaction (_in_transaction is true).
+                // So we process any data in the hopes that we will complete the transaction after that
+                // we then check again (at end of loop) to see if we can handle remaining notifications.
                 _process_notifications();
 
                 // go through fds and check if we have any pending data
@@ -90,7 +95,8 @@ namespace springtail::pg_proxy {
 
                 fds.clear();
 
-                // check once more for any notifications
+                // check once more for any notifications; we may not have processed at the
+                // top of the loop if we were in a transaction, so try again now.
                 _process_notifications();
 
             } while ((_state != State::ERROR) && !is_shutdown() && _has_pending_data(fds));
