@@ -115,7 +115,7 @@ namespace springtail {
          * Internal helper to flush a trace extent to disk.
          * @param extent_to_flush The extent to flush (allows flushing old extent while creating new one)
          */
-        void _flush_trace_extent(std::shared_ptr<Extent> extent_to_flush) noexcept;
+        void _flush_trace_extent(ExtentPtr extent_to_flush) noexcept;
 
         /**
          * Gets the current timestamp in microseconds since epoch.
@@ -141,10 +141,10 @@ namespace springtail {
 
         // Trace file generation (only used if _trace_enabled)
         boost::mutex _mutex;                    ///< Protects trace state
-        std::shared_ptr<Extent> _current_trace; ///< Current extent collecting traces
-        std::shared_ptr<class ExtentSchema> _schema; ///< Schema for trace entries
+        ExtentPtr _current_trace; ///< Current extent collecting traces
+        ExtentSchemaPtr _schema;  ///< Schema for trace entries
         uint64_t _trace_sequence;               ///< Sequence number for trace files
-        std::vector<std::future<std::shared_ptr<struct IOResponseAppend>>> _pending_flushes; ///< Pending async flush operations
+        std::vector<std::future<std::shared_ptr<IOResponseAppend>>> _pending_flushes; ///< Pending async flush operations
 
         // Statistics tracking (always enabled)
         std::atomic<uint64_t> _total_cache_hits{0};    ///< Total lifetime cache hits
