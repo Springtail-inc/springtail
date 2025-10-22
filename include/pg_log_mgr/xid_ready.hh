@@ -184,11 +184,6 @@ namespace springtail::committer {
             _xid_tracker->remove_xid(xid);
         }
 
-        /** A getter for the tracker. */
-        pg_log_mgr::WalProgressTrackerPtr get_tracker() const {
-            return _xid_tracker;
-        }
-
     private:
         Type _type; ///< The message type.
         uint64_t _db_id; ///< The database ID.

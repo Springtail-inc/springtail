@@ -8,7 +8,6 @@
 #include <redis/redis_ddl.hh>
 #include <xid_mgr/pg_xact_log_writer.hh>
 #include <xid_mgr/xid_mgr_service.hh>
-#include <pg_log_mgr/wal_progress_tracker.hh>
 
 namespace springtail::xid_mgr {
 
@@ -24,34 +23,8 @@ public:
      * @brief commit up to and including given xid
      * @param db_id database id
      * @param xid xid to commit
-     * @param has_schema_changes true if transaction has schema changes
-     * @param wal_progress_tracker WAL progress tracker, this is to synchronize xlog and wal progress
      */
     void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes);
-
-    /** Prepare for async commit of given xid. This function doesn't do the actual commit.
-     * @param db_id database id
-     * @param pg_xid Postgres xid
-     * @param xid xid to commit
-     * @param has_schema_changes true if transaction has schema changes
-     * @param wal_progress_tracker WAL progress tracker, this is to synchronize xlog and wal progress
-     */
-    void pre_commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr wal_progress_tracker);
-
-    /** Register for async commit after the table data has been persisted.
-     * @param db_id database id
-     * @param xid xid to commit
-     * @param tid table id
-     * @param wal_progress_tracker WAL progress tracker, this is to synchronize xlog and wal progress
-     */
-    void register_table_xid_commit(uint64_t db_id, uint64_t xid, uint64_t tid, pg_log_mgr::WalProgressTrackerPtr wal_progress_tracker);
-
-    /** Complete async commit for this table.
-     * @param db_id database id
-     * @param xid xid to commit
-     * @param tid table id
-     */
-    void complete_table_xid_commit(uint64_t db_id, uint64_t xid, uint64_t tid);
 
     /**
      * @brief Record a DDL change without doing a commit.  Used for table sync operations.
@@ -100,17 +73,6 @@ private:
 
     /** base path */
     std::filesystem::path _base_path;
-
-
-    using TableIds = std::vector<uint64_t>;
-    struct CommitInfo {
-        uint64_t pg_xid;
-        bool has_schema_changes;
-        pg_log_mgr::WalProgressTrackerPtr wal_progress_tracker;  ///< WAL progress tracker
-        TableIds table_ids;  ///< list of table ids
-    };
-    using XidCommitMap = std::map<uint64_t, CommitInfo>;
-    std::unordered_map<uint64_t, XidCommitMap> _pending_xid_commits;  ///< map of database id to map of xid to table ids
 
     /**
      * @brief Class for keeping transaction log data and managing access to them

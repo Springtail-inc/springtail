@@ -130,10 +130,9 @@ namespace springtail {
          * completed.  Further operations on the BTree without setting the XID forward should result
          * in errors.
          *
-         * *param fs_sync If true, then fsync the file after writing all data.
          * @return The offset of the root for the target XID we just finalized.
          */
-        uint64_t finalize(bool fs_sync = true);
+        uint64_t finalize();
 
         /**
          * Helper function to return the key fields of the btree leaf extents.
@@ -150,9 +149,6 @@ namespace springtail {
         bool empty() {
             return _root->empty();
         }
-
-        /** Write the index to disk (fsync). */
-        void sync();
 
     private:
         /** The default maximum number of extents in an in-memory page before we automatically flush it to disk. */

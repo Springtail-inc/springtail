@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <memory>
 
 #include <common/common.hh>
 #include <common/exception.hh>
@@ -92,42 +91,7 @@ XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 void
 XidMgrServer::commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes)
 {
-    std::optional<CommitInfo> commit_info_opt;
-    {
-        // if there are pending commits in front of us, we need to wait
-        std::unique_lock write_lock(_mutex);
-
-        // do we have pending commits in front of us?
-        auto pending_it = _pending_xid_commits.find(db_id);
-        if (pending_it != _pending_xid_commits.end()) {
-            // iterate in xid order
-            for( const auto & [xid_key, commit_info]: pending_it->second) {
-                if (xid_key == xid && commit_info.table_ids.empty())  {
-                    // it's us and we can do a final commit
-                    commit_info_opt = commit_info;
-
-                    // remove from pending
-                    pending_it->second.erase(xid_key);
-                    if (pending_it->second.empty()) {
-                        _pending_xid_commits.erase(pending_it);
-                        break;
-                    }
-                } else if (xid_key <= xid) {
-                    // we have a pending commit in front of us or it's us with table sync
-                    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Waiting for pending commit for db {} xid {}", db_id, xid_key);
-                    // ... commit but don't update xlog and notify tracker
-                    return;
-                }
-            }
-        }
-    }
-
     _record_xid_change(db_id, pg_xid, xid, has_schema_changes, true);
-    // notify the WAL progress tracker
-    if (commit_info_opt.has_value() && commit_info_opt->wal_progress_tracker) {
-        CHECK(pg_xid == commit_info_opt->pg_xid);
-        commit_info_opt->wal_progress_tracker->remove_xid(xid);
-    }
 }
 
 void
@@ -283,17 +247,6 @@ XidMgrServer::DBXactLogData::cleanup(uint64_t min_timestamp, bool archive_logs)
 {
     std::unique_lock lock(_mutex);
     _xact_log.cleanup(min_timestamp, archive_logs);
-}
-
-void 
-XidMgrServer::pre_commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr wal_progress_tracker)
-{
-    std::unique_lock lock(_mutex);
-
-    auto& db = _pending_xid_commits[db_id];
-    auto it = db.find(xid);
-    CHECK(it == db.end()) << "XID: " << xid << " is already a pending commit for db " << db_id; 
-    db.emplace(xid, CommitInfo{pg_xid, has_schema_changes, wal_progress_tracker});
 }
 
 }  // namespace springtail::xid_mgr
