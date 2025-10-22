@@ -152,8 +152,16 @@ WriteCacheServer::drop_database(uint64_t db_id)
     WriteCacheIndexPtr index = _get_index(db_id);
 
     uint64_t index_mem = index->get_memory_in_use();
+
+    boost::upgrade_lock shared_lock(_db_mutex);
     _indexes.erase(db_id);
     _subtract_memory(index_mem);
+
+    // create storage directory for the database
+    std::filesystem::path db_storage_dir = _disk_storage_dir / std::to_string(db_id);
+    std::error_code ec;
+    std::filesystem::remove_all(db_storage_dir, ec);
+    CHECK(!ec) << ec.message();
 }
 
 nlohmann::json
