@@ -262,8 +262,6 @@ private:
     std::filesystem::path _global_vacuum_runfile; ///< Global vacuum file for current run
     std::string _vacuum_cutoff_xid_redis_hash;    ///< name of the redis hash holding last seen vacuum cutoff XIDs
 
-    RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
-
     std::atomic<int64_t> _entries_count_in_memory = 0;  ///< To track count of entries in the memory
 
     /**
