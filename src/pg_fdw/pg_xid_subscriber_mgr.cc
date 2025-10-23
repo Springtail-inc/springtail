@@ -63,7 +63,6 @@ PgXidSubscriberMgr::task(std::stop_token st)
     };
 
     std::unique_ptr<XidMgrSubscriber> subscriber;
-    subscriber->start();
 
     // the worker threads are responsible for fetching
     // sys table data when the next xid is committed
