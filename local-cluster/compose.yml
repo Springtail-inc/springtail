@@ -152,7 +152,7 @@ services:
     volumes:
       - data:/fsx:rw
       - ./etc/supervisor:/etc/supervisor:rw
-      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
+      - "./opt/springtail/helpers:${INSTALL_DIR}/helpers"
       - "ingestion_logs:${INSTALL_DIR}/logs:rw"
     restart: unless-stopped
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
@@ -192,7 +192,7 @@ services:
       - data:/fsx:ro
       - ./etc/supervisor:/etc/supervisor:rw
       - shadow_logs:/shadow_logs:rw
-      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
+      - "./opt/springtail/helpers:${INSTALL_DIR}/helpers"
       - "proxy_logs:${INSTALL_DIR}/logs:rw"
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:
@@ -207,7 +207,7 @@ services:
       retries: 10
       timeout: 5s
 
-  fdw:
+  fdw1:
     image: ${IMAGE:-local-cluster-img:latest}
     labels:
       <<: *common_labels
@@ -219,12 +219,12 @@ services:
     networks:
       - local-cluster
     ports:
-      - "${HOST_PORT_FDW}:5432"
+      - "${HOST_PORT_FDW1}:5432"
     env_file:
       - ./env/env.services
       - ./env/env.setup
       - ./env/.env
-      - ./env/env.fdw
+      - ./env/env.fdw1
     cap_add:
       - SYS_ADMIN
       - SYS_PTRACE
@@ -234,6 +234,46 @@ services:
       - ./etc/supervisor:/etc/supervisor:rw
       - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
       - "./opt/springtail/customize-pg.yml:${INSTALL_DIR}/customize-pg.yml:ro"
+      - "fdw_logs:${INSTALL_DIR}/logs:rw"
+    command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
+    depends_on:
+      ingestion:
+        condition: service_started
+      controller-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      # Checks if there is `<SUCCESS>` in /var/log/supervisor/init-services.out.log
+      test: [ "CMD-SHELL", "grep -q '<SUCCESS>' /var/log/supervisor/init-services.out.log || exit 1" ]
+      interval: 15s
+      retries: 24
+      timeout: 5s
+
+  fdw2:
+    image: ${IMAGE:-local-cluster-img:latest}
+    labels:
+      <<: *common_labels
+    privileged: true
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      core: -1
+    networks:
+      - local-cluster
+    ports:
+      - "${HOST_PORT_FDW2}:5432"
+    env_file:
+      - ./env/env.services
+      - ./env/env.setup
+      - ./env/.env
+      - ./env/env.fdw2
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+    restart: unless-stopped
+    volumes:
+      - data:/fsx:ro
+      - ./etc/supervisor:/etc/supervisor:rw
+      - "./opt/springtail/helpers:${INSTALL_DIR}/helpers"
       - "fdw_logs:${INSTALL_DIR}/logs:rw"
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:

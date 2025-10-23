@@ -104,7 +104,6 @@ namespace springtail {
 
             // got the file, incr use count and return
             if (file != nullptr) {
-                _in_use_count++;
                 return file;
             }
 
@@ -127,7 +126,6 @@ namespace springtail {
         CHECK_EQ(fh->is_busy, true);
 
         fh->is_busy = false;
-        _in_use_count--;
 
         DCHECK_GE(_in_use_count, 0);
 

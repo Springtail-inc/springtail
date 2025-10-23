@@ -174,8 +174,12 @@ BEGIN
     FROM
         __pg_springtail_current_role_snapshot AS cur
     FULL OUTER JOIN
-        __pg_springtail_triggers.role_snapshot_history AS prev
-            ON (cur.role_oid = prev.role_oid AND prev.fdw_id = fdw_id_var)
+    (
+        SELECT *
+        FROM __pg_springtail_triggers.role_snapshot_history
+        WHERE fdw_id = fdw_id_var
+    ) AS prev
+    ON (cur.role_oid = prev.role_oid)
     WHERE
         cur.role_oid IS NULL -- Role was removed
         OR prev.role_oid IS NULL -- Role was added

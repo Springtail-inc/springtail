@@ -28,7 +28,7 @@ namespace springtail {
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
+        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
         /**
          * Returns a MutableTable that can be used to populate a new snapshot of the given table.
@@ -138,10 +138,9 @@ namespace springtail {
                          const std::vector<std::string> &primary_key,
                          const std::vector<Index> &secondary,
                          const TableMetadata &metadata,
-                         ExtentSchemaPtr schema,
-                         bool for_gc = false) :
+                         ExtentSchemaPtr schema) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, for_gc) {}
+                         secondary, metadata, schema) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing
