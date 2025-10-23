@@ -103,11 +103,9 @@ private:
 
         /**
          * @brief Cleanup committed history of schema changes
-         *
-         * @param redis_ddl - redis DDL object
          */
         void
-        cleanup_history_and_flush(RedisDDL &redis_ddl);
+        cleanup_history_and_flush();
 
         /**
          * @brief Get the value of the last committed xid

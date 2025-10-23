@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/redis.hh>
+#include <common/singleton.hh>
 
 namespace springtail {
 
@@ -23,11 +24,10 @@ namespace springtail {
      * - XidMgr checks the set of schema XIDs at each FDW and updates it's history based on the minimum
      *   schema XID reached across all FDWs
      */
-    class RedisDDL {
+    class RedisDDL : public Singleton<RedisDDL> {
+        friend class Singleton<RedisDDL>;
+
     public:
-        RedisDDL()
-            : _redis(RedisMgr::get_instance()->get_client())
-        { }
 
         /**
          * Used by gc::LogParser (GC-1) to record DDL statements against the XID.
@@ -163,6 +163,12 @@ namespace springtail {
         uint64_t min_index_xid(uint64_t db_id);
 
     private:
+        RedisDDL()
+            : _redis(RedisMgr::get_instance()->get_client())
+        { }
+
+        ~RedisDDL() override = default;
+
         std::shared_ptr<RedisClient> _redis;
 
         // In-memory DDL storage: db_id -> (xid -> [ddl_statements])

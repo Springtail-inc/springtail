@@ -129,8 +129,6 @@ namespace springtail::committer {
         // workers
         std::vector<std::jthread> _workers;
 
-        RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
-        
         // reconciliation Index
 
         /**
