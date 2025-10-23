@@ -68,8 +68,8 @@ namespace springtail {
                 }
             }
         }
-        // Return empty array if not found (no DDLs for this XID)
-        return nlohmann::json::array();
+        // Return null if not found (no DDLs for this XID)
+        return nlohmann::json();
     }
 
 
