@@ -226,7 +226,6 @@ namespace springtail::committer {
         );
 
     private:
-        RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
 
         /**
