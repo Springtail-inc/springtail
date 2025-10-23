@@ -300,7 +300,7 @@ namespace springtail::pg_fdw {
             std::vector<std::pair<std::string, std::string>> db_xid_list;
             std::vector<std::string> new_pid_list;
 
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Redis data refresh; process count {}",  _pid_to_db_id_xid.size());
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG3, "Redis data refresh; process count {}",  _pid_to_db_id_xid.size());
 
             // we will try to spend as little time as possible in the critical section
             std::shared_lock data_lock(_data_mutex);

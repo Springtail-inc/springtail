@@ -183,7 +183,7 @@ namespace springtail {
         std::shared_ptr<IOSysFH> _get_append_fh();
 
     public:
-                /*
+        /*
          * Extent Header 12 Bytes:
          *       0-2  (3B) Magic number (CXT for compressed, or UXT for uncompressed)
          *       3    (1B) Vector count (number of vectors that make up this block)
@@ -224,12 +224,12 @@ namespace springtail {
 
         /**
          * @brief Atomically increment in use counter indicating a FH is in use
-         *        Incremented by IOMgr::lookup
+         *        Incremented by IOMgr::get_file
          */
         inline void incr_in_use() { _in_use_count++; }
 
         /**
-         * @brief Atomically decrement in use counter; Decremented by IOMgr::release
+         * @brief Atomically decrement in use counter; Decremented by IOMgr::put_file
          *
          */
         inline void decr_in_use() { _in_use_count--; assert(_in_use_count >= 0); }

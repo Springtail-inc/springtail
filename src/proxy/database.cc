@@ -615,7 +615,7 @@ namespace springtail::pg_proxy
         DCHECK_GE(_active_sessions.size(), _pool->size());
 
         // if shutting down and no more active sessions, call shutdown callback
-        if (_state.load() == InstanceState::SHUTTING_DOWN && _active_sessions.empty()) {
+        if (_state.load() == State::SHUTTING_DOWN && _active_sessions.empty()) {
             lock.unlock();
             LOG_INFO("[DB:{}] All sessions completed, shutting down instance", to_string());
             if (_shutdown_callback) {
@@ -628,12 +628,12 @@ namespace springtail::pg_proxy
     DatabaseInstance::initiate_shutdown()
     {
         // atomic test and set _state to SHUTTING_DOWN
-        InstanceState expected = InstanceState::ACTIVE;
-        if (!_state.compare_exchange_strong(expected, InstanceState::SHUTTING_DOWN)) {
+        State expected = State::ACTIVE;
+        if (!_state.compare_exchange_strong(expected, State::SHUTTING_DOWN)) {
             return; // already shutting down or inactive
         }
 
-        _state.store(InstanceState::SHUTTING_DOWN);
+        _state.store(State::SHUTTING_DOWN);
         _pool->shutdown();
 
         std::unique_lock lock(_active_sessions_mutex);
@@ -646,6 +646,8 @@ namespace springtail::pg_proxy
             if (session != nullptr) {
                 auto client_session = session->get_client_session();
                 if (client_session != nullptr) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[DB:{}] Notifying client session S:{} of failover",
+                              to_string(), client_session->id());
                     // enqueue a failover notification to the client session, this is non-blocking
                     client_session->queue_failover_notification();
                 }
@@ -796,7 +798,7 @@ namespace springtail::pg_proxy
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "FDW configurations changed: {}", new_value.dump(4));
                 CHECK(path.starts_with(Properties::FDW_CONFIG_PATH));
-                _redis_fdw_change_cb(path, new_value);
+                _redis_fdw_change_cb(new_value);
             }
         );
 
@@ -860,32 +862,46 @@ namespace springtail::pg_proxy
     }
 
     void
-    DatabaseMgr::_redis_fdw_change_cb(const std::string &path,
-                                      const nlohmann::json &new_value)
+    DatabaseMgr::_redis_fdw_change_cb(const nlohmann::json &new_value)
     {
-        // extract database id from path
-        std::vector<std::string> path_parts;
-        common::split_string("/", path, path_parts);
-        DCHECK_EQ(path_parts.size(), 2);
-        auto replica_id = path_parts[1];
-
+        /*
+        New value looks like:
+        "new_value": {
+            "default": {
+                "fdw_user": "fdw_user",
+                "host": "fdw",
+                "password": "fdw_user_password",
+                "port": 5432,
+                "state": "running",
+                "sync_seconds": 30
+            }
+        }
+        */
         DCHECK(new_value.type() != nlohmann::json::value_t::null);
 
-        // extract fdw state
-        // see: https://www.notion.so/springtail-hq/Database-Schema-1273ea3f343c8098bf95d78b6a3741aa
-        // states: initialize->running->draining->stopped
-        auto state = Json::get<std::string>(new_value, "state");
+        // iterate through all keys (fdw_ids) in new_value
+        for (const auto &[replica_id, fdw_config] : new_value.items()) {
+            // get instance state of replica
+            auto current_state = _replica_set->get_replica_state(replica_id);
 
-        if (state == Properties::FDW_STATE_DRAINING) {
-            // initiate shutdown of the replica instance
-            _replica_set->initiate_replica_shutdown(replica_id);
-            return;
-        }
+            // extract fdw state
+            // see: https://www.notion.so/springtail-hq/Database-Schema-1273ea3f343c8098bf95d78b6a3741aa
+            // states: initialize->running->draining->stopped
+            auto state = Json::get<std::string>(fdw_config, "state");
 
-        if (state == Properties::FDW_STATE_RUNNING) {
-            // add the replica instance if not already present
-            add_replica(replica_id);
-            return;
+            if (current_state == DatabaseInstance::State::ACTIVE &&
+                state == Properties::FDW_STATE_DRAINING) {
+                // initiate shutdown of the replica instance
+                _replica_set->initiate_replica_shutdown(replica_id);
+                continue;
+            }
+
+            if (current_state == DatabaseInstance::State::NONE &&
+                state == Properties::FDW_STATE_RUNNING) {
+                // add the replica instance if not already present
+                add_replica(replica_id);
+                continue;
+            }
         }
     }
 
@@ -1159,16 +1175,28 @@ namespace springtail::pg_proxy
     }
 
     void
+    DatabaseMgr::_internal_thread_shutdown()
+    {
+        _shutdown_cv.notify_all();
+    }
+
+    void
     DatabaseMgr::_internal_run()
     {
         while (!_is_shutting_down()) {
             if (_primary_set != nullptr) {
                 _primary_set->release_expired_sessions();
             }
+
             if (_replica_set != nullptr) {
                 _replica_set->release_expired_sessions();
             }
-            sleep(5);
+
+            // condition variable sleep for 5 seconds
+            std::unique_lock lock(_shutdown_mutex);
+            _shutdown_cv.wait_for(lock, std::chrono::seconds(5), [this]() {
+                return _is_shutting_down();
+            });
         }
     }
 

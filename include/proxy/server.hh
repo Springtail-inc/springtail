@@ -25,7 +25,7 @@ namespace springtail::pg_proxy {
     {
         friend class Singleton<ProxyServer>;
     public:
-        enum MODE : int8_t {
+        enum class MODE : int8_t {
             NORMAL=0,   ///< normal mode, read-write splitting
             PRIMARY=1,  ///< primary mode, all traffic to primary
             SHADOW=2    ///< shadow mode, replica shadows primary and logs
@@ -149,7 +149,7 @@ namespace springtail::pg_proxy {
         std::mutex _notification_mutex;       ///< mutex for _notification_queue
 
         /** map of session to connection socket */
-        std::unordered_map<SessionPtr, std::vector<int>, Session::SessionHash, Session::SessionEqual> _session_sockets;
+        std::unordered_map<SessionPtr, std::set<int>, Session::SessionHash> _session_sockets;
 
         SSL_CTX *_ssl_ctx_server = nullptr;  ///< SSL context for server
         SSL_CTX *_ssl_ctx_client = nullptr;  ///< SSL context for client
@@ -178,7 +178,7 @@ namespace springtail::pg_proxy {
         void _start_keep_alive(int port);
 
         /** Helper to add a runnable fd, and remove its associated fds from the waiting sessions */
-        void _add_runnable_fd(int fd, std::set<SessionPtr, Session::SessionComparator> &runnable_fds);
+        void _add_runnable_fd(int fd, bool has_data, std::set<SessionPtr, Session::SessionComparator> &runnable_fds);
 
         /** Main server thread */
         std::thread _proxy_thread;

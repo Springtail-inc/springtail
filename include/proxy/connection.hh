@@ -87,6 +87,15 @@ namespace springtail::pg_proxy {
             return ::SSL_get_error(_ssl, rc);
         }
 
+        /**
+         * @brief Is ssl enabled for this connection
+         * @return true if ssl enabled
+         * @return false if ssl not enabled
+         */
+        bool is_ssl_enabled() const {
+            return _ssl_enabled;
+        }
+
         /** Does connection have pending data */
         bool has_pending();
 
