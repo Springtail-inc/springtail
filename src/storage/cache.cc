@@ -2086,9 +2086,11 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
     {
         LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "PageCache::evict_for_database database_id={}", database_id);
 
-        // Collect all pages for this database and get the file list while holding the lock
+        auto data_cache = StorageCache::get_instance()->_data_cache;
         std::list<PagePtr> pages_to_evict;
         std::set<std::filesystem::path> files;
+
+        // Hold the lock for the entire operation
         {
             boost::unique_lock lock(_mutex);
 
@@ -2107,31 +2109,8 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
             if (db_i != _database_files.end()) {
                 files = db_i->second;
             }
-        }
 
-        // Now process the pages without holding the cache lock
-        auto data_cache = StorageCache::get_instance()->_data_cache;
-        for (auto &page : pages_to_evict) {
-            // clear the associated extents from the cache
-            for (auto &ref : page->_extents) {
-                auto extent = ref.lock_cached();
-                if (extent) {
-                    if (extent->state() == CacheExtent::State::DIRTY) {
-                        data_cache->drop_dirty(extent);
-                        data_cache->put(extent);
-                    } else if (extent->state() == CacheExtent::State::CLEAN ||
-                              extent->state() == CacheExtent::State::MUTABLE) {
-                        data_cache->invalidate_clean(extent);
-                        data_cache->put(extent);
-                    }
-                }
-            }
-        }
-
-        // Re-acquire the lock to evict the Page objects themselves
-        {
-            boost::unique_lock lock(_mutex);
-
+            // Evict the Page objects from the cache
             for (auto &page : pages_to_evict) {
                 // Evict the Page object from the PageCache
                 auto cache_i = _cache.find(page->key());
