@@ -73,7 +73,7 @@ namespace springtail::pg_proxy {
          * @brief Get the shadow session
          * @return ServerSessionPtr shadow session
          */
-        ServerSessionPtr get_shadow_session() {
+        ServerSessionPtr get_shadow_session() const {
             if (_shadow_mode && _replica_session != nullptr) {
                 return _replica_session;
             }
@@ -84,7 +84,7 @@ namespace springtail::pg_proxy {
          * @brief Get the primary session
          * @return ServerSessionPtr primary session
          */
-        ServerSessionPtr get_primary_session() {
+        ServerSessionPtr get_primary_session() const {
             return _primary_session;
         }
 
@@ -92,8 +92,12 @@ namespace springtail::pg_proxy {
          * @brief Get the replica session
          * @return ServerSessionPtr replica session
          */
-        ServerSessionPtr get_replica_session() {
+        ServerSessionPtr get_replica_session() const {
             return _replica_session;
+        }
+
+        ServerSessionPtr get_pending_replica_session() const {
+            return _pending_replica_session;
         }
 
         /**
@@ -138,6 +142,11 @@ namespace springtail::pg_proxy {
          * @param session session that is shutting down
          */
         void server_shutdown(ServerSessionPtr session);
+
+        /**
+         * @brief Enqueue a failover notification message to this session
+         */
+        void queue_failover_notification();
 
     private:
 
@@ -277,6 +286,12 @@ namespace springtail::pg_proxy {
         ServerSessionPtr _get_associated_session() {
             return std::static_pointer_cast<ServerSession>(get_associated_session());
         }
+
+        /**
+         * @brief Helper to switch failover replica session with replica session
+         * @return true if the switch was successful, false otherwise (requeue needed)
+         */
+        bool _switch_failover_replica();
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
 } // namespace springtail::pg_proxy

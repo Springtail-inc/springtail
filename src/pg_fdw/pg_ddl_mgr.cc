@@ -70,6 +70,13 @@ namespace springtail::pg_fdw {
         "       role_owner_name, table_oid "
         "FROM __pg_springtail_triggers.table_owner_diff('{}');";
 
+    /** Resets the history of snapshot tables for a given FDW */
+    static constexpr char RESET_HISTORY_DIFFS[] =
+        "SELECT __pg_springtail_triggers.reset_role_diff('{}'); "
+        "SELECT __pg_springtail_triggers.reset_role_member_diff('{}'); "
+        "SELECT __pg_springtail_triggers.reset_table_owner_diff('{}'); "
+        "SELECT __pg_springtail_triggers.reset_policy_diff('{}');";
+
     /** Drops roles that aren't system or FDW roles */
     static constexpr char DROP_ROLES[] =
         "DO $$ "
@@ -259,8 +266,6 @@ namespace springtail::pg_fdw {
         _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this, sync_interval_secs);
         pthread_setname_np(_sync_thread.native_handle(), "DDLMgrSync");
         LOG_INFO("PgDDLMgr::init() done");
-
-        Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_RUNNING);
     }
 
     bool
@@ -580,6 +585,8 @@ namespace springtail::pg_fdw {
         std::string user;
         std::string password;
 
+        bool first_pass = true;
+
         std::string coordinator_id = fmt::format(DDL_SYNC_WORKER_ID, _fdw_id);
         auto coordinator = Coordinator::get_instance();
         auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::DDL_MGR, coordinator_id);
@@ -610,6 +617,12 @@ namespace springtail::pg_fdw {
                     // these operations perform on the fdw connection as well as the primary
                     // if there is an error, we rollback both transactions
                     try {
+                        if (first_pass) {
+                            // on the first pass, reset the snapshot history tables
+                            conn->exec(fmt::format(RESET_HISTORY_DIFFS,
+                                                   _fdw_id, _fdw_id, _fdw_id, _fdw_id));
+                        }
+
                         // sync user roles for this database
                         _roles_sync_database(conn, fdw_conn, db_id);
 
@@ -638,7 +651,15 @@ namespace springtail::pg_fdw {
                 }
             } catch (const std::exception &e) {
                 LOG_ERROR("Error syncing policies: {}", e.what());
+                DCHECK(false) << "Error syncing policies and roles";
                 // on error we should drop the primary fdw policy table and try resyncing from scratch
+            }
+
+            // after the first successful pass, set the FDW state to running
+            if (first_pass) {
+                LOG_INFO("Initial DDL sync pass complete");
+                first_pass = false;
+                Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_RUNNING);
             }
 
             // sleep for sync_interval_secs

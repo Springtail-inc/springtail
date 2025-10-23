@@ -65,10 +65,14 @@ namespace springtail::pg_proxy {
         // wrap with error handler to catch any exceptions
         _wrap_error_handler([this, &fds] {
             do {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Client session in run loop", _id);
+
                 // handle any pending notifications
-                if (_state == State::READY) {
-                    _process_notifications();
-                }
+                // NOTE: notifications may not be processed right away if we are not in READY state or
+                // in the midst of a transaction (_in_transaction is true).
+                // So we process any data in the hopes that we will complete the transaction after that
+                // we then check again (at end of loop) to see if we can handle remaining notifications.
+                _process_notifications();
 
                 // go through fds and check if we have any pending data
                 // first check client session
@@ -85,12 +89,32 @@ namespace springtail::pg_proxy {
                     _replica_session->process_connection(_gen_seq_id());
                 }
 
+                if (_state != State::ERROR && _pending_replica_session && fds.contains(_pending_replica_session->get_connection()->get_socket())) {
+                    _pending_replica_session->process_connection(_gen_seq_id());
+                }
+
                 fds.clear();
+
+                // check once more for any notifications; we may not have processed at the
+                // top of the loop if we were in a transaction, so try again now.
+                _process_notifications();
 
             } while ((_state != State::ERROR) && !is_shutdown() && _has_pending_data(fds));
         });
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "[C:{}] Client session done", _id);
+    }
+
+    void
+    ClientSession::queue_failover_notification()
+    {
+        DCHECK_NE(_connection, nullptr);
+        DCHECK_EQ(_connection->closed(), false);
+        {
+            std::lock_guard<std::mutex> lock(_notification_mutex);
+            _notification_queue.emplace(NotificationMsg{NotificationMsg::Type::NOTIFY_FAILOVER});
+        }
+        ProxyServer::get_instance()->notify(_connection->get_socket());
     }
 
     bool
@@ -105,7 +129,10 @@ namespace springtail::pg_proxy {
 
         if (_replica_session) {
             connections.push_back(_replica_session->get_connection());
+        }
 
+        if (_pending_replica_session) {
+            connections.push_back(_pending_replica_session->get_connection());
         }
 
         return ProxyConnection::has_pending(connections, fds);
@@ -114,8 +141,17 @@ namespace springtail::pg_proxy {
     void
     ClientSession::_process_notifications()
     {
-        // if we are in ready state, check for any server notifications
+        if (_state != State::READY) {
+            // only process notifications in ready state
+            return;
+        }
+
+        // for requeuing notifications that need reprocessing, can't add them
+        // back to real queue while processing it
+        std::vector<NotificationMsg> notifications;
+
         std::unique_lock<std::mutex> lock(_notification_mutex);
+        // if we are in ready state, check for any server notifications
         while (_state == State::READY && !_notification_queue.empty()) {
             // pop notification
             NotificationMsg notify(std::move(_notification_queue.front()));
@@ -129,11 +165,24 @@ namespace springtail::pg_proxy {
                     _handle_failover_notification();
                     break;
 
+                case NotificationMsg::Type::NOTIFY_FAILOVER_READY:
+                    LOG_INFO("[C:{}] Client session received failover ready notification", _id);
+                    if (!_switch_failover_replica()) {
+                        notifications.emplace_back(std::move(notify));
+                    }
+                    break;
+
                 default:
                     LOG_ERROR("[C:{}] Client session received unknown notification type: {}", _id, (int8_t)notify.type);
                     break;
             }
             lock.lock();
+        }
+
+        // re-queue any notifications that need reprocessing; still locked
+        DCHECK(lock.owns_lock());
+        for (auto &notify : notifications) {
+            _notification_queue.push(std::move(notify));
         }
     }
 
@@ -174,17 +223,70 @@ namespace springtail::pg_proxy {
         // handle failover notification
         LOG_INFO("[C:{}] Client session handling failover notification", _id);
 
-        // allocate a new replica session if possible
-        _create_server_session(Session::Type::REPLICA, _gen_seq_id(), true);
-
+        // allocate a new replica session
+        // this will set _pending_replica_session
+        // and when auth is done, server_auth_done() will be called
+        // which will call _handle_failover_auth_done() to complete the failover
+        auto session = _create_server_session(Session::Type::REPLICA, _gen_seq_id(), true);
+        if (session == nullptr) {
+            LOG_ERROR("[C:{}] Client session failed to create failover replica session", _id);
+            // we stay in ready state, and continue to use the primary session
+            return;
+        }
     }
 
     void
     ClientSession::_handle_failover_auth_done()
     {
-        // failover replica session auth is done
+        // called from server_auth_done() when failover replica is ready
         LOG_INFO("[C:{}] Client session handling failover auth done", _id);
         DCHECK_NE(_pending_replica_session, nullptr);
+
+        // try and switch to the new replica session; if not ready requeue it
+        if (!_switch_failover_replica()) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                      "[C:{}] Client session queuing failover ready notification", _id);
+
+            // if not processed, indicate that the message wasn't processed so that it is
+            // re-queued and will only be processed when we are in ready state
+            std::lock_guard<std::mutex> lock(_notification_mutex);
+            _notification_queue.push(NotificationMsg{NotificationMsg::Type::NOTIFY_FAILOVER_READY});
+            return;
+        }
+    }
+
+    bool
+    ClientSession::_switch_failover_replica()
+    {
+        DCHECK_NE(_pending_replica_session, nullptr);
+        if (_pending_replica_session == nullptr) {
+            LOG_ERROR("[C:{}] Client session no pending replica session to switch", _id);
+            return true;
+        }
+
+        if (_state != State::READY || _in_transaction) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                      "[C:{}] Client session not ready yet, queuing failover ready notification", _id);
+
+            // if not ready, indicate that the message wasn't processed so that it is
+            // re-queued and will only be processed when we are in ready state
+            return false;
+        }
+
+        // switch the failover replica session with the current replica session
+        LOG_INFO("[C:{}] Client session switching failover replica session", _id);
+
+        if (_replica_session != nullptr) {
+            // release the old replica session
+            DCHECK(_replica_session->is_pinned());
+            _replica_session->unpin_client_session();
+            _replica_session->shutdown_session();
+        }
+        _replica_session = _pending_replica_session;
+        _pending_replica_session = nullptr;
+
+        LOG_INFO("[C:{}] Client session failover replica session switched over to [S:{}]", _id, _replica_session->id());
+        return true;
     }
 
     void
@@ -302,6 +404,7 @@ namespace springtail::pg_proxy {
             // XXX need to handle replica auth errors
             LOG_ERROR("[C:{}] Client session received auth error from non-primary server session",
                        _id);
+            session->shutdown_session();
             return;
         }
 
@@ -374,32 +477,47 @@ namespace springtail::pg_proxy {
     void
     ClientSession::server_shutdown(ServerSessionPtr session)
     {
-        // server session is shutting down
+        // server session is shutting down; called from ServerSession::shutdown_session()
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Server session shutting down", _id);
 
         if (session->type() == Session::Type::PRIMARY) {
             // primary session is shutting down
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Primary session shutting down", _id);
             _primary_session = nullptr;
-        } else {
-            // replica session is shutting down
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Replica session shutting down", _id);
-            _replica_session = nullptr;
 
-            // XXX need to failover to new replica
-            if (_shadow_mode) {
-                // for now ignore the replica failure, we will get a new one
-                // XXX we should really replay any session state on startup...
-                return;
+            if (get_associated_session()) {
+                clear_associated_session();
             }
+
+            _state = State::ERROR;
+            return;
         }
 
-        // XXX right now can't handle this
-        if (get_associated_session()) {
+        // replica session is shutting down
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Replica session shutting down", _id);
+
+        if (session == _pending_replica_session) {
+            // XXX try another replica?
+            _pending_replica_session = nullptr;
+            return;
+        }
+
+        DCHECK_EQ(_replica_session, session);
+        _replica_session = nullptr;
+
+        if (_in_transaction && get_associated_session() == session) {
+            // replica going away during a transaction and it is the associated session
+            LOG_ERROR("[C:{}] Replica session shut down during transaction, cannot failover", _id);
             clear_associated_session();
+            _state = State::ERROR;
+            return;
         }
 
-        _state = State::ERROR;
+        // XXX need to failover to new replica if possible
+        // queue a failover request, however keep track of back to back errors
+        // as we don't want to loop endlessly trying to failover
+
+        return;
     }
 
 
@@ -978,7 +1096,8 @@ namespace springtail::pg_proxy {
             }
         }
 
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Got server session: id={}, is_ready={}", _id, session->id(), session->is_ready());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Got server session: id={}, is_ready={}, hostname={}",
+                  _id, session->id(), session->is_ready(), session->hostname());
 
         if (type == Type::PRIMARY) {
             // store reference to primary session
@@ -1020,6 +1139,7 @@ namespace springtail::pg_proxy {
                 session->startup_reset_session(seq_id, parameters);
             }
 
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Reusing pooled server session: id={}", _id, session->id());
             return session;
         }
 
@@ -1027,6 +1147,7 @@ namespace springtail::pg_proxy {
         // we need to do authentication and wait for session to become ready
 
         // startup the server session
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Starting up server session: id={}", _id, session->id());
         session->startup(seq_id);
 
         return session;
