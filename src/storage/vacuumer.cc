@@ -430,12 +430,10 @@ Vacuumer::_save_last_seen_cutoff_xid(uint64_t db_id, uint64_t cutoff_xid)
 uint64_t
 Vacuumer::_get_vacuum_cutoff_xid(uint64_t db_id)
 {
-    RedisDDL _redis_ddl;
-
     // Cutoff XID for Vacuum = Minimum XID from (fdw, last_committed, index-build/drop)
-    uint64_t min_fdw_xid = _redis_ddl.min_fdw_xid(db_id);
+    uint64_t min_fdw_xid = RedisDDL::get_instance()->min_fdw_xid(db_id);
     uint64_t last_committed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
-    uint64_t min_index_xid = _redis_ddl.min_index_xid(db_id);
+    uint64_t min_index_xid = RedisDDL::get_instance()->min_index_xid(db_id);
 
     return std::min({min_fdw_xid, last_committed_xid, min_index_xid});
 }

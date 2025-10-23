@@ -4,9 +4,12 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <shared_mutex>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 
 #include <common/redis.hh>
+#include <common/singleton.hh>
 
 namespace springtail {
 
@@ -21,11 +24,10 @@ namespace springtail {
      * - XidMgr checks the set of schema XIDs at each FDW and updates it's history based on the minimum
      *   schema XID reached across all FDWs
      */
-    class RedisDDL {
+    class RedisDDL : public Singleton<RedisDDL> {
+        friend class Singleton<RedisDDL>;
+
     public:
-        RedisDDL()
-            : _redis(RedisMgr::get_instance()->get_client())
-        { }
 
         /**
          * Used by gc::LogParser (GC-1) to record DDL statements against the XID.
@@ -48,6 +50,12 @@ namespace springtail {
          * @param uint64_t xid The XID to clear.
          */
         void clear_ddls_xid(uint64_t db_id, uint64_t xid);
+
+        /**
+         * Clear all DDL statements for a given database.
+         * @param uint64_t db_id The database ID to clear.
+         */
+        void clear_ddls(uint64_t db_id);
 
         /**
          * Used by the gc::Committer (GC-2) to pre-commit the DDL statements prior to committing the
@@ -161,7 +169,19 @@ namespace springtail {
         uint64_t min_index_xid(uint64_t db_id);
 
     private:
-        std::shared_ptr<RedisClient> _redis;
+        RedisDDL()
+            : _redis(RedisMgr::get_instance()->get_client())
+        { }
+
+        ~RedisDDL() override = default;
+
+        RedisClientPtr _redis;
+
+        // In-memory DDL storage: db_id -> (xid -> [ddl_statements])
+        // Used for the hot path between GC-1 (PgLogReader) and GC-2 (Committer)
+        // Entries are transient and cleared after precommit_ddl() moves them to Redis
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::vector<nlohmann::json>>> _ddl_cache;
+        mutable std::shared_mutex _ddl_cache_mutex;
     };
 
 }
