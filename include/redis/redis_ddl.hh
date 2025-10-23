@@ -5,7 +5,7 @@
 #include <vector>
 #include <utility>
 #include <shared_mutex>
-#include <map>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 
 #include <common/redis.hh>
@@ -50,6 +50,12 @@ namespace springtail {
          * @param uint64_t xid The XID to clear.
          */
         void clear_ddls_xid(uint64_t db_id, uint64_t xid);
+
+        /**
+         * Clear all DDL statements for a given database.
+         * @param uint64_t db_id The database ID to clear.
+         */
+        void clear_ddls(uint64_t db_id);
 
         /**
          * Used by the gc::Committer (GC-2) to pre-commit the DDL statements prior to committing the
@@ -169,12 +175,12 @@ namespace springtail {
 
         ~RedisDDL() override = default;
 
-        std::shared_ptr<RedisClient> _redis;
+        RedisClientPtr _redis;
 
         // In-memory DDL storage: db_id -> (xid -> [ddl_statements])
         // Used for the hot path between GC-1 (PgLogReader) and GC-2 (Committer)
         // Entries are transient and cleared after precommit_ddl() moves them to Redis
-        std::map<uint64_t, std::map<uint64_t, std::vector<nlohmann::json>>> _ddl_cache;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::vector<nlohmann::json>>> _ddl_cache;
         mutable std::shared_mutex _ddl_cache_mutex;
     };
 

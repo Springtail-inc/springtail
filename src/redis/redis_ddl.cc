@@ -92,6 +92,16 @@ namespace springtail {
     }
 
     void
+    RedisDDL::clear_ddls(uint64_t db_id)
+    {
+        // Clear all DDLs for the given database from in-memory cache
+        {
+            std::unique_lock<std::shared_mutex> lock(_ddl_cache_mutex);
+            _ddl_cache.erase(db_id);
+        }
+    }
+
+    void
     RedisDDL::precommit_ddl(uint64_t db_id,
                             uint64_t xid,
                             nlohmann::json ddls)
