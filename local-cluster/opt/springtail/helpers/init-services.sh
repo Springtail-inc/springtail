@@ -70,6 +70,6 @@ fi
 
 if [ "$SERVICE_NAME" == "fdw" ]; then
   echo "Starting the bootstrap FDW Custom PG"
-  CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1 ansible-playbook -i localhost, -c local "${INSTALL_DIR}/customize-pg.yml" --extra-vars "username=${FDW_USER}"
+  CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1 ansible-playbook -i localhost, -c local "${INSTALL_DIR}/helpers/customize-pg.yml" --extra-vars "username=${FDW_USER}"
 fi
 echo "<SUCCESS> Bootstrap coordinator package installed"

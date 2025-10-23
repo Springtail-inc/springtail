@@ -200,13 +200,13 @@ namespace springtail {
         }
 
         /** is queue empty */
-        bool empty() {
+        bool empty() const {
             std::unique_lock<std::mutex> write_lock{_mutex};
             return _queue.empty();
         }
 
         /** get size of queue */
-        int size() {
+        int size() const {
             std::unique_lock<std::mutex> write_lock{_mutex};
             return _queue.size();
         }
@@ -218,7 +218,7 @@ namespace springtail {
         }
 
         /** is queue shutdown */
-        bool is_shutdown() {
+        bool is_shutdown() const {
             return _shutdown;
         }
 
@@ -226,7 +226,7 @@ namespace springtail {
         /** max number of elements in queue */
         std::size_t _limit=-1;
         /** mutex to protect queue */
-        std::mutex _mutex;
+        mutable std::mutex _mutex;
         /** condition variable for queue to wait on */
         std::condition_variable _cv_pop;
         /** condition variable to wait on if queue is full */

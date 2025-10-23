@@ -6,7 +6,7 @@ services:
     container_name: pg16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: springtail 
+      POSTGRES_USER: springtail
       POSTGRES_PASSWORD: springtail
       POSTGRES_DB: springtail
     ports:
@@ -21,8 +21,8 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   dev:
-    image: build:test-ga
-    container_name: dev-snapshot
+    image: springtail:dev
+    container_name: dev-springtail
     depends_on:
       - postgres
     privileged: true
@@ -34,13 +34,9 @@ services:
     tty: true
     ports:
       - "2222:22" # map host 2222 to container 22
-    entrypoint: ["tail", "-f", "/dev/null"]
-    environment:
-      CI_WORKSPACE: /__w/springtail/springtail
-      CI_BUILD_TYPE: debug
-      SYSTEM_SETTINGS_OVERRIDE: .github/workflows/ci-general.overrides.json
+    entrypoint: ["/tini", "--", "/entrypoint.sh"]
     volumes:
-#      - ${SPRINGTAIL_SRC}:/home/dev/springtail
+      - ${SPRINGTAIL_SRC}:/home/dev/springtail
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:

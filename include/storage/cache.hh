@@ -8,6 +8,7 @@
 #include <common/constants.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
+#include <storage/cache_tracing.hh>
 #include "common/open_telemetry.hh"
 
 namespace springtail {
@@ -390,11 +391,16 @@ namespace springtail {
          */
         class DataCache {
         public:
-            DataCache(uint64_t max_size)
-                : _size(0),
-                  _max_size(max_size),
-                  _next_cache_id(0)
-            { }
+            explicit DataCache(uint64_t max_size);
+
+            ~DataCache() = default;
+
+            /**
+             * Returns cache metrics from the last 5 minutes.
+             */
+            nlohmann::json get_cache_metrics() const {
+                return _tracer.get_cache_metrics();
+            }
 
             void validate() const {
                 assert(_dirty_cache.size() + _clean_cache.size() == _size);
@@ -598,6 +604,9 @@ namespace springtail {
             uint64_t _size; ///< The current size of the cache.
             uint64_t _max_size; ///< The maximum allowed size of the cache.
             uint64_t _next_cache_id; ///< The next cache ID to assign.
+
+            // Cache statistics and tracing (always instantiated)
+            CacheTracer _tracer;
         };
 
     public:

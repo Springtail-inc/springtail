@@ -78,6 +78,7 @@ namespace springtail::pg_proxy {
             enum class Type : int8_t {
                 NOTIFY_NONE=0,      ///< no notification; used for return type of peek
                 NOTIFY_FAILOVER=1,  ///< failover notification for replica (sent to client)
+                NOTIFY_FAILOVER_READY=2, ///< failover complete, ready to switch (sent to client)
             };
 
             Type type;                                   ///< type of notification
@@ -290,12 +291,22 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Enqueue a failover notification message to this session
+         * @brief Get JSON representation of session; used by admin server
+         * @return nlohmann::json JSON object representing session
          */
-        void queue_failover_notification() {
-            std::lock_guard<std::mutex> lock(_notification_mutex);
-            _notification_queue.emplace(NotificationMsg{NotificationMsg::Type::NOTIFY_FAILOVER});
-        }
+        nlohmann::json to_json() const;
+
+        /**
+         * @brief Get brief JSON representation of session; used by admin server
+         * @return nlohmann::json JSON object representing session
+         */
+        nlohmann::json _to_json_brief() const;
+
+        /**
+         * @brief Get hostname for this session
+         * @return std::string hostname
+         */
+        const std::string hostname() const;
 
         /**
          * @brief Does this session have a closed connection

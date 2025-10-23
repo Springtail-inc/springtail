@@ -72,7 +72,7 @@ namespace springtail {
         }
 
         /**
-         * @brief Lookup file object in LRU cache based on path name
+         * @brief Lookup file object in LRU cache based on path name; incr in_use count
          * @details Lookup file object in LRU cache;
          *          if not found a new file object is created and added to the cache.
          *          May trigger eviction of another object.
@@ -81,8 +81,14 @@ namespace springtail {
          *
          * @return file object ptr
          */
-        std::shared_ptr<IOFile> lookup(const std::filesystem::path &path,
-                                       bool compressed);
+        std::shared_ptr<IOFile> get_file(const std::filesystem::path &path,
+                                         bool compressed);
+
+        /**
+         * @brief Release file object when done with it; decr in_use count
+         * @param file File object to release
+         */
+        void put_file(std::shared_ptr<IOFile> file);
 
         /**
          * @brief Resize filehandle cache

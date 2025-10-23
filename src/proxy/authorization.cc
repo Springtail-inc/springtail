@@ -989,7 +989,7 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
     } else if (_login->type == TEXT) {
         user.has_scram_keys = false;
         user.passwd = _login->password.c_str();
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Using TEXT password for SCRAM for password: {}", user.passwd);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Using TEXT password for SCRAM for user: {}", _user->username());
     } else {
         LOG_ERROR("Invalid password type for SCRAM");
         throw ProxyAuthError();
