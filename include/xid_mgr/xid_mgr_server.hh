@@ -8,6 +8,7 @@
 #include <redis/redis_ddl.hh>
 #include <xid_mgr/pg_xact_log_writer.hh>
 #include <xid_mgr/xid_mgr_service.hh>
+#include <pg_log_mgr/wal_progress_tracker.hh>
 
 namespace springtail::xid_mgr {
 
@@ -26,12 +27,30 @@ public:
      */
     void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes);
 
+    /**     
+     * @brief commit up to and including given xid without writing to xlog
+     * @param db_id database id
+     * @param xid xid to commit
+     * @param has_schema_changes true if transaction has schema changes
+     * @param real_commit true if this is a real commit
+     * @param tracker WAL progress tracker, this is to synchronize xlog and wal progress
+     */
+    void commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit, pg_log_mgr::WalProgressTrackerPtr tracker);
+
+    /**
+     * @brief Commit xlog entries that were commited with commit_xid_no_xlog and are now ready to be written to xlog
+     * @param db_id database id
+     * @param xid xid to commit
+     */
+    void commit_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid);
+
+
     /**
      * @brief Record a DDL change without doing a commit.  Used for table sync operations.
      * @param db_id database id
      * @param xid xid to commit
      */
-    void record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes);
+    void record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr tracker);
 
     /**
      * @brief Get the latest committed xid object
@@ -97,9 +116,22 @@ private:
          * @param xid - Springtail xid
          * @param has_schema_changes - this flag indicates if transaction has schema changes
          * @param real_commit - thi flag indicates if this is a real commit
+         * @param wal_tracker - WAL progress tracker
+         * @param write_log - If false the entry won't be written to the log file
          */
         void
-        record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit);
+        record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit, 
+                pg_log_mgr::WalProgressTrackerPtr wal_tracker,
+                bool write_log);  
+
+        /**
+        * @brief Mark the entry as ready to be written and write all ready entries to the log file.
+        *
+        * @param pg_xid - Postgres xid
+        * @param xid - Springtail xid
+        */
+        void write_log_entry(uint32_t pg_xid, uint64_t xid); 
+
 
         /**
          * @brief Cleanup committed history of schema changes
@@ -159,6 +191,15 @@ private:
         uint64_t _db_id;                        ///< database id
         bool _dirty_history{false};             ///< dirty history flag
         uint64_t _last_committed_xid{0};        ///< last committed xid
+
+        
+        struct XactLogEntry {
+            uint32_t pg_xid;
+            bool real_commit;
+            pg_log_mgr::WalProgressTrackerPtr wal_tracker;
+            bool ready; ///< whether the log entry is realdy to be written to log
+        };
+        std::map<uint64_t, XactLogEntry> _pending_log_entries;  ///< pending log entries (xid -> log entry)
     };
 
     std::shared_mutex _mutex;                   ///< mutex for access control to transaction log data
@@ -180,10 +221,11 @@ private:
      * @param xid - Springtail xid
      * @param has_schema_changes - schema changes flag
      * @param real_commit - real commit flag
+     * @param wal_tracker - WAL progress tracker
      */
     void
     _record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid,
-                       bool has_schema_changes, bool real_commit);
+                       bool has_schema_changes, bool real_commit, pg_log_mgr::WalProgressTrackerPtr wal_tracker);
 
     /**
      * @brief Find database for the give database idand if it is not there, add it

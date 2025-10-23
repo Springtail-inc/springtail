@@ -218,6 +218,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     uint64_t
     StorageCache::PageCache::flush_file(const std::filesystem::path &file)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::flush_file file={}", file);
         boost::unique_lock lock(_mutex);
 
         StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::FlushCalls>();
@@ -317,6 +318,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     void
     StorageCache::PageCache::drop_file(const std::filesystem::path &file)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::drop_file file={}", file);
         boost::unique_lock lock(_mutex);
 
         StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::DropCalls>();
@@ -415,6 +417,8 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::PageCache::_put(PagePtr page)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_put file={} eid={} s_xid={} use_count={}",
+                  page->_file, page->_extent_id, page->_start_xid, page->_use_count.load());
         // decrement it's use count
         --(page->_use_count);
 
@@ -455,6 +459,8 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::PageCache::_try_evict_dirty(PagePtr page)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_evict_dirty file={} eid={} s_xid={} use_count={} is_dirty={}",
+                  page->_file, page->_extent_id, page->_start_xid, page->_use_count.load(), page->_is_dirty);
         // issue the associated callback for the page's eviction
         bool success = true;
         if (page->_flush_callback && page->_is_dirty) {
@@ -504,12 +510,12 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::PageCache::_evict_clean(PagePtr page)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_evict_clean file={} eid={} s_xid={} use_count={}",
+                  page->_file, page->_extent_id, page->_start_xid, page->_use_count.load());
         DCHECK(page->_use_count == 1);
         DCHECK(!page->_is_dirty);
 
         // remove the page from the cache
-        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "Page evict file {} eid {} xid {}",
-                            page->key().first, page->key().second, page->xid());
         auto cache_i = _cache.find(page->key());
         cache_i->second.erase(page->xid());
         if (cache_i->second.empty()) {
@@ -523,6 +529,8 @@ StorageCache::PageCache::background_cleaner()
     void
     StorageCache::PageCache::_make_page_space()
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_make_page_space size={} max_size={} dirty_lru_size={} clean_lru_size={}",
+                  _size, _max_size, _dirty_lru.size(), _clean_lru.size());
         // check if there's vacant space in the cache
         if (_size < _max_size) {
             ++_size;
@@ -570,23 +578,35 @@ StorageCache::PageCache::background_cleaner()
                                       uint64_t extent_id,
                                       uint64_t xid)
     {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={}", file, extent_id, xid);
         TIME_TRACE_SCOPED(time_trace::traces, cache__try_get_total);
 
         // check for the key in the hash map
         std::pair<uint64_t, const std::string&> key{extent_id, file.native()};
         auto write_i = _cache.find(key);
         if (write_i == _cache.end()) {
+            LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={} - NOT FOUND in cache",
+                      file, extent_id, xid);
             return nullptr;
         }
 
         // check for the xid in the XID map
         auto page_i = write_i->second.lower_bound(xid);
         if (page_i == write_i->second.end()) {
+            LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={} - XID map end()",
+                      file, extent_id, xid);
             return nullptr;
         }
 
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={} - found page_xid={} page_ptr={} page_valid={}",
+                  file, extent_id, xid, page_i->first,
+                  static_cast<void*>(page_i->second.get()),
+                  page_i->second != nullptr);
+
         // check if the page is valid through the requested xid
         if (!page_i->second->check_xid_valid(xid)) {
+            LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG2, "PageCache::_try_get file={} eid={} xid={} - check_xid_valid FAILED",
+                      file, extent_id, xid);
             return nullptr;
         }
 

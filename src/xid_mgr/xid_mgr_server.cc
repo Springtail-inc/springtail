@@ -91,17 +91,35 @@ XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 void
 XidMgrServer::commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes)
 {
-    _record_xid_change(db_id, pg_xid, xid, has_schema_changes, true);
+    _record_xid_change(db_id, pg_xid, xid, has_schema_changes, true, nullptr);
 }
 
-void
-XidMgrServer::record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes)
+void 
+XidMgrServer::commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit, pg_log_mgr::WalProgressTrackerPtr tracker)
 {
-    _record_xid_change(db_id, pg_xid, xid, has_schema_changes, false);
+    DCHECK(tracker);
+    std::shared_lock read_lock(_mutex);
+    auto db_id_to_log_data = _find_or_add(db_id, read_lock);
+    db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit, tracker, false);
+    _service->notify_subscriber(db_id, xid);
+}
+
+void 
+XidMgrServer::commit_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid)
+{
+    std::shared_lock read_lock(_mutex);
+    auto db_id_to_log_data = _find_or_add(db_id, read_lock);
+    db_id_to_log_data->second.write_log_entry(pg_xid, xid);
 }
 
 void
-XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit)
+XidMgrServer::record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr tracker)
+{
+    _record_xid_change(db_id, pg_xid, xid, has_schema_changes, false, tracker);
+}
+
+void
+XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit, pg_log_mgr::WalProgressTrackerPtr tracker)
 {
     auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({
         {"db_id", std::to_string(db_id)},
@@ -110,7 +128,7 @@ XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
     });
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
-    db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit);
+    db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit, tracker, true);
     if (real_commit) {
         _service->notify_subscriber(db_id, xid);
     }
@@ -156,10 +174,28 @@ XidMgrServer::_find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &
 }
 
 void
-XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit)
+XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit, 
+        pg_log_mgr::WalProgressTrackerPtr wal_tracker, bool write_log)
 {
     std::unique_lock lock(_mutex);
-    _xact_log.log(pg_xid, xid, real_commit);
+    if (write_log) {
+        if (_pending_log_entries.empty()) {
+            _xact_log.log(pg_xid, xid, real_commit);
+            if (wal_tracker) {
+                wal_tracker->remove_xid(xid);
+            }
+        } else {
+            DCHECK(std::prev(_pending_log_entries.end())->first < xid);
+            // add to the pending log entries and mark it as ready to be written
+            _pending_log_entries[xid] = {pg_xid, real_commit, wal_tracker, true};
+        }
+    } else { // not writing to log yet
+        DCHECK(_pending_log_entries.empty() || std::prev(_pending_log_entries.end())->first < xid) 
+            << "pending: " << std::prev(_pending_log_entries.end())->first << " new xid:" << xid;
+
+        // write_to_log() must be called to mark it as ready to be written
+        _pending_log_entries[xid] = {pg_xid, real_commit, wal_tracker, false};
+    }
 
     if (has_schema_changes) {
         _xact_history.push_back({xid, _last_committed_xid});
@@ -168,6 +204,30 @@ XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, boo
 
     if (real_commit) {
         _last_committed_xid = xid;
+    }
+}
+
+void XidMgrServer::DBXactLogData::write_log_entry(uint32_t pg_xid, uint64_t xid)
+{
+    std::unique_lock lock(_mutex);
+
+    // mark the entry as ready
+    auto it = _pending_log_entries.find(xid);
+    CHECK(it != _pending_log_entries.end()) << "XID: " << xid << " not found in pending log entries for db " << _db_id;
+    DCHECK_EQ(pg_xid,it->second.pg_xid);
+    it->second.ready = true;
+
+    // ... and write all ready entries in order
+    for (auto pending_it = _pending_log_entries.begin(); pending_it != _pending_log_entries.end();) {
+        if (!pending_it->second.ready) {
+            break;
+        }
+
+        _xact_log.log(pending_it->second.pg_xid, pending_it->first, pending_it->second.real_commit);
+        if (pending_it->second.wal_tracker) {
+            pending_it->second.wal_tracker->remove_xid(pending_it->first);
+        }
+        pending_it =  _pending_log_entries.erase(pending_it);
     }
 }
 

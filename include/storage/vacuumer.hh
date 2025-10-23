@@ -430,5 +430,13 @@ private:
      * @param cutoff_xid Cutoff XID
      */
     void _save_last_seen_cutoff_xid(uint64_t db_id, uint64_t cutoff_xid);
+
+    /**
+     * @brief Clean up expired roots files for system tables older than cutoff XID
+     *
+     * @param cutoff_xid XID below which roots files can be removed
+     * @param table_dir  Directory containing the system table
+     */
+    void _cleanup_expired_roots_files(uint64_t cutoff_xid, const std::filesystem::path& table_dir);
 };
 }

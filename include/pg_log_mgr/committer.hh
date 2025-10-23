@@ -9,6 +9,7 @@
 
 #include <common/concurrent_queue.hh>
 #include <common/constants.hh>
+#include <common/coordinator.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/properties.hh>
@@ -27,6 +28,7 @@
 
 #include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_index.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::committer {
 
@@ -90,6 +92,17 @@ namespace springtail::committer {
         constexpr static const std::string_view THREAD_WORKER = "w";
 
     private:
+        /**
+         * Scan forward through the results deque to find the final XID for each database
+         * in the upcoming batch. Stops at the first non-XACT_MSG message (batch boundary).
+         * @param start_it Iterator to start scanning from
+         * @param end_it Iterator marking the end of the deque
+         * @return Map of db_id to final_xid for each database in the batch
+         */
+        std::map<uint64_t, uint64_t> _scan_batch_final_xids(
+            std::deque<std::shared_ptr<XidReady>>::iterator start_it,
+            std::deque<std::shared_ptr<XidReady>>::iterator end_it);
+
         /**
          * Clear the SysTblMgr::Client cache for any tables with DDL mutations.
          */
@@ -155,6 +168,63 @@ namespace springtail::committer {
          */
         bool _shift_to_xid(SchemaMetadata &meta, const XidLsn &xid);
 
+        /**
+         * Handle TABLE_SYNC_COMMIT and TABLE_SYNC_SWAP message types.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         */
+        void _handle_table_sync_message(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id
+        );
+
+        /**
+         * Handle RECONCILE_INDEX message type in isolation.
+         * This commits any pending batch, processes the reconciliation, and commits it.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         * @param completed_xid The most recent XID we completed processing
+         */
+        void _handle_index_reconciliation(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id,
+            uint64_t& completed_xid
+        );
+
+        /**
+         * Handle XACT_MSG message types.
+         * @param result The XidReady message to process
+         * @param db_id The database ID
+         * @param completed_xid The most recent XID we completed processing
+         */
+        void _handle_transaction_message(
+            const std::shared_ptr<XidReady>& result,
+            uint64_t db_id,
+            uint64_t completed_xid
+        );
+
+    private:
+        /**
+         * Batch state tracked per database during batch processing
+         */
+        struct BatchState {
+            std::map<uint64_t, MutableTablePtr> table_cache;  ///< tid → MutableTable
+            std::vector<std::shared_ptr<XidReady>> xid_results;  ///< All XidReady messages for this db
+            uint64_t final_xid = 0;  ///< The final XID where this batch will commit (determined upfront)
+        };
+
+        /**
+         * Commits all accumulated changes for a single database batch.
+         * @param db_id The database ID
+         * @param batch The batch state to commit
+         * @param completed_xid The XID we started from
+         */
+        void _commit_batch(
+            uint64_t db_id,
+            BatchState& batch,
+            uint64_t completed_xid
+        );
+
     private:
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
@@ -163,6 +233,11 @@ namespace springtail::committer {
          * Table worker threads in the committer
          */
         uint32_t _worker_count;
+
+        /**
+         * Batch processing state per database. Maps db_id → BatchState
+         */
+        std::map<uint64_t, BatchState> _batch_state;
 
         /**
          * Indexer worker threads to process indexes
@@ -209,6 +284,9 @@ namespace springtail::committer {
          */
         std::shared_ptr<pg_log_mgr::IndexRequestsManager> _index_requests_mgr;
 
+        /**
+         * @brief Table sync processor to handle fsync operations in the background
+         */
         struct TableSyncProcessor
         {
             explicit TableSyncProcessor(size_t max_workers)
@@ -224,42 +302,40 @@ namespace springtail::committer {
 
             ~TableSyncProcessor() = default;
 
-            void add(MutableTablePtr table)
-            {
-                {
-                    std::unique_lock g(_m);
-                    _queue.push(table);
-                }
-                _cv.notify_one();
-            }
+            /** Add a table to be synced.
+             *
+             * @param table The table to be synced.
+             */
+            void add(uint64_t xid, MutableTablePtr table);
+
+            /** Track sync completion for a given XID. After the table syncs are done, it will notify 
+             * the XID manager and WAL tracker to move the log forward.
+             *
+             * @param db_id The database ID.
+             * @param pg_xid The Postgres XID.
+             * @param xid The internal XID.
+             */
+            void track_sync(uint64_t db_id, uint32_t pg_xid, uint64_t xid);
 
         private:
-            void task(std::stop_token st)
-            {
-                while(!st.stop_requested()) {
-                    MutableTablePtr table;
-                    {
-                        std::unique_lock g(_m);
-                        if (!_cv.wait(g, st, [this]{ return !_queue.empty(); })) {
-                            break;
-                        }
-                        table = _queue.front();
-                        _queue.pop();
-                    }
-
-                    table->sync_data_and_indexes();
-                }
-                LOG_INFO("thread joined");
-            }
+            void _check_finished();
+            void task(std::stop_token st);
 
             // work state
             std::condition_variable_any _cv;
             std::mutex _m;
 
-            std::queue<MutableTablePtr> _queue;
+            std::queue<std::pair<uint64_t, MutableTablePtr>> _queue;
 
             // workers
             std::vector<std::jthread> _workers;
+
+            struct WorkItem {
+                std::vector<MutableTablePtr> tables;
+                uint64_t pg_xid = 0;
+            };
+            using WorkItems = std::map<uint64_t, WorkItem>; ///< xid → WorkItem
+            std::unordered_map<uint64_t, WorkItems> _work_map;  ///< db_id → (xid → MutableTable)
         };
 
         std::unique_ptr<TableSyncProcessor> _table_sync_processor;
