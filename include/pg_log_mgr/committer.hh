@@ -305,16 +305,7 @@ namespace springtail::committer {
              *
              * @param table The table to be synced.
              */
-            void add(uint64_t xid, MutableTablePtr table);
-
-            /** Track sync completion for a given XID. After the table syncs are done, it will notify 
-             * the XID manager and WAL tracker to move the log forward.
-             *
-             * @param db_id The database ID.
-             * @param pg_xid The Postgres XID.
-             * @param xid The internal XID.
-             */
-            void track_sync(uint64_t db_id, uint32_t pg_xid, uint64_t xid);
+            void add(uint64_t pg_xid, uint64_t xid, std::vector<MutableTablePtr> tables);
 
         private:
             void _check_finished();

@@ -239,14 +239,13 @@ namespace springtail::committer {
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
         Coordinator::get_instance()->unregister_thread(daemon_type, "committer");
 
-        std::vector<uint64_t> table_ids;
-
         // finalize all tables in the batch
+        std::vector<MutableTablePtr> tables_to_sync;
         for (auto& [tid, table] : batch.table_cache) {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Finalizing table {}", tid);
             auto metadata = table->finalize(false);
             sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, batch.final_xid, metadata);
-            _table_sync_processor->add(batch.final_xid, table);
+            tables_to_sync.push_back(table);
         }
 
         Coordinator::get_instance()->register_thread(daemon_type, "committer");
@@ -295,10 +294,9 @@ namespace springtail::committer {
                         xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null()); 
                         result->notify_tracker(xid);
                     } else {
-                        // commit the completed XID without xlog update
+                        // commit the completed XID without xlog update because table data has not been persisted (fsync).
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), true, result->get_tracker()); 
-                        // track the table sync for this XID that will update xlog and wal tracker.
-                        _table_sync_processor->track_sync(db_id, pg_xid, xid);
+                        _table_sync_processor->add(pg_xid, batch.final_xid, std::move(tables_to_sync));
                     }
 
                     // push completed DDL changes to the FDWs
@@ -313,9 +311,15 @@ namespace springtail::committer {
                 }
             } else {
                 if (is_last_xid) {
-                    // commit the completed XID without xlog update
-                    xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false, result->get_tracker()); 
-                    _table_sync_processor->track_sync(db_id, pg_xid, xid);
+                    if (batch.table_cache.empty()) {
+                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
+                        // don't commit, but record any DDL changes to the history
+                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), result->get_tracker());
+                    } else {
+                        // commit the completed XID without xlog update
+                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false, result->get_tracker()); 
+                        _table_sync_processor->add(pg_xid, batch.final_xid, std::move(tables_to_sync));
+                    }
                 } else {
                     // don't commit, but record any DDL changes to the history
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), result->get_tracker());
@@ -894,29 +898,18 @@ namespace springtail::committer {
 
     // ---------------- TableSyncProcessor ----------------
     void 
-    Committer::TableSyncProcessor::add(uint64_t xid, MutableTablePtr table)
+    Committer::TableSyncProcessor::add(uint64_t pg_xid, uint64_t xid, std::vector<MutableTablePtr> tables)
     {
-        {
+        if (!tables.empty()) {
             std::unique_lock g(_m);
-            _queue.push({xid, table});
-        }
-        _cv.notify_one();
-    }
-
-    void 
-    Committer::TableSyncProcessor::track_sync(uint64_t db_id, uint32_t pg_xid, uint64_t xid)
-    {
-        // update work item
-        {
-            std::unique_lock g(_m);
-            _work_map[db_id][xid].pg_xid = pg_xid;
-            // we don't call _check_finished() here because it is called
-            // from the worker thread when processing the not empty queue.
-            if (!_queue.empty()) {
-                return;
+            // create a new work item and distribute the tables to the queue
+            auto& work_item = _work_map[tables[0]->db()][xid];
+            work_item = {std::move(tables), pg_xid};
+            for (auto& table : work_item.tables) {
+                _queue.push({xid, table});
             }
+            _cv.notify_one();
         }
-        _check_finished();
     }
 
     void 
@@ -931,7 +924,7 @@ namespace springtail::committer {
                 auto& xid_map = db_it->second;
                 for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
                     auto& work_item = xid_it->second;
-                    if (work_item.tables.empty() && work_item.pg_xid != 0) {
+                    if (work_item.tables.empty()) {
                         to_commit.emplace_back(db_it->first, work_item.pg_xid, xid_it->first);
                         xid_it = xid_map.erase(xid_it);
                     } else {
@@ -948,8 +941,8 @@ namespace springtail::committer {
             }
         }
 
-
         for (const auto& [db_id, pg_xid, xid] : to_commit) {
+            // all tables have been fsync'ed for this xid
             xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, pg_xid, xid); 
         }
     }
@@ -972,13 +965,13 @@ namespace springtail::committer {
                 _queue.pop();
             }
 
-            // do the actuall work
+            // do the actual work
             table->sync_data_and_indexes();
 
             {
                 std::unique_lock g(_m);
                 // remove the table from the work item
-                std::erase_if(_work_map[table->db()][table->target_xid()].tables,
+                std::erase_if(_work_map[table->db()][xid].tables,
                         [&table](const MutableTablePtr& t) { return t->id() == table->id(); });
             }
             _check_finished();
