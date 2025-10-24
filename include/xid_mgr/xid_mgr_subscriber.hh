@@ -30,6 +30,8 @@ struct XidMgrSubscriber : public grpc::ClientReadReactor<proto::XidPushResponse>
     XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks cb);
     ~XidMgrSubscriber();
 
+    void start();
+
 private:
     // GRPC callbacks
     void OnReadDone(bool ok) override;

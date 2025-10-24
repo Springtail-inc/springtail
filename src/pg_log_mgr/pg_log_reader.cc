@@ -722,7 +722,6 @@ namespace springtail::pg_log_mgr {
                                              const XidLsn &xidlsn,
                                              const std::vector<uint64_t> &pg_xids)
     {
-        RedisDDL redis_ddl;
         auto server = sys_tbl_mgr::Server::get_instance();
 
         switch(change->msg_type) {
@@ -740,11 +739,11 @@ namespace springtail::pg_log_mgr {
 
                 if (action.get<std::string>() != "no_change") {
                     LOG_INFO("Table namespace created: {} {} {}", table_msg.table, table_msg.namespace_name, table_msg.namespace_id);
-                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
 
                 ddl_stmt = server->create_table(_db, xidlsn, table_msg);
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 _exists_cache->insert(_db, table_msg.oid, true);
                 break;
             }
@@ -771,7 +770,7 @@ namespace springtail::pg_log_mgr {
                     // Mark the parent table for resync
                     _mark_table_resync(table_ids, xidlsn, pg_xids);
                 } else if (action.get<std::string>() != "no_change") {
-                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
                 break;
             }
@@ -782,7 +781,7 @@ namespace springtail::pg_log_mgr {
                           drop_msg.xid, drop_msg.oid);
 
                 std::string &&ddl_stmt = server->drop_table(_db, xidlsn, drop_msg);
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 _exists_cache->insert(_db, drop_msg.oid, false);
                 break;
             }
@@ -790,35 +789,35 @@ namespace springtail::pg_log_mgr {
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
                 std::string &&ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::ALTER_NAMESPACE:
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
                 std::string &&ddl_stmt = server->alter_namespace(_db, xidlsn, namespace_msg);
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::DROP_NAMESPACE:
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
                 std::string &&ddl_stmt = server->drop_namespace(_db, xidlsn, namespace_msg);
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::CREATE_TYPE:
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
                 std::string &&ddl_stmt = server->create_usertype(_db, xidlsn, type_msg);
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::ALTER_TYPE:
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
                 std::string &&ddl_stmt = server->alter_usertype(_db, xidlsn, type_msg);
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::DROP_TYPE:
@@ -829,7 +828,7 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "DROP TYPE: xid={}, pg_xid={}, tid={}, ddl={}", xidlsn.xid,
                           type_msg.xid, type_msg.oid, json.dump());
                 if (json.at("action").get<std::string>() != "no_change") {
-                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
                 break;
             }
@@ -871,7 +870,7 @@ namespace springtail::pg_log_mgr {
                 std::string &&ddl_stmt = server->attach_partition(_db, xidlsn, attach_partition_msg);
 
                 // Store the DDL statement for the Committer
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
 
                 break;
             }
@@ -883,7 +882,7 @@ namespace springtail::pg_log_mgr {
                 std::string &&ddl_stmt = server->detach_partition(_db, xidlsn, detach_partition_msg);
 
                 // Store the DDL statement for the Committer
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
 
                 break;
             }

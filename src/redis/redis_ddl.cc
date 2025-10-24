@@ -11,31 +11,8 @@
 namespace {
     using namespace springtail;
 
-    template<const char* queue>
-    nlohmann::json  _get_ddls(
-            RedisClient& redis,
-            uint64_t db_id,
-            uint64_t xid
-            )
-    {
-        std::string ddl_key = fmt::format(queue,
-                Properties::get_db_instance_id(), db_id, xid);
-
-        // retrieve the list of DDL operations for this XID
-        std::vector<std::string> values;
-        redis.lrange(ddl_key, 0, -1, std::back_inserter(values));
-
-        nlohmann::json ddls;
-        for (std::string &value : values) {
-            ddls.push_back(nlohmann::json::parse(value));
-        }
-
-        return ddls;
-    }
-
-    // pass hash_set as a template parameter
-    // becuase fmt::format() expects a constexpr
-    template<const char* queue, const char* hash_set>
+    // Store DDL value in the pre-commit hash for crash recovery
+    // Note: DDLs are stored in-memory and only moved to Redis pre-commit phase
     void _precommit(
             RedisClient& redis,
             uint64_t db_id,
@@ -49,16 +26,12 @@ namespace {
         op["ddls"] = ddls;
         std::string value = nlohmann::to_string(op);
 
-        std::string precommit_key = fmt::format(hash_set,
+        std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT,
                                                 Properties::get_db_instance_id());
         std::string hkey = fmt::format("{}:{}", db_id, xid);
-        std::string ddl_key = fmt::format(queue,
-                                          Properties::get_db_instance_id(), db_id, xid);
 
-        // construct the DDL value and place it into the pre-commit hash in a single transaction
-        // with clearing the DDL_XID queue
-        auto ts = redis.transaction(false, false);
-        ts.hset(precommit_key, hkey, value).del(ddl_key).exec();
+        // Store the DDL value in the pre-commit hash for crash recovery
+        redis.hset(precommit_key, hkey, value);
     }
 }
 
@@ -69,18 +42,34 @@ namespace springtail {
                       uint64_t xid,
                       const std::string &ddl)
     {
-        std::string key = fmt::format(redis::QUEUE_DDL_XID,
-                                      Properties::get_db_instance_id(), db_id, xid);
-
-        // RPUSH ddl_queue:xid ddl
-        _redis->rpush(key, ddl);
+        // Store DDL in in-memory cache for fast access by Committer
+        {
+            std::unique_lock<std::shared_mutex> lock(_ddl_cache_mutex);
+            _ddl_cache[db_id][xid].push_back(nlohmann::json::parse(ddl));
+        }
     }
 
     nlohmann::json
     RedisDDL::get_ddls_xid(uint64_t db_id,
                            uint64_t xid)
     {
-        return _get_ddls<redis::QUEUE_DDL_XID>(*_redis, db_id, xid);
+        // Retrieve DDL from in-memory cache
+        {
+            std::shared_lock<std::shared_mutex> lock(_ddl_cache_mutex);
+            auto db_it = _ddl_cache.find(db_id);
+            if (db_it != _ddl_cache.end()) {
+                auto xid_it = db_it->second.find(xid);
+                if (xid_it != db_it->second.end()) {
+                    nlohmann::json ddls;
+                    for (const auto &ddl : xid_it->second) {
+                        ddls.push_back(ddl);
+                    }
+                    return ddls;
+                }
+            }
+        }
+        // Return null if not found (no DDLs for this XID)
+        return nlohmann::json();
     }
 
 
@@ -88,9 +77,28 @@ namespace springtail {
     RedisDDL::clear_ddls_xid(uint64_t db_id,
                              uint64_t xid)
     {
-        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
-                                          Properties::get_db_instance_id(), db_id, xid);
-        _redis->del(ddl_key);
+        // Clear from in-memory cache
+        {
+            std::unique_lock<std::shared_mutex> lock(_ddl_cache_mutex);
+            auto db_it = _ddl_cache.find(db_id);
+            if (db_it != _ddl_cache.end()) {
+                db_it->second.erase(xid);
+                // Clean up empty db_id entries to prevent unbounded map growth
+                if (db_it->second.empty()) {
+                    _ddl_cache.erase(db_id);
+                }
+            }
+        }
+    }
+
+    void
+    RedisDDL::clear_ddls(uint64_t db_id)
+    {
+        // Clear all DDLs for the given database from in-memory cache
+        {
+            std::unique_lock<std::shared_mutex> lock(_ddl_cache_mutex);
+            _ddl_cache.erase(db_id);
+        }
     }
 
     void
@@ -98,7 +106,11 @@ namespace springtail {
                             uint64_t xid,
                             nlohmann::json ddls)
     {
-        _precommit<redis::QUEUE_DDL_XID, redis::HASH_DDL_PRECOMMIT>(*_redis, db_id, xid, ddls);
+        // Move DDLs to Redis pre-commit phase for crash recovery
+        _precommit(*_redis, db_id, xid, ddls);
+
+        // Clear from in-memory cache now that they're safely in Redis pre-commit storage
+        clear_ddls_xid(db_id, xid);
     }
 
     void
