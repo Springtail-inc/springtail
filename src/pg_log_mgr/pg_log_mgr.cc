@@ -42,6 +42,31 @@ namespace springtail::pg_log_mgr {
         );
     }
 
+    nlohmann::json
+    PgLogMgr::get_stats()
+    {
+        static const std::string internal_state_names[] =
+        {
+            "STATE_STARTUP",
+            "STATE_STARTUP_SYNC",
+            "STATE_RUNNING",
+            "STATE_SYNC_STALL",
+            "STATE_SYNCING",
+            "STATE_REPLAYING",
+            "STATE_STOPPED"
+        };
+
+        nlohmann::json json_stats =
+            nlohmann::json::object({
+                {"db_name", _db_name},
+                {"pub_name", _pub_name},
+                {"slot_name", _slot_name},
+                {"internal_state", internal_state_names[_internal_state.get()]}
+            });
+
+            return json_stats;
+    }
+
     void
     PgLogMgr::_on_database_state_changed(const std::string &path,
                                          const nlohmann::json &new_value)
@@ -589,8 +614,8 @@ namespace springtail::pg_log_mgr {
                               RECONNECT_TIME_PERIOD_SEC);
 
                     // shutdown
-                    Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-                    abort();
+                    shutdown();
+                    Properties::get_instance()->set_db_state_in_redis(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
                     return false;
                 }
 
@@ -605,8 +630,8 @@ namespace springtail::pg_log_mgr {
             } catch (const PgConnectionError &e) {
                 LOG_ERROR("Error reconnecting to pg: {}", e.what());
                 // shutdown
-                Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-                abort();
+                shutdown();
+                Properties::get_instance()->set_db_state_in_redis(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
                 return false;
             }
         }

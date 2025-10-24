@@ -24,6 +24,14 @@ namespace springtail::pg_log_mgr {
         void
         cleanup_database_dir(uint64_t db_id);
 
+        /**
+         * @brief Get this object relevant data in json format.
+         *
+         * @return nlohmann::json
+         */
+        nlohmann::json
+        get_stats();
+
     private:
         friend class Singleton<PgLogCoordinator>;
         PgLogCoordinator();
@@ -31,7 +39,9 @@ namespace springtail::pg_log_mgr {
 
         std::mutex _mutex;                         ///< mutex for _log_mgrs map
         std::map<uint64_t, PgLogMgrPtr> _log_mgrs; ///< map of db_id to log mgr
-        RedisCache::RedisChangeWatcherPtr _cache_watcher; ///> redis cache callback object
+        std::map<uint64_t, std::string> _db_states; ///< map of db_id to db state
+        RedisCache::RedisChangeWatcherPtr _db_id_watcher; ///> redis cache callback object for db list change
+        RedisCache::RedisChangeWatcherPtr _db_state_watcher; ///> redis cache callback object for db ids change
         std::shared_ptr<committer::Committer> _committer;
         std::thread _committer_thread;
         std::string _repl_log;                     ///< common part of replication log path

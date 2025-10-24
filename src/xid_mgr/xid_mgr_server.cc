@@ -131,17 +131,10 @@ XidMgrServer::cleanup(uint64_t db_id)
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Cleaning up database {}", db_id);
     std::unique_lock read_lock(_mutex);
     _xact_log_data.erase(db_id);
-    std::filesystem::path path = _base_path / std::to_string(db_id);
 
     // Remove database directory and everything inside it
-    std::error_code ec;
-    std::filesystem::remove_all(path, ec);
-    if (!ec) {
-        LOG_INFO("Removed database directory {}", path.c_str());
-    } else {
-        LOG_ERROR("Failed to removed database directory {}: error code {}, error message '{}'",
-            path.c_str(), ec.value(), ec.message());
-    }
+    std::filesystem::path path = _base_path / std::to_string(db_id);
+    fs::remove_dir(path);
 }
 
 void

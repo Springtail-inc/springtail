@@ -671,4 +671,11 @@ namespace springtail {
         std::string pid_path = Json::get_or<std::string>(props, Properties::PID_PATH, "/var/springtail/pids");
         return pid_path;
     }
+
+    void
+    Properties::set_db_state_in_redis(uint64_t db_id, const std::string &state)
+    {
+        nlohmann::json json_state = state;
+        _cache->set_hash_value_in_redis(DATABASE_STATE_PATH, std::to_string(db_id), json_state);
+    }
 }

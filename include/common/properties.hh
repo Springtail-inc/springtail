@@ -244,6 +244,16 @@ namespace springtail {
             _set_fdw_state(_get_fdw_id(), state);
         }
 
+        /**
+         * @brief Set the db state directly in redis bypassing the properties storage.
+         *      This proparties storage will get automatically updated through redis cache
+         *      notification mechanism.
+         *
+         * @param db_id - database id
+         * @param state - database state
+         */
+        void set_db_state_in_redis(uint64_t db_id, const std::string &state);
+
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;

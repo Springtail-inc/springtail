@@ -110,10 +110,6 @@ namespace springtail::pg_log_mgr {
 
         /** Wait for threads */
         void join() {
-            std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
-            redis_cache->remove_callback(
-                std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
-                _cache_watcher_db_states);
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "joining threads");
             _writer_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "writer thread joined");
@@ -138,9 +134,17 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "shutting down");
             _shutdown = true;
 
+            std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+            redis_cache->remove_callback(
+                std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
+                _cache_watcher_db_states);
+
             // set shutdown flag in pg connection repl class
             _pg_conn.shutdown();
         }
+
+        /** Get log manager stats */
+        nlohmann::json get_stats();
 
     protected:
         /** Helper to create log writer -- one per log file */

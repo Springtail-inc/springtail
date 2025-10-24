@@ -1,4 +1,5 @@
 #include <common/coordinator.hh>
+#include <common/filesystem.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
@@ -17,7 +18,8 @@ namespace springtail::pg_log_mgr {
     PgLogCoordinator::_internal_shutdown()
     {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
-        redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+        redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _db_id_watcher);
+        redis_cache->remove_callback(Properties::DATABASE_STATE_PATH, _db_state_watcher);
 
         // shut down all log managers
         std::unique_lock lock(_mutex);
@@ -39,7 +41,7 @@ namespace springtail::pg_log_mgr {
 
     PgLogCoordinator::PgLogCoordinator() : Singleton<PgLogCoordinator>(ServiceId::PgLogCoordinatorId)
     {
-        _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
+        _db_id_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
                 CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
@@ -63,16 +65,61 @@ namespace springtail::pg_log_mgr {
             }
         );
 
+        _db_state_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replicated databases states: {}", new_value.dump(4));
+                CHECK_EQ(path, Properties::DATABASE_STATE_PATH);
+
+                // get new database keys from json object
+                std::unique_lock<std::mutex> lock(_mutex);
+                auto db_states_copy = _db_states;
+                _db_states.clear();
+                for (auto& [key, value] : new_value.items()) {
+                    // get integer db_id from key
+                    uint64_t db_id = std::stoull(key);
+
+                    // get state
+                    std::string state;
+                    if (value.is_string()) {
+                        state = value.get<std::string>();
+                    } else {
+                        throw Error("Invalid type of state value");
+                    }
+
+                    // add state
+                    _db_states[db_id] = state;
+
+                    // compare current state to the previous value
+                    auto it = db_states_copy.find(db_id);
+                    if (it != db_states_copy.end() && it->second != state) {
+                        if (it->second == redis::db_state_change::REDIS_STATE_FAILED) {
+                            // add database
+                            lock.unlock();
+                            _add_database(db_id);
+                            lock.lock();
+                        }
+                        if (state == redis::db_state_change::REDIS_STATE_FAILED) {
+                            // remove database
+                            lock.unlock();
+                            _remove_database(db_id);
+                            lock.lock();
+                        }
+                    }
+                }
+            }
+        );
+
         // register "/info" route with AdminServer
         if (AdminServer::exists()) {
             LOG_INFO("Registering admin server get path {}", program_invocation_short_name);
 
             AdminServer::get_instance()->register_get_route(
                 "/info",
-                []([[maybe_unused]] const std::string &path,
+                [this]([[maybe_unused]] const std::string &path,
                    [[maybe_unused]] const httplib::Params &params,
                    nlohmann::json &json_response) {
                     json_response["write_cache"] = WriteCacheServer::get_instance()->get_memory_stats();
+                    json_response["log_coordinator"] = get_stats();
                 });
         }
 
@@ -117,13 +164,56 @@ namespace springtail::pg_log_mgr {
         _db_instance_id = Properties::get_db_instance_id();
 
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
-        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _db_id_watcher);
+        redis_cache->add_callback(Properties::DATABASE_STATE_PATH, _db_state_watcher);
 
         std::map<uint64_t, std::string> db_ids = Properties::get_databases();
-        for (auto &db: db_ids) {
-            uint64_t db_id = db.first;
-            _add_database(db_id);
+
+        // acquire lock
+        std::unique_lock lock(_mutex);
+        for (auto &[db_id, db_name]: db_ids) {
+            std::string state = Properties::get_db_state(db_id);
+            _db_states[db_id] = state;
         }
+        lock.unlock();
+
+        for (auto &[db_id, db_name]: db_ids) {
+            std::string state = Properties::get_db_state(db_id);
+            if (state != redis::db_state_change::REDIS_STATE_FAILED) {
+                _add_database(db_id);
+            }
+        }
+    }
+
+    nlohmann::json
+    PgLogCoordinator::get_stats()
+    {
+        nlohmann::json json_stats =
+            nlohmann::json::object({
+                {"instance_id", _db_instance_id},
+                {"archive_logs", _archive_logs},
+                {"rollover_size", _log_size_rollover_threshold},
+                {"host", _host},
+                {"port", _port},
+                {"user_name", _user_name},
+                {"password", _password},
+                {"log_mgrs", nullptr},
+                {"db_states", nullptr}
+            });
+        {
+            std::unique_lock lock(_mutex);
+            nlohmann::json log_mgrs = nlohmann::json::object();
+            for (auto &[db_id, log_mgr]: _log_mgrs) {
+                log_mgrs[std::to_string(db_id)] = log_mgr->get_stats();
+            }
+            json_stats["log_mgrs"] = log_mgrs;
+            nlohmann::json db_states = nlohmann::json::object();
+            for (auto &[db_id, db_state]: _db_states) {
+                db_states[std::to_string(db_id)] = db_state;
+            }
+            json_stats["db_states"] = db_states;
+        }
+        return json_stats;
     }
 
     void
@@ -167,14 +257,7 @@ namespace springtail::pg_log_mgr {
     {
         std::filesystem::path table_path = TableMgr::get_instance()->get_table_base() / std::to_string(db_id);
         // Remove database directory and everything inside it
-        std::error_code ec;
-        std::filesystem::remove_all(table_path, ec);
-        if (!ec) {
-            LOG_INFO("Removed database directory {}", table_path.c_str());
-        } else {
-            LOG_ERROR("Failed to removed database directory {}: error code {}, error message '{}'",
-                table_path.c_str(), ec.value(), ec.message());
-        }
+        fs::remove_dir(table_path);
     }
 
     void
@@ -223,13 +306,6 @@ namespace springtail::pg_log_mgr {
 
         // cleanup replication logs directory
         std::filesystem::path repl_log_path = Properties::make_absolute_path(_repl_log) / std::to_string(db_id);
-        std::error_code ec;
-        std::filesystem::remove_all(repl_log_path, ec);
-        if (!ec) {
-            LOG_INFO("Removed relication logs directory {}", repl_log_path.c_str());
-        } else {
-            LOG_ERROR("Failed to removed replication logs directory {}: error code {}, error message '{}'",
-                repl_log_path.c_str(), ec.value(), ec.message());
-        }
+        fs::remove_dir(repl_log_path);
     }
 }
