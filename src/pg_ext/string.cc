@@ -287,7 +287,7 @@ enlargeStringInfo(StringInfo str, int needed)
     }
 
     /* Now realloc the buffer */
-    str->data = (char *)realloc(str->data, newlen); // NOSONAR - realloc is used for memory management for pg
+    str->data = (char *)repalloc(str->data, newlen); // NOSONAR - repalloc is used for memory management for pg
     if (!str->data)
         throw std::bad_alloc();
 
@@ -385,17 +385,17 @@ void appendStringInfoChar(StringInfo str, char ch) {
     str->data[str->len] = '\0';
 }
 
-void appendStringInfoString(StringInfo str, std::string_view s) {
+void appendStringInfoString(StringInfo str, const char *s) {
     if (!str) {
         LOG_ERROR("Invalid argument: str is null");
         return;
     }
 
-    if (str->len + s.size() + 1 > str->maxlen)
-        enlargeStringInfo(str, s.size() + 1);
+    if (str->len + strlen(s) + 1 > str->maxlen)
+        enlargeStringInfo(str, strlen(s) + 1);
 
-    std::memcpy(str->data + str->len, s.data(), s.size());
-    str->len += s.size();
+    std::memcpy(str->data + str->len, s, strlen(s));
+    str->len += strlen(s);
     str->data[str->len] = '\0';
 }
 

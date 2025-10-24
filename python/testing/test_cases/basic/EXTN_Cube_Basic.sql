@@ -56,6 +56,8 @@ CREATE INDEX idx_cube ON mixed_data (dimensions);
 
 ## verify
 
+### schema_check public mixed_data
+
 -- Basic comparison operators
 SELECT 'Basic comparison operators' as test_case;
 

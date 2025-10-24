@@ -42,7 +42,7 @@ struct ParseState {
 extern "C" PGEXT_API void initStringInfo(StringInfo str);
 extern "C" PGEXT_API void appendBinaryStringInfo(StringInfo str, const void *data, int datalen);
 extern "C" PGEXT_API void appendBinaryStringInfoNT(StringInfo str, const void *data, int datalen);
-extern "C" PGEXT_API void appendStringInfoString(StringInfo str, std::string_view s);
+extern "C" PGEXT_API void appendStringInfoString(StringInfo str, const char *s);
 extern "C" PGEXT_API void appendStringInfoChar(StringInfo str, char ch);
 extern "C" PGEXT_API void appendStringInfo(StringInfo str, const char *fmt, ...);
 extern "C" PGEXT_API int appendStringInfoVA(StringInfo str, const char *fmt, va_list args);

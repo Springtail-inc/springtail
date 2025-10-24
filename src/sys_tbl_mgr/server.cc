@@ -1368,6 +1368,10 @@ Server::_check_index_columns(uint64_t db_id, const proto::IndexInfo & index_info
             case NUMERICOID:
                 break;
             default:
+                // Support for user-defined types
+                if (column_type >= constant::FIRST_USER_DEFINED_PG_OID) {
+                    return true;
+                }
                 LOG_ERROR("Unsupported index column type {} for index column: table {}, index {}",
                     column_type, idx_position,
                     index_info.table_id(), index_info.name());
@@ -2091,7 +2095,7 @@ Server::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn&
             }
         } else {
             auto it = _last_namespace_update_by_id.find(db_id);
-            if (it != _last_namespace_update_by_id.end()) { 
+            if (it != _last_namespace_update_by_id.end()) {
                 auto const& [last_xid, ns] = it->second;
                 if (last_xid <= xid.xid) {
                     auto ns_it = ns.find(namespace_id);
@@ -2164,7 +2168,7 @@ Server::_get_namespace_info(uint64_t db_id, const std::string& name, const XidLs
             }
         } else {
             auto it = _last_namespace_update_by_name.find(db_id);
-            if (it != _last_namespace_update_by_name.end()) { 
+            if (it != _last_namespace_update_by_name.end()) {
                 auto const& [last_xid, ns] = it->second;
                 if (last_xid <= xid.xid) {
                     auto ns_it = ns.find(name);
@@ -2432,7 +2436,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             }
         }
     }
-    
+
     // access the stats table if we didn't find cached stats
     if (!stats_found) {
         auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
