@@ -40,6 +40,18 @@ namespace springtail {
         }
 
         /**
+         * @brief Get the time in microseconds
+         * @return uint64_t time in microseconds since epoch
+         */
+        static inline
+        uint64_t get_time_in_micros()
+        {
+            struct timeval t;
+            gettimeofday(&t, nullptr);
+            return (uint64_t)t.tv_sec * 1000000 + t.tv_usec;
+        }
+
+        /**
          * @brief Joins strings into a single string with a delimiter between them.
          * @param delimiter delimiter string (e.g., ",")
          * @param first An iterator to the first element to include

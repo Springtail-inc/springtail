@@ -184,7 +184,8 @@ namespace springtail::pg_proxy {
      */
     class DatabaseInstance : public std::enable_shared_from_this<DatabaseInstance> {
     public:
-        enum class InstanceState {
+        enum class State {
+            NONE,             // Instance not known
             ACTIVE,           // Normal operation, can accept new sessions
             SHUTTING_DOWN,    // No new sessions, waiting for active sessions to complete
         };
@@ -243,11 +244,29 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Get JSON representation of instance; used by admin server
+         * @return nlohmann::json JSON object representing instance
+         */
+        nlohmann::json to_json() const {
+            std::shared_lock lock(_active_sessions_mutex);
+            nlohmann::json j = {
+                {"state", (is_active() ? "ACTIVE" : "SHUTTING_DOWN")},
+                {"type", (_type == Session::Type::PRIMARY ? "PRIMARY" : "REPLICA")},
+                {"hostname", _hostname},
+                {"port", _port},
+                {"replica_id", _replica_id},
+                {"active_sessions", static_cast<int>(_active_sessions.size())},
+                {"pooled_sessions", static_cast<int>(_pool->size())}
+            };
+            return j;
+        }
+
+        /**
          * @brief Is the instance active
          * @return true if active, false if shutting down
          */
         bool is_active() const {
-            return _state.load() == InstanceState::ACTIVE;
+            return _state.load() == State::ACTIVE;
         }
 
         /**
@@ -378,10 +397,18 @@ namespace springtail::pg_proxy {
          */
         void dump();
 
+        /**
+         * @brief Get the current state of the instance
+         * @return DatabaseInstance::State
+         */
+        State state() const {
+            return _state.load();
+        }
+
     protected: // for testing
         /** map of active sessions by id, includes all allocated sessions (incl. pooled) */
         std::unordered_map<uint64_t, ServerSessionWeakPtr> _active_sessions;
-        std::shared_mutex _active_sessions_mutex;   ///< mutex for active sessions map
+        mutable std::shared_mutex _active_sessions_mutex;   ///< mutex for active sessions map
 
         /**
          * @brief Add session to active sessions map
@@ -395,7 +422,7 @@ namespace springtail::pg_proxy {
         }
 
     private:
-        std::atomic<InstanceState> _state{InstanceState::ACTIVE}; ///< state of instance
+        std::atomic<State> _state{State::ACTIVE}; ///< state of instance
         DatabasePoolPtr _pool{nullptr};      ///< free connections pool for this instance
         Session::Type _type;                 ///< type of instance (primary, replica)
         std::string _hostname;               ///< hostname of instance
@@ -428,6 +455,23 @@ namespace springtail::pg_proxy {
          */
         ServerSessionPtr get_pooled_session(uint64_t db_id,
                                             const std::string &username);
+
+
+        /**
+         * @brief Get JSON representation of instance set; used by admin server
+         * @return nlohmann::json
+         */
+        virtual nlohmann::json to_json() const {
+            nlohmann::json j = nlohmann::json::array();
+            std::shared_lock lock(_base_mutex);
+            for (const auto &instance: _active_instances) {
+                j.push_back(instance->to_json());
+            }
+            for (const auto &instance: _shutdown_pending_instances) {
+                j.push_back(instance->to_json());
+            }
+            return j;
+        }
 
         /**
          * @brief Remove database from the instance set
@@ -619,6 +663,18 @@ namespace springtail::pg_proxy {
          */
         DatabaseInstancePtr get_replica_instance(const std::string &replica_id) const;
 
+        /**
+         * @brief Get the current state of the instance
+         * @return DatabaseInstance::State
+         */
+        DatabaseInstance::State get_replica_state(const std::string &replica_id) const {
+            auto instance = get_replica_instance(replica_id);
+            if (instance) {
+                return instance->state();
+            }
+            return DatabaseInstance::State::NONE;
+        }
+
     protected:
         /** pool config used for each instance */
         DatabasePool::PoolConfig _pool_config;
@@ -681,6 +737,14 @@ namespace springtail::pg_proxy {
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters,
             const std::string &database) override;
+
+        /**
+         * @brief Get JSON representation of primary/standby set
+         * @return nlohmann::json
+         */
+        nlohmann::json to_json() const override {
+            return _primary->to_json();
+        }
 
     private:
         DatabaseInstancePtr _primary{nullptr}; ///< primary instance
@@ -935,6 +999,11 @@ namespace springtail::pg_proxy {
         void _internal_shutdown() override;
 
         /**
+         * @brief Function called by Singleton base class to prior to thread shutdown.
+         */
+        void _internal_thread_shutdown() override;
+
+        /**
          * @brief Function called by Singleton base class to run thread.
          *
          */
@@ -958,6 +1027,9 @@ namespace springtail::pg_proxy {
 
         std::string _db_replica_prefix;         ///< prefix to be used for replica database (for testing)
         DatabasePool::PoolConfig _pool_config;  ///< pool configuration
+
+        std::condition_variable _shutdown_cv;    ///< condition variable for shutdown
+        std::mutex _shutdown_mutex;              ///< mutex for shutdown
 
         /**
          * @brief Construct a new Database Mgr object
@@ -1017,10 +1089,10 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Handle changes to the list of FDWs
-         * @param path - path of the change
          * @param new_value - new value
          */
-        void _redis_fdw_change_cb(const std::string &path, const nlohmann::json &new_value);
+        void _redis_fdw_change_cb(const nlohmann::json &new_value);
     };
+    using DatabaseMgrPtr = std::shared_ptr<DatabaseMgr>;
 
 } // namespace springtail:pg_proxy

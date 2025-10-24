@@ -566,7 +566,7 @@ namespace springtail {
     }
 
     std::vector<std::string>
-    Properties::_get_fdw_ids()
+    Properties::_get_fdw_ids(const std::string &state)
     {
         nlohmann::json fdw_ids_json = _cache->get_value("fdw_ids");
         if (fdw_ids_json.empty()) {
@@ -576,7 +576,20 @@ namespace springtail {
         std::vector<std::string> fdw_ids;
         for (auto &fdw_id_json: fdw_ids_json) {
             CHECK(fdw_id_json.type() == nlohmann::json::value_t::string);
-            fdw_ids.push_back(fdw_id_json.get<std::string>());
+            auto fdw_id = fdw_id_json.get<std::string>();
+
+            // filter by state if provided
+            if (!state.empty()) {
+                // get fdw config and check state
+                nlohmann::json fdw_config = _get_fdw_config(fdw_id);
+                CHECK(fdw_config.contains("state"));
+                std::string fdw_state = fdw_config["state"];
+                if (fdw_state != state) {
+                    continue;
+                }
+            }
+
+            fdw_ids.push_back(fdw_id);
         }
         return fdw_ids;
     }

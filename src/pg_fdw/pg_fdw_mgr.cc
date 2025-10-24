@@ -526,7 +526,6 @@ namespace springtail::pg_fdw {
             return;
         }
 
-        RedisDDL redis_ddl;
         while (!_is_shutting_down()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(THREAD_SLEEP_INTERVAL_MSEC));
             if (_in_transaction) {
@@ -534,7 +533,7 @@ namespace springtail::pg_fdw {
             }
 
             // read latest schema xid from redis
-            uint64_t schema_xid = redis_ddl.get_schema_xid(_fdw_id, _db_id);
+            uint64_t schema_xid = RedisDDL::get_instance()->get_schema_xid(_fdw_id, _db_id);
             std::unique_lock xid_lock(_xid_update_mutex);
             if (schema_xid == 0) {
                 schema_xid = _schema_xid;

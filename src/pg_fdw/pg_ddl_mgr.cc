@@ -70,6 +70,13 @@ namespace springtail::pg_fdw {
         "       role_owner_name, table_oid "
         "FROM __pg_springtail_triggers.table_owner_diff('{}');";
 
+    /** Resets the history of snapshot tables for a given FDW */
+    static constexpr char RESET_HISTORY_DIFFS[] =
+        "SELECT __pg_springtail_triggers.reset_role_diff('{}'); "
+        "SELECT __pg_springtail_triggers.reset_role_member_diff('{}'); "
+        "SELECT __pg_springtail_triggers.reset_table_owner_diff('{}'); "
+        "SELECT __pg_springtail_triggers.reset_policy_diff('{}');";
+
     /** Drops roles that aren't system or FDW roles */
     static constexpr char DROP_ROLES[] =
         "DO $$ "
@@ -259,8 +266,6 @@ namespace springtail::pg_fdw {
         _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this, sync_interval_secs);
         pthread_setname_np(_sync_thread.native_handle(), "DDLMgrSync");
         LOG_INFO("PgDDLMgr::init() done");
-
-        Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_RUNNING);
     }
 
     bool
@@ -580,6 +585,8 @@ namespace springtail::pg_fdw {
         std::string user;
         std::string password;
 
+        bool first_pass = true;
+
         std::string coordinator_id = fmt::format(DDL_SYNC_WORKER_ID, _fdw_id);
         auto coordinator = Coordinator::get_instance();
         auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::DDL_MGR, coordinator_id);
@@ -610,6 +617,12 @@ namespace springtail::pg_fdw {
                     // these operations perform on the fdw connection as well as the primary
                     // if there is an error, we rollback both transactions
                     try {
+                        if (first_pass) {
+                            // on the first pass, reset the snapshot history tables
+                            conn->exec(fmt::format(RESET_HISTORY_DIFFS,
+                                                   _fdw_id, _fdw_id, _fdw_id, _fdw_id));
+                        }
+
                         // sync user roles for this database
                         _roles_sync_database(conn, fdw_conn, db_id);
 
@@ -638,7 +651,15 @@ namespace springtail::pg_fdw {
                 }
             } catch (const std::exception &e) {
                 LOG_ERROR("Error syncing policies: {}", e.what());
+                DCHECK(false) << "Error syncing policies and roles";
                 // on error we should drop the primary fdw policy table and try resyncing from scratch
+            }
+
+            // after the first successful pass, set the FDW state to running
+            if (first_pass) {
+                LOG_INFO("Initial DDL sync pass complete");
+                first_pass = false;
+                Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_RUNNING);
             }
 
             // sleep for sync_interval_secs
@@ -1037,16 +1058,13 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::run()
     {
-        // init redis ddl client
-        RedisDDL redis_ddl;
-
         // move any pending DDLs to the active queue
-        redis_ddl.abort_fdw(_fdw_id);
+        RedisDDL::get_instance()->abort_fdw(_fdw_id);
 
         while (!_is_shutting_down()) {
             try {
                 // blocking redis call to get next set of DDL statements
-                auto &&ddls_vec = redis_ddl.get_next_ddls(_fdw_id);
+                auto &&ddls_vec = RedisDDL::get_instance()->get_next_ddls(_fdw_id);
                 if (ddls_vec.empty()) {
                     continue; // check for shutdown and then re-check for queued DDL changes
                 }
@@ -1080,7 +1098,7 @@ namespace springtail::pg_fdw {
                 if (db_map.empty()) {
                     LOG_WARN("All schemas have already been applied");
                     db_lock.unlock();
-                    redis_ddl.commit_fdw_no_update(_fdw_id);
+                    RedisDDL::get_instance()->commit_fdw_no_update(_fdw_id);
                     continue;
                 }
 
@@ -1089,7 +1107,7 @@ namespace springtail::pg_fdw {
                 // queue each DBs DDL statements for processing
                 for (const auto &[db_id, xid_map] : db_map) {
                     _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
-                        db_id, [this, &redis_ddl, db_id, xid_map]() {
+                        db_id, [this, db_id, xid_map]() {
                             try {
                                 uint64_t schema_xid = xid_map.rbegin()->first;
                                 auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
@@ -1105,14 +1123,14 @@ namespace springtail::pg_fdw {
                                 if (!status) {
                                     // error occured, abort the DDL
                                     LOG_ERROR("Failed to apply DDL statements");
-                                    redis_ddl.abort_fdw(_fdw_id);
+                                    RedisDDL::get_instance()->abort_fdw(_fdw_id);
                                     DCHECK(false);
                                     return;
                                 }
 
                                 // success, update schema XID if applied, otherwise they may be
                                 // queued
-                                redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
+                                RedisDDL::get_instance()->update_schema_xid(_fdw_id, db_id, schema_xid);
 
                                 std::unique_lock db_lock_unique(_db_mutex);
                                 _db_xid_map[db_id] = schema_xid;
@@ -1647,8 +1665,6 @@ namespace springtail::pg_fdw {
     {
 
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        RedisDDL redis_ddl;
-
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
         // get schemas, parse include, fetch from primary db if necessary
@@ -1764,7 +1780,7 @@ namespace springtail::pg_fdw {
         db_lock.unlock();
 
         // update redis with the schema xid
-        redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
+        RedisDDL::get_instance()->update_schema_xid(_fdw_id, db_id, xid);
         LOG_INFO("Schema initialization complete for db_id={}, db_name={}, xid={}",
                  db_id, db_name, xid);
     }

@@ -126,6 +126,12 @@ namespace springtail::pg_proxy {
             return _password_type;
         }
 
+        /** get password and type */
+        std::pair<const std::string&, PasswordType> get_password_and_type() const {
+            std::shared_lock lock(_user_mutex);
+            return {_password, _password_type};
+        }
+
         /**
          * @brief Add database to user's list of connected databases
          * @param name - database name
@@ -202,10 +208,15 @@ namespace springtail::pg_proxy {
          */
         UserPtr get_user(const std::string &username, const std::string &database) const;
 
+        /**
+         * @brief Update the user with the FDW password from the _proxy_to_fdw_user
+         * @param user UserPtr user
+         */
+        UserLoginPtr get_replica_login(UserPtr user);
+
     protected:
         /**
          * @brief Wake up internal thread.
-         *
          */
         virtual void _internal_thread_shutdown() override
         {
@@ -214,7 +225,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Stop function for stopping UserMgr thread
-         *
          */
         void _internal_shutdown() override {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Stopping User Manager thread {}", _id);
@@ -264,6 +274,8 @@ namespace springtail::pg_proxy {
 
         std::mutex _sleep_mutex;                ///< mutex for sleep
         std::condition_variable _sleep_cv;      ///< condition variable for sleep
+
+        UserPtr _proxy_to_fdw_user;             ///< user for role proxy_to_fdw
 
         /**
          * @brief Add new user to the user map

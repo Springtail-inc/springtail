@@ -147,7 +147,7 @@ namespace springtail::committer {
                 .first->second.push_back(key);
             _work_set[key] = std::move(idx);
             _queue.push(key);
-            _redis_ddl.insert_index_xid(idx._db_id, idx._xid);
+            RedisDDL::get_instance()->insert_index_xid(idx._db_id, idx._xid);
             // notify workers about new items
             _cv.notify_one();
         }
@@ -163,7 +163,7 @@ namespace springtail::committer {
             // it means to drop the index right away
             _work_set[key] = {db_id, xid, {}, IndexStatus::DELETING};
             _queue.push(key);
-            _redis_ddl.insert_index_xid(db_id, xid);
+            RedisDDL::get_instance()->insert_index_xid(db_id, xid);
             _cv.notify_one();
         } else {
             // mark the status as ABORTING, it will tell the worker to
@@ -586,7 +586,7 @@ namespace springtail::committer {
         }
 
         // Remove XID from the tracker
-        _redis_ddl.remove_index_xid(db_id, idx_state._idx._xid);
+        RedisDDL::get_instance()->remove_index_xid(db_id, idx_state._idx._xid);
     }
 
     void Indexer::_remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key)
