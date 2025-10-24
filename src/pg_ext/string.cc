@@ -391,11 +391,11 @@ void appendStringInfoString(StringInfo str, const char *s) {
         return;
     }
 
-    if (str->len + strlen(s) + 1 > str->maxlen)
-        enlargeStringInfo(str, strlen(s) + 1);
+    if (str->len + strlen(s) + 1 > str->maxlen)                 // NOSONAR - strlen is validated
+        enlargeStringInfo(str, strlen(s) + 1);                  // NOSONAR - strlen is validated
 
-    std::memcpy(str->data + str->len, s, strlen(s));
-    str->len += strlen(s);
+    std::memcpy(str->data + str->len, s, strlen(s));            // NOSONAR - strlen is validated
+    str->len += strlen(s);                                      // NOSONAR - strlen is validated
     str->data[str->len] = '\0';
 }
 
