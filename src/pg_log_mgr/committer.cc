@@ -259,11 +259,11 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processing batch XID: {}@{}", db_id, xid);
 
             // get DDL changes for this XID
-            nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+            nlohmann::json completed_ddls = RedisDDL::get_instance()->get_ddls_xid(db_id, xid);
 
             if (!completed_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
-                _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
+                RedisDDL::get_instance()->precommit_ddl(db_id, xid, completed_ddls);
                 _has_ddl_precommit = true;
             }
 
@@ -295,7 +295,7 @@ namespace springtail::committer {
                     // push completed DDL changes to the FDWs
                     if (_has_ddl_precommit) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, xid);
-                        _redis_ddl.commit_ddl(db_id, xid);
+                        RedisDDL::get_instance()->commit_ddl(db_id, xid);
                         _has_ddl_precommit = false;
                     }
                 } else {
@@ -403,7 +403,7 @@ namespace springtail::committer {
         auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
 
         // pre-commit the DDLs in case there's a failure
-        _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
+        RedisDDL::get_instance()->precommit_ddl(db_id, completed_xid, ddls);
         _has_ddl_precommit = true;
 
         if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
@@ -416,7 +416,7 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, completed_xid);
             // notify the FDW of the schema changes
             if (_has_ddl_precommit) {
-                _redis_ddl.commit_ddl(db_id, completed_xid);
+                RedisDDL::get_instance()->commit_ddl(db_id, completed_xid);
                 _has_ddl_precommit = false;
             }
 
@@ -466,7 +466,7 @@ namespace springtail::committer {
 
         // check if there were DDL mutations as part of this txn, invalidate the schema cache
         // accordingly
-        nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+        nlohmann::json completed_ddls = RedisDDL::get_instance()->get_ddls_xid(db_id, xid);
         if (!completed_ddls.is_null()) {
             _invalidate_systbl_cache(db_id, completed_ddls);
         }
@@ -552,17 +552,17 @@ namespace springtail::committer {
             // perform thread-type-specific cleanup
             if (parts[1] == THREAD_MAIN) {
                 // get the set of pre-committed DDL statements
-                auto &&precommit = _redis_ddl.get_precommit_ddl();
+                auto &&precommit = RedisDDL::get_instance()->get_precommit_ddl();
 
                 for (const auto &entry : precommit) {
                     uint64_t commit_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(entry.first, 0);
 
                     if (entry.second <= commit_xid) {
                         // for those that are <= the committed XID, commit them
-                        _redis_ddl.commit_ddl(entry.first, entry.second);
+                        RedisDDL::get_instance()->commit_ddl(entry.first, entry.second);
                     } else {
                         // for those that are > the committed XID, abort them
-                        _redis_ddl.abort_ddl(entry.first, entry.second);
+                        RedisDDL::get_instance()->abort_ddl(entry.first, entry.second);
                     }
                 }
             }

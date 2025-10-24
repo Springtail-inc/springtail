@@ -1044,16 +1044,13 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::run()
     {
-        // init redis ddl client
-        RedisDDL redis_ddl;
-
         // move any pending DDLs to the active queue
-        redis_ddl.abort_fdw(_fdw_id);
+        RedisDDL::get_instance()->abort_fdw(_fdw_id);
 
         while (!_is_shutting_down()) {
             try {
                 // blocking redis call to get next set of DDL statements
-                auto &&ddls_vec = redis_ddl.get_next_ddls(_fdw_id);
+                auto &&ddls_vec = RedisDDL::get_instance()->get_next_ddls(_fdw_id);
                 if (ddls_vec.empty()) {
                     continue; // check for shutdown and then re-check for queued DDL changes
                 }
@@ -1087,7 +1084,7 @@ namespace springtail::pg_fdw {
                 if (db_map.empty()) {
                     LOG_WARN("All schemas have already been applied");
                     db_lock.unlock();
-                    redis_ddl.commit_fdw_no_update(_fdw_id);
+                    RedisDDL::get_instance()->commit_fdw_no_update(_fdw_id);
                     continue;
                 }
 
@@ -1096,7 +1093,7 @@ namespace springtail::pg_fdw {
                 // queue each DBs DDL statements for processing
                 for (const auto &[db_id, xid_map] : db_map) {
                     _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
-                        db_id, [this, &redis_ddl, db_id, xid_map]() {
+                        db_id, [this, db_id, xid_map]() {
                             try {
                                 uint64_t schema_xid = xid_map.rbegin()->first;
                                 auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
@@ -1112,14 +1109,14 @@ namespace springtail::pg_fdw {
                                 if (!status) {
                                     // error occured, abort the DDL
                                     LOG_ERROR("Failed to apply DDL statements");
-                                    redis_ddl.abort_fdw(_fdw_id);
+                                    RedisDDL::get_instance()->abort_fdw(_fdw_id);
                                     DCHECK(false);
                                     return;
                                 }
 
                                 // success, update schema XID if applied, otherwise they may be
                                 // queued
-                                redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
+                                RedisDDL::get_instance()->update_schema_xid(_fdw_id, db_id, schema_xid);
 
                                 std::unique_lock db_lock_unique(_db_mutex);
                                 _db_xid_map[db_id] = schema_xid;
@@ -1622,8 +1619,6 @@ namespace springtail::pg_fdw {
     {
 
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        RedisDDL redis_ddl;
-
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
         // get schemas, parse include, fetch from primary db if necessary
@@ -1729,7 +1724,7 @@ namespace springtail::pg_fdw {
         db_lock.unlock();
 
         // update redis with the schema xid
-        redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
+        RedisDDL::get_instance()->update_schema_xid(_fdw_id, db_id, xid);
         LOG_INFO("Schema initialization complete for db_id={}, db_name={}, xid={}",
                  db_id, db_name, xid);
     }

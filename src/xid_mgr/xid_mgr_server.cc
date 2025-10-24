@@ -67,13 +67,12 @@ XidMgrServer::_internal_shutdown()
 void
 XidMgrServer::_internal_run()
 {
-    RedisDDL redis_ddl;
     while (!_is_shutting_down()) {
         // sleep for at least XIG_MGR_MIN_SYNC_MS
         std::this_thread::sleep_for(std::chrono::milliseconds(XIG_MGR_MIN_SYNC_MS));
         std::shared_lock lock(_mutex);
         for (auto &it: _xact_log_data) {
-            it.second.cleanup_history_and_flush(redis_ddl);
+            it.second.cleanup_history_and_flush();
         }
     }
 }
@@ -184,12 +183,12 @@ XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, boo
 }
 
 void
-XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL &redis_ddl)
+XidMgrServer::DBXactLogData::cleanup_history_and_flush()
 {
     std::unique_lock lock(_mutex);
     if (!_xact_history.empty() && _dirty_history) {
         // get min schema xid
-        uint64_t min_schema_xid = redis_ddl.min_schema_xid(_db_id);
+        uint64_t min_schema_xid = RedisDDL::get_instance()->min_schema_xid(_db_id);
 
         // find position lower than min_schema_xid
         auto it = std::lower_bound(
