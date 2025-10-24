@@ -88,7 +88,8 @@ private:
          */
         DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir) :
                       _xact_log(base_dir / std::to_string(db_id)),
-                      _db_id(db_id) {}
+                      _db_id(db_id),
+                      _last_committed_xid(_xact_log.get_last_xid()) {}
 
         /**
          * @brief Record mapping from pg_xid to xid with some attributes
