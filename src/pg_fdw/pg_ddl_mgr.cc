@@ -1890,6 +1890,7 @@ namespace springtail::pg_fdw {
             std::unique_lock<std::mutex> conn_lock(_fdw_conn_cache_mutex);
             _fdw_conn_cache.evict(db_id);
         }
+        RedisDDL::get_instance()->clear_ddls(db_id);
     }
 
     std::string

@@ -40,6 +40,10 @@ XidMgrServer::XidMgrServer() : Singleton<XidMgrServer>(ServiceId::XidMgrServerId
 
     _archive_logs = Json::get_or<bool>(json, "archive_logs", false);
 
+    // Just for initialization, otherwise it might lock up a unit test because of a race condition
+    // between shutdown sequence and XID manager thread instantiating RedisDDL for the first time.
+    RedisDDL::get_instance();
+
     _startup();
 }
 

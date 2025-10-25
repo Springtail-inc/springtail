@@ -307,5 +307,8 @@ namespace springtail::pg_log_mgr {
         // cleanup replication logs directory
         std::filesystem::path repl_log_path = Properties::make_absolute_path(_repl_log) / std::to_string(db_id);
         fs::remove_dir(repl_log_path);
+
+        // cleanup redis DDLs
+        RedisDDL::get_instance()->clear_ddls(db_id);
     }
 }
