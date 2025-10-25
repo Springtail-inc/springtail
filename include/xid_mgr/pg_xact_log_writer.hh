@@ -83,12 +83,24 @@ public:
     void rotate(uint64_t timestamp);
 
     /**
-     * @brief Log transaction ids in the log
+     * @brief Log transaction ids in the log. This will
+     * call add_log_entry(), and for real commits, will set the last_xid.
      *
      * @param pg_xid - Postgress xid
      * @param xid - transaction id associated with this xid
+     * @param real_commit - real commit flag
      */
     void log(uint32_t pg_xid, uint64_t xid, bool real_commit);
+
+    /**
+     * @brief Add log record to the write buffer. Does not update last_xid.
+     *
+     * @param pg_xid - Postgress xid
+     * @param xid - transaction id associated with this xid
+     * @param real_commit - real commit flag
+     */
+    void add_log_entry(uint32_t pg_xid, uint64_t xid, bool real_commit);
+
 
     /**
      * @brief Clean up old logs
@@ -104,6 +116,14 @@ public:
      * @return uint64_t - xid value
      */
     uint64_t get_last_xid() { return _last_stored_xid; }
+
+    /**
+    * @brief Set the last xid stored in the xact log
+    */
+    void set_last_xid(uint64_t xid) { 
+        CHECK_GT(xid, _last_stored_xid) << "XID must be greater than the last stored XID";
+        _last_stored_xid = xid;
+    }
 
     /**
      * @brief Flush from memory to file.

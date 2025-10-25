@@ -185,13 +185,18 @@ XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, boo
             }
         } else {
             DCHECK(std::prev(_pending_log_entries.end())->first < xid);
+            if (real_commit) {
+                _xact_log.set_last_xid(xid);
+            }
             // add to the pending log entries and mark it as ready to be written
             _pending_log_entries[xid] = {pg_xid, real_commit, wal_tracker, true};
         }
     } else { // not writing to log yet
         DCHECK(_pending_log_entries.empty() || std::prev(_pending_log_entries.end())->first < xid) 
             << "pending: " << std::prev(_pending_log_entries.end())->first << " new xid:" << xid;
-
+        if (real_commit) {
+            _xact_log.set_last_xid(xid);
+        }
         // write_to_log() must be called to mark it as ready to be written
         _pending_log_entries[xid] = {pg_xid, real_commit, wal_tracker, false};
     }
@@ -222,7 +227,7 @@ void XidMgrServer::DBXactLogData::write_log_entry(uint32_t pg_xid, uint64_t xid)
             break;
         }
 
-        _xact_log.log(pending_it->second.pg_xid, pending_it->first, pending_it->second.real_commit);
+        _xact_log.add_log_entry(pending_it->second.pg_xid, pending_it->first, pending_it->second.real_commit);
         if (pending_it->second.wal_tracker) {
             pending_it->second.wal_tracker->remove_xid(pending_it->first);
         }

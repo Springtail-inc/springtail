@@ -89,6 +89,16 @@ PgXactLogWriter::rotate(uint64_t timestamp)
 void
 PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
 {
+    if (real_commit) {
+        set_last_xid(xid);
+    }
+
+    add_log_entry(pg_xid, xid, real_commit);
+}
+
+void
+PgXactLogWriter::add_log_entry(uint32_t pg_xid, uint64_t xid, bool real_commit)
+{
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Recording xid in log: file: {}, pg_xid: {}, xid: {}, real_commit: {}, offset: {}",
               _file.string(), pg_xid, xid, real_commit, _offset);
 
@@ -99,11 +109,6 @@ PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
     // write to the _write_buffer the XidElement data
     XidElement xid_element = {xid, pg_xid, real_commit};
     _offset += XidElement::pack(&_write_buffer[_offset], xid_element);
-
-    if (real_commit) {
-        CHECK_GT(xid, _last_stored_xid) << "XID must be greater than the last stored XID";
-        _last_stored_xid = xid;
-    }
 
     // check if we reached the end of the write buffer, if so write it out
     if (_offset + XidElement::PACKED_SIZE >= PG_XLOG_PAGE_SIZE) {
@@ -116,6 +121,7 @@ PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
     }
     _can_flush = true;
 }
+
 
 void
 PgXactLogWriter::cleanup(uint64_t min_timestamp, bool archive_logs)
