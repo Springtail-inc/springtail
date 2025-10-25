@@ -25,7 +25,7 @@ public:
      * @param db_id database id
      * @param xid xid to commit
      */
-    void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes);
+    void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr tracker = nullptr);
 
     /**     
      * @brief commit up to and including given xid without writing to xlog

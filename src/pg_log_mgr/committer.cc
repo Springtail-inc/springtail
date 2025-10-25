@@ -291,8 +291,7 @@ namespace springtail::committer {
                 if (is_last_xid) {
                     if (batch.table_cache.empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
-                        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null()); 
-                        result->notify_tracker(xid);
+                        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null(), result->get_tracker());
                     } else {
                         // commit the completed XID without xlog update because table data has not been persisted (fsync).
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), true, result->get_tracker()); 

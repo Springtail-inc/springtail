@@ -88,9 +88,9 @@ XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 }
 
 void
-XidMgrServer::commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes)
+XidMgrServer::commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr tracker)
 {
-    _record_xid_change(db_id, pg_xid, xid, has_schema_changes, true, nullptr);
+    _record_xid_change(db_id, pg_xid, xid, has_schema_changes, true, tracker);
 }
 
 void 
