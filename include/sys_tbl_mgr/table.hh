@@ -754,7 +754,7 @@ namespace indexer_helpers {
          * @param index_id PG index ID.
          * @param index_columns Positions of the index columns.
          */
-        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns);
+        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ComparatorCallback& comparator_callback = {});
 
         /**
          * Returns the requested index BTree of the table based on the index ID in the "indexes" table.

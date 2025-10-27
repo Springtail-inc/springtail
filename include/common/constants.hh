@@ -18,7 +18,7 @@ namespace springtail {
                               const std::span<const char>&,
                               const std::span<const char>&);
 
-        Func func;
+        Func func = nullptr;
         ComparatorContext context = {};
     };
 }

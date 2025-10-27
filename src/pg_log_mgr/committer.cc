@@ -699,7 +699,7 @@ namespace springtail::committer {
             // create new mutable table with target_xid set to final_xid
             // All operations in this batch will be applied at the final XID
             CHECK_GT(batch.final_xid, 0);
-            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid);
+            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid, {PgExtnRegistry::get_instance()->comparator_func});
             batch.table_cache[tid] = table;
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, batch.final_xid);
         }
@@ -782,7 +782,7 @@ namespace springtail::committer {
         // get the schema at the given XID/LSN
         // note: we are guaranteed that the entire batch will utilize the same schema
         XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
-        auto schema = TableMgr::get_instance()->get_extent_schema(db_id, tid, xid);
+        auto schema = TableMgr::get_instance()->get_extent_schema(db_id, tid, xid, {PgExtnRegistry::get_instance()->comparator_func});
 
         auto sort_keys = schema->get_sort_keys();
         sort_keys.push_back("__springtail_lsn");

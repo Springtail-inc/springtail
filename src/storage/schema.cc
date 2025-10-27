@@ -105,11 +105,8 @@ namespace springtail {
                 break;
 
             case (SchemaType::EXTENSION): {
-                if ( comparator_callback.func != nullptr ) {
-                    field = std::make_shared<ExtentField>(column.type, byte_pos, comparator_callback, column.pg_type);
-                } else {
-                    field = std::make_shared<ExtentField>(column.type, byte_pos);
-                }
+                DCHECK(comparator_callback.func != nullptr);
+                field = std::make_shared<ExtentField>(column.type, byte_pos, comparator_callback, column.pg_type);
 
                 byte_pos += 4; // add the used bytes
                 break;

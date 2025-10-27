@@ -271,8 +271,7 @@ namespace springtail::pg_log_mgr {
             if (entry.schema == nullptr) {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    ComparatorCallback comparator_callback = {PgExtnRegistry::get_instance()->comparator_func};
-                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, comparator_callback, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, {PgExtnRegistry::get_instance()->comparator_func}, true);
                 }
                 entry.update_schema();
             }
@@ -360,8 +359,7 @@ namespace springtail::pg_log_mgr {
                 XidLsn current(current_xid);
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    ComparatorCallback comparator_callback = {PgExtnRegistry::get_instance()->comparator_func};
-                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, comparator_callback, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, {PgExtnRegistry::get_instance()->comparator_func}, true);
                 }
                 entry.update_schema();
             }
