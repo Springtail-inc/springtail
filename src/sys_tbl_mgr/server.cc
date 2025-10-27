@@ -724,7 +724,7 @@ Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
 }
 
 void
-Server::finalize(uint64_t db_id, uint64_t xid)
+Server::finalize(uint64_t db_id, uint64_t xid, bool call_sync)
 {
     proto::FinalizeRequest request;
     request.set_db_id(db_id);
@@ -747,7 +747,7 @@ Server::finalize(uint64_t db_id, uint64_t xid)
     std::map<uint64_t, TableMetadata> md_map;
     for (const auto& entry : _write[db_id]) {
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize table {}@{}", entry.first, request.xid());
-        md_map[entry.first] = entry.second->finalize();
+        md_map[entry.first] = entry.second->finalize(call_sync);
     }
     if (md_map.empty()) {
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Nothing to finalize: {}@{} >= {}", db_id, request.xid(),
@@ -775,6 +775,18 @@ Server::finalize(uint64_t db_id, uint64_t xid)
 
     // Commit expired extents in Vacuumer
     Vacuumer::get_instance()->commit_expired_extents(db_id, request.xid());
+}
+
+void 
+Server::sync(uint64_t db_id, uint64_t xid)
+{
+    // block all mutations
+    boost::unique_lock wlock(_write_mutex);
+
+    for (const auto& entry : _write[db_id]) {
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Sync table {}@{}", entry.first, xid);
+        entry.second->sync_data_and_indexes();
+    }
 }
 
 void

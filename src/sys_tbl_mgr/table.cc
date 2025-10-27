@@ -899,31 +899,29 @@ namespace indexer_helpers {
     void
     MutableTable::sync_data_and_indexes()
     {
+        // sync the data file
         auto data_handle = IOMgr::get_instance()->open(_data_file,
                                                        IOMgr::IO_MODE::APPEND, true);
 
         data_handle->sync();
 
+        // sync the indexes
         _primary_index->sync();
-
-        // now flush the indexes, capturing the roots
         for (auto &secondary : _secondary_indexes) {
             secondary.second.first->sync();
         }
 
         if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
-            auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
-            auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
+            // sync the roots file for sysntem tables
+            auto root_handle = IOMgr::get_instance()->open(_table_dir / constant::ROOTS_FILE,
                                                            IOMgr::IO_MODE::APPEND, true);
-
-            // flush and wait for completion
             root_handle->sync();
 
-            // swap the symlink
-            std::filesystem::create_symlink(_table_dir / filename,
-                                            _table_dir / constant::ROOTS_TMP_FILE);
-            std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
-                                    _table_dir / constant::ROOTS_FILE);
+            // also fsync() the directory to ensure the symlink+rename are persisted
+            int fd = ::open(_table_dir.c_str(), O_RDONLY | O_DIRECTORY);
+            CHECK(fd != -1) << "Failed to open directory " << _table_dir << ", error: " << strerror(errno);
+            ::fsync(fd);
+            ::close(fd);
         }
     }
 
@@ -977,8 +975,14 @@ namespace indexer_helpers {
             auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
             auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
                                                            IOMgr::IO_MODE::APPEND, true);
+            // flush and wait for completion
+            extent->async_flush(root_handle).wait();
 
-            extent->async_flush(root_handle);
+            // swap the symlink
+            std::filesystem::create_symlink(_table_dir / filename,
+                                            _table_dir / constant::ROOTS_TMP_FILE);
+            std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
+                                    _table_dir / constant::ROOTS_FILE);
         }
 
         if (call_sync) {

@@ -278,7 +278,8 @@ namespace springtail::committer {
                     // finalize the system metadata
                     // note: we do this even without DDL changes to ensure the primary and secondary
                     //       index root offsets are written to disk
-                    sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
+                    // we will fsync system table along with the user tables in the table sync processor:w
+                    sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid, batch.table_cache.empty() == true);
                 }
 
                 // Check and notify vacuumer about dropped tables
@@ -943,7 +944,10 @@ namespace springtail::committer {
         }
 
         for (const auto& [db_id, pg_xid, xid] : to_commit) {
-            // all tables have been fsync'ed for this xid
+            // sync the system tables
+//            sys_tbl_mgr::Server::get_instance()->sync(db_id, xid);
+
+            // all tables have been fsync'ed for this xid, update xlog
             xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, pg_xid, xid); 
         }
     }
