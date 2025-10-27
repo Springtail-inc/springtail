@@ -85,7 +85,7 @@ private:
          *
          * @param db_id - database id
          * @param base_dir - parent directory of all transaction logs
-         * @param recovered_xid - last committed xid recovered from storage (0 if none)
+         * @param recovered_xid - last committed xid recovered from storage (1 if none)
          */
         DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir, uint64_t recovered_xid) :
                       _xact_log(base_dir / std::to_string(db_id), recovered_xid),

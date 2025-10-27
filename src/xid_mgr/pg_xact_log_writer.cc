@@ -271,7 +271,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
         LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "No committed XID found in the log files");
         // no committed XID found, cleanup all files
         fs::cleanup_files_from_dir<std::greater<uint64_t>>(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX, 0, archive);
-        return 0;
+        return 1;
     }
 
     // last_committed_xid != 0
