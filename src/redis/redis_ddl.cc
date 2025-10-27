@@ -106,6 +106,8 @@ namespace springtail {
                             uint64_t xid,
                             nlohmann::json ddls)
     {
+        LOG_INFO("RedisDDL::precommit_ddl: db_id={}, xid={}, ddls={}", db_id, xid, ddls.dump());
+
         // Move DDLs to Redis pre-commit phase for crash recovery
         _precommit(*_redis, db_id, xid, ddls);
 
@@ -117,6 +119,8 @@ namespace springtail {
     RedisDDL::commit_ddl(uint64_t db_id,
                          uint64_t xid)
     {
+        LOG_INFO("RedisDDL::commit_ddl: db_id={}, xid={}", db_id, xid);
+
         uint64_t db_instance_id = Properties::get_db_instance_id();
         std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT, db_instance_id);
 

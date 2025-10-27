@@ -161,7 +161,6 @@ XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, boo
     _xact_log.log(pg_xid, xid, real_commit);
 
     if (has_schema_changes) {
-        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Pushing entry: {}, {}", xid, _last_committed_xid);
         _xact_history.push_back({xid, _last_committed_xid});
         _dirty_history = true;
     }
