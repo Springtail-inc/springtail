@@ -95,7 +95,7 @@ jobs:
 
   integration-test-p4:
     uses: ./.github/workflows/rw-run-integration-test.yml
-    needs: [ build ]
+    needs: [ build, integration-test-p1, integration-test-p2, integration-test-p3,]
     if: ${{ github.event.pull_request.draft == false }}
     with:
       image_tag: ${{ needs.build.outputs.output_image_tag }}
