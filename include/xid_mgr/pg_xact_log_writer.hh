@@ -65,9 +65,9 @@ public:
      * @brief Construct a new Pg Xact Log Writer Mmap object
      *
      * @param base_dir - directory to store the files in
-     * @param committed_xid - committed xid to start writing from
+     * @param recovered_xid - last committed xid recovered from storage (0 if none, defaults to 0)
      */
-    explicit PgXactLogWriter(const std::filesystem::path &base_dir);
+    explicit PgXactLogWriter(const std::filesystem::path &base_dir, uint64_t recovered_xid = 0);
 
     /**
      * @brief Destroy the Pg Xact Log Writer Mmap object
@@ -116,8 +116,9 @@ public:
      * @param base_dir - directory where xact log files are stored
      * @param last_xid - last allowed xid
      * @param archive - flag to archive or remove the files with the xids greater than the give one
+     * @return uint64_t - the last committed xid found in storage, or 0 if none found
      */
-    static void set_last_xid_in_storage(std::filesystem::path base_dir, uint64_t last_xid, bool archive);
+    static uint64_t set_last_xid_in_storage(std::filesystem::path base_dir, uint64_t last_xid, bool archive);
 
 
 
