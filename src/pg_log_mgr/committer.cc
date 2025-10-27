@@ -917,7 +917,7 @@ namespace springtail::committer {
     void 
     Committer::TableSyncProcessor::_check_finished()
     {
-        std::vector<std::tuple<uint64_t, uint32_t, uint64_t>> to_commit;
+        std::vector<std::tuple<uint64_t, uint32_t, uint64_t>> to_sync;
 
         // collect commit-able work items 
         {
@@ -927,7 +927,7 @@ namespace springtail::committer {
                 for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
                     auto& work_item = xid_it->second;
                     if (work_item.tables.empty()) {
-                        to_commit.emplace_back(db_it->first, work_item.pg_xid, xid_it->first);
+                        to_sync.emplace_back(db_it->first, work_item.pg_xid, xid_it->first);
                         xid_it = xid_map.erase(xid_it);
                     } else {
                         // we iterate in xid order, if we find one that is not ready, we stop.
@@ -943,9 +943,9 @@ namespace springtail::committer {
             }
         }
 
-        for (const auto& [db_id, pg_xid, xid] : to_commit) {
+        for (const auto& [db_id, pg_xid, xid] : to_sync) {
             // sync the system tables
-//            sys_tbl_mgr::Server::get_instance()->sync(db_id, xid);
+            sys_tbl_mgr::Server::get_instance()->sync(db_id, xid);
 
             // all tables have been fsync'ed for this xid, update xlog
             xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, pg_xid, xid); 
@@ -966,7 +966,6 @@ namespace springtail::committer {
                 auto const& v = _queue.front();
                 table = v.second;
                 xid = v.first;
-                _work_map[table->db()][xid].tables.emplace_back(table);
                 _queue.pop();
             }
 
