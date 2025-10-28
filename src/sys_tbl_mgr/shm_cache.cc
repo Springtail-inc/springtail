@@ -38,7 +38,11 @@ ShmCache::~ShmCache()
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache deleted: {} - {}", _name, _created);
     if (_created) {
-        remove(_name);
+        try {
+            remove(_name);
+        } catch (...) {
+            LOG_ERROR("Failed to remove shared memory cache '{}'", _name);
+        }
     }
 }
 
