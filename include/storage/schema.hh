@@ -201,6 +201,14 @@ namespace springtail {
         /** The sort column names of the schema. */
         std::vector<std::string> _sort_keys;
 
+        /**
+         * Helper to get all the columns by merging old and new columns
+         * @param old_columns  Old/existing column names in the schema
+         * @param new_columns  New columns to be added
+         * @param sort_columns Columns that form the pkey
+         *
+         * @return vector of SchemaColumn
+         */
         std::vector<SchemaColumn>
         _get_all_columns_for_schema(const std::vector<std::string> &old_columns,
                       const std::vector<SchemaColumn> &new_columns,
@@ -215,7 +223,9 @@ namespace springtail {
     public:
         /**
          * Constructor.
-         * @param columns Map from column position to the SchemaColumn definition.
+         * @param columns                 Map from column position to the SchemaColumn definition.
+         * @param allow_undefined         Allow undefined columns
+         * @param include_internal_row_id Include internal_row_id column at the end of the columns
          */
         explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false,
                 bool include_internal_row_id = true) {
@@ -295,8 +305,8 @@ namespace springtail {
 
         /**
          * Generate a new ExtentSchema, based on a list of columns from this schema, as well as
-         * additional provided columns.  Used in the creation of schemas for BTree indexes and to
-         * populate the WriteCache.
+         * additional provided columns.  Used in the creation of schemas for populating the WriteCache.
+         * This will include internal_row_id as the last column
          */
         std::shared_ptr<ExtentSchema>
         create_schema(const std::vector<std::string> &old_columns,
@@ -304,6 +314,11 @@ namespace springtail {
                       const std::vector<std::string> &sort_columns,
                       bool allow_undefined = false) const;
 
+        /**
+         * Generate a new ExtentSchema, based on a list of columns from this schema, as well as
+         * additional provided columns.  Used in the creation of schemas for BTree indexes.
+         * Note: Indexes wont have internal_row_id columns in the schema
+         */
         std::shared_ptr<ExtentSchema>
         create_index_schema(const std::vector<std::string> &old_columns,
                       const std::vector<SchemaColumn> &new_columns,

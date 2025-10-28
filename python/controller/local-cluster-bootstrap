@@ -49,7 +49,8 @@ if [ -z "$DISABLE_SSL_FLAG" ]; then
     --primary-db-host primary \
     --system-settings-gitsha "$SYSTEM_SETTINGS_GITSHA" \
     --db-info 1 postgres springtail_pub_1 springtail_replication_slot_1 \
-    --fdw-info default fdw \
+    --fdw-info fdw1 fdw1 \
+    --fdw-info fdw2 fdw2 \
     --replication-cred "$POSTGRES_USER" "$POSTGRES_PASSWORD" text \
     --fdw-superuser-cred "$FDW_USER" "$FDW_USER_PASSWORD" text \
     --force-set
@@ -58,7 +59,8 @@ else
     --primary-db-host primary \
     --system-settings-gitsha "$SYSTEM_SETTINGS_GITSHA" \
     --db-info 1 postgres springtail_pub_1 springtail_replication_slot_1 \
-    --fdw-info default fdw \
+    --fdw-info fdw1 fdw1 \
+    --fdw-info fdw2 fdw2 \
     --replication-cred "$POSTGRES_USER" "$POSTGRES_PASSWORD" text \
     --fdw-superuser-cred "$FDW_USER" "$FDW_USER_PASSWORD" text \
     --force-set

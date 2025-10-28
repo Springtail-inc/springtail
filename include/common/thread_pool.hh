@@ -184,6 +184,24 @@ namespace springtail {
             _queue.push(requests);
         }
 
+        /**
+         * @brief Get the current size of the queue
+         * @return size of the queue
+         */
+        int queue_size() const
+        {
+            return _queue.size();
+        }
+
+        /**
+         * @brief Get the number of threads in the pool
+         * @return number of threads
+         */
+        int pool_size() const
+        {
+            return _threads.size();
+        }
+
     private:
         /** thread queue */
         ConcurrentQueue<ThreadRequest> _queue;

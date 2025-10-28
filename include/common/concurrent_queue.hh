@@ -1,10 +1,11 @@
 #pragma once
 
-#include <queue>
+#include <deque>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
 #include <memory>
+#include <vector>
 
 namespace springtail {
     /**
@@ -93,7 +94,7 @@ namespace springtail {
             }
 
             Tptr entry = _queue.front();
-            _queue.pop();
+            _queue.pop_front();
 
             write_lock.unlock();
 
@@ -114,13 +115,57 @@ namespace springtail {
             }
 
             Tptr entry = _queue.front();
-            _queue.pop();
+            _queue.pop_front();
 
             write_lock.unlock();
 
             _cv_push.notify_one();
 
             return entry;
+        }
+
+        /**
+         * @brief Pop all entries from queue in one operation, optionally waiting for entries
+         * @param seconds timeout in seconds
+         * @return std::deque<Tptr> all entries currently in queue, empty deque if no entries
+         *         found either due to timeout or shutdown
+         */
+        std::deque<Tptr> pop_all(uint32_t seconds = 0)
+        {
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            while (_queue.empty() && !_shutdown) {
+                // wait on cv until not empty
+                if (seconds) {
+                    // wait for the requested number of seconds
+                    _cv_pop.wait_for(write_lock, std::chrono::seconds(seconds));
+                    if (_queue.empty() && !_shutdown) {
+                        // timeout
+                        return std::deque<Tptr>();
+                    }
+                } else {
+                    // wait indefinitely
+                    _cv_pop.wait(write_lock);
+                }
+            }
+
+            if (_queue.empty()) {
+                write_lock.unlock();
+                if (_shutdown) {
+                    _cv_shutdown.notify_all();
+                }
+                return std::deque<Tptr>();
+            }
+
+            // Efficiently extract all items by swapping with an empty deque
+            std::deque<Tptr> result;
+            std::swap(_queue, result);
+
+            write_lock.unlock();
+
+            // Notify any threads waiting to push (in case we had a bounded queue)
+            _cv_push.notify_all();
+
+            return result;
         }
 
         /**
@@ -155,13 +200,13 @@ namespace springtail {
         }
 
         /** is queue empty */
-        bool empty() {
+        bool empty() const {
             std::unique_lock<std::mutex> write_lock{_mutex};
             return _queue.empty();
         }
 
         /** get size of queue */
-        int size() {
+        int size() const {
             std::unique_lock<std::mutex> write_lock{_mutex};
             return _queue.size();
         }
@@ -169,13 +214,11 @@ namespace springtail {
         /** clear the queue */
         void clear() {
             std::unique_lock<std::mutex> write_lock{_mutex};
-            while (!_queue.empty()) {
-                _queue.pop();
-            }
+            _queue.clear();
         }
 
         /** is queue shutdown */
-        bool is_shutdown() {
+        bool is_shutdown() const {
             return _shutdown;
         }
 
@@ -183,7 +226,7 @@ namespace springtail {
         /** max number of elements in queue */
         std::size_t _limit=-1;
         /** mutex to protect queue */
-        std::mutex _mutex;
+        mutable std::mutex _mutex;
         /** condition variable for queue to wait on */
         std::condition_variable _cv_pop;
         /** condition variable to wait on if queue is full */
@@ -191,7 +234,7 @@ namespace springtail {
         /** condition variable to wait on empty for shutdown */
         std::condition_variable _cv_shutdown;
         /** internal queue */
-        std::queue<Tptr> _queue;
+        std::deque<Tptr> _queue;
         /** shutdown flag */
         std::atomic<bool> _shutdown = false;
 
@@ -204,7 +247,7 @@ namespace springtail {
             }
 
             // push entry
-            _queue.push(entry);
+            _queue.push_back(entry);
 
             // notify condition variable
             _cv_pop.notify_one();

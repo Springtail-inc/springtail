@@ -262,8 +262,6 @@ private:
     std::filesystem::path _global_vacuum_runfile; ///< Global vacuum file for current run
     std::string _vacuum_cutoff_xid_redis_hash;    ///< name of the redis hash holding last seen vacuum cutoff XIDs
 
-    RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
-
     std::atomic<int64_t> _entries_count_in_memory = 0;  ///< To track count of entries in the memory
 
     /**
@@ -430,5 +428,13 @@ private:
      * @param cutoff_xid Cutoff XID
      */
     void _save_last_seen_cutoff_xid(uint64_t db_id, uint64_t cutoff_xid);
+
+    /**
+     * @brief Clean up expired roots files for system tables older than cutoff XID
+     *
+     * @param cutoff_xid XID below which roots files can be removed
+     * @param table_dir  Directory containing the system table
+     */
+    void _cleanup_expired_roots_files(uint64_t cutoff_xid, const std::filesystem::path& table_dir);
 };
 }

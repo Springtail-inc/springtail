@@ -65,7 +65,7 @@
     },
     "storage": {
         "table_dir": "table",
-        "data_cache_size": 16384,
+        "data_cache_size": 32768,
         "page_cache_size": 16384,
         "btree_cache_size": 512,
         "max_extent_per_page": 16,

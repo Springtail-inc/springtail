@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import pwd
 import signal
 import sys
 import threading
@@ -325,6 +326,16 @@ def make_signal_handler(coordinator):
             coordinator.scheduler.shutdown()
     return signal_handler
 
+def set_home_env():
+    """
+    Set the HOME environment variable if not already set.
+    """
+    # Get the current user's UID
+    uid = os.getuid()  # or any other UID
+    # Look up the passwd entry
+    user_info = pwd.getpwuid(uid)
+    # set Home directory
+    os.environ['HOME'] = user_info.pw_dir
 
 if __name__ == "__main__":
     """Main entry point for the coordinator script."""
@@ -333,6 +344,9 @@ if __name__ == "__main__":
 
     if not os.path.exists(args.config_file):
         raise ValueError(f"Config file not found: {args.config_file}")
+
+    # Set the HOME environment variable
+    set_home_env()
 
     # Load the yaml configuration file
     with open(args.config_file, 'r') as f:
@@ -378,4 +392,3 @@ if __name__ == "__main__":
         error_details = traceback.format_exc()
         logger.error(f"An error occurred during startup: {e}")
         logger.error(f"Error details: {error_details}")
-        coordinator.shutdown(0)

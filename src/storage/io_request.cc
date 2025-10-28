@@ -104,13 +104,13 @@ namespace springtail {
         // marks file object as in use
         LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOWorker got request for path: {}", path.c_str());
 
-        std::shared_ptr<IOFile> io_file = mgr->lookup(path, compressed);
+        std::shared_ptr<IOFile> io_file = mgr->get_file(path, compressed);
 
         // get a free handle based on IO mode; may block
         // marks file handle as in use
         std::shared_ptr<IOSysFH> fh = io_file->get_fh((IOType::READ == type) ?
-                                                           IOMgr::IO_MODE::READ :
-                                                           IOMgr::IO_MODE::WRITE);
+                                                       IOMgr::IO_MODE::READ :
+                                                       IOMgr::IO_MODE::WRITE);
 
         // issue request -- calls derived _issue_request method
         _issue_request(mgr, fh);
@@ -119,7 +119,7 @@ namespace springtail {
         io_file->put_fh(fh);
 
         // release file object
-        io_file->decr_in_use();
+        mgr->put_file(io_file);
 
         return;
     }

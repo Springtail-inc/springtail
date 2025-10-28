@@ -670,7 +670,6 @@ namespace indexer_helpers {
                      const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
-                     bool for_gc = false,
                      bool initialize_look_aside = false);
 
         ~MutableTable() {
@@ -994,9 +993,6 @@ namespace indexer_helpers {
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats{}; ///< The stats for the table.
-
-        bool _for_gc; ///< If this table is being used for the ingest pipeline.
-                      ///
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

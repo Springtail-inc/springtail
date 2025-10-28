@@ -46,8 +46,7 @@ namespace springtail {
     TableMgr::get_mutable_table(uint64_t db_id,
                                 uint64_t table_id,
                                 uint64_t access_xid,
-                                uint64_t target_xid,
-                                bool for_gc)
+                                uint64_t target_xid)
     {
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
@@ -80,7 +79,7 @@ namespace springtail {
 
         return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_indexes,
-                                                  *tbl_meta, schema, for_gc);
+                                                  *tbl_meta, schema);
     }
 
     MutableTablePtr
@@ -107,7 +106,7 @@ namespace springtail {
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema_with_row_id->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema_with_row_id, false);
+                                                  tbl_meta, schema_with_row_id, !secondary_keys.empty());
     }
 
     std::map<uint32_t, SchemaColumn>

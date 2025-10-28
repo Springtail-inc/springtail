@@ -101,9 +101,6 @@ namespace {
             }
 
             _primary_keys = std::vector<std::string>({"name"});
-
-            csv::CSVReader reader("test_btree_simple.csv");
-
             _last_internal_row_id = 0;
         }
 
