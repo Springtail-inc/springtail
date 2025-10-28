@@ -13,23 +13,40 @@ VALUES
     (
         '(1,1,1)'::cube,
         'city => "Bangalore", population => "8M", famous_for => "IT"'::hstore
-    ),
+    );
+
+INSERT INTO mixed_data (dimensions, properties)
+VALUES
     (
         '(1,2,3)'::cube,
         'city => "Chennai", population => "8M", famous_for => "Beach"'::hstore
-    ),
+    );
+
+INSERT INTO mixed_data (dimensions, properties)
+VALUES
     (
         '(2,2,2)'::cube,
         'city => "Delhi", population => "8M", famous_for => "India Gate"'::hstore
-    ),
+    );
+
+INSERT INTO mixed_data (dimensions, properties)
+VALUES
     (
         '(2,3,4)'::cube,
         'city => "Hyderabad", population => "8M", famous_for => "Charminar"'::hstore
-    ),
+    );
+
+INSERT INTO mixed_data (dimensions, properties)
+VALUES
     (
         '(3,3,3)'::cube,
         'city => "Kolkata", population => "8M", famous_for => "Howrah Bridge"'::hstore
-    ),
+    );
+
+CREATE INDEX idx_cube ON mixed_data (dimensions);
+
+INSERT INTO mixed_data (dimensions, properties)
+VALUES
     (
         '(3,4,5)'::cube,
         'city => "Mumbai", population => "880k", famous_for => "Gateway of India"'::hstore
@@ -41,18 +58,22 @@ VALUES
     (
         '(-1,-1,-1)'::cube,
         'city => "Negative Point", population => "0", famous_for => "Testing"'::hstore
-    ),
+    );
+
+INSERT INTO mixed_data (dimensions, properties)
+VALUES
     -- Test data for decimal coordinates
     (
         '(1.5,2.5,3.5)'::cube,
         'city => "Decimal Point", population => "0", famous_for => "Precision Testing"'::hstore
-    ),
+    );
+
+INSERT INTO mixed_data (dimensions, properties)
+VALUES
     -- Test data for NULL values
     (NULL, NULL),
     -- Test data for empty cube and hstore
     ('()'::cube, ''::hstore);
-
-CREATE INDEX idx_cube ON mixed_data (dimensions);
 
 ## verify
 

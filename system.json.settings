@@ -111,6 +111,9 @@
             },
             "hstore": {
                 "version": "1.8"
+            },
+            "pg_trgm": {
+                "version": "1.6"
             }
         }
     },
