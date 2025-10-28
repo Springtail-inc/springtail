@@ -4,6 +4,7 @@
 #include <bit>
 #include <fmt/format.h>
 #include <common/constants.hh>
+#include <common/logging.hh>
 
 #include <absl/log/check.h>
 #include <pg_repl/pg_types.hh>
@@ -521,22 +522,22 @@ namespace springtail {
               _bool_bitmask(static_cast<char>(1) << bool_bit)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, const ComparatorCallback &comparator_callback, int32_t type_oid)
+        ExtentField(SchemaType type, uint32_t offset, const ExtensionCallback &extension_callback, int32_t type_oid)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
               _offset(offset),
-              _comparator_callback(comparator_callback),
+              _extension_callback(extension_callback),
               _type_oid(type_oid)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, const ComparatorCallback &comparator_callback, int32_t type_oid)
+        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, const ExtensionCallback &extension_callback, int32_t type_oid)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
               _offset(offset),
               _bool_bitmask(static_cast<char>(1) << bool_bit),
-              _comparator_callback(comparator_callback),
+              _extension_callback(extension_callback),
               _type_oid(type_oid)
         { }
 
@@ -834,16 +835,16 @@ namespace springtail {
                           const std::span<const char> &lhval,
                           const std::span<const char> &rhval) const override
         {
-            DCHECK(_comparator_callback.func != nullptr);
+            DCHECK(_extension_callback.comparator_func != nullptr);
             DCHECK(_type_oid >= constant::FIRST_USER_DEFINED_PG_OID);
 
             // Build a local context for this comparison to respect const correctness
-            ComparatorContext ctx = _comparator_callback.context;
+            ExtensionContext ctx = _extension_callback.context;
             ctx.type_oid = _type_oid;
             ctx.op_str = op_str;
 
             // Invoke comparator with pointer to context as required by the signature
-            return _comparator_callback.func(&ctx, lhval, rhval);
+            return _extension_callback.comparator_func(&ctx, lhval, rhval);
         }
 
     private:
@@ -886,7 +887,7 @@ namespace springtail {
         uint32_t _undefined_offset;
         uint8_t _undefined_bitmask;
 
-        ComparatorCallback _comparator_callback;
+        ExtensionCallback _extension_callback;
         int32_t _type_oid;
     };
     using ExtentFieldPtr = std::shared_ptr<ExtentField>;
@@ -909,12 +910,12 @@ namespace springtail {
     private:
         T _value;
         bool is_extn;
-        ComparatorCallback _comparator_callback;
+        ExtensionCallback _extension_callback;
         int32_t _type_oid;
 
     public:
-        explicit ConstTypeField(const T &value, bool is_extn = false, ComparatorCallback const& comparator_callback = {}, int32_t type_oid = 0)
-            : _value(value), is_extn(is_extn), _comparator_callback(comparator_callback), _type_oid(type_oid)
+        explicit ConstTypeField(const T &value, bool is_extn = false, ExtensionCallback const& extension_callback = {}, int32_t type_oid = 0)
+            : _value(value), is_extn(is_extn), _extension_callback(extension_callback), _type_oid(type_oid)
         { }
 
         SchemaType get_type() const override {
@@ -1068,16 +1069,16 @@ namespace springtail {
                           const std::span<const char> &lhval,
                           const std::span<const char> &rhval) const override
         {
-            DCHECK(_comparator_callback.func != nullptr);
+            DCHECK(_extension_callback.comparator_func != nullptr);
             DCHECK(_type_oid >= constant::FIRST_USER_DEFINED_PG_OID);
 
             // Build a local context for this comparison to respect const correctness
-            ComparatorContext ctx = _comparator_callback.context;
+            ExtensionContext ctx = _extension_callback.context;
             ctx.type_oid = _type_oid;
             ctx.op_str = op_str;
 
             // Invoke comparator with pointer to context as required by the signature
-            return _comparator_callback.func(&ctx, lhval, rhval);
+            return _extension_callback.comparator_func(&ctx, lhval, rhval);
         }
     };
 

@@ -408,10 +408,10 @@ namespace springtail::pg_fdw {
         // when the function exits.
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
 
-        ComparatorContext comparator_context = {tr.db_id, tr.xid};
-        ComparatorCallback comparator_callback = {_comparator_function, comparator_context};
+        ExtensionContext extension_context = {tr.db_id, tr.xid};
+        ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, comparator_callback);
+        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
@@ -1587,7 +1587,7 @@ namespace springtail::pg_fdw {
     }
 
     bool
-    PgFdwMgr::_comparator_function(const ComparatorContext* ctx,
+    PgFdwMgr::_comparator_function(const ExtensionContext* ctx,
                                    const std::span<const char> &lhs_value,
                                    const std::span<const char> &rhs_value)
     {
@@ -2150,10 +2150,10 @@ namespace springtail::pg_fdw {
                         // if the type is an extension type, get the extension value instead of the enum value
                         std::vector<char> extension_value = _get_extension_data_from_pg(state, qual->base.typeoid, qual->value);
 
-                        ComparatorContext comparator_context = {state->db_id, state->xid};
-                        ComparatorCallback comparator_callback = {_comparator_function, comparator_context};
+                        ExtensionContext extension_context = {state->db_id, state->xid};
+                        ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true, comparator_callback, column.pg_type);
+                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true, extension_callback, column.pg_type);
                     } else {
                         Oid oid = DatumGetObjectId(qual->value);
                         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1,

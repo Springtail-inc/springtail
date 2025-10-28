@@ -342,7 +342,7 @@ namespace springtail::pg_fdw {
         static Form_pg_type _resolve_type_information(Oid oid);
 
         /** Helper to perform the comparator function based on the extension type oid */
-        static bool _comparator_function(const ComparatorContext* ctx,
+        static bool _comparator_function(const ExtensionContext* ctx,
                                          const std::span<const char> &lhs_value,
                                          const std::span<const char> &rhs_value);
 

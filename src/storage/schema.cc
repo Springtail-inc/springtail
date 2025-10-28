@@ -5,7 +5,7 @@ namespace springtail {
 
     void
     ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns,
-                            const ComparatorCallback &comparator_callback,
+                            const ExtensionCallback &extension_callback,
                             bool allow_undefined)
     {
         // track how many primary key columns there are
@@ -105,8 +105,8 @@ namespace springtail {
                 break;
 
             case (SchemaType::EXTENSION): {
-                DCHECK(comparator_callback.func != nullptr);
-                field = std::make_shared<ExtentField>(column.type, byte_pos, comparator_callback, column.pg_type);
+                DCHECK(extension_callback.comparator_func != nullptr);
+                field = std::make_shared<ExtentField>(column.type, byte_pos, extension_callback, column.pg_type);
                 byte_pos += 4; // add the used bytes
                 break;
             }
@@ -172,7 +172,7 @@ namespace springtail {
     ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
                                 const std::vector<SchemaColumn> &new_columns,
                                 const std::vector<std::string> &sort_columns,
-                                const ComparatorCallback &comparator_callback,
+                                const ExtensionCallback &extension_callback,
                                 bool allow_undefined) const
     {
         // create SchemaColumn entries for the existing fields
@@ -216,7 +216,7 @@ namespace springtail {
         }
 
         // create the new ExtentSchema
-        return std::make_shared<ExtentSchema>(all_columns, comparator_callback, allow_undefined);
+        return std::make_shared<ExtentSchema>(all_columns, extension_callback, allow_undefined);
     }
 
     std::shared_ptr<std::vector<FieldPtr>>
@@ -285,12 +285,12 @@ namespace springtail {
         return fields;
     }
 
-    VirtualSchema::VirtualSchema(const SchemaMetadata &meta, const ComparatorCallback &comparator_callback)
+    VirtualSchema::VirtualSchema(const SchemaMetadata &meta, const ExtensionCallback &extension_callback)
     {
         std::map<uint32_t, std::string> name_map;
 
         // generate the extent schema from the base columns
-        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, comparator_callback);
+        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, extension_callback);
 
         // get a copy of the fields from the extent schema
         for (auto &column : meta.columns) {

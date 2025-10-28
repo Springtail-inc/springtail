@@ -100,11 +100,14 @@ PgExtnRegistry::init_libraries(uint64_t db_id,
 
     auto library = _load_library(extension_lib_path);
 
+    // Ensure library is loaded
+    DCHECK(library);
+
     _library_map.try_emplace(extension, library);
 }
 
 bool
-PgExtnRegistry::comparator_func(const ComparatorContext* context,
+PgExtnRegistry::comparator_func(const ExtensionContext* context,
                                 const std::span<const char> &lhval,
                                 const std::span<const char> &rhval)
 {
@@ -115,21 +118,21 @@ PgExtnRegistry::comparator_func(const ComparatorContext* context,
 
     auto type = extn_registry->get_type_by_oid(type_oid);
 
-    Datum leftDatum = extn_registry->binary_to_datum(lhval, type_oid, -1);
-    Datum rightDatum = extn_registry->binary_to_datum(rhval, type_oid, -1);
+    Datum left_datum = extn_registry->binary_to_datum(lhval, type_oid, -1);
+    Datum right_datum = extn_registry->binary_to_datum(rhval, type_oid, -1);
 
     auto operator_func = extn_registry->get_operator_func_by_oper_name(op_str);
 
-    Datum result = DirectFunctionCall3(operator_func, leftDatum, rightDatum, ObjectIdGetDatum(0));
+    Datum result = DirectFunctionCall3(operator_func, left_datum, right_datum, ObjectIdGetDatum(0));
 
-    auto leftDatumString = extn_registry->datum_to_string(leftDatum, type_oid);
-    auto rightDatumString = extn_registry->datum_to_string(rightDatum, type_oid);
-    bool comparatorResult = DatumGetBool(result);
+    auto left_datum_string = extn_registry->datum_to_string(left_datum, type_oid);
+    auto right_datum_string = extn_registry->datum_to_string(right_datum, type_oid);
+    bool comparator_result = DatumGetBool(result);
 
-    LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG3, "Operator = Result: {} {} {} = {}", leftDatumString,
-              op_str, rightDatumString, comparatorResult);
+    LOG_DEBUG(LOG_COMMON, LOG_LEVEL_DEBUG3, "Operator = Result: {} {} {} = {}", left_datum_string,
+              op_str, right_datum_string, comparator_result);
 
-    return comparatorResult;
+    return comparator_result;
 }
 
 std::string

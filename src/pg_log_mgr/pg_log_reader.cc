@@ -163,8 +163,8 @@ namespace springtail::pg_log_mgr {
 
         std::vector<SchemaColumn> new_columns{op, lsn};
 
-        ComparatorCallback comparator_callback = {PgExtnRegistry::get_instance()->comparator_func};
-        schema = table_schema->create_schema(columns, new_columns, sort_keys, comparator_callback, true);
+        ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+        schema = table_schema->create_schema(columns, new_columns, sort_keys, extension_callback, true);
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
@@ -581,8 +581,8 @@ namespace springtail::pg_log_mgr {
                         });
             }
 
-            ComparatorCallback comparator_callback = {PgExtnRegistry::get_instance()->comparator_func};
-            entry.table_schema = std::make_shared<ExtentSchema>(columns, comparator_callback, true);
+            ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+            entry.table_schema = std::make_shared<ExtentSchema>(columns, extension_callback, true);
             entry.update_schema();
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set

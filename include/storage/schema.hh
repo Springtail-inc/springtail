@@ -206,30 +206,30 @@ namespace springtail {
          * Construct the set of column fields based on the column definitions.
          * @param columns A map from column position to column definition.
          */
-        void _populate(const std::map<uint32_t, SchemaColumn>& columns, const ComparatorCallback &comparator_callback = {}, bool allow_undefined = false);
+        void _populate(const std::map<uint32_t, SchemaColumn>& columns, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false);
 
     public:
         /**
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, const ComparatorCallback &comparator_callback = {}, bool allow_undefined = false) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
             }
 
             // populate the field map using the column definitions
-            _populate(column_map, comparator_callback, allow_undefined);
+            _populate(column_map, extension_callback, allow_undefined);
         }
 
         /**
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, const ComparatorCallback &comparator_callback = {}, bool allow_undefined = false)
+        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false)
         {
-            _populate(columns, comparator_callback, allow_undefined);
+            _populate(columns, extension_callback, allow_undefined);
         }
 
         /** Returns the fixed width for a single row. */
@@ -282,7 +282,7 @@ namespace springtail {
         create_schema(const std::vector<std::string> &old_columns,
                       const std::vector<SchemaColumn> &new_columns,
                       const std::vector<std::string> &sort_columns,
-                      const ComparatorCallback &comparator_callback = {},
+                      const ExtensionCallback &extension_callback = {},
                       bool allow_undefined = false) const;
 
         /**
@@ -400,7 +400,7 @@ namespace springtail {
          * @param columns The column definitions for the underlying extent data.
          * @param updates The updates to apply to the extent schema to generate the virtual schema.
          */
-        explicit VirtualSchema(const SchemaMetadata &meta, const ComparatorCallback &comparator_callback = {});
+        explicit VirtualSchema(const SchemaMetadata &meta, const ExtensionCallback &extension_callback = {});
 
         /**
          * Checks if the column exists within the virtual schema.

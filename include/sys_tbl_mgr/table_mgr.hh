@@ -23,12 +23,12 @@ namespace springtail {
          * Read the table metadata for the requested table ID.  Note that Table objects's are always
          * constructed at lsn == MAX_LSN within the provided xid.
          */
-        virtual TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ComparatorCallback &comparator_callback = {}) override;
+        virtual TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ExtensionCallback &extension_callback = {}) override;
 
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const ComparatorCallback &comparator_callback = {});
+        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const ExtensionCallback &extension_callback = {});
 
         /**
          * Returns a MutableTable that can be used to populate a new snapshot of the given table.
@@ -39,7 +39,7 @@ namespace springtail {
          *                     available until a later stable XID.
          * @param schema The ExtentSchema of the table.
          */
-        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema, const std::vector<Index>& secondary_keys, const ComparatorCallback &comparator_callback = {});
+        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema, const std::vector<Index>& secondary_keys, const ExtensionCallback &extension_callback = {});
 
         /**
          * @brief Get table data dir for a table_id
@@ -69,7 +69,7 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, const ComparatorCallback &comparator_callback = {}, bool allow_undefined = false) override;
+                          const XidLsn &xid, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false) override;
 
     private:
         /**
@@ -99,8 +99,8 @@ namespace springtail {
                   const std::vector<Index> &secondary,
                   const TableMetadata &metadata,
                   ExtentSchemaPtr schema,
-                  const ComparatorCallback &comparator_callback = {}) :
-            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, comparator_callback) {}
+                  const ExtensionCallback &extension_callback = {}) :
+            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, extension_callback) {}
 
         /**
          * Retrieves the schema for the table at a given XID.
@@ -140,9 +140,9 @@ namespace springtail {
                          const std::vector<Index> &secondary,
                          const TableMetadata &metadata,
                          ExtentSchemaPtr schema,
-                         const ComparatorCallback &comparator_callback = {}) :
+                         const ExtensionCallback &extension_callback = {}) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, comparator_callback) {}
+                         secondary, metadata, schema, extension_callback) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing

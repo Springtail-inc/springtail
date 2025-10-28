@@ -6,20 +6,20 @@
 #include <span>
 
 namespace springtail {
-    struct ComparatorContext {
+    struct ExtensionContext {
         uint64_t db_id;
         uint64_t xid;
         int32_t type_oid;
         const char* op_str;
     };
 
-    struct ComparatorCallback {
-        using Func = bool (*)(const ComparatorContext*,
-                              const std::span<const char>&,
-                              const std::span<const char>&);
+    struct ExtensionCallback {
+        using ComparatorFunc = bool (*)(const ExtensionContext*,
+                                        const std::span<const char>&,
+                                        const std::span<const char>&);
 
-        Func func = nullptr;
-        ComparatorContext context = {};
+        ComparatorFunc comparator_func = nullptr;
+        ExtensionContext context = {};
     };
 }
 

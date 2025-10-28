@@ -148,7 +148,7 @@ public:
      * @param rhval The right hand value
      * @return The result of the comparison
      */
-    static bool comparator_func(const ComparatorContext* context,
+    static bool comparator_func(const ExtensionContext* context,
                                 const std::span<const char> &lhval,
                                 const std::span<const char> &rhval);
 private:
