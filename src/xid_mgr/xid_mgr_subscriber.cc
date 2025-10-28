@@ -13,7 +13,12 @@ XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks 
 {
     _stub = proto::XidManager::NewStub(_channel);
     CHECK(_stub);
+}
 
+void 
+XidMgrSubscriber::start()
+{
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Starting subscriber");
     proto::SubscribeRequest req;
     // From this point the lifetime of this object is managed by gRPC
     // According to gRPC docs, we must not delete this object until OnDone callback
@@ -23,6 +28,7 @@ XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks 
     StartCall();
     StartRead(&_push_response);
 }
+
 
 XidMgrSubscriber::~XidMgrSubscriber()
 {

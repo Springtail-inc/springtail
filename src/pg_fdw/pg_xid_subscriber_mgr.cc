@@ -93,6 +93,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
             connected = true;
             subscriber = std::make_unique<XidMgrSubscriber>(xid_client->get_channel(),
                     XidMgrSubscriber::Callbacks{on_push, on_disconnect});
+            subscriber->start();
         }
         std::this_thread::sleep_for(loop_time_period);
         _cache->keep_alive();

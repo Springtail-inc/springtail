@@ -42,6 +42,10 @@ namespace {
                 _s = std::make_unique<XidMgrSubscriber>(client->get_channel(), cb);
             }
 
+            void start() {
+                _s->start();
+            }
+
             void cancel() {
                 _s.reset();
             }
@@ -86,6 +90,7 @@ namespace {
 
         void SetUp() override {
             _subscriber = std::make_unique<Subscriber>();
+            _subscriber->start();
         }
 
         void TearDown() override {
