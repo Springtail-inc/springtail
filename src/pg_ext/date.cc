@@ -561,14 +561,14 @@ tzparse(const char *name, struct state *sp, bool lastditch)
 			name = TZDEFRULESTRING;
 		if (*name == ',' || *name == ';')
 		{
-			struct rule start;
-			struct rule end;
-			int			year;
-			int			yearlim;
-			int			timecnt;
-			pg_time_t	janfirst;
+			struct rule start = {};
+			struct rule end = {};
+			int			year = 0;
+			int			yearlim = 0;
+			int			timecnt = 0;
+			pg_time_t	janfirst = 0;
 			int32_t		janoffset = 0;
-			int			yearbeg;
+			int			yearbeg = 0;
 
 			++name;
 			if ((name = getrule(name, &start)) == nullptr)
@@ -658,12 +658,12 @@ tzparse(const char *name, struct state *sp, bool lastditch)
 		}
 		else
 		{
-			int32_t		theirstdoffset;
-			int32_t		theirdstoffset;
-			int32_t		theiroffset;
-			bool		isdst;
-			int			i;
-			int			j;
+			int32_t		theirstdoffset = 0;
+			int32_t		theirdstoffset = 0;
+			int32_t		theiroffset = 0;
+			bool		isdst = false;
+			int			i = 0;
+			int			j = 0;
 
 			if (*name != '\0')
 				return false;
@@ -907,7 +907,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
           * TIME_T_MIN.
           */
          timecnt = 0;
-         for (int i = 0; i < sp->timecnt; ++i)
+         for (i = 0; i < sp->timecnt; ++i)
          {
              int64_t		at
              = stored == 4 ? detzcode(p) : detzcode64(p);
@@ -944,9 +944,9 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
          sp->timecnt = timecnt;
          for (i = 0; i < sp->typecnt; ++i)
          {
-             struct ttinfo *ttisp;
-             unsigned char isdst,
-                         desigidx;
+             struct ttinfo *ttisp = nullptr;
+             unsigned char isdst = 0;
+			 unsigned char desigidx = 0;
 
              ttisp = &sp->ttis[i];
              ttisp->tt_utoff = detzcode(p);
@@ -995,7 +995,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
 
          for (i = 0; i < sp->typecnt; ++i)
          {
-             struct ttinfo *ttisp;
+             struct ttinfo *ttisp = nullptr;
 
              ttisp = &sp->ttis[i];
              if (ttisstdcnt == 0)
@@ -1009,7 +1009,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
          }
          for (int i = 0; i < sp->typecnt; ++i)
          {
-             struct ttinfo *ttisp;
+             struct ttinfo *ttisp = nullptr;
 
              ttisp = &sp->ttis[i];
              if (ttisutcnt == 0)
@@ -1053,7 +1053,7 @@ differ_by_repeat(const pg_time_t t1, const pg_time_t t0)
              for (i = 0; i < ts->typecnt; i++)
              {
                  char	   *tsabbr = ts->chars + ts->ttis[i].tt_desigidx;
-                 int			j;
+                 int			j = 0;
 
                  for (j = 0; j < charcnt; j++)
                      if (strcmp(sp->chars + j, tsabbr) == 0)
@@ -1259,7 +1259,7 @@ static struct pg_tm *
 timesub(const pg_time_t *timep, int32_t offset,
 		const struct state *sp, struct pg_tm *tmp)
 {
-	const struct lsinfo *lp;
+	const struct lsinfo *lp = nullptr;
 	pg_time_t	tdays = 0;
 	int			idays = 0;			/* unsigned would be so 2003 */
 	int64_t		rem = 0;
@@ -1381,7 +1381,7 @@ static struct pg_tm *
 gmtsub(pg_time_t const *timep, int32_t offset,
 	   struct pg_tm *tmp)
 {
-	struct pg_tm *result;
+	struct pg_tm *result = nullptr;
 
 	/* GMT timezone state data is kept here */
 	static struct state *gmtptr = nullptr;
@@ -1444,7 +1444,7 @@ localsub(struct state const *sp, pg_time_t const *timep,
 		result = localsub(sp, &newt, tmp);
 		if (result)
 		{
-			int64_t		newy;
+			int64_t		newy = 0;
 
 			newy = result->tm_year;
 			if (t < sp->ats[0])
@@ -1529,7 +1529,7 @@ j2date(int jd, int *year, int *month, int *day)
 void
 dt2time(Timestamp jd, int *hour, int *min, int *sec, fsec_t *fsec)
 {
-	TimeOffset	time;
+	TimeOffset	time = 0;
 
 	time = jd;
 
@@ -1544,9 +1544,9 @@ dt2time(Timestamp jd, int *hour, int *min, int *sec, fsec_t *fsec)
 int
 timestamp2tm(Timestamp dt, int *tzp, struct pg_tm *tm, fsec_t *fsec, const char **tzn, pg_tz *attimezone)
 {
-	Timestamp	date;
-	Timestamp	time;
-	pg_time_t	utime;
+	Timestamp	date = 0;
+	Timestamp	time = 0;
+	pg_time_t	utime = 0;
 
 	// XXX Check this
 	// if (attimezone == nullptr)
@@ -1656,7 +1656,7 @@ AppendSeconds(char *cp, int sec, fsec_t fsec, int precision, bool fillzeros)
 		while (precision--)
 		{
 			int32_t		oldval = value;
-			int32_t		remainder;
+			int32_t		remainder = 0;
 
 			value /= 10;
 			remainder = oldval - value * 10;

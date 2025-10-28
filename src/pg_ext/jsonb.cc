@@ -664,8 +664,8 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 	{
 		case DATEOID:
 			{
-				DateADT		date;
-				struct pg_tm tm;
+				DateADT		date = 0;
+				struct pg_tm tm = {};
 
 				date = DatumGetDateADT(value);
 
@@ -723,10 +723,10 @@ JsonEncodeDateTime(char *buf, Datum value, Oid typid, const int *tzp)
 			break;
 		case TIMESTAMPTZOID:
 			{
-				TimestampTz timestamp;
-				struct pg_tm tm;
-				int			tz;
-				fsec_t		fsec;
+				TimestampTz timestamp = 0;
+				struct pg_tm tm = {};
+				int			tz = 0;
+				fsec_t		fsec = 0;
 				const char *tzn = nullptr;
 
 				timestamp = DatumGetTimestampTz(value);

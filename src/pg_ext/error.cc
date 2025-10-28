@@ -45,7 +45,7 @@ static int pg_vfprintf(FILE *stream, const char *fmt, va_list ap)
         LOG_ERROR("Pg_fprintf (null)");
         return 0;
     }
-    char buf[1024];
+    char buf[1024] = "";
     int written = vsnprintf(buf, sizeof(buf), fmt, ap); // NOSONAR - Fmt is validated
     /* Maintain prior behavior: log the formatted message. */
     LOG_ERROR("Pg_fprintf %s", buf);

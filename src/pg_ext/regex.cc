@@ -74,12 +74,12 @@ int pg_reg_getnumcolors(const regex_t *regex) {
     return regex ? regex->colors.size() : 0;
 }
 
-bool pg_reg_colorisbegin(const regex_t *regex, regcolor_t color) {
+bool pg_reg_colorisbegin([[maybe_unused]] const regex_t *regex, [[maybe_unused]] regcolor_t color) {
     // Used in the console. No implementation required
     return false;
 }
 
-bool pg_reg_colorisend(const regex_t *regex, regcolor_t color) {
+bool pg_reg_colorisend([[maybe_unused]] const regex_t *regex, [[maybe_unused]] regcolor_t color) {
     // Used in the console. No implementation required
     return false;
 }

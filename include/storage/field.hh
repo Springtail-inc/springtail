@@ -710,7 +710,7 @@ namespace springtail {
             DCHECK_EQ(_type, SchemaType::EXTENSION);
 
             auto e_row = reinterpret_cast<const Extent::Row *>(row);
-            uint32_t var_off;
+            uint32_t var_off = 0;
             std::memcpy(&var_off, e_row->data() + _offset, sizeof(uint32_t));
             return e_row->get_binary(var_off);
         }

@@ -3,8 +3,8 @@
 #include <pg_ext/export.hh>
 #include <pg_ext/fmgr.hh>
 
-typedef struct NumericData *Numeric;
-typedef int16_t NumericDigit;
+using Numeric = struct NumericData *;
+using NumericDigit = int16_t;
 
 struct NumericShort {
     uint16_t n_header;                            /* Sign + display scale + weight */

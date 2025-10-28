@@ -16,7 +16,7 @@ main()
 
         LOG_INFO("Loading library: {}", lib_path);
 
-        void* library = dlopen(lib_path.data(), RTLD_NOW | RTLD_GLOBAL);
+        const auto library = dlopen(lib_path.data(), RTLD_NOW | RTLD_GLOBAL);
         if (!library) {
             LOG_ERROR("Failed to load library: {}", dlerror());
             return 1;

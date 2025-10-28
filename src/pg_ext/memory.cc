@@ -3,8 +3,6 @@
 
 #include <pg_ext/memory.hh>
 
-// namespace pgext {
-
 // Define the global memory context
 MemoryContext TopMemoryContext(nullptr, "TopMemoryContext", 8192, 1048576); // NOSONAR - Global memory management
 
@@ -138,9 +136,7 @@ MemoryContext::free(void* ptr)
     return false;
 }
 
-// } // namespace pgext
-
-// // Global memory context pointer
+// Global memory context pointer
 void* CurrentMemoryContext = &TopMemoryContext; // NOSONAR - Global memory management
 
 // Implementation of exported functions
@@ -241,37 +237,3 @@ void* repalloc(void* ptr, size_t size)
     // Try to reallocate the pointer, if not found do nothing
     return ctx->alloc(size);
 }
-
-// void
-// pfree(void *ptr)
-// {
-//     if (ptr == nullptr) {
-//         return;
-//     }
-//     free(ptr);
-// }
-
-// void*
-// repalloc(void* ptr, size_t size)
-// {
-//     if (ptr == nullptr) {
-//         return palloc(size);
-//     }
-//     return realloc(ptr, size);
-// }
-
-// void*
-// palloc(size_t size)
-// {
-//     return malloc(size);
-// }
-
-// void*
-// palloc0(size_t size)
-// {
-//     auto ptr = malloc(size);
-//     if (ptr != nullptr) {
-//         std::memset(ptr, 0, size);
-//     }
-//     return ptr;
-// }
