@@ -6,8 +6,9 @@
 
 namespace springtail::xid_mgr {
 
-PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &base_dir) :
-    _base_dir(base_dir)
+PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &base_dir, uint64_t recovered_xid) :
+    _base_dir(base_dir),
+    _last_stored_xid(recovered_xid)
 {
     // create the base directory for the file if it doesn't exist
     LOG_INFO("Creating directory {}", base_dir);
@@ -189,7 +190,7 @@ PgXactLogWriter::flush()
 }
 
 // TODO: need unit tests for this function
-void
+uint64_t
 PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
                                          uint64_t last_xid,
                                          bool archive)
@@ -270,7 +271,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
         LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "No committed XID found in the log files");
         // no committed XID found, cleanup all files
         fs::cleanup_files_from_dir<std::greater<uint64_t>>(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX, 0, archive);
-        return;
+        return 1;
     }
 
     // last_committed_xid != 0
@@ -296,7 +297,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
 
     fs::cleanup_files_from_dir<std::greater<uint64_t>>(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX, file_timestamp.value(), archive);
 
-    return;
+    return last_committed_xid;
 }
 
 
