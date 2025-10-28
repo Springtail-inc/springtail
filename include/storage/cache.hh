@@ -289,7 +289,7 @@ namespace springtail {
             }
 
             // create empty extent
-            SafeExtent(const std::filesystem::path &file, ExtentHeader hdr, uint64_t database_id) {
+            SafeExtent(const std::filesystem::path &file, const ExtentHeader &hdr, uint64_t database_id) {
                 _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr, database_id);
             }
 

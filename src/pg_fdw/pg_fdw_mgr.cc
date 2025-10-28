@@ -500,6 +500,8 @@ namespace springtail::pg_fdw {
         // NOTE: first call to XidMgrClient needs to be done on the main thread to prevent occasional
         //      deadlock during shutdown for short-lived FDW processes.
         (void)XidMgrClient::get_instance();
+        // NOTE: the same for RedisDDL
+        (void)RedisDDL::get_instance();
         start_thread();
         LOG_INFO("FDW process finished initialization");
     }

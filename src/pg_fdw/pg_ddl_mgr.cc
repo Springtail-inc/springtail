@@ -1804,7 +1804,7 @@ namespace springtail::pg_fdw {
         }
 
         {
-            std::unique_lock<std::mutex> lock(_db_name_mutex);
+            std::unique_lock lock(_db_name_mutex);
             _db_name_map.emplace(db_id, db_name);
         }
 
@@ -1863,7 +1863,7 @@ namespace springtail::pg_fdw {
 
         std::string db_name;
         {
-            std::unique_lock<std::mutex> lock(_db_name_mutex);
+            std::unique_lock lock(_db_name_mutex);
             auto it = _db_name_map.find(db_id);
             if (it == _db_name_map.end()) {
                 return;
@@ -1887,7 +1887,7 @@ namespace springtail::pg_fdw {
 
         // remove connections from connection cache
         {
-            std::unique_lock<std::mutex> conn_lock(_fdw_conn_cache_mutex);
+            std::unique_lock conn_lock(_fdw_conn_cache_mutex);
             _fdw_conn_cache.evict(db_id);
         }
         RedisDDL::get_instance()->clear_ddls(db_id);

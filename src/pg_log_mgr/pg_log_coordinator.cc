@@ -42,7 +42,7 @@ namespace springtail::pg_log_mgr {
     PgLogCoordinator::PgLogCoordinator() : Singleton<PgLogCoordinator>(ServiceId::PgLogCoordinatorId)
     {
         _db_id_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+            [this](const std::string &path, const nlohmann::json &new_value) {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
                 CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
                 // get a vector of old database ids from _log_mgrs
@@ -66,12 +66,12 @@ namespace springtail::pg_log_mgr {
         );
 
         _db_state_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+            [this](const std::string &path, const nlohmann::json &new_value) {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replicated databases states: {}", new_value.dump(4));
                 CHECK_EQ(path, Properties::DATABASE_STATE_PATH);
 
                 // get new database keys from json object
-                std::unique_lock<std::mutex> lock(_mutex);
+                std::unique_lock lock(_mutex);
                 auto db_states_copy = _db_states;
                 _db_states.clear();
                 for (auto& [key, value] : new_value.items()) {
@@ -80,11 +80,11 @@ namespace springtail::pg_log_mgr {
 
                     // get state
                     std::string state;
-                    if (value.is_string()) {
-                        state = value.get<std::string>();
-                    } else {
+                    if (!value.is_string()) {
+                        LOG_ERROR("Invalid type of state value");
                         throw Error("Invalid type of state value");
                     }
+                    state = value.get<std::string>();
 
                     // add state
                     _db_states[db_id] = state;
@@ -171,13 +171,13 @@ namespace springtail::pg_log_mgr {
 
         // acquire lock
         std::unique_lock lock(_mutex);
-        for (auto &[db_id, db_name]: db_ids) {
+        for (const auto &[db_id, db_name]: db_ids) {
             std::string state = Properties::get_db_state(db_id);
             _db_states[db_id] = state;
         }
         lock.unlock();
 
-        for (auto &[db_id, db_name]: db_ids) {
+        for (const auto &[db_id, db_name]: db_ids) {
             std::string state = Properties::get_db_state(db_id);
             if (state != redis::db_state_change::REDIS_STATE_FAILED) {
                 _add_database(db_id);
@@ -203,7 +203,7 @@ namespace springtail::pg_log_mgr {
         {
             std::unique_lock lock(_mutex);
             nlohmann::json log_mgrs = nlohmann::json::object();
-            for (auto &[db_id, log_mgr]: _log_mgrs) {
+            for (const auto &[db_id, log_mgr]: _log_mgrs) {
                 log_mgrs[std::to_string(db_id)] = log_mgr->get_stats();
             }
             json_stats["log_mgrs"] = log_mgrs;

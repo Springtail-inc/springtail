@@ -115,12 +115,6 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "writer thread joined");
             _reader_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "reader thread joined");
-
-            // Wait till pg_log_reader drained the queue and has no inflight commits
-            while(!_pg_log_reader->is_done()) {
-                usleep(100);
-            }
-
             _table_copy_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "copy thread joined");
             _reconciliation_thread.join();

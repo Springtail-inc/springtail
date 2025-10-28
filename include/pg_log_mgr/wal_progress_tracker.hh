@@ -208,7 +208,7 @@ namespace springtail::pg_log_mgr {
         uint32_t
         get_inflight_xid_count()
         {
-            std::shared_lock<std::shared_mutex> lock(_mt);
+            std::shared_lock lock(_mt);
             return _xid_to_ts.size();
         }
 

@@ -1,5 +1,6 @@
 #include <boost/thread/locks.hpp>
 
+#include <common/filesystem.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <write_cache/write_cache_server.hh>
@@ -157,11 +158,8 @@ WriteCacheServer::drop_database(uint64_t db_id)
     _indexes.erase(db_id);
     _subtract_memory(index_mem);
 
-    // create storage directory for the database
-    std::filesystem::path db_storage_dir = _disk_storage_dir / std::to_string(db_id);
-    std::error_code ec;
-    std::filesystem::remove_all(db_storage_dir, ec);
-    CHECK(!ec) << ec.message();
+    // remove database storage directory
+    CHECK(fs::remove_dir(_disk_storage_dir / std::to_string(db_id))) << "Failed to remove database directory";
 }
 
 nlohmann::json

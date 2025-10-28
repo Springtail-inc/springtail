@@ -852,6 +852,11 @@ namespace springtail::pg_log_mgr {
 
         // unregister thread before exiting
         coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
+        // Wait till pg_log_reader drained the queue and has no inflight commits
+        while(!_pg_log_reader->is_done()) {
+            usleep(100);
+        }
     }
 
     PgLogWriterPtr

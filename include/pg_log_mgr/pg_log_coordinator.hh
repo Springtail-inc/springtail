@@ -29,8 +29,7 @@ namespace springtail::pg_log_mgr {
          *
          * @return nlohmann::json
          */
-        nlohmann::json
-        get_stats();
+        nlohmann::json get_stats();
 
     private:
         friend class Singleton<PgLogCoordinator>;

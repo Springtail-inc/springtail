@@ -368,7 +368,7 @@ namespace springtail {
         }
 
         uint64_t min_xid = constant::LATEST_XID;
-        std::string suffix = ":" + std::to_string(db_id);
+        std::string suffix = fmt::format(":{}", db_id);
 
         for (const auto& [field, value] : values) {
             DCHECK(field.ends_with(suffix));

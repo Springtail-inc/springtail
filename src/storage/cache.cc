@@ -1752,7 +1752,7 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         }
 
         // Remove from LRU lists and mark as INVALID
-        for (auto &extent : extents_to_evict) {
+        for (const auto &extent: extents_to_evict) {
             // Extent must not be in use for safe eviction
             DCHECK_EQ(extent->_use_count, 0);
 
@@ -2154,7 +2154,7 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
             }
 
             // Evict the Page objects from the cache
-            for (auto &page : pages_to_evict) {
+            for (const auto &page : pages_to_evict) {
                 // Evict the Page object from the PageCache
                 auto cache_i = _cache.find(page->key());
                 if (cache_i != _cache.end()) {

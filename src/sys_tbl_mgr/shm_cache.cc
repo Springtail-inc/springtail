@@ -67,7 +67,9 @@ ShmCache::_init()
 void
 ShmCache::remove(const std::string& name)
 {
-    ipc::shared_memory_object::remove(name.c_str());
+    if (!ipc::shared_memory_object::remove(name.c_str())) {
+        LOG_ERROR("Failed to remove shared memory '{}'", name);
+    }
     Mutex::remove((name + std::string(".mutex")).c_str());
 }
 
