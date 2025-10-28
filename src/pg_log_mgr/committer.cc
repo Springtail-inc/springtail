@@ -684,7 +684,7 @@ namespace springtail::committer {
             // TODO: another way to handle the case would be to drop the table mutation
             // records from the Batch object in the log reader. Marking this as TODO
             // just to keep the question open for now.
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access XID: {} @ {}", tid, xid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access/target XID: {} @ {} || {}", tid, xid, batch.final_xid);
             return;
         }
 
