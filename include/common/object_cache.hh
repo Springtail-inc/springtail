@@ -322,37 +322,26 @@ namespace springtail {
         void
         drop_all(std::function<bool(std::shared_ptr<EntryType>)> callback)
         {
-            auto it = _lookup.begin();
-            if (!_callback) {
-                while (it != _lookup.end()) {
-                    // retrieve the value from the lookup entry
-                    CacheEntry &entry = *(it->second);
-                    auto value = std::get<1>(entry);
-                    if (callback(value)) {
-                        // remove the entry from the cache
-                        _cache_size -= std::get<2>(entry);
-                        _cache.erase(it->second);
-                        it = _lookup.erase(it);
-                    } else {
-                        ++it;
-                    }
-                }
+            // Wrap _callback so it's always callable
+            std::function<bool(std::shared_ptr<EntryType>)> pre_check;
+            if (_callback) {
+                pre_check = _callback;
             } else {
-                while (it != _lookup.end()) {
-                    // retrieve the value from the lookup entry
-                    CacheEntry &entry = *(it->second);
-                    auto value = std::get<1>(entry);
-                    if (_callback(value) == false) {
-                        continue;
-                    }
-                    if (callback(value)) {
-                        // remove the entry from the cache
-                        _cache_size -= std::get<2>(entry);
-                        _cache.erase(it->second);
-                        it = _lookup.erase(it);
-                    } else {
-                        ++it;
-                    }
+                pre_check = [](std::shared_ptr<EntryType>) { return true; };
+            }
+
+            auto it = _lookup.begin();
+            while (it != _lookup.end()) {
+                // retrieve the value from the lookup entry
+                CacheEntry &entry = *(it->second);
+                auto value = std::get<1>(entry);
+                if (pre_check(value) && callback(value)) {
+                    // remove the entry from the cache
+                    _cache_size -= std::get<2>(entry);
+                    _cache.erase(it->second);
+                    it = _lookup.erase(it);
+                } else {
+                    ++it;
                 }
             }
         }
