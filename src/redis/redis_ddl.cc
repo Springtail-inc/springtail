@@ -190,8 +190,8 @@ namespace springtail {
                 }
             }
 
-            // get the set of FDWs
-            std::vector<std::string> fdw_ids = Properties::get_fdw_ids();
+            // get the set of FDWs in both initialize and running states
+            std::vector<std::string> fdw_ids = Properties::get_fdw_ids(std::vector<std::string>{Properties::FDW_STATE_INITIALIZE, Properties::FDW_STATE_RUNNING});
 
             for (const std::string &fdw_id : fdw_ids) {
                 std::string fdw_key = fmt::format(redis::QUEUE_DDL_FDW, db_instance_id, fdw_id);
