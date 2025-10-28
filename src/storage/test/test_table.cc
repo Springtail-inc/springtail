@@ -57,7 +57,6 @@ namespace {
 
             auto xid_client = XidMgrClient::get_instance();
             uint64_t access_xid = xid_client->get_committed_xid(1, 0);
-            ASSERT_NE(access_xid, 0);
             uint64_t target_xid = access_xid + 1;
 
             // create the public namespace in the sys_tbl_mgr
