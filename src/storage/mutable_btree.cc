@@ -229,7 +229,7 @@ void
 MutableBTree::sync() 
 {
     // sync the file to ensure all data is written to disk
-    auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::WRITE, true);
+    auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
     handle->sync();
 }
 

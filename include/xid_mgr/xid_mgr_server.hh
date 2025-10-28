@@ -24,6 +24,8 @@ public:
      * @brief commit up to and including given xid
      * @param db_id database id
      * @param xid xid to commit
+     * @param has_schema_changes true if transaction has schema changes
+     * @param tracker WAL progress tracker, this is to synchronize xlog and wal progress
      */
     void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr tracker = nullptr);
 
@@ -195,7 +197,7 @@ private:
             uint32_t pg_xid;
             bool real_commit;
             pg_log_mgr::WalProgressTrackerPtr wal_tracker;
-            bool ready; ///< whether the log entry is realdy to be written to log
+            bool ready; ///< whether the log entry is ready to be written to log
         };
         std::map<uint64_t, XactLogEntry> _pending_log_entries;  ///< pending log entries (xid -> log entry)
     };

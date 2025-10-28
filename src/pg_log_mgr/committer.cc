@@ -959,8 +959,8 @@ namespace springtail::committer {
             MutableTablePtr table;
             uint64_t xid;
             {
-                std::unique_lock g(_m);
-                if (!_cv.wait(g, st, [this]{ return !_queue.empty(); })) {
+                std::unique_lock lock(_m);
+                if (!_cv.wait(lock, st, [this]{ return !_queue.empty(); })) {
                     break;
                 }
                 auto const& v = _queue.front();
@@ -973,8 +973,12 @@ namespace springtail::committer {
             table->sync_data_and_indexes();
 
             {
-                std::unique_lock g(_m);
+                std::unique_lock lock(_m);
                 // remove the table from the work item
+                //
+                // We pop the queue and get a table, do the sync for that table,
+                // then we remove that table from the work map, and once all tables
+                // for that xid have been removed from the work map we do the commit for that table.
                 std::erase_if(_work_map[table->db()][xid].tables,
                         [&table](const MutableTablePtr& t) { return t->id() == table->id(); });
             }
