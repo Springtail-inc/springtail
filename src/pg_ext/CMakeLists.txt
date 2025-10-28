@@ -32,33 +32,31 @@ set(LIB_PGEXT_SOURCES
 )
 
 # Create the library
-add_library(pgext SHARED ${LIB_PGEXT_SOURCES})
-target_include_directories(pgext
+add_library(springtail_pgext SHARED ${LIB_PGEXT_SOURCES})
+target_include_directories(springtail_pgext
     PUBLIC ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
-target_link_libraries(pgext
+target_link_libraries(springtail_pgext
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE absl::check
     PRIVATE absl::flat_hash_map
     PRIVATE fmt::fmt
     PRIVATE springtail_common
 )
-# target_link_options(pgext PRIVATE -Wl,--exclude-libs,ALL) # prevent exports that aren't explicitly part of this library
-target_link_options(pgext PRIVATE -W)
+target_link_options(springtail_pgext PRIVATE -W)
 
-# target_compile_options(pgext PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
-set_target_properties(pgext PROPERTIES
+set_target_properties(springtail_pgext PROPERTIES
   CXX_VISIBILITY_PRESET default
   VISIBILITY_INLINES_HIDDEN ON
 )
 
 # Add extn_parser executable
-add_executable(extn_parser extn_parser.cc)
+add_executable(springtail_extn_parser extn_parser.cc)
 
 # Link the executable against the required libraries
-target_link_libraries(extn_parser
-    PRIVATE pgext
+target_link_libraries(springtail_extn_parser
+    PRIVATE springtail_pgext
     PRIVATE springtail_common
     PRIVATE dl
     PRIVATE absl::flat_hash_map

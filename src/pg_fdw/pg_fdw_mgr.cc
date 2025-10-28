@@ -285,14 +285,7 @@ namespace springtail::pg_fdw {
                 return true;
             }
             if (pg_schema_type == SchemaType::BINARY) {
-                if (pg_type == NUMERICOID &&
-                    (qual->base.op == QualOpName::EQUALS || qual->base.op == QualOpName::NOT_EQUALS)) {
-                    // only support equality of NUMERICOID binary types
-                    return true;
-                } else {
-                    // don't support comparisons of binary types
-                    return false;
-                }
+                return false;
             }
             return true;
         }
@@ -1719,13 +1712,18 @@ namespace springtail::pg_fdw {
     {
         // check for user defined type
         if (springtail_oid >= FirstNormalObjectId) {
-            assert(field->get_type() == SchemaType::FLOAT32 || field->get_type() == SchemaType::BINARY || field->get_type() == SchemaType::EXTENSION);
-            if (field->get_type() == SchemaType::FLOAT32) {
+            auto type = field->get_type();
+            assert(type == SchemaType::FLOAT32 ||
+                type == SchemaType::BINARY ||
+                type == SchemaType::EXTENSION);
+
+            if (type == SchemaType::FLOAT32) {
                 return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(&row));
-            } else {
-                auto &&value = field->get_extension(&row);
-                return _binary_to_datum(value, pg_oid, atttypmod);
             }
+
+            // Both BINARY and EXTENSION handled the same way:
+            auto&& value = field->get_extension(&row);
+            return _binary_to_datum(value, pg_oid, atttypmod);
         }
 
         // otherwise convert they row by the schema type

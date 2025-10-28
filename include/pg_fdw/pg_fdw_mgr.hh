@@ -312,8 +312,8 @@ namespace springtail::pg_fdw {
          * @return user type pointer
          */
         static UserTypePtr _enum_cache_lookup(uint64_t db_id,
-                                       int32_t oid,
-                                       uint64_t xid);
+                                              int32_t oid,
+                                              uint64_t xid);
 
         /** Helper to convert a springtail enum user type to a datum */
         Datum _get_enum_datum(const PgFdwState *state,
@@ -423,6 +423,9 @@ namespace springtail::pg_fdw {
         /** Helper function to get the last xid */
         uint64_t _update_last_xid(uint64_t schema_xid);
 
-        std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows);
+        std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate,
+                                                       const List *qual_list,
+                                                       const List* join_quals,
+                                                       double *rows);
     };
 } // namespace springtail::pg_fdw

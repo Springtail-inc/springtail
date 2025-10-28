@@ -107,7 +107,6 @@ namespace springtail {
             case (SchemaType::EXTENSION): {
                 DCHECK(comparator_callback.func != nullptr);
                 field = std::make_shared<ExtentField>(column.type, byte_pos, comparator_callback, column.pg_type);
-
                 byte_pos += 4; // add the used bytes
                 break;
             }
@@ -291,7 +290,7 @@ namespace springtail {
         std::map<uint32_t, std::string> name_map;
 
         // generate the extent schema from the base columns
-        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, comparator_callback, false);
+        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, comparator_callback);
 
         // get a copy of the fields from the extent schema
         for (auto &column : meta.columns) {

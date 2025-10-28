@@ -41,7 +41,8 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, const ComparatorCallback &comparator_callback = {}, bool allow_undefined = false) override;
+                          const XidLsn &xid, const ComparatorCallback &comparator_callback = {},
+                          bool allow_undefined = false) override;
 
     protected:
         /**

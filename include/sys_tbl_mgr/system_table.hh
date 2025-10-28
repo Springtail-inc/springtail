@@ -56,7 +56,7 @@ namespace springtail {
                            const TableMetadata &metadata,
                            ExtentSchemaPtr schema) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, {}) {}
+                         secondary, metadata, schema) {}
 
         /**
          * Truncate function call is empty as we are not going to truncate system tables.

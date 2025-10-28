@@ -835,7 +835,7 @@ namespace springtail {
                           const std::span<const char> &rhval) const override
         {
             DCHECK(_comparator_callback.func != nullptr);
-            DCHECK(_type_oid > constant::FIRST_USER_DEFINED_PG_OID);
+            DCHECK(_type_oid >= constant::FIRST_USER_DEFINED_PG_OID);
 
             // Build a local context for this comparison to respect const correctness
             ComparatorContext ctx = _comparator_callback.context;
@@ -1069,7 +1069,7 @@ namespace springtail {
                           const std::span<const char> &rhval) const override
         {
             DCHECK(_comparator_callback.func != nullptr);
-            DCHECK(_type_oid > constant::FIRST_USER_DEFINED_PG_OID);
+            DCHECK(_type_oid >= constant::FIRST_USER_DEFINED_PG_OID);
 
             // Build a local context for this comparison to respect const correctness
             ComparatorContext ctx = _comparator_callback.context;

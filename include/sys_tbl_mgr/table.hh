@@ -920,7 +920,7 @@ namespace indexer_helpers {
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats{}; ///< The stats for the table.
 
-        ComparatorCallback comparator_callback; ///< The comparator function for this table.
+        ComparatorCallback _comparator_callback; ///< The comparator function for this table.
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 
