@@ -679,8 +679,10 @@ namespace springtail::committer {
         // find the coordinator keep-alive
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
         auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, thread_name);
+        auto& batch = _batch_state[db_id];
 
-        if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid})) {
+        if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid}) ||
+            !sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{batch.final_xid})) {
             // This could happen if the table is dropped in the same transaction
             // BEGIN/INSERT/DROP/COMMIT
             // TODO: another way to handle the case would be to drop the table mutation
@@ -691,7 +693,6 @@ namespace springtail::committer {
         }
 
         // get or create the mutable table object from batch cache
-        auto& batch = _batch_state[db_id];
         MutableTablePtr table;
 
         auto table_it = batch.table_cache.find(tid);

@@ -144,6 +144,7 @@ namespace springtail::pg_log_mgr {
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);
         auto optional_repl_log = Json::get<std::string>(log_mgr_config, "replication_log_path");
         auto optional_trans_log = Json::get<std::string>(log_mgr_config, "transaction_log_path");
+        auto committer_worker_threads = Json::get_or<uint32_t>(log_mgr_config, "committer_worker_threads", 1);
         auto indexer_worker_threads = Json::get_or<uint32_t>(log_mgr_config, "indexer_worker_threads", 1);
         _log_size_rollover_threshold = Json::get_or<uint64_t>(log_mgr_config, "log_size_rollover_threshold", PgLogMgr::LOG_ROLLOVER_SIZE_BYTES);
         _archive_logs = Json::get_or<bool>(log_mgr_config, "archive_logs", false);
@@ -156,7 +157,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // Start the committer thread
-        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue, _index_reconciliation_queue_mgr, _index_requests_mgr, indexer_worker_threads);
+        _committer = std::make_shared<springtail::committer::Committer>(committer_worker_threads, _committer_queue, _index_reconciliation_queue_mgr, _index_requests_mgr, indexer_worker_threads);
         _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
         pthread_setname_np(_committer_thread.native_handle(), "LogMgrCommitter");
 
