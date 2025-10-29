@@ -1109,7 +1109,7 @@ namespace springtail::pg_fdw {
                                         db_xid_lock.unlock();
                                         db_name_lock.unlock();
                                         // sleep and continue
-                                        std::this_thread::sleep_for(std::chrono::milliseconds(1s00));
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
                                         continue;
                                     }
                                 }
