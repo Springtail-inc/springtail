@@ -153,7 +153,7 @@ namespace indexer_helpers {
     /**
      * Handler that does the secondary index mutations
      * @param row   Extent row holding the content
-     * @param ctx   pointer to an IndexMutationContext
+     * @param ctx   Generic pointer to an IndexMutationContext
      */
     template<IndexOperation op>
     static void mutation_handler(const Extent::Row& row, void* ctx) {
@@ -1090,8 +1090,11 @@ namespace indexer_helpers {
                                     TuplePtr value)
     {
 
+        // Create a context to passed to cache and so the same will be
+        // passed back to the mutation_handler
         indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes };
 
+        // Find and invoke appropriate mutations in the cache
         if constexpr (m_type == MutationType::INSERT) {
             page->insert(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Insert>, &ctx);
 
@@ -1113,6 +1116,7 @@ namespace indexer_helpers {
             return page->try_remove_by_scan(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Remove>, &ctx);
 
         } else {
+            // Shouldn't reach here ideally
             CHECK(false);
         }
     }
@@ -1212,9 +1216,6 @@ namespace indexer_helpers {
     bool
     MutableTable::_upsert_direct(TuplePtr value, uint64_t extent_id)
     {
-        // Callback to insert entries into secondary indexes
-        // XXX: Need upsert equivalent callback
-
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
                 get_max_extent_size(),
@@ -1350,6 +1351,7 @@ namespace indexer_helpers {
         }
     }
 
+    // XXX: SPR-1082: update-only-affected-indexes-during-updates
     std::vector<uint64_t>
     MutableTable::_find_updated_secondary_indexes(Extent::Row existing_row, TuplePtr value)
     {

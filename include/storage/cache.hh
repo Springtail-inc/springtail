@@ -1045,6 +1045,7 @@ namespace springtail {
              * @param schema                   Schema for the tuple
              * @param post_append_handler      Callback to trigger with the resulted row,
              *                                 post appending the tuple
+             * @param handler_context          Context to be passed to the callback
              */
             void _append(TuplePtr tuple, ExtentSchemaPtr schema,
                     MutationHandlerPtr post_append_handler = nullptr,
