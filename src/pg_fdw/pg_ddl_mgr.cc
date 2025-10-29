@@ -1,3 +1,4 @@
+#include <redis/db_state_change.hh>
 #include <redis/redis_ddl.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
@@ -1071,7 +1072,7 @@ namespace springtail::pg_fdw {
 
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Sorted DDLS: {}", sorted_ddls.dump(4));
 
-                    uint64_t current_xid = 0;
+                    uint64_t current_xid = constant::INVALID_XID;
                     if (_db_xid_map.contains(db_id)) {
                         current_xid = _db_xid_map[db_id];
                     }
@@ -1108,6 +1109,15 @@ namespace springtail::pg_fdw {
                                     } else {
                                         db_xid_lock.unlock();
                                         db_name_lock.unlock();
+                                        try {
+                                            std::string db_state = Properties::get_db_state(db_id);
+                                            if (db_state != redis::db_state_change::REDIS_STATE_INITIALIZE) {
+                                                return;
+                                            }
+                                        } catch (RedisNotFoundError &e) {
+                                            LOG_ERROR("Failed to find database state: {}", e.what());
+                                            return;
+                                        }
                                         // sleep and continue
                                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
                                         continue;
@@ -1883,7 +1893,7 @@ namespace springtail::pg_fdw {
         LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
         std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
-        conn->exec(drop_db);
+        conn->exec_no_throw(drop_db);
         conn->disconnect();
 
         // remove it from internal storage
