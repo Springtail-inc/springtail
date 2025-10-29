@@ -86,7 +86,7 @@ namespace springtail::pg_fdw {
         std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
 
-        std::mutex _db_name_mutex;                 ///< mutex for access to _db_name_map
+        std::shared_mutex _db_name_mutex;          ///< mutex for access to _db_name_map
         std::unordered_map<uint64_t, std::string> _db_name_map;     ///< map of database id to database name
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names

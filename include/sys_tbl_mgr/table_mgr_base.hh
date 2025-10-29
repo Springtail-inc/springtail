@@ -62,7 +62,7 @@ namespace springtail {
          *
          * @return std::filesystem::path file path
          */
-        const std::filesystem::path get_table_base() { return _table_base; }
+        std::filesystem::path get_table_base() const { return _table_base; }
 
     protected:
         /** Helper to convert schema column to map */

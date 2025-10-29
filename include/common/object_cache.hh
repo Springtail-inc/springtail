@@ -324,8 +324,8 @@ namespace springtail {
         {
             // Wrap _callback so it's always callable
             std::function<bool(std::shared_ptr<EntryType>)> pre_check;
-            if (_callback) {
-                pre_check = _callback;
+            if (callback) {
+                pre_check = callback;
             } else {
                 pre_check = [](std::shared_ptr<EntryType>) { return true; };
             }
@@ -335,7 +335,7 @@ namespace springtail {
                 // retrieve the value from the lookup entry
                 CacheEntry &entry = *(it->second);
                 auto value = std::get<1>(entry);
-                if (pre_check(value) && callback(value)) {
+                if (pre_check(value)) {
                     // remove the entry from the cache
                     _cache_size -= std::get<2>(entry);
                     _cache.erase(it->second);

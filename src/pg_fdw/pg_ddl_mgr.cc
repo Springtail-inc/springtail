@@ -73,7 +73,7 @@ namespace springtail::pg_fdw {
         "  FOR r IN (SELECT rolname "
         "            FROM pg_roles "
         "            WHERE rolname NOT LIKE 'pg_%' AND "
-	"                      rolname <> '{}' AND "
+	    "                  rolname <> '{}' AND "
         "                  rolname NOT IN (SELECT DISTINCT rolname FROM pg_roles JOIN pg_database ON pg_roles.oid = datdba) "
         "           ) LOOP "
         "    EXECUTE format('DROP ROLE IF EXISTS %s', r.rolname); "
@@ -130,8 +130,8 @@ namespace springtail::pg_fdw {
         CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
 
         // get a vector of old database ids from _log_mgrs
-        std::shared_lock<std::shared_mutex> lock(_db_mutex);
-        auto keys = std::views::keys(_db_xid_map);
+        std::shared_lock lock(_db_name_mutex);
+        auto keys = std::views::keys(_db_name_map);
         lock.unlock();
         std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
 
@@ -1071,29 +1071,50 @@ namespace springtail::pg_fdw {
 
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Sorted DDLS: {}", sorted_ddls.dump(4));
 
-                    if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
+                    uint64_t current_xid = 0;
+                    if (_db_xid_map.contains(db_id)) {
+                        current_xid = _db_xid_map[db_id];
+                    }
+                    if (current_xid >= schema_xid) {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
-                                    db_id, _db_xid_map[db_id], schema_xid);
+                                    db_id, current_xid, schema_xid);
                     } else {
                         LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
-                                  db_id, _db_xid_map[db_id], schema_xid);
+                                  db_id, current_xid, schema_xid);
                         db_map[db_id][schema_xid] = sorted_ddls;
                     }
                 }
 
+                db_lock.unlock();
+
                 if (db_map.empty()) {
                     LOG_WARN("All schemas have already been applied");
-                    db_lock.unlock();
                     RedisDDL::get_instance()->commit_fdw_no_update(_fdw_id);
                     continue;
                 }
-
-                db_lock.unlock();
 
                 // queue each DBs DDL statements for processing
                 for (const auto &[db_id, xid_map] : db_map) {
                     _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
                         db_id, [this, db_id, xid_map]() {
+                            while (true) {
+                                std::shared_lock db_name_lock(_db_name_mutex);
+                                std::shared_lock db_xid_lock(_db_mutex);
+                                if (!_db_name_map.contains(db_id)) {
+                                    if (_db_xid_map.contains(db_id)) {
+                                        // warn and return
+                                        LOG_WARN("DDL changes for database {} won't be applied as database is being removed", db_id);
+                                        return;
+                                    } else {
+                                        db_xid_lock.unlock();
+                                        db_name_lock.unlock();
+                                        // sleep and continue
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(1s00));
+                                        continue;
+                                    }
+                                }
+                                break;
+                            }
                             try {
                                 uint64_t schema_xid = xid_map.rbegin()->first;
                                 auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
@@ -1102,12 +1123,10 @@ namespace springtail::pg_fdw {
                                     LOG_FDW, LOG_LEVEL_DEBUG1, "Updating redis ddl @ through schema XID: {}, db_id: {}",
                                     schema_xid, db_id);
 
-
-
                                 // apply the DDL statements
                                 bool status = _update_schemas(db_id, xid_map);
                                 if (!status) {
-                                    // error occured, abort the DDL
+                                    // error occurred, abort the DDL
                                     LOG_ERROR("Failed to apply DDL statements");
                                     RedisDDL::get_instance()->abort_fdw(_fdw_id);
                                     DCHECK(false);
@@ -1220,10 +1239,10 @@ namespace springtail::pg_fdw {
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
         LibPqConnectionPtr conn = _get_fdw_connection(db_id, db_name);
+        std::vector<std::string> txn;
 
         try {
             // generate a DDL statement for each JSON in the transaction
-            std::vector<std::string> txn;
             for (auto &[xid, ddls] : xid_map) {
                 for (const auto &ddl : ddls) {
                     auto query_string = _gen_sql_from_json(conn, SPRINGTAIL_FDW_SERVER_NAME, ddl);
@@ -1803,24 +1822,20 @@ namespace springtail::pg_fdw {
             db_name = db_name_opt.value();
         }
 
-        {
-            std::unique_lock lock(_db_name_mutex);
-            _db_name_map.emplace(db_id, db_name);
-        }
-
         LibPqConnectionPtr conn = nullptr;
         if (check_exists) {
             // check if the database already exists in the fdw
             // flag is set if coming from redis callback for adding db
             {
-                std::shared_lock shared_lock(_db_mutex);
-                if (_db_xid_map.contains(db_id)) {
+                std::shared_lock shared_lock(_db_name_mutex);
+                if (_db_name_map.contains(db_id)) {
                     LOG_INFO("Database {} already exists in the fdw", db_name);
                     return;
                 }
             }
 
-            // looks like it exists in xid map, so get a connection and really check
+            // NOTE: I think it is no longer needed
+            // looks like it does not exist in database name map, so get a connection and really check
             conn = _get_fdw_connection(std::nullopt, "template1");
             std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
             conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
@@ -1830,15 +1845,7 @@ namespace springtail::pg_fdw {
                 return;
             }
             conn->clear();
-
-            {
-                // remove from xid map
-                std::unique_lock unique_lock(_db_mutex);
-                _db_xid_map.erase(db_id);
-            }
-        }
-
-        if (!conn) {
+        } else {
             conn = _get_fdw_connection(std::nullopt, "template1");
         }
 
@@ -1848,19 +1855,17 @@ namespace springtail::pg_fdw {
 
         // create schemas
         _create_schemas(db_id, db_name);
+
+        {
+            std::unique_lock lock(_db_name_mutex);
+            _db_name_map.emplace(db_id, db_name);
+        }
     }
 
     void
     PgDDLMgr::_remove_replicated_database(uint64_t db_id)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        {
-            std::shared_lock shared_lock(_db_mutex);
-            if (!_db_xid_map.contains(db_id)) {
-                return;
-            }
-        }
-
         std::string db_name;
         {
             std::unique_lock lock(_db_name_mutex);
@@ -1871,6 +1876,8 @@ namespace springtail::pg_fdw {
             db_name = it->second;
             _db_name_map.erase(it);
         }
+
+        RedisDDL::get_instance()->clear_ddls(db_id);
 
         // drop database
         LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
@@ -1890,7 +1897,6 @@ namespace springtail::pg_fdw {
             std::unique_lock conn_lock(_fdw_conn_cache_mutex);
             _fdw_conn_cache.evict(db_id);
         }
-        RedisDDL::get_instance()->clear_ddls(db_id);
     }
 
     std::string
