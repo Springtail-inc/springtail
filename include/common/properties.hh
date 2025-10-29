@@ -159,7 +159,13 @@ namespace springtail {
 
         /** Helper to get set of FDW ids from Redis */
         static inline std::vector<std::string> get_fdw_ids(const std::string &state=std::string{FDW_STATE_RUNNING}) {
-            return get_instance()->_get_fdw_ids(state);
+            CHECK(!state.empty()) << "FDW state must not be empty";
+            return get_instance()->_get_fdw_ids(std::vector<std::string>{state});
+        }
+
+        /** Helper to get set of FDW ids from Redis matching any of the given states */
+        static inline std::vector<std::string> get_fdw_ids(const std::vector<std::string> &states) {
+            return get_instance()->_get_fdw_ids(states);
         }
 
         /** Helper to get db config for given database */
@@ -392,12 +398,12 @@ namespace springtail {
          */
         uint64_t _get_db_id(const std::string &db_name);
 
-         /**
-         * @brief Internal get fdw ids
-         * @param state - fdw state filter
+        /**
+         * @brief Internal get fdw ids matching any of the given states
+         * @param states - vector of fdw states to match (empty vector returns all FDWs)
          * @return std::vector<std::string>
          */
-        std::vector<std::string> _get_fdw_ids(const std::string &state);
+        std::vector<std::string> _get_fdw_ids(const std::vector<std::string> &states);
 
         /**
          * @brief Internal get database config for the given database id

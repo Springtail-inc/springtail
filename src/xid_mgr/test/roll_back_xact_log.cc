@@ -50,7 +50,7 @@ main(int argc, char **argv)
 
     std::filesystem::path db_path = base_dir + "/" + std::to_string(db_id);
 
-    PgXactLogWriter::set_last_xid_in_storage(db_path, xid, false);
+    (void)PgXactLogWriter::set_last_xid_in_storage(db_path, xid, false);
 
     // verify xid logs
     PgXactLogReader reader(db_path);
