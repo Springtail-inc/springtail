@@ -144,8 +144,8 @@ XidMgrServer::_find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &
         // this will sanitize existing logs for recovery, if there are any records at the end with
         // real_commit set to false, it will remove those, so that the log can be written from
         // the last real commit
-        PgXactLogWriter::set_last_xid_in_storage(_base_path / std::to_string(db_id), std::numeric_limits<uint64_t>::max(), _archive_logs);
-        auto result = _xact_log_data.emplace(std::piecewise_construct, std::forward_as_tuple(db_id), std::forward_as_tuple(db_id, _base_path));
+        uint64_t recovered_xid = PgXactLogWriter::set_last_xid_in_storage(_base_path / std::to_string(db_id), std::numeric_limits<uint64_t>::max(), _archive_logs);
+        auto result = _xact_log_data.emplace(std::piecewise_construct, std::forward_as_tuple(db_id), std::forward_as_tuple(db_id, _base_path, recovered_xid));
         it = result.first;
         write_lock.unlock();
 
