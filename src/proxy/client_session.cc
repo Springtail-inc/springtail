@@ -528,7 +528,7 @@ namespace springtail::pg_proxy {
         ClientSessionPtr self = shared_from_this();
 
         // Callback from Session::_handle_error()
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Client session shutting down", _id);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Client session shutting down (socket = {})", _id, _connection->get_socket());
 
         // first close connection and remove from server poll list
         // this removes all associated sockets from this session

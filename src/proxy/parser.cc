@@ -178,6 +178,11 @@ namespace springtail::pg_proxy {
     bool
     Parser::_is_function_readonly_safe(const std::string &funcname)
     {
+        #ifndef NDEBUG
+        if (funcname == "inet_server_addr") {
+            return true;
+        }
+        #endif
         if (funcname.starts_with("pg_") || funcname.starts_with("inet_") ||
             funcname.starts_with("has_") || funcname.starts_with("acl_") ||
             funcname.starts_with("to_reg") || funcname.starts_with("txid_") ||
