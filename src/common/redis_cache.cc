@@ -481,6 +481,13 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
 }
 
 void
+RedisCache::set_hash_value_in_redis(const std::string &hash_name, const std::string &key, const nlohmann::json &value)
+{
+    std::string full_hash_name = fmt::format("{}:{}", _instance_id, hash_name);
+    _client->hset(full_hash_name, key, _json_to_string(value));
+}
+
+void
 RedisCache::add_callback(const std::string &path, const RedisCacheChangeCallbackPtr &cb)
 {
     std::deque<std::string> json_path_queue = {};

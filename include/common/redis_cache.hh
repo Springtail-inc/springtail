@@ -156,6 +156,16 @@ namespace springtail {
         bool set_value(const std::string &path, const nlohmann::json &value);
 
         /**
+         * @brief Set hash value directly in redis while bypassing setting the value in redis hash.
+         *      The change will be absorbed into the cache through notification callback.
+         *
+         * @param hash_name - name of the hash without instance prefix
+         * @param key - key inside the
+         * @param value - value for the given key
+         */
+        void set_hash_value_in_redis(const std::string &hash_name, const std::string &key, const nlohmann::json &value);
+
+        /**
          * @brief Add callback for the specified path notifications
          *
          * @param path - path into json document

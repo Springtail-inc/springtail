@@ -1,16 +1,9 @@
 #pragma once
 
-#include <cstdint>
-#include <map>
-#include <mutex>
-
 #include <common/init.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/committer.hh>
-#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
-#include <pg_log_mgr/index_requests_manager.hh>
-#include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -23,6 +16,21 @@ namespace springtail::pg_log_mgr {
          */
         void init();
 
+        /**
+         * @brief Cleanup database directory for given database id
+         *
+         * @param db_id database id
+         */
+        void
+        cleanup_database_dir(uint64_t db_id);
+
+        /**
+         * @brief Get this object relevant data in json format.
+         *
+         * @return nlohmann::json
+         */
+        nlohmann::json get_stats();
+
     private:
         friend class Singleton<PgLogCoordinator>;
         PgLogCoordinator();
@@ -30,7 +38,9 @@ namespace springtail::pg_log_mgr {
 
         std::mutex _mutex;                         ///< mutex for _log_mgrs map
         std::map<uint64_t, PgLogMgrPtr> _log_mgrs; ///< map of db_id to log mgr
-        RedisCache::RedisChangeWatcherPtr _cache_watcher; ///> redis cache callback object
+        std::map<uint64_t, std::string> _db_states; ///< map of db_id to db state
+        RedisCache::RedisChangeWatcherPtr _db_id_watcher; ///> redis cache callback object for db list change
+        RedisCache::RedisChangeWatcherPtr _db_state_watcher; ///> redis cache callback object for db ids change
         std::shared_ptr<committer::Committer> _committer;
         std::thread _committer_thread;
         std::string _repl_log;                     ///< common part of replication log path

@@ -4,11 +4,13 @@
 #include <storage/mutable_btree.hh>
 
 namespace springtail {
-    MutableBTree::MutableBTree(const std::filesystem::path &file,
+    MutableBTree::MutableBTree(uint64_t database_id,
+                               const std::filesystem::path &file,
                                const std::vector<std::string> &keys,
                                ExtentSchemaPtr schema,
                                uint64_t xid, uint64_t max_extent_size)
-        : _file(file),
+        : _database_id(database_id),
+          _file(file),
           _sort_keys(keys),
           _xid(xid),
           _max_extent_size(max_extent_size),
@@ -31,7 +33,7 @@ namespace springtail {
         CHECK_EQ(_root, nullptr);
 
         // construct an empty extent
-        auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid, constant::LATEST_XID, _max_extent_size);
+        auto cache_page = StorageCache::get_instance()->get(_database_id, _file, constant::UNKNOWN_EXTENT, _xid, constant::LATEST_XID, _max_extent_size);
 
         // create an empty root
         _root = std::make_shared<Page>(this, std::move(cache_page), _leaf_schema);
@@ -531,7 +533,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         auto extent_id = _cache_page->flush_empty(header);
 
         // XXX how to handle the XIDs?
-        auto cache_page = StorageCache::get_instance()->get(_btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+        auto cache_page = StorageCache::get_instance()->get(_btree->_database_id, _btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
         auto page = std::make_shared<Page>(_btree, extent_id);
         page->set_cache_page(std::move(cache_page), _schema);
 
@@ -546,7 +548,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         PageVector new_pages;
         for (auto id : ids) {
             // XXX how to handle XIDs?
-            auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+            auto cache_page = StorageCache::get_instance()->get(_btree->_database_id, _btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
             // XXX need a better way to create these combined tuples
             ValueTuplePtr value_key;
@@ -824,7 +826,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // get the backing page
         // XXX how should we handle the access XID here??
-        auto cache_page = StorageCache::get_instance()->get(_file, page->extent_id, _xid, constant::LATEST_XID, _max_extent_size);
+        auto cache_page = StorageCache::get_instance()->get(_database_id, _file, page->extent_id, _xid, constant::LATEST_XID, _max_extent_size);
 
         // determine the schema for this page
         ExtentSchemaPtr schema = (cache_page->header().type.is_branch())
@@ -988,7 +990,7 @@ MutableBTree::_async_flush_finish(PagePtr page,
     PageVector new_pages;
     for (auto id : ids) {
         // XXX how to handle XIDs?
-        auto cache_page = StorageCache::get_instance()->get(_file, id, _xid, constant::LATEST_XID, _max_extent_size);
+        auto cache_page = StorageCache::get_instance()->get(_database_id, _file, id, _xid, constant::LATEST_XID, _max_extent_size);
 
         // XXX need a better way to create these combined tuples
         ValueTuplePtr value_key;
@@ -1169,7 +1171,7 @@ MutableBTree::_async_flush_finish(PagePtr page,
         PagePtr new_root;
         if (new_pages.size() > 1) {
             // construct the new root's extent
-            auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid, constant::LATEST_XID, _max_extent_size);
+            auto cache_page = StorageCache::get_instance()->get(_database_id, _file, constant::UNKNOWN_EXTENT, _xid, constant::LATEST_XID, _max_extent_size);
 
             // add pointers to the new root for each new page
             for (const PagePtr &child : new_pages) {

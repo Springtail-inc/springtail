@@ -40,6 +40,10 @@ XidMgrServer::XidMgrServer() : Singleton<XidMgrServer>(ServiceId::XidMgrServerId
 
     _archive_logs = Json::get_or<bool>(json, "archive_logs", false);
 
+    // Just for initialization, otherwise it might lock up a unit test because of a race condition
+    // between shutdown sequence and XID manager thread instantiating RedisDDL for the first time.
+    RedisDDL::get_instance();
+
     _startup();
 }
 
@@ -144,6 +148,18 @@ XidMgrServer::cleanup(uint64_t db_id, uint64_t min_timestamp)
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.cleanup(min_timestamp, _archive_logs);
+}
+
+void
+XidMgrServer::cleanup(uint64_t db_id)
+{
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Cleaning up database {}", db_id);
+    std::unique_lock read_lock(_mutex);
+    _xact_log_data.erase(db_id);
+
+    // Remove database directory and everything inside it
+    std::filesystem::path path = _base_path / std::to_string(db_id);
+    fs::remove_dir(path);
 }
 
 std::map<uint64_t, XidMgrServer::DBXactLogData>::iterator

@@ -138,6 +138,9 @@ OpenTelemetry::_init_metrics(const ::opentelemetry::sdk::resource::Resource& res
         options.url = fmt::format("{}:{}/v1/metrics", *_host, *_port);
         LOG_INFO("Enabling OTel metrics over HTTP: {}", options.url);
     }
+    // Configure Delta temporality for histograms to reset after each export
+    // This prevents unbounded accumulation of histogram bucket counts
+    options.aggregation_temporality = opentelemetry::exporter::otlp::PreferredAggregationTemporality::kDelta;
     ::opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
     if (_metrics_export_interval_millis) {
         reader_options.export_interval_millis = std::chrono::milliseconds(*_metrics_export_interval_millis);

@@ -79,6 +79,13 @@ public:
     void cleanup(uint64_t db_id, uint64_t min_timestamp);
 
     /**
+     * @brief Cleanup the whole database from xid manager. Only used for database removal
+     *
+     * @param db_id database id
+     */
+    void cleanup(uint64_t db_id);
+
+    /**
      * @brief Set clean up flag so that for cleaning up xid files.
      *
      */

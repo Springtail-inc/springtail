@@ -1,18 +1,10 @@
-#include <common/constants.hh>
-#include <common/coordinator.hh>
-#include <common/logging.hh>
-#include <pg_log_mgr/pg_redis_xact.hh>
-#include <proto/pg_copy_table.pb.h>
-#include <chrono>
-#include <filesystem>
-#include <memory>
+#include <common/time_trace.hh>
+#include <pg_log_mgr/committer.hh>
 #include <redis/db_state_change.hh>
+#include <storage/vacuumer.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>
-
-#include <pg_log_mgr/committer.hh>
-#include <storage/vacuumer.hh>
 
 namespace springtail::committer {
 
@@ -24,6 +16,14 @@ namespace springtail::committer {
         auto it =
             std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
         return it != meta->roots.end();
+    }
+
+    void
+    Committer::remove_db(uint64_t db_id)
+    {
+        _indexer->remove_db(db_id);
+        std::unique_lock lock(_main_mutex);
+        _completed_xids.erase(db_id);
     }
 
     void
@@ -71,6 +71,8 @@ namespace springtail::committer {
 
             // clear batch state from previous iteration
             _batch_state.clear();
+
+            std::unique_lock lock(_main_mutex);
 
             // process all messages, grouping by db_id and handling special cases
             // use iterator-based loop to allow peeking ahead for batch boundaries
@@ -327,6 +329,22 @@ namespace springtail::committer {
 
             // evict from write cache
             WriteCacheServer::get_instance()->evict_xid(db_id, xid);
+
+            // Record per-transaction latency metrics for this XID
+            auto metadata_it = batch.xid_metadata.find(xid);
+            if (metadata_it != batch.xid_metadata.end()) {
+                auto now = std::chrono::steady_clock::now();
+                auto finalize_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - metadata_it->second.local_commit_ts);
+                auto transaction_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - metadata_it->second.local_begin_ts);
+
+                open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, finalize_duration.count());
+                open_telemetry::OpenTelemetry::get_instance()->record_histogram(TRANSACTION_LATENCIES, transaction_duration.count());
+
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "XID {} latencies: transaction={}ms, finalize={}ms",
+                        xid, transaction_duration.count(), finalize_duration.count());
+            }
 
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
         }
@@ -718,6 +736,10 @@ namespace springtail::committer {
             // All operations in this batch will be applied at the final XID
             CHECK_GT(batch.final_xid, 0);
             table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid);
+
+            // Initialize write cache schema once for this table (performance optimization)
+            table->initialize_wc_schema();
+
             batch.table_cache[tid] = table;
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, batch.final_xid);
         }
@@ -728,20 +750,19 @@ namespace springtail::committer {
         time_trace::Trace process_extents_trace;
         TIME_TRACE_START(process_extents_trace);
 
-        TxCounters tx_counters;
-
         while (true) {
             // XXX would be better if we could perform an async prefetch to reduce IO latency
             WriteCacheTableSet::Metadata md;
             auto &&extent_list = WriteCacheServer::get_instance()->get_extents(db_id, tid, xid, 1000, extent_cursor, md);
-            // TODO: this should probably be done after we verified that extent_list is not empty
-            if (!min_md || md.pg_commit_ts < min_md->pg_commit_ts) {
-                min_md = md;
-            }
 
             // if we didn't receive any extents then we're done
             if (extent_list.empty()) {
                 break;
+            }
+
+            // Track the earliest metadata (first extent processed)
+            if (!min_md || md.pg_commit_ts < min_md->pg_commit_ts) {
+                min_md = md;
             }
 
 
@@ -752,7 +773,7 @@ namespace springtail::committer {
                 Coordinator::mark_alive(keep_alive);
 
                 // process the extent
-                tx_counters += _process_extent(db_id, tid, table, wc_extent);
+                _process_extent(db_id, tid, table, wc_extent);
             }
         }
         TIME_TRACE_STOP(process_extents_trace);
@@ -761,72 +782,38 @@ namespace springtail::committer {
         // Note: finalize() and update_roots() are now deferred until _commit_batch()
         // This allows us to batch multiple XIDs' mutations to the same table before finalizing
 
-        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_MESSAGES, tx_counters.messages);
-        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_INSERTS, tx_counters.inserts);
-        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_DELETES, tx_counters.deletes);
-        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_UPDATES, tx_counters.updates);
-        open_telemetry::OpenTelemetry::get_instance()->record_histogram(COMMITTER_TXN_TRUNCATES, tx_counters.truncates);
-
+        // Update the batch's per-XID metadata (used for per-transaction metrics in _commit_batch)
+        // Track the earliest metadata for this XID across all its tables
         if (min_md) {
-            // log how long it took to process this table
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now() - min_md->pg_commit_ts.to_system_time());
-            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processed table {} in {} milliseconds", tid, duration.count());
-
-            auto now = std::chrono::steady_clock::now();
-            auto duration1 = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    now - min_md->local_commit_ts);
-            auto duration2 = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    now - min_md->local_begin_ts);
-
-            open_telemetry::OpenTelemetry::get_instance()->record_histogram(WRITE_CACHE_FINALIZE_LATENCIES, duration1.count());
-            open_telemetry::OpenTelemetry::get_instance()->record_histogram(TRANSACTION_LATENCIES, duration2.count());
-
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG2, "Transaction latency: xid={}, transaction_latency={}, finalize_latency={}",
-                    xid, duration2, duration1);
+            auto it = batch.xid_metadata.find(xid);
+            if (it == batch.xid_metadata.end()) {
+                batch.xid_metadata[xid] = *min_md;
+            } else if (min_md->pg_commit_ts < it->second.pg_commit_ts) {
+                batch.xid_metadata[xid] = *min_md;
+            }
         }
 
     }
 
-    Committer::TxCounters
+    void
     Committer::_process_extent(uint64_t db_id,
                                uint64_t tid,
                                MutableTablePtr table,
                                const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent)
     {
-        TxCounters tx_counters;
-
-        // get the schema at the given XID/LSN
-        // note: we are guaranteed that the entire batch will utilize the same schema
-        XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
-        auto schema = TableMgr::get_instance()->get_extent_schema(db_id, tid, xid);
-
-        auto sort_keys = schema->get_sort_keys();
-        sort_keys.push_back("__springtail_lsn");
-
-        auto columns = schema->column_order();
-        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "xid={}:{}, columns={}",
-                            xid.xid, xid.lsn,
-                            common::join_string(",", columns.begin(), columns.end()));
-
-        SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
-        SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
-        std::vector<SchemaColumn> new_columns{op, lsn};
-
-        auto wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
+        // Get pre-computed schema and fields from table (already initialized in _process_table)
+        auto wc_schema = table->wc_schema();
+        auto op_f = table->wc_op_field();
+        auto wc_fields = table->wc_fields();
+        auto wc_key_fields = table->wc_key_fields();
 
         time_trace::Trace process_extent_trace;
         TIME_TRACE_START(process_extent_trace);
 
         // Get the extent from the write cache index
+        XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
         Extent extent(*wc_extent->data);
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "xid={} rows={}", xid.xid, extent.row_count());
-
-        // process the rows
-        auto op_f = wc_schema->get_field("__springtail_op");
-        auto wc_fields = wc_schema->get_fields(columns);
-        auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
 
         TIME_TRACE_STOP(process_extent_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_write_extent-xid_{}", xid.xid), process_extent_trace);
@@ -837,14 +824,12 @@ namespace springtail::committer {
         //     which must always appear first in a batch (although not necessarily first in
         //     the transaction).
         for (auto &row : extent) {
-            ++tx_counters.messages;
             time_trace::Trace process_row_trace;
             TIME_TRACE_START(process_row_trace);
             uint8_t op = op_f->get_uint8(&row);
             switch (op) {
             case INSERT:
                 {
-                    ++tx_counters.inserts;
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, constant::UNKNOWN_EXTENT);
@@ -852,7 +837,6 @@ namespace springtail::committer {
                 }
             case UPDATE:
                 {
-                    ++tx_counters.updates;
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "UPDATE value={}", tuple->to_string());
                     table->update(tuple, constant::UNKNOWN_EXTENT);
@@ -860,7 +844,6 @@ namespace springtail::committer {
                 }
             case DELETE:
                 {
-                    ++tx_counters.deletes;
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
                         auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
@@ -876,7 +859,6 @@ namespace springtail::committer {
 
             case TRUNCATE:
                 {
-                    ++tx_counters.truncates;
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "TRUNCATE");
                     // note: this should always be the first operation within an extent
                     table->truncate();
@@ -891,7 +873,6 @@ namespace springtail::committer {
             TIME_TRACE_STOP(process_row_trace);
             TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_row-xid_{}", xid.xid), process_row_trace);
         }
-        return tx_counters;
     }
 
     // ---------------- TableSyncProcessor ----------------
