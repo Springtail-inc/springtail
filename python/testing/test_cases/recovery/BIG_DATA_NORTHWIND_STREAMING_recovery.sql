@@ -1,6 +1,5 @@
 ## metadata
 ### autocommit false
-### sync_timeout 2000
 ## test
 
 -- alter session for streaming

@@ -153,7 +153,7 @@ namespace indexer_helpers {
     /**
      * Handler that does the secondary index mutations
      * @param row   Extent row holding the content
-     * @param ctx   pointer to an IndexMutationContext
+     * @param ctx   Generic pointer to an IndexMutationContext
      */
     template<IndexOperation op>
     static void mutation_handler(const Extent::Row& row, void* ctx) {
@@ -1102,8 +1102,11 @@ namespace indexer_helpers {
                                     TuplePtr value)
     {
 
+        // Create a context to passed to cache and so the same will be
+        // passed back to the mutation_handler
         indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes };
 
+        // Find and invoke appropriate mutations in the cache
         if constexpr (m_type == MutationType::INSERT) {
             page->insert(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Insert>, &ctx);
 
@@ -1125,6 +1128,7 @@ namespace indexer_helpers {
             return page->try_remove_by_scan(value, _schema, &indexer_helpers::mutation_handler<indexer_helpers::IndexOperation::Remove>, &ctx);
 
         } else {
+            // Shouldn't reach here ideally
             CHECK(false);
         }
     }
@@ -1224,9 +1228,6 @@ namespace indexer_helpers {
     bool
     MutableTable::_upsert_direct(TuplePtr value, uint64_t extent_id)
     {
-        // Callback to insert entries into secondary indexes
-        // XXX: Need upsert equivalent callback
-
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
                 get_max_extent_size(),
@@ -1362,6 +1363,7 @@ namespace indexer_helpers {
         }
     }
 
+    // XXX: SPR-1082: update-only-affected-indexes-during-updates
     std::vector<uint64_t>
     MutableTable::_find_updated_secondary_indexes(Extent::Row existing_row, TuplePtr value)
     {
@@ -1530,12 +1532,8 @@ MutableTable::_get_extent_id(TuplePtr search_key) {
             BTreePtr btree, const BTree::Iterator &btree_i,
             ExtentSchemaPtr schema )
         :
-            Tracker{table, btree, btree_i},
-            _cache_size{Json::get_or<uint64_t>(Properties::get(Properties::STORAGE_CONFIG), "page_cache_size", 16384)},
-            _eid_buffer{_cache_size/2}
+            Tracker{table, btree, btree_i}
     {
-        DCHECK(_cache_size);
-
         _look_aside_key_fields = std::make_shared<FieldArray>(1);
         _extent_id_f = table->look_aside_schema()->get_field(constant::INDEX_EID_FIELD);
         _row_id_f = table->look_aside_schema()->get_field(constant::INDEX_RID_FIELD);
@@ -1549,7 +1547,6 @@ MutableTable::_get_extent_id(TuplePtr search_key) {
     {
         ++_btree_i;
         if (_btree_i == _btree->end()) {
-            _page_map.clear();
             return;
         }
         update_page();
@@ -1563,8 +1560,6 @@ MutableTable::_get_extent_id(TuplePtr search_key) {
     void Table::Iterator::Secondary::update_page()
     {
         DCHECK(_btree_i != _btree->end());
-        DCHECK(_page_map.size() <= _cache_size);
-        DCHECK(_eid_buffer.size() <= _cache_size);
         auto &&index_row = *_btree_i;
 
         // Get the internal_row_id from the index row first
@@ -1588,36 +1583,9 @@ MutableTable::_get_extent_id(TuplePtr search_key) {
         eid = _extent_id_f->get_uint64(&row);
         row_id = _row_id_f->get_uint32(&row);
 
-        if (_page_map.empty() || _extent_id != eid) {
-            _extent_id = eid;
-            auto it = _page_map.find(eid);
-            if (it == _page_map.end()) {
-                TIME_TRACE_SCOPED(time_trace::traces, table_iterator_read_page);
-
-                // check if need to free space in the page map
-                if (_page_map.size() == _cache_size) {
-                    DCHECK(!_eid_buffer.empty());
-                    auto cached_eid = _eid_buffer.next();
-                    auto erase_it = _page_map.find(cached_eid);
-                    DCHECK(erase_it != _page_map.end());
-                    _page_map.erase(erase_it);
-                }
-
-                auto page = _table->_read_page(_extent_id);
-                //TODO: is this correct?
-                DCHECK(page->extent_count() == 1);
-
-                auto begin_it = page->begin();
-                PageMapItem pi{std::move(page), std::move(begin_it)};
-                auto [inserted_it, _] = _page_map.try_emplace(_extent_id, std::move(pi));
-                _eid_buffer.put(_extent_id);
-                _page_i_begin = inserted_it->second.it_begin;
-            } else {
-                _page_i_begin = it->second.it_begin;
-            }
-        }
-
-        _page_i = _page_i_begin;
+        auto page = _table->_read_page(eid);
+        DCHECK(page->extent_count() == 1);
+        _page_i = page->begin();
         _page_i += row_id;
     }
 

@@ -2033,6 +2033,9 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         // read the extent
         auto handle = IOMgr::get_instance()->open(file, IOMgr::READ, true);
         auto response = handle->read(extent_id);
+        DCHECK(response->is_success()) << "Failed to read extent " << extent_id
+                                     << " from file " << file.native()
+                                     << ", status: " << response->status;
         auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id,
                                                     response->next_offset - response->offset);
 

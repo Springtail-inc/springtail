@@ -675,26 +675,20 @@ namespace springtail::committer {
         // find the coordinator keep-alive
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
         auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, thread_name);
+        auto& batch = _batch_state[db_id];
 
-        if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid})) {
+        if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid}) ||
+            !sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{batch.final_xid})) {
             // This could happen if the table is dropped in the same transaction
             // BEGIN/INSERT/DROP/COMMIT
             // TODO: another way to handle the case would be to drop the table mutation
             // records from the Batch object in the log reader. Marking this as TODO
             // just to keep the question open for now.
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access XID: {} @ {}", tid, xid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access/target XID: {} @ {} || {}", tid, xid, batch.final_xid);
             return;
         }
 
         // get or create the mutable table object from batch cache
-        auto& batch = _batch_state[db_id];
-        if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{batch.final_xid})) {
-            // This could happen if the table is dropped in the same transaction
-            // BEGIN/INSERT/DROP/COMMIT
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at target XID: {} @ {}", tid, batch.final_xid);
-            return;
-        }
-
         MutableTablePtr table;
 
         auto table_it = batch.table_cache.find(tid);

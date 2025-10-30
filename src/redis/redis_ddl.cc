@@ -106,6 +106,8 @@ namespace springtail {
                             uint64_t xid,
                             nlohmann::json ddls)
     {
+        LOG_INFO("RedisDDL::precommit_ddl: db_id={}, xid={}, ddls={}", db_id, xid, ddls.dump());
+
         // Move DDLs to Redis pre-commit phase for crash recovery
         _precommit(*_redis, db_id, xid, ddls);
 
@@ -117,6 +119,8 @@ namespace springtail {
     RedisDDL::commit_ddl(uint64_t db_id,
                          uint64_t xid)
     {
+        LOG_INFO("RedisDDL::commit_ddl: db_id={}, xid={}", db_id, xid);
+
         uint64_t db_instance_id = Properties::get_db_instance_id();
         std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT, db_instance_id);
 
@@ -186,8 +190,8 @@ namespace springtail {
                 }
             }
 
-            // get the set of FDWs
-            std::vector<std::string> fdw_ids = Properties::get_fdw_ids();
+            // get the set of FDWs in both initialize and running states
+            std::vector<std::string> fdw_ids = Properties::get_fdw_ids(std::vector<std::string>{Properties::FDW_STATE_INITIALIZE, Properties::FDW_STATE_RUNNING});
 
             for (const std::string &fdw_id : fdw_ids) {
                 std::string fdw_key = fmt::format(redis::QUEUE_DDL_FDW, db_instance_id, fdw_id);
