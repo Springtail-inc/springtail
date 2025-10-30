@@ -65,10 +65,10 @@ class ShmCache
 public:
 
     /**
-     * In order for get_committed_xid() to return a valid XID, update_committed_xid() must
-     * be called at least once every XID_KEEP_ALIVE_PERIOD.
+     * In order for get_committed_xid() to return a valid XID, update_committed_xid() 
+     * or keep_alive() must be called at least once every XID_KEEP_ALIVE_PERIOD.
      */
-    static constexpr std::chrono::duration XID_KEEP_ALIVE_PERIOD = std::chrono::milliseconds(6);
+    static constexpr std::chrono::duration XID_KEEP_ALIVE_PERIOD = std::chrono::milliseconds(60);
 
     /*
      * Create a new cache with the given name. If a cache with
@@ -137,8 +137,14 @@ public:
      * This will update committed XID and set _xid_committed_time to now().
      * @param db The DB ID.
      * @param xid The XID.
+     * @param has_schema_changes Indicates if the XID includes schema changes. 
      */
-    void update_committed_xid(DbId db, Xid xid);
+    void update_committed_xid(DbId db, Xid xid, bool has_schema_changes);
+
+    /** 
+     * Cleanup committed history of schema changes
+     */ 
+    void cleanup_xid_history();
 
     /**
      * This must be called periodically (see XID_KEEP_ALIVE_PERIOD).
@@ -147,12 +153,19 @@ public:
     void keep_alive();
 
     /**
+     * Return true if the cache is alive (i.e. keep_alive() has been called
+     * recently enough).
+     */
+    bool is_alive();
+
+    /**
      * Return the last committed Xid if it is up to date or false otherwise.
      * The function will check that now() - _xid_commit_time < XID_KEEP_ALIVE_PERIOD.
+     * @param db The DB ID.
+     * @param schema_xid The last known schema XID.
      */
-    std::optional<Xid> get_committed_xid(DbId db);
+    std::optional<Xid> get_committed_xid(DbId db, Xid schema_xid);
 
-    bool is_alive();
 
     /**
      * Return all tables that are tracked by the cache.
@@ -213,9 +226,18 @@ private:
     // Xid updates
     using Time = std::chrono::time_point<std::chrono::high_resolution_clock>;
     using XidMap = ipc::map<DbId, Xid, std::less<DbId>, Alloc<std::pair<const DbId, Xid>>>;
-
     Time* _xid_commit_time;
     XidMap* _committed_xid_map;
+
+    struct XidHistoryEntry {
+        Xid schema_xid;
+        Xid latest_committed_xid;
+    };
+    using XidHistory = ipc::vector<XidHistoryEntry, Alloc<XidHistoryEntry>>;
+    using XidHistoryMap = ipc::map<DbId, XidHistory, std::less<DbId>, Alloc<std::pair<const DbId, XidHistory>>>;
+
+    XidHistory::allocator_type _history_alloc;
+    XidHistoryMap* _xid_history_map;
 };
 
 }  // namespace springtail::sys_tbl_mgr

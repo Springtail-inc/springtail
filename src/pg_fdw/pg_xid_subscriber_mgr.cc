@@ -7,6 +7,7 @@
 #include <xid_mgr/xid_mgr_subscriber.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <common/coordinator.hh>
+#include <redis/redis_ddl.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
@@ -49,12 +50,12 @@ PgXidSubscriberMgr::task(std::stop_token st)
     std::atomic<bool> connected = false;
 
     // XID subscriber callbacks
-    auto on_push = [this](DbId db, uint64_t xid) {
+    auto on_push = [this](DbId db, uint64_t xid, bool has_schema_changes) {
         // when we get an XID push notification, we pass it to the workers
         // and return immediately. A worker calls get_roots() that will
         // attempt to populate the cache.
         LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {}", db, xid);
-        _cache->update_committed_xid(db, xid);
+        _cache->update_committed_xid(db, xid, has_schema_changes);
         _enqueue_populate_job(db, xid);
     };
     auto on_disconnect = [&connected]() {
@@ -97,6 +98,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         }
         std::this_thread::sleep_for(loop_time_period);
         _cache->keep_alive();
+//        [[maybe_unused]] uint64_t min_schema_xid = RedisDDL::get_instance()->min_schema_xid(1);
     }
     subscriber.reset();
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
