@@ -70,7 +70,7 @@ namespace springtail::pg_log_mgr {
         static constexpr char const * const FSYNC_WORKER_ID = "fsync_{}";
         static constexpr char const * const XACT_WORKER_ID = "xact_{}";
 
-        static constexpr int QUEUE_SIZE = 256;
+        static constexpr int QUEUE_SIZE = 256 * 1024;
 
         /** minimum size for log rollover */
         static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;

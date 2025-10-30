@@ -893,7 +893,6 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::enqueue_msg(PgMsgPtr msg)
     {
-        open_telemetry::OpenTelemetry::get_instance()->record_histogram(INGEST_MSG_QUEUE_SIZE, _msg_queue.size());
         _msg_queue.push(msg);
     }
 

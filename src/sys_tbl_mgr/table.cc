@@ -694,6 +694,33 @@ namespace indexer_helpers {
     }
 
     void
+    MutableTable::initialize_wc_schema()
+    {
+        // Use the table's existing schema (_schema is already set in constructor)
+        auto schema = _schema;
+
+        // Build sort keys with __springtail_lsn
+        auto sort_keys = schema->get_sort_keys();
+        sort_keys.push_back("__springtail_lsn");
+
+        // Get column order
+        auto columns = schema->column_order();
+
+        // Create new columns for write cache
+        SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
+        SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
+        std::vector<SchemaColumn> new_columns{op, lsn};
+
+        // Create write cache schema
+        _wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
+
+        // Cache field accessors
+        _wc_op_field = _wc_schema->get_field("__springtail_op");
+        _wc_fields = _wc_schema->get_fields(columns);
+        _wc_key_fields = _wc_schema->get_fields(schema->get_sort_keys());
+    }
+
+    void
     MutableTable::insert(TuplePtr value,
                          uint64_t extent_id)
     {

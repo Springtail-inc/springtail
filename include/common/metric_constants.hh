@@ -39,14 +39,7 @@ namespace springtail {
     constexpr std::string_view WRITE_CACHE_FINALIZE_LATENCIES = "write_cache_finalize_latencies";
 
     constexpr std::string_view LOG_READER_QUEUE_SIZE = "log_reader_queue_size";
-    constexpr std::string_view INGEST_MSG_QUEUE_SIZE = "ingest_msg_queue_size";
     constexpr std::string_view COMMITTER_QUEUE_SIZE = "committer_queue_size";
-
-    constexpr std::string_view COMMITTER_TXN_MESSAGES = "committer_messages_per_txn";
-    constexpr std::string_view COMMITTER_TXN_INSERTS = "committer_inserts";
-    constexpr std::string_view COMMITTER_TXN_DELETES = "committer_deletes";
-    constexpr std::string_view COMMITTER_TXN_UPDATES = "committer_updates";
-    constexpr std::string_view COMMITTER_TXN_TRUNCATES = "committer_trancates";
 
     // sys_tbl_mgr counter metrics
     constexpr std::string_view SYS_TBL_MGR_CREATE_INDEX_CALLS = "sys_tbl_mgr_create_index_calls";
@@ -124,11 +117,6 @@ namespace springtail {
 
         // histogram count metrics
         inline const std::vector<std::pair<std::string_view, std::string_view>> _histogram_count_metrics = {
-            {COMMITTER_TXN_MESSAGES, "Messages per transaction"},
-            {COMMITTER_TXN_INSERTS, "INSERT counter"},
-            {COMMITTER_TXN_DELETES, "DELETE counter"},
-            {COMMITTER_TXN_UPDATES, "UPDATE counter"},
-            {COMMITTER_TXN_TRUNCATES, "TRUNCATE counter"},
         };
 
         // histogram unitless metrics (that are not time or count based)
@@ -139,7 +127,6 @@ namespace springtail {
             {LOG_READER_STREAM_COMMIT_FREQ, "Stream commit frequency"},
 
             {LOG_READER_QUEUE_SIZE, "Log reader queue size"},
-            {INGEST_MSG_QUEUE_SIZE, "Message queue size"},
             {COMMITTER_QUEUE_SIZE, "Committer work queue size"},
         };
 

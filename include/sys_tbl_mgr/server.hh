@@ -829,6 +829,65 @@ private:
     using DbId = uint64_t;
     std::map<DbId, TableIndexMap> _index_cache;
 
+    // CACHE FOR TABLE EXISTENCE
+
+    /**
+     * Represents one lifecycle range for a table.
+     * A table can have multiple ranges if it's been dropped and recreated (e.g., during resync).
+     * Range is [start_xid_lsn, end_xid_lsn) - start is inclusive, end is exclusive.
+     */
+    struct TableExistenceRange {
+        XidLsn start_xid_lsn;  ///< First XID/LSN where table exists (inclusive)
+        XidLsn end_xid_lsn;    ///< First XID/LSN where table no longer exists (exclusive)
+                               ///< Set to LATEST_XID/MAX_LSN if table still exists
+
+        TableExistenceRange() = default;
+        TableExistenceRange(const XidLsn& start, const XidLsn& end)
+            : start_xid_lsn(start), end_xid_lsn(end)
+        {
+        }
+    };
+
+    /**
+     * Vector of existence ranges for a table, sorted by start_xid_lsn.
+     * Multiple ranges support resync operations where a table is dropped and recreated.
+     */
+    using TableExistenceRanges = std::vector<TableExistenceRange>;
+
+    /**
+     * Persistent cache for table existence.
+     * Maps DB ID -> Table ID -> vector of TableExistenceRange
+     * This cache survives finalize() calls and is protected by _table_existence_cache_mutex.
+     */
+    std::map<uint64_t, std::map<uint64_t, TableExistenceRanges>> _table_existence_cache;
+
+    /**
+     * Dedicated mutex to protect the table existence cache.
+     */
+    boost::shared_mutex _table_existence_cache_mutex;
+
+    /**
+     * Helper function to populate the table existence cache for a specific table.
+     * Scans the TableNames system table to find the first and last entries.
+     * @param db_id The database ID.
+     * @param table_id The table ID.
+     * @return true if the table was found in the system tables, false otherwise.
+     *
+     * Preconditions: Caller must hold boost::unique_lock on _table_existence_cache_mutex AND boost::shared_lock on _read_mutex
+     */
+    bool _populate_table_existence_cache(uint64_t db_id, uint64_t table_id);
+
+    /**
+     * Helper function to check table existence in cache.
+     * @param db_id The database ID.
+     * @param table_id The table ID.
+     * @param xid The XID/LSN to check.
+     * @return std::optional<bool> - true if exists, false if doesn't exist, nullopt if not in cache
+     *
+     * Preconditions: Caller must hold boost::shared_lock on _table_existence_cache_mutex
+     */
+    std::optional<bool> _check_table_existence_cache(uint64_t db_id, uint64_t table_id, const XidLsn& xid);
+
     // Enum cache per DB
     using EnumId = uint64_t;
     using EnumIndex = float;
