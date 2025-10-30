@@ -896,6 +896,23 @@ namespace indexer_helpers {
         }
     }
 
+    std::vector<std::filesystem::path>
+    MutableTable::get_table_files() const
+    {
+        std::vector<std::filesystem::path> r;
+        r.emplace_back(_data_file);
+        r.emplace_back(_primary_index->get_file_path());
+        for (auto &secondary : _secondary_indexes) {
+            r.emplace_back(secondary.second.first->get_file_path());
+        }
+
+        if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
+            r.emplace_back(_table_dir / constant::ROOTS_FILE);
+        }
+
+        return r;
+    }
+
     void
     MutableTable::sync_data_and_indexes()
     {

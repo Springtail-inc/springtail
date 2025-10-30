@@ -352,7 +352,7 @@ namespace {
 
         Vacuumer::get_instance()->commit_expired_extents(_db_id, constant::LATEST_XID);
 
-        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, next_data_xid, true);
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, next_data_xid, true, 0);
 
         // Get the blocks count pre-vacuum
         auto index_file = table_dir.value() / fmt::format(constant::INDEX_FILE, index_id);

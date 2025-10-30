@@ -25,34 +25,42 @@ public:
      * @param db_id database id
      * @param xid xid to commit
      * @param has_schema_changes true if transaction has schema changes
+     * @param timestamp commit timestamp
      * @param tracker WAL progress tracker, this is to synchronize xlog and wal progress
      */
-    void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr tracker = nullptr);
+    void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, 
+            uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker = nullptr);
 
     /**     
      * @brief commit up to and including given xid without writing to xlog
      * @param db_id database id
+     * @param pg_xid Postgres xid
      * @param xid xid to commit
      * @param has_schema_changes true if transaction has schema changes
      * @param real_commit true if this is a real commit
+     * @param timestamp commit timestamp
      * @param tracker WAL progress tracker, this is to synchronize xlog and wal progress
      */
-    void commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit, pg_log_mgr::WalProgressTrackerPtr tracker);
+    void commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit,
+            uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker);
 
     /**
      * @brief Commit xlog entries that were commited with commit_xid_no_xlog and are now ready to be written to xlog
      * @param db_id database id
      * @param xid xid to commit
      */
-    void commit_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid);
-
+    void commit_xlog(uint64_t db_id, uint64_t xid);
 
     /**
      * @brief Record a DDL change without doing a commit.  Used for table sync operations.
      * @param db_id database id
      * @param xid xid to commit
+     * @param has_schema_changes true if transaction has schema changes
+     * @param timestamp commit timestamp
+     * @param tracker WAL progress tracker, this is to synchronize xlog and wal progress
      */
-    void record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, pg_log_mgr::WalProgressTrackerPtr tracker);
+    void record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes,
+            uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker);
 
     /**
      * @brief Get the latest committed xid object
@@ -69,14 +77,6 @@ public:
      * @param min_timestamp minimum timestamp id of xact logs
      */
     void cleanup(uint64_t db_id, uint64_t min_timestamp);
-
-    /**
-     * @brief Rotate database xact log to the new timestamp id
-     *
-     * @param db_id database id
-     * @param timestamp timestamp id
-     */
-    void rotate(uint64_t db_id, uint64_t timestamp);
 
     /**
      * @brief Set clean up flag so that for cleaning up xid files.
@@ -108,10 +108,11 @@ private:
          * @param base_dir - parent directory of all transaction logs
          * @param recovered_xid - last committed xid recovered from storage (1 if none)
          */
-        DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir, uint64_t recovered_xid) :
-                      _xact_log(base_dir / std::to_string(db_id), recovered_xid),
+        DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir, uint64_t recovered_xid)
+                      :_xact_log(base_dir / std::to_string(db_id), recovered_xid),
                       _db_id(db_id),
-                      _last_committed_xid(_xact_log.get_last_xid()) {}
+                      _last_committed_xid(_xact_log.get_last_xid())
+        {}
 
         /**
          * @brief Record mapping from pg_xid to xid with some attributes
@@ -125,16 +126,14 @@ private:
          */
         void
         record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit, 
-                pg_log_mgr::WalProgressTrackerPtr wal_tracker,
-                bool write_log);  
+                uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr wal_tracker, bool write_log);  
 
         /**
         * @brief Mark the entry as ready to be written and write all ready entries to the log file.
         *
-        * @param pg_xid - Postgres xid
         * @param xid - Springtail xid
         */
-        void write_log_entry(uint32_t pg_xid, uint64_t xid); 
+        void write_log_entry(uint64_t xid); 
 
 
         /**
@@ -153,14 +152,6 @@ private:
         get_committed_xid(uint64_t schema_xid);
 
         /**
-         * @brief Start logging xids in a file with the new timestamp
-         *
-         * @param timestamp - file timestamp
-         */
-        void
-        rotate(uint64_t timestamp);
-
-        /**
          * @brief Cleanup files below the given timestamp
          *
          * @param min_timestamp - minimum allowed timestamp
@@ -170,6 +161,14 @@ private:
         cleanup(uint64_t min_timestamp, bool archive_logs);
 
     private:
+        /**
+         * @brief Start logging xids in a file with the new timestamp
+         *
+         * @param timestamp - file timestamp
+         */
+        void
+        rotate(uint64_t timestamp);
+
         struct XactHistoryEntry {
             uint64_t schema_xid;  ///< schema xid
             uint64_t latest_real_commit_xid;  ///< latest real committted xid
@@ -193,13 +192,14 @@ private:
         uint64_t _db_id;                        ///< database id
         bool _dirty_history{false};             ///< dirty history flag
         uint64_t _last_committed_xid{0};        ///< last committed xid
+        uint64_t _last_timestamp{0};              ///< last timestamp
 
-        
         struct XactLogEntry {
             uint32_t pg_xid;
             bool real_commit;
             pg_log_mgr::WalProgressTrackerPtr wal_tracker;
-            bool ready; ///< whether the log entry is ready to be written to log
+            bool ready; ///< whether the log entry is ready to be written to log (fsync was done)
+            uint64_t timestamp; ///< timestamp when the log entry was created
         };
         std::map<uint64_t, XactLogEntry> _pending_log_entries;  ///< pending log entries (xid -> log entry)
     };
@@ -223,11 +223,13 @@ private:
      * @param xid - Springtail xid
      * @param has_schema_changes - schema changes flag
      * @param real_commit - real commit flag
+     * @param timestamp - timestamp
      * @param wal_tracker - WAL progress tracker
      */
     void
     _record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid,
-                       bool has_schema_changes, bool real_commit, pg_log_mgr::WalProgressTrackerPtr wal_tracker);
+                       bool has_schema_changes, bool real_commit,
+                       uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr wal_tracker);
 
     /**
      * @brief Find database for the give database idand if it is not there, add it

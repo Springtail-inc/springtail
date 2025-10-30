@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <filesystem>
 #include <thread>
 
 #include <boost/thread.hpp>
@@ -64,9 +66,11 @@ namespace springtail::committer {
 
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
                 std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
-                const std::shared_ptr<pg_log_mgr::IndexRequestsManager> &index_requests_mgr, uint32_t indexer_worker_count)
+                const std::shared_ptr<pg_log_mgr::IndexRequestsManager> &index_requests_mgr, uint32_t indexer_worker_count,
+                std::chrono::milliseconds fsync_interval)
             : _worker_count(worker_count),
               _indexer_worker_count(indexer_worker_count),
+              _fsync_interval(fsync_interval),
               _committer_queue(committer_queue),
               _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
               _index_requests_mgr(index_requests_mgr)
@@ -242,8 +246,11 @@ namespace springtail::committer {
          * Indexer worker threads to process indexes
          */
         uint32_t _indexer_worker_count;
+        std::chrono::milliseconds _fsync_interval; ///< Interval between fsync calls
+
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
+
 
         /**
          * @brief shared_ptr to the index reconciliation manager to access the index reconciliation queues
@@ -270,9 +277,6 @@ namespace springtail::committer {
             sync state. */
         std::set<uint64_t> _block_commit;
 
-        /** Maping of database id to xact log timestamp id */
-        std::map<uint64_t, uint64_t> _db_to_timestamp;
-
         /** Indexer
          */
         std::unique_ptr<Indexer> _indexer;
@@ -288,7 +292,8 @@ namespace springtail::committer {
          */
         struct TableSyncProcessor
         {
-            explicit TableSyncProcessor(size_t max_workers)
+            TableSyncProcessor(std::chrono::milliseconds sync_interval, size_t max_workers)
+                : _sync_interval(sync_interval)
             {
                 for (auto i = 0; i != max_workers; ++i) {
                     _workers.emplace_back([this](std::stop_token st) { task(st); });
@@ -303,29 +308,28 @@ namespace springtail::committer {
 
             /** Add a table to be synced.
              *
-             * @param table The table to be synced.
+             * @param xid The XID associated with the table sync
+             * @param tables The list of tables to sync
              */
-            void add(uint64_t pg_xid, uint64_t xid, std::vector<MutableTablePtr> tables);
+            void add(uint64_t xid, const std::vector<MutableTablePtr>& tables);
 
         private:
-            void _check_finished();
+            std::chrono::milliseconds _sync_interval;
+
             void task(std::stop_token st);
 
             // work state
             std::condition_variable_any _cv;
             std::mutex _m;
 
-            std::queue<std::pair<uint64_t, MutableTablePtr>> _queue;
-
             // workers
             std::vector<std::jthread> _workers;
 
             struct WorkItem {
-                std::vector<MutableTablePtr> tables;
-                uint64_t pg_xid = 0;
+                uint64_t xid = 0;
+                std::set<std::filesystem::path> files;
             };
-            using WorkItems = std::map<uint64_t, WorkItem>; ///< xid → WorkItem
-            std::unordered_map<uint64_t, WorkItems> _work_map;  ///< db_id → (xid → MutableTable)
+            std::unordered_map<uint64_t, WorkItem> _work_map;  ///< db_id → WorkItem
         };
 
         std::unique_ptr<TableSyncProcessor> _table_sync_processor;

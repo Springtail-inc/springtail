@@ -4,6 +4,7 @@
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/server.hh>
@@ -35,7 +36,7 @@ namespace springtail::committer {
         _indexer = std::make_unique<Indexer>(_indexer_worker_count, _index_reconciliation_queue_mgr);
         // we use a fraction of the committer workers for table sync processing
         // we don't want to starve the committer workers with too many fsync tasks
-        _table_sync_processor = std::make_unique<TableSyncProcessor>(_worker_count>=4?_worker_count/4:1);
+        _table_sync_processor = std::make_unique<TableSyncProcessor>(_fsync_interval, 1);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -85,18 +86,6 @@ namespace springtail::committer {
                     _indexer->recover_indexes(db_id);
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexes recovery initiated: {}", db_id);
                     continue;
-                }
-
-                uint64_t timestamp = result->timestamp();
-                uint64_t stored_timestamp = 0;
-                auto emplace_result = _db_to_timestamp.try_emplace(db_id, timestamp);
-                if (!emplace_result.second) {
-                    // set stored_timestamp
-                    stored_timestamp = emplace_result.first->second;
-                }
-                if (timestamp > stored_timestamp) {
-                    xid_mgr::XidMgrServer::get_instance()->rotate(db_id, timestamp);
-                    emplace_result.first->second = timestamp;
                 }
 
                 auto token_1 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
@@ -294,11 +283,13 @@ namespace springtail::committer {
                 if (is_last_xid) {
                     if (batch.table_cache.empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
-                        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null(), result->get_tracker());
+                        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null(),
+                                result->timestamp(), result->get_tracker());
                     } else {
                         // commit the completed XID without xlog update because table data has not been persisted (fsync).
-                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), true, result->get_tracker()); 
-                        _table_sync_processor->add(pg_xid, batch.final_xid, std::move(tables_to_sync));
+                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), true,
+                                result->timestamp(), result->get_tracker()); 
+                        _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
                     }
 
                     // push completed DDL changes to the FDWs
@@ -309,22 +300,26 @@ namespace springtail::committer {
                     }
                 } else {
                     // for intermediate XIDs, just record the mapping
-                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), result->get_tracker());
+                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
+                            result->timestamp(), result->get_tracker());
                 }
             } else {
                 if (is_last_xid) {
                     if (batch.table_cache.empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
                         // don't commit, but record any DDL changes to the history
-                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), result->get_tracker());
+                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), 
+                                result->timestamp(), result->get_tracker());
                     } else {
                         // commit the completed XID without xlog update
-                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false, result->get_tracker()); 
-                        _table_sync_processor->add(pg_xid, batch.final_xid, std::move(tables_to_sync));
+                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false,
+                                result->timestamp(), result->get_tracker()); 
+                        _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
                     }
                 } else {
                     // don't commit, but record any DDL changes to the history
-                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), result->get_tracker());
+                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
+                            result->timestamp(), result->get_tracker());
                 }
             }
 
@@ -391,10 +386,10 @@ namespace springtail::committer {
             sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
 
             // Commit the reconciliation XID (no DDL changes for reconciliation)
-            xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, xid, false);
+            xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, xid, false, result->timestamp());
         } else {
             // Record mapping if commits are blocked
-            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, xid, false, nullptr);
+            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, xid, false, result->timestamp(), nullptr);
         }
 
         _completed_xids[db_id] = xid;
@@ -429,7 +424,7 @@ namespace springtail::committer {
             sys_tbl_mgr::Server::get_instance()->finalize(db_id, completed_xid);
 
             // perform a commit to the XidMgr
-            xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true);
+            xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true, result->timestamp());
 
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Commit DDL changes db {} xid {}", db_id, completed_xid);
             // notify the FDW of the schema changes
@@ -449,7 +444,7 @@ namespace springtail::committer {
             }
         } else {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Record DDL changes db {} xid {}", db_id, completed_xid);
-            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true, nullptr);
+            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true, result->timestamp(), nullptr);
         }
         _completed_xids[db_id] = completed_xid;
         WriteCacheServer::get_instance()->evict_xid(db_id, completed_xid);
@@ -901,92 +896,79 @@ namespace springtail::committer {
 
     // ---------------- TableSyncProcessor ----------------
     void 
-    Committer::TableSyncProcessor::add(uint64_t pg_xid, uint64_t xid, std::vector<MutableTablePtr> tables)
+    Committer::TableSyncProcessor::add(uint64_t xid, const std::vector<MutableTablePtr>& tables)
     {
-        if (!tables.empty()) {
-            std::unique_lock g(_m);
-            // create a new work item and distribute the tables to the queue
-            auto& work_item = _work_map[tables[0]->db()][xid];
-            work_item = {std::move(tables), pg_xid};
-            for (auto& table : work_item.tables) {
-                _queue.push({xid, table});
+        DCHECK(!tables.empty());
+
+        std::unique_lock g(_m);
+
+        auto db_id = tables[0]->db();
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "TableSyncProcessor adding work item for db {} xid {} with {} tables",
+                db_id, xid, tables.size());
+
+        auto& item = _work_map[db_id];
+        item.xid = xid;
+
+        for (const auto& table : tables) {
+            auto files = table->get_table_files();
+            for (auto const& file : files) {
+                item.files.emplace(file);
             }
-            _cv.notify_all();
-        }
-    }
-
-    void 
-    Committer::TableSyncProcessor::_check_finished()
-    {
-        std::vector<std::tuple<uint64_t, uint32_t, uint64_t>> to_commit;
-
-        // collect commit-able work items 
-        {
-            std::unique_lock g(_m);
-            for (auto db_it = _work_map.begin(); db_it != _work_map.end(); ) {
-                auto& xid_map = db_it->second;
-                for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
-                    auto& work_item = xid_it->second;
-                    if (work_item.tables.empty()) {
-                        to_commit.emplace_back(db_it->first, work_item.pg_xid, xid_it->first);
-                        xid_it = xid_map.erase(xid_it);
-                    } else {
-                        // we iterate in xid order, if we find one that is not ready, we stop.
-                        // This function is called again to re-check by the internal worker thread.
-                        break;
-                    }
-                }
-                if (xid_map.empty()) {
-                    db_it = _work_map.erase(db_it);
-                } else {
-                    ++db_it;
-                }
-            }
-        }
-
-        for (const auto& [db_id, pg_xid, xid] : to_commit) {
-            // sync the system tables
-            sys_tbl_mgr::Server::get_instance()->sync(db_id, xid);
-
-            // all tables have been fsync'ed for this xid, update xlog
-            xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, pg_xid, xid); 
         }
     }
 
     void 
     Committer::TableSyncProcessor::task(std::stop_token st)
     {
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Thread started, interval: {}ms",
+                std::chrono::duration_cast<std::chrono::milliseconds>(_sync_interval).count()); 
+
         while(!st.stop_requested()) {
-            MutableTablePtr table;
-            uint64_t xid;
+            uint64_t db_id;
+            WorkItem item;
             {
                 std::unique_lock lock(_m);
-                if (!_cv.wait(lock, st, [this]{ return !_queue.empty(); })) {
+                // wait for timeout or stop request
+                _cv.wait_for(lock, st, _sync_interval, [this]{ return !_work_map.empty(); });
+                if (st.stop_requested()) {
                     break;
                 }
-                auto const& v = _queue.front();
-                table = v.second;
-                xid = v.first;
-                _queue.pop();
+
+                if (_work_map.empty()) {
+                    continue;
+                }
+
+                auto db_it = _work_map.begin();
+                db_id = db_it->first;
+                item = std::move(db_it->second);
+                _work_map.erase(db_it);
             }
 
-            // do the actual work
-            table->sync_data_and_indexes();
+            for (auto const& file : item.files) {
+                if (st.stop_requested()) {
+                    break;
+                }
+                if (std::filesystem::is_directory(file)) {
+                    auto fd = ::open(file.c_str(), O_RDONLY | O_DIRECTORY);
+                    CHECK(fd != -1) << "Failed to open directory " << file << ", error: " << strerror(errno);
+                    ::fsync(fd);
+                    ::close(fd);
+                    continue;
+                }
 
-            {
-                std::unique_lock lock(_m);
-                // remove the table from the work item
-                //
-                // We pop the queue and get a table, do the sync for that table,
-                // then we remove that table from the work map, and once all tables
-                // for that xid have been removed from the work map we do the commit for that table.
-                std::erase_if(_work_map[table->db()][xid].tables,
-                        [&table](const MutableTablePtr& t) { return t->id() == table->id(); });
+                auto handle = IOMgr::get_instance()->open(file, IOMgr::IO_MODE::APPEND, true);
+                handle->sync();
             }
-            _check_finished();
+
+            if (!st.stop_requested()) {
+                // sync the system tables
+                sys_tbl_mgr::Server::get_instance()->sync(db_id, item.xid);
+
+                // all files  have been fsync'ed for this xid, update xlog
+                xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, item.xid); 
+            }
         }
         LOG_INFO("thread joined");
     }
-
 
 }  // namespace springtail::gc

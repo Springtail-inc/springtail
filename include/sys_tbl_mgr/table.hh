@@ -779,6 +779,8 @@ namespace indexer_helpers {
         /** Commit the data and indexes to disk. */ 
         void sync_data_and_indexes();
 
+        /** Get the list of table data and index files. */
+        std::vector<std::filesystem::path> get_table_files() const;
 
     protected:
         /**
