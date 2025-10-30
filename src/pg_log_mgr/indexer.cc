@@ -274,7 +274,18 @@ namespace springtail::committer {
             root->finalize();
 
             if (is_last_index) {
-                auto look_aside_root = table->look_aside_index();
+                auto la_it = std::ranges::find_if(meta->roots,
+                        [&](auto const& v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
+
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Dropping look aside index as we are dropping final secondary index: {}", index_id);
+
+                auto look_aside_root = table->create_look_aside_root();
+                if (la_it->extent_id != constant::UNKNOWN_EXTENT) {
+                    look_aside_root->init(la_it->extent_id);
+                } else {
+                    look_aside_root->init_empty();
+                }
+
                 look_aside_root->truncate();
                 look_aside_root->finalize();
             }
