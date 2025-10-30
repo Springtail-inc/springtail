@@ -223,7 +223,7 @@ namespace {
         }
         ASSERT_EQ(current_xid, iterations * 3 + 10);
         {
-            PgXactLogWriter::set_last_xid_in_storage(log_path, current_xid - 20, true);
+            (void)PgXactLogWriter::set_last_xid_in_storage(log_path, current_xid - 20, true);
             PgXactLogReader reader(log_path);
             uint64_t found_xid = 10;
             ASSERT_TRUE(reader.begin());
@@ -292,7 +292,7 @@ namespace {
         }
 
         current_xid = 13;
-        PgXactLogWriter::set_last_xid_in_storage(log_path, current_xid, true);
+        (void)PgXactLogWriter::set_last_xid_in_storage(log_path, current_xid, true);
         {
             PgXactLogReader reader(log_path);
             ASSERT_TRUE(reader.begin());
@@ -404,7 +404,7 @@ namespace {
             writer.log(109, 19, true);
             writer.log(110, 20, true);
         }
-        PgXactLogWriter::set_last_xid_in_storage(log_path, 15, true);
+        (void)PgXactLogWriter::set_last_xid_in_storage(log_path, 15, true);
         {
             PgXactLogReader reader(log_path);
 
@@ -502,9 +502,9 @@ namespace {
             writer.log(110, 20, false);
             writer.flush();
         }
-        PgXactLogWriter::set_last_xid_in_storage(log_path, std::numeric_limits<uint64_t>::max(), true);
+        uint64_t recovered_xid = PgXactLogWriter::set_last_xid_in_storage(log_path, std::numeric_limits<uint64_t>::max(), true);
         {
-            PgXactLogWriter writer(log_path);
+            PgXactLogWriter writer(log_path, recovered_xid);
             EXPECT_EQ(writer.get_last_xid(), 18);
         }
         {

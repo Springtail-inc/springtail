@@ -3465,7 +3465,9 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
             }
 
             // Check for a primary key position change
-            if (old_col->pk_position() != new_col->pk_position()) {
+            if ((old_col->has_pk_position() && !new_col->has_pk_position()) ||
+                (!old_col->has_pk_position() && new_col->has_pk_position()) ||
+                (old_col->pk_position() != new_col->pk_position())) {
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
                 return update;
@@ -3478,7 +3480,7 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
     update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NO_CHANGE));
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No schema change detected for table @{}:{}",
-                            xid.xid, xid.lsn);
+              xid.xid, xid.lsn);
 
     return update;
 }
