@@ -985,11 +985,39 @@ Server::exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
 
     boost::shared_lock lock(_read_mutex);
 
-    auto info = _get_table_info(db_id, request.table_id(), xid);
-    if (info == nullptr) {
+    // Check the table existence cache first
+    {
+        boost::shared_lock cache_lock(_table_existence_cache_mutex);
+        auto result = _check_table_existence_cache(db_id, table_id, xid);
+        if (result.has_value()) {
+            return result.value();
+        }
+    }
+
+    // Cache miss - need to populate the cache
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2,
+              "Table existence cache miss: db {} tid {} xid {}:{}",
+              db_id, table_id, xid.xid, xid.lsn);
+
+    // Upgrade to unique lock on _table_existence_cache_mutex to populate cache
+    boost::unique_lock cache_lock(_table_existence_cache_mutex);
+
+    // Double-check that another thread hasn't populated it
+    auto result = _check_table_existence_cache(db_id, table_id, xid);
+    if (result.has_value()) {
+        return result.value();
+    }
+
+    // Populate the cache (this will check _table_cache after scanning disk)
+    bool found = _populate_table_existence_cache(db_id, table_id);
+    if (!found) {
+        // Table never existed
         return false;
     }
-    return true;
+
+    // Now check the cache again (must succeed now)
+    result = _check_table_existence_cache(db_id, table_id, xid);
+    return result.value();
 }
 
 std::string
@@ -1614,6 +1642,22 @@ Server::_create_table(const proto::TableRequest& request)
     _set_primary_index(request.db_id(), ns_info->id, request.table().id(), request.table().name(),
                        request.table().namespace_name(), xid);
 
+    // Update the table existence cache - append new range since XIDs are monotonic
+    {
+        boost::unique_lock cache_lock(_table_existence_cache_mutex);
+        auto& ranges = _table_existence_cache[request.db_id()][request.table().id()];
+
+        // Always append new range (XIDs are guaranteed monotonic)
+        ranges.push_back(TableExistenceRange{xid, XidLsn{constant::LATEST_XID, constant::MAX_LSN}});
+
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2,
+                  "Updated table existence cache on create: db {} tid {} added range [{},{})-[{},{}) - total {} range(s)",
+                  request.db_id(), request.table().id(),
+                  xid.xid, xid.lsn,
+                  constant::LATEST_XID, constant::MAX_LSN,
+                  ranges.size());
+    }
+
     return ddl;
 }
 
@@ -1712,6 +1756,27 @@ Server::_drop_table(const proto::DropTableRequest& request, bool is_resync)
         *change.mutable_column() = column;
     }
     _set_schema_info(request.db_id(), request.table_id(), ns_info->id, request.name(), changes);
+
+    // Update the table existence cache - close the last range since XIDs are monotonic
+    {
+        boost::unique_lock cache_lock(_table_existence_cache_mutex);
+        auto db_it = _table_existence_cache.find(request.db_id());
+        if (db_it != _table_existence_cache.end()) {
+            auto table_it = db_it->second.find(request.table_id());
+            if (table_it != db_it->second.end() && !table_it->second.empty()) {
+                // Update the last (most recent) range's end XID (XIDs are guaranteed monotonic)
+                auto& last_range = table_it->second.back();
+                last_range.end_xid_lsn = xid;
+
+                LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2,
+                          "Updated table existence cache on drop: db {} tid {} closed range [{},{})-[{},{}) - total {} range(s)",
+                          request.db_id(), request.table_id(),
+                          last_range.start_xid_lsn.xid, last_range.start_xid_lsn.lsn,
+                          last_range.end_xid_lsn.xid, last_range.end_xid_lsn.lsn,
+                          table_it->second.size());
+            }
+        }
+    }
 
     return ddl;
 }
@@ -2074,6 +2139,147 @@ Server::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // note: we currently only keep un-finalized mutations in the cache, so don't cache here
     return info;
+}
+
+bool
+Server::_populate_table_existence_cache(uint64_t db_id, uint64_t table_id)
+{
+    // Preconditions: Caller holds boost::unique_lock on _table_existence_cache_mutex AND boost::shared_lock on _read_mutex
+
+    TableExistenceRanges ranges;
+
+    // PHASE 1: Scan finalized entries from TableNames system table
+    {
+        auto table_names_t = _get_system_table(db_id, sys_tbl::TableNames::ID);
+        auto schema = table_names_t->extent_schema();
+        auto fields = schema->get_fields();
+
+        // Create search key for this table_id at XID=0, LSN=0 to find the first entry
+        auto search_key = sys_tbl::TableNames::Primary::key_tuple(table_id, 0, 0);
+
+        XidLsn range_start{0, 0};
+        bool in_range = false;
+        bool found_any = false;
+
+        // Scan all entries for this table_id and build ranges
+        for (auto row_i = table_names_t->lower_bound(search_key); row_i != table_names_t->end(); ++row_i) {
+            auto& row = *row_i;
+
+            // Check if we're still looking at the same table_id
+            uint64_t current_table_id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+            if (current_table_id != table_id) {
+                // We've moved past this table's entries
+                break;
+            }
+
+            // Get the XID/LSN and exists flag for this entry
+            uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
+            uint64_t lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
+            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+
+            found_any = true;
+
+            if (exists && !in_range) {
+                // Start of new range
+                range_start = XidLsn{xid, lsn};
+                in_range = true;
+            } else if (!exists && in_range) {
+                // End of current range
+                ranges.push_back(TableExistenceRange{range_start, XidLsn{xid, lsn}});
+                in_range = false;
+            }
+        }
+
+        // Handle open range (table still exists)
+        if (in_range) {
+            ranges.push_back(TableExistenceRange{range_start, XidLsn{constant::LATEST_XID, constant::MAX_LSN}});
+        }
+
+        if (!found_any) {
+            // No finalized entries - check _table_cache for unfinalized entries
+            // (fall through to PHASE 2)
+        }
+    }
+
+    // PHASE 2: Check _table_cache for unfinalized entries
+    // These will always be at XID/LSN after the finalized entries
+    {
+        boost::unique_lock table_cache_lock(_mutex);
+        auto table_i = _table_cache[db_id].find(table_id);
+        if (table_i != _table_cache[db_id].end()) {
+            // Iterate through _table_cache entries in chronological order
+            // Note: _table_cache stores entries in REVERSE order for lower_bound lookup
+            // So we iterate backwards to get chronological order
+            for (auto it = table_i->second.rbegin(); it != table_i->second.rend(); ++it) {
+                const auto& xid_lsn = it->first;
+                bool exists = it->second->exists;
+
+                if (exists && (ranges.empty() || ranges.back().end_xid_lsn != XidLsn{constant::LATEST_XID, constant::MAX_LSN})) {
+                    // Start new range
+                    ranges.push_back(TableExistenceRange{xid_lsn, XidLsn{constant::LATEST_XID, constant::MAX_LSN}});
+                } else if (!exists && !ranges.empty() && ranges.back().end_xid_lsn == XidLsn{constant::LATEST_XID, constant::MAX_LSN}) {
+                    // Close the last range
+                    ranges.back().end_xid_lsn = xid_lsn;
+                }
+            }
+        }
+    }
+
+    // If we didn't find any entries at all, return false
+    if (ranges.empty()) {
+        return false;
+    }
+
+    // Store ranges in cache
+    _table_existence_cache[db_id][table_id] = std::move(ranges);
+
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2,
+              "Populated table existence cache: db {} table {} with {} range(s)",
+              db_id, table_id, _table_existence_cache[db_id][table_id].size());
+
+    return true;
+}
+
+std::optional<bool>
+Server::_check_table_existence_cache(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
+{
+    // Preconditions: Caller holds boost::shared_lock on _table_existence_cache_mutex
+
+    auto db_it = _table_existence_cache.find(db_id);
+    if (db_it == _table_existence_cache.end()) {
+        return std::nullopt;
+    }
+
+    auto table_it = db_it->second.find(table_id);
+    if (table_it == db_it->second.end()) {
+        return std::nullopt;
+    }
+
+    const auto& ranges = table_it->second;
+    if (ranges.empty()) {
+        return std::nullopt;
+    }
+
+    // Check if xid falls within any of the ranges
+    // Ranges are sorted by start_xid_lsn, so we iterate through them
+    for (const auto& range : ranges) {
+        // Table exists if xid is in [start_xid_lsn, end_xid_lsn)
+        // Note: end_xid_lsn is exclusive
+        if (xid >= range.start_xid_lsn && xid < range.end_xid_lsn) {
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2,
+                      "Table existence cache hit: db {} tid {} xid {}:{} exists=true (range [{},{})-[{},{}))",
+                      db_id, table_id, xid.xid, xid.lsn,
+                      range.start_xid_lsn.xid, range.start_xid_lsn.lsn,
+                      range.end_xid_lsn.xid, range.end_xid_lsn.lsn);
+            return true;
+        }
+    }
+
+    // Not in any range
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2,
+              "Table existence cache hit: db {} tid {} xid {}:{} exists=false ({} ranges checked)",
+              db_id, table_id, xid.xid, xid.lsn, ranges.size());
+    return false;
 }
 
 Server::NamespaceCacheRecordPtr
