@@ -52,6 +52,15 @@ public:
         _schema_cache->invalidate_by_index(db, index_id, xid);
     }
 
+    /**
+     * @brief Remove data stored in the schema cache for given database
+     *
+     * @param db database id
+     */
+    void remove_db(uint64_t db)
+    {
+        _schema_cache->remove_db(db);
+    }
 
 private:
     Client();

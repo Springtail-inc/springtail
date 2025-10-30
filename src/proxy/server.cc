@@ -148,15 +148,26 @@ namespace springtail::pg_proxy {
 
                     // _sessions maps may have multiple entries for the same client session
                     std::set<SessionPtr> client_sessions;
+                    std::set<SessionPtr> pooled_sessions;
                     for (const auto &[fd, session]: _sessions) {
                         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Admin /info request session: fd={}, id={}", fd, session->id());
-                        client_sessions.insert(session);
+                        if (session->type() == Session::Type::CLIENT) {
+                            client_sessions.insert(session);
+                        } else {
+                            pooled_sessions.insert(session);
+                        }
                     }
 
                     // go through the unique client sessions and get their JSON
-                    nlohmann::json sessions_array = nlohmann::json::array();
+                    nlohmann::json client_sessions_array = nlohmann::json::array();
                     for (const auto &session: client_sessions) {
-                        sessions_array.push_back(session->to_json());
+                        client_sessions_array.push_back(session->to_json());
+                    }
+
+                    // go through the unique pooled sessions and get their JSON
+                    nlohmann::json pooled_sessions_array = nlohmann::json::array();
+                    for (const auto &session: pooled_sessions) {
+                        pooled_sessions_array.push_back(session->to_json());
                     }
 
                     json_response = nlohmann::json::object({
@@ -168,7 +179,8 @@ namespace springtail::pg_proxy {
                         {"primary", primary_json},
                         {"replicas", replica_json},
                         {"client_count", static_cast<int>(client_sessions.size())},
-                        {"client_sessions", sessions_array}
+                        {"client_sessions", client_sessions_array},
+                        {"pooled_sessions", pooled_sessions_array}
                     });
 
                     LOG_INFO("Admin /info request response: {}", json_response.dump());

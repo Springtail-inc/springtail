@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include <string>
 #include <vector>
 #include <utility>
@@ -170,7 +169,8 @@ namespace springtail {
 
     private:
         RedisDDL()
-            : _redis(RedisMgr::get_instance()->get_client())
+            : springtail::Singleton<RedisDDL>(ServiceId::RedisDDLId),
+            _redis(RedisMgr::get_instance()->get_client())
         { }
 
         ~RedisDDL() override = default;

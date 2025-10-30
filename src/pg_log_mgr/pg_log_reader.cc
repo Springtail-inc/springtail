@@ -1,16 +1,9 @@
-#include <chrono>
-#include <memory>
-#include <thread>
-
-#include <common/filesystem.hh>
-#include <common/open_telemetry.hh>
-#include <common/coordinator.hh>
+#include <common/time_trace.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/sync_tracker.hh>
 
-#include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>

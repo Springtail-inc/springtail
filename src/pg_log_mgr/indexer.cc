@@ -1,9 +1,3 @@
-#include <mutex>
-#include <stop_token>
-#include <algorithm>
-
-#include <common/logging.hh>
-#include <common/properties.hh>
 #include <pg_log_mgr/indexer.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
