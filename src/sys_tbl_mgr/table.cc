@@ -1012,6 +1012,8 @@ namespace indexer_helpers {
         // Flush the look aside index if available
         if (_look_aside_index) {
             metadata.roots.push_back({constant::INDEX_LOOK_ASIDE, _look_aside_index->finalize()});
+        } else {
+            metadata.roots.push_back({constant::INDEX_LOOK_ASIDE, constant::UNKNOWN_EXTENT});
         }
 
         // now flush the indexes, capturing the roots
