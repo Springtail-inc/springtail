@@ -616,6 +616,10 @@ namespace springtail::committer {
             std::unordered_set<uint64_t> invalidated_eids;
             auto value_fields = std::make_shared<FieldArray>(1);
 
+            // look_aside_keys to be used to manage look_aside_index if exists
+            std::vector<std::string> look_aside_keys;
+            look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
+
             // If next_extent is available, invalidate previous extent first and then populate using next_extent
             while (next_extent) {
                 // Get the table at the next XID
@@ -633,6 +637,11 @@ namespace springtail::committer {
                     auto prev_schema = TableMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
                     auto internal_row_id_f = prev_schema->get_field(constant::INTERNAL_ROW_ID);
 
+                    // Invalidate look aside index if exists
+                    if (idx_state._look_aside_root) {
+                        indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._look_aside_root, look_aside_keys, prev_schema);
+                    }
+
                     // and invalidate index for the rows in the prev page
                     auto &&idx_col_fields = prev_schema->get_fields(prev_schema->get_column_names(idx_cols));
                     for (auto &row: *prev_extent) {
@@ -644,6 +653,11 @@ namespace springtail::committer {
                     // Insert into a set to skip for other extents pointing
                     // to the same previous extent
                     invalidated_eids.insert(prev_eid);
+                }
+
+                // Populate look aside index if exists
+                if (idx_state._look_aside_root) {
+                    indexer_helpers::populate_index_for_extent(next_eid, next_extent, idx_state._look_aside_root, look_aside_keys, next_schema);
                 }
 
                 // Populate index for the rows in the next page

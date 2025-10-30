@@ -620,8 +620,7 @@ namespace indexer_helpers {
                                const std::vector<std::string> &primary_key,
                                const std::vector<Index> &secondary,
                                const TableMetadata &metadata,
-                               ExtentSchemaPtr schema,
-                               bool initialize_look_aside)
+                               ExtentSchemaPtr schema)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
@@ -722,20 +721,6 @@ namespace indexer_helpers {
         _use_empty = _primary_index->empty();
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
-        // find look-aside index root
-        auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
-
-        // initialize the look-aside index
-        if (la_it != roots.end() && la_it->extent_id != constant::UNKNOWN_EXTENT) {
-            create_look_aside_root();
-            LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init with root: {}", la_it->extent_id);
-            _look_aside_index->init(la_it->extent_id);
-        } else if (initialize_look_aside) {
-            create_look_aside_root();
-            LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init empty");
-            _look_aside_index->init_empty();
-        }
-
         // deal with secondary indexes
         for (auto const& idx: secondary) {
             if (idx.state != static_cast<uint8_t>(sys_tbl::IndexNames::State::READY)) {
@@ -764,6 +749,25 @@ namespace indexer_helpers {
                 }
                 assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
                 _secondary_indexes[idx.id] = {btree, idx_cols};
+            }
+        }
+
+        // Look-aside exists only with secondary indexes
+        auto initialize_look_aside = !_secondary_indexes.empty();
+
+        // find look-aside index root
+        auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
+
+        if (initialize_look_aside) {
+            // initialize the look-aside index
+            if (la_it != roots.end() && la_it->extent_id != constant::UNKNOWN_EXTENT) {
+                create_look_aside_root();
+                LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init with root: {}", la_it->extent_id);
+                _look_aside_index->init(la_it->extent_id);
+            } else {
+                create_look_aside_root();
+                LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init empty");
+                _look_aside_index->init_empty();
             }
         }
     }
@@ -921,11 +925,6 @@ namespace indexer_helpers {
             std::vector<std::string> look_aside_keys;
             look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
             indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, _look_aside_index, look_aside_keys, _schema);
-        } else {
-            // Invalidate secondary indexes as the same are not managed during mutations
-            for (auto const& [index_id, idx]: _secondary_indexes) {
-                indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, idx.first, _schema->get_column_names(idx.second), _schema);
-            }
         }
     }
 
@@ -975,11 +974,6 @@ namespace indexer_helpers {
                 std::vector<std::string> look_aside_keys;
                 look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
                 indexer_helpers::populate_index_for_page(extent_id, new_page, _look_aside_index, look_aside_keys, _schema);
-            } else {
-                // Populate secondary indexes as the same are not managed during mutations
-                for (auto const& [index_id, idx]: _secondary_indexes) {
-                    indexer_helpers::populate_index_for_page(extent_id, new_page, idx.first, _schema->get_column_names(idx.second), _schema);
-                }
             }
         }
     }

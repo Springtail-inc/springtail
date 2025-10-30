@@ -654,8 +654,7 @@ namespace indexer_helpers {
                      const std::vector<std::string> &primary_key,
                      const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
-                     ExtentSchemaPtr schema,
-                     bool initialize_look_aside = false);
+                     ExtentSchemaPtr schema);
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
