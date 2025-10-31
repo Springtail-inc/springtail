@@ -363,7 +363,7 @@ namespace springtail::committer {
             for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
                 if (st.stop_requested()) {
                     look_aside_index->truncate();
-                    return {nullptr, key, idx, tid};
+                    return {nullptr, key, idx, tid, look_aside_index};
                 }
 
                 auto extent_id = row_i.extent_id();
