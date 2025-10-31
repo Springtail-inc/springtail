@@ -31,7 +31,7 @@ namespace springtail::pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection)
         : Session(connection),
-          _stmt_cache(STATEMENT_CACHE_SIZE),
+          _stmt_cache(),
           _shadow_mode(ProxyServer::get_instance()->mode() == ProxyServer::MODE::SHADOW),
           _primary_mode(ProxyServer::get_instance()->mode() == ProxyServer::MODE::PRIMARY)
     {
@@ -393,6 +393,7 @@ namespace springtail::pg_proxy {
         }
     }
 
+
     void
     ClientSession::server_auth_error(ServerSessionPtr session,
                                      uint64_t seq_id,
@@ -414,6 +415,7 @@ namespace springtail::pg_proxy {
         ProxyProtoError::encode_error(buffer, error_code, error_message, "FATAL");
         _send_buffer(buffer, seq_id);
     }
+
 
     void
     ClientSession::server_auth_done(ServerSessionPtr session,
@@ -443,12 +445,14 @@ namespace springtail::pg_proxy {
         _auth->send_auth_done(_gen_seq_id(), parameters);
     }
 
+
     void
     ClientSession::server_msg_response(SessionMsgPtr msg, bool success)
     {
         // update statement cache with msg completion
         _stmt_cache.commit_statement(msg->data(), msg->completed(), success);
     }
+
 
     void
     ClientSession::server_ready_msg(char xact_status)
@@ -474,11 +478,15 @@ namespace springtail::pg_proxy {
         _stmt_cache.sync_transaction(xact_status);
     }
 
+
     void
     ClientSession::server_shutdown(ServerSessionPtr session)
     {
-        // server session is shutting down; called from ServerSession::shutdown_session()
+        // server session is shutting down; called from ServerSession::reset_session()
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Server session shutting down", _id);
+
+        // should be removed by reset_session() first
+        _stmt_cache.remove_session(session->id());
 
         if (session->type() == Session::Type::PRIMARY) {
             // primary session is shutting down

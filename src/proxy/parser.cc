@@ -62,8 +62,14 @@ namespace springtail::pg_proxy {
     void
     Parser::dump_context(const StmtContext &context)
     {
-        LOG_INFO("Context: location={}, type={}, name={}, is_read_safe={}\n  has_select_query={}, has_unsupported_query={}, has_locking={}, has_into={}, has_declare_hold={}, has_error={}, has_is_local={}",
-            context.stmt_location, _stmt_names[(int8_t)context.type], context.name, context.is_read_safe, context.has_select_query, context.has_unsupported_query, context.has_locking, context.has_into, context.has_declare_hold, context.has_error, context.has_is_local);
+        LOG_INFO("Context: location={}, type={}, name={}, is_read_safe={}\n  has_select_query={}, has_unsupported_query={}, has_locking={}, has_into={}, has_declare_hold={}, has_error={}, has_is_local={}, has_set_config_session={}",
+            context.stmt_location, _stmt_names[(int8_t)context.type], context.name, context.is_read_safe, 
+            context.has_select_query, context.has_unsupported_query, context.has_locking, context.has_into, 
+            context.has_declare_hold, context.has_error, context.has_is_local, context.has_set_config_session);
+
+        if (context.has_set_config_session && !context.set_config_value.empty()) {
+            LOG_INFO("set_config session variable: {}={}", context.name, context.set_config_value);
+        }
 
         for (auto &func : context.functions) {
             LOG_INFO("Function: {}", func);
@@ -496,14 +502,80 @@ namespace springtail::pg_proxy {
             context->has_locking = true;
             return false;
 
-        case T_FuncCall:
+        case T_FuncCall: {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Parser node: funccall");
+            FuncCall *func_call = (FuncCall *)node;
             parse_context->in_funccall = true;
-            raw_expression_tree_walker_impl((Node*)(((FuncCall *)node)->funcname), _node_walker, ctx);
+
+            // Walk the funcname list to build the function name
+            raw_expression_tree_walker_impl((Node*)(func_call->funcname), _node_walker, ctx);
             parse_context->in_funccall = false;
-            context->functions.insert(parse_context->func_name);
+
+            if (!parse_context->func_name.empty()) {
+                context->functions.insert(parse_context->func_name);
+
+                // Handle set_config function specifically
+                if (parse_context->func_name == "set_config") {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Detected set_config function call");
+
+                    // Extract arguments to check if this is a session variable (3rd param = false)
+                    if (func_call->args != nullptr && list_length(func_call->args) >= 3) {
+                        // Get the third argument (is_local parameter)
+                        Node *third_arg = (Node*)list_nth(func_call->args, 2);
+
+                        bool is_session_variable = false;
+                        if (nodeTag(third_arg) == T_A_Const) {
+                            A_Const *is_local_const = (A_Const*)third_arg;
+                            if (nodeTag(&is_local_const->val) == T_Boolean) {
+                                // If third parameter is false, it's a session variable
+                                is_session_variable = !is_local_const->val.boolval.boolval;
+                            }
+                        }
+
+                        if (is_session_variable) {
+                            // Extract key and value from first two arguments
+                            if (list_length(func_call->args) >= 2) {
+                                Node *first_arg = (Node*)list_nth(func_call->args, 0);
+                                Node *second_arg = (Node*)list_nth(func_call->args, 1);
+
+                                // Extract the variable name (key)
+                                if (nodeTag(first_arg) == T_A_Const) {
+                                    A_Const *key_const = (A_Const*)first_arg;
+                                    if (nodeTag(&key_const->val) == T_String) {
+                                        context->name = key_const->val.sval.sval;
+                                        context->has_set_config_session = true;
+                                        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                                                 "set_config session variable: key={}", context->name);
+                                    }
+                                }
+
+                                // Extract the variable value
+                                if (nodeTag(second_arg) == T_A_Const) {
+                                    A_Const *value_const = (A_Const*)second_arg;
+                                    if (nodeTag(&value_const->val) == T_String) {
+                                        context->set_config_value = value_const->val.sval.sval;
+                                        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                                                 "set_config session variable: value={}", context->set_config_value);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Transaction-local variable, mark as unsupported for replicas
+                            context->has_unsupported_query = true;
+                            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                                     "set_config transaction-local variable detected");
+                        }
+                    } else {
+                        // Insufficient arguments or malformed call
+                        context->has_unsupported_query = true;
+                        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                                 "set_config function call with insufficient arguments");
+                    }
+                }
+            }
             parse_context->func_name = {};
             break;
+        }
 
         case T_String:
             if (parse_context->in_funccall) {

@@ -1,10 +1,12 @@
+#include <set>
+
 #include <proxy/history_cache.hh>
 
 namespace springtail {
 namespace pg_proxy {
 
     void
-    HistoryCache::add(QueryStmtPtr entry, bool prune)
+    HistoryCache::add(QueryStmtPtr entry)
     {
         // convert FETCH to MOVE; rest of query remains the same
         if (entry->type == QueryStmt::FETCH) {
@@ -24,12 +26,6 @@ namespace pg_proxy {
             }
         }
 
-        // prune existing history based on new entry
-        // e.g., if we see a close, remove any previous matching declare
-        if (prune) {
-            _prune(entry, entry->name.size() == 0);
-        }
-
         _history[_current_idx++] = entry;
     }
 
@@ -44,6 +40,17 @@ namespace pg_proxy {
         return nullptr;
     }
 
+    // Add the new interface methods for HistoryCache
+    std::vector<QueryStmtPtr>
+    HistoryCache::get_all_entries() const
+    {
+        std::vector<QueryStmtPtr> all_entries;
+        for (const auto& [index, statement_ptr] : _history) {
+            all_entries.push_back(statement_ptr);
+        }
+        return all_entries;
+    }
+
     void
     HistoryCache::_clear_by_type(QueryStmt::Type type, const std::string &name, bool all)
     {
@@ -52,33 +59,144 @@ namespace pg_proxy {
         for (auto it = _history.begin(); it != _history.end(); ) {
             if (it->second->type == type && (all || it->second->name == name)) {
                 it = _history.erase(it);
+                LOG_INFO("Pruned statement from history: type={}, name='{}'", static_cast<int>(type), name);
             } else {
                 ++it;
             }
         }
     }
 
-    void
-    HistoryCache::_prune(QueryStmtPtr entry, bool all)
+    std::map<uint64_t, QueryStmtPtr>
+    HistoryCache::compact(uint64_t replay_idx, const std::map<uint64_t, QueryStmtPtr> &history)
     {
+        std::map<uint64_t, QueryStmtPtr> new_history; // hold new compacted history
+
+        // Map to track the latest state of statements up to replay_idx
+        std::unordered_map<QueryStmt::Type,
+            std::unordered_map<std::string, std::pair<uint64_t, QueryStmtPtr>>> statement_map;
+
+        // Flag to indicate if we are still processing entries up to replay_idx
+        // After we pass replay_idx, we cannot be sure about the state of statements
+        // so we preserve the creation and deletion statements after that point.
+        bool replayed = true;
+
+        // --- Phase 1: Scan up to replay_idx ---
+        for (auto const& [idx, stmt] : history) {
+            if (idx > replay_idx) {
+                replayed = false;
+            }
+
+            switch (stmt->type) {
+                case QueryStmt::SET: // set variable
+                    statement_map[QueryStmt::SET][stmt->name] = {idx, stmt};
+                    break;
+
+                case QueryStmt::PREPARE: // add prepared statement
+                    statement_map[QueryStmt::PREPARE][stmt->name] = {idx, stmt};
+                    break;
+
+                case QueryStmt::DECLARE_HOLD: // add cursor/portal
+                    statement_map[QueryStmt::DECLARE_HOLD][stmt->name] = {idx, stmt};
+                    break;
+
+                case QueryStmt::FETCH: // cursor/portal use
+                    // no need to track usage, just ensure it exists
+                    if (statement_map[QueryStmt::DECLARE_HOLD].contains(stmt->name)) {
+                        statement_map[QueryStmt::FETCH][stmt->name] = {idx, stmt};
+                    }
+                    break;
+
+                case QueryStmt::RESET: // remove variable(s)
+                    if (stmt->name.empty()) { // RESET ALL
+                        statement_map[QueryStmt::SET].clear();
+                    } else {
+                        statement_map[QueryStmt::SET].erase(stmt->name);
+                    }
+                    // keep the RESET statement to reset config variables
+                    new_history[idx] = stmt;
+                    break;
+
+                case QueryStmt::DEALLOCATE_ALL: // remove all prepared statements
+                    statement_map[QueryStmt::PREPARE].clear();
+                    // keep the DEALLOCATE ALL statement
+                    new_history[idx] = stmt;
+                    break;
+
+                case QueryStmt::DEALLOCATE: // remove prepared statement
+                    if (replayed) {
+                        statement_map[QueryStmt::PREPARE].erase(stmt->name);
+                    } else {
+                        // If there are new statements after replay_idx,
+                        // we cannot be sure if this DEALLOCATE affects
+                        // prepared statements before or after replay_idx.
+                        // So we keep it to be safe.
+                        new_history[idx] = stmt;
+                    }
+                    break;
+
+                case QueryStmt::CLOSE:  // remove cursor/portal
+                    if (replayed) {
+                        statement_map[QueryStmt::DECLARE_HOLD].erase(stmt->name);
+                        statement_map[QueryStmt::FETCH].erase(stmt->name);
+                    } else {
+                        // Similar logic as DEALLOCATE
+                        new_history[idx] = stmt;
+                    }
+                    break;
+
+                case QueryStmt::CLOSE_ALL: // remove all cursors/portals
+                    if (replayed) {
+                        statement_map[QueryStmt::DECLARE_HOLD].clear();
+                    } else {
+                        // safe to clear FETCH as the DECLARE_HOLD entries are still there
+                        statement_map[QueryStmt::FETCH].clear();
+
+                        // Similar logic as DEALLOCATE
+                        new_history[idx] = stmt;
+                    }
+                    break;
+
+                case QueryStmt::DISCARD_ALL: // discard all
+                    statement_map.clear();
+                    // keep the DISCARD ALL statement
+                    new_history[idx] = stmt;
+                    break;
+            }
+        }
+
+        // --- Phase 2: Rebuild compacted history
+        // Add retained statements from the statement_map
+        for (const auto& [type, name_map] : statement_map) {
+            for (const auto& [name, idx_stmt_pair] : name_map) {
+                new_history[idx_stmt_pair.first] = idx_stmt_pair.second;
+            }
+        }
+
+        return new_history;
+    }
+
+    void
+    HistoryCache::_prune(QueryStmtPtr entry)
+    {
+        bool all = entry->name.empty();
         std::string empty_string = {};
 
         switch (entry->type) {
             // ignore portal statements (for pruning)
             case QueryStmt::FETCH:
             case QueryStmt::DECLARE_HOLD:
-            case QueryStmt::DECLARE:
+            case QueryStmt::PREPARE:
                 return;
             // shouldn't see these:
-            case QueryStmt::PREPARE:
             case QueryStmt::BEGIN:
             case QueryStmt::COMMIT:
             case QueryStmt::ROLLBACK:
             case QueryStmt::RELEASE_SAVEPOINT:
             case QueryStmt::ROLLBACK_TO_SAVEPOINT:
             case QueryStmt::SET_LOCAL:
+            case QueryStmt::DECLARE:
             case QueryStmt::ANONYMOUS:
-                assert(0);
+                DCHECK(false);
                 return; // nothing to do
 
             // these override previous statements
@@ -100,11 +218,11 @@ namespace pg_proxy {
                 _clear_by_type(QueryStmt::PREPARE, empty_string, true);
                 break;
             case QueryStmt::CLOSE_ALL:
-                _clear_by_type(QueryStmt::DECLARE, empty_string, true);
+                _clear_by_type(QueryStmt::DECLARE_HOLD, empty_string, true);
                 _clear_by_type(QueryStmt::FETCH, empty_string, true);
                 break;
             case QueryStmt::CLOSE:
-                _clear_by_type(QueryStmt::DECLARE, entry->name, false);
+                _clear_by_type(QueryStmt::DECLARE_HOLD, entry->name, false);
                 _clear_by_type(QueryStmt::FETCH, entry->name, false);
                 break;
             case QueryStmt::UNLISTEN:
@@ -119,29 +237,23 @@ namespace pg_proxy {
     }
 
     std::pair<QueryStmtPtr, bool>
-    StatementCache::_lookup(const std::string &name, QueryStmt::Type type)
+    StatementCache::_lookup(const std::string_view name, QueryStmt::Type type)
     {
         // check statement history first
         QueryStmtPtr qs = _statement_history.lookup(name, type);
         if (qs) {
             return {qs, true};
         }
+
         // then check transaction history
         qs = _transaction_history.lookup(name, type);
         if (qs) {
             return {qs, true};
         }
 
-        // then check the caches
-        if (type == QueryStmt::PREPARE) {
-            qs = _prepared_cache.get(name);
-            return {qs, false};
-        } else {
-            qs = _session_history.lookup(name, type);
-            return {qs, false};
-        }
-
-        return {nullptr, false};
+        // then check the session history
+        qs = _session_history.lookup(name, type);
+        return {qs, false};
     }
 
     void
@@ -182,6 +294,19 @@ namespace pg_proxy {
         }
     }
 
+    StatementCache::CacheState
+    StatementCache::get_cache_state() const
+    {
+        CacheState cache_state;
+
+        // Get session history cache contents only
+        cache_state.session_history = _session_history.get_all_entries();
+
+        cache_state.in_error = _in_error;
+
+        return cache_state;
+    }
+
     void
     StatementCache::sync_transaction(char xact_status)
     {
@@ -214,6 +339,9 @@ namespace pg_proxy {
     void
     StatementCache::commit_statement(QueryStmtPtr stmt, int completed, bool success)
     {
+        // these statements have successfully completed, but not yet committed
+        // they could still be rolled back
+
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Committing statement: stmt_type: {}, completed: {}, children: {}, in_error: {}, success: {}",
                     (uint8_t)stmt->type, completed, stmt->children.size(), _in_error, success);
 
@@ -227,6 +355,8 @@ namespace pg_proxy {
                 // process this single statement
                 _commit_single_stmt(stmt);
             } else {
+                DCHECK_EQ(completed, 0) <<
+                       "Completed statements for non-simple query should be either 0 or 1";
                 // no completed statements, error
                 _in_error = true;
             }
@@ -239,8 +369,8 @@ namespace pg_proxy {
             return;
         }
 
-        assert (stmt->children.size() > 0);
-        assert (completed <= stmt->children.size());
+        DCHECK_GT(stmt->children.size(), 0);
+        DCHECK_LE(completed, stmt->children.size());
         for (int i = 0; i < completed; i++) {
             _commit_single_stmt(stmt->children[i]);
         }
@@ -251,12 +381,15 @@ namespace pg_proxy {
         }
 
         // simple query removes unamed prepared statement from cache
-        _prepared_cache.evict("");
+        _session_history._clear_by_type(QueryStmt::PREPARE, {}, false);
     }
 
     void
     StatementCache::_commit_single_stmt(QueryStmtPtr entry)
     {
+        // these statements have successfully completed, but not yet committed
+        // they could still be rolled back
+
         switch (entry->type) {
             case QueryStmt::PREPARE:
                 // prepared statements don't get rolled back
@@ -266,19 +399,18 @@ namespace pg_proxy {
                 // we clear unamed prepared statements at the end of a simple query
 
                 // add to session level prepared stmt cache
-                _prepared_cache.insert(entry->name, entry);
+                _session_history.add(entry);
 
                 // no need to add to transaction history,
                 // as soon as they succeed they are visible; rollbacks don't affect them
-                // they get replayed on demand if not already applied within the session
                 return;
             case QueryStmt::DEALLOCATE:
                 // remove from session level prepared stmt cache
-                _prepared_cache.evict(entry->name);
+                _transaction_history._clear_by_type(QueryStmt::PREPARE, entry->name, false);
                 break;
             case QueryStmt::DEALLOCATE_ALL:
                 // clear all prepared statements
-                _prepared_cache.clear();
+                _transaction_history._clear_by_type(QueryStmt::PREPARE, {}, true);
                 break;
             case QueryStmt::BEGIN:
                 // safe to ignore
@@ -302,6 +434,10 @@ namespace pg_proxy {
                 _rollback_to_savepoint(entry->name);
                 // skip adding this to transaction history
                 return;
+            case QueryStmt::DISCARD_ALL:
+                // clear session history
+                _transaction_history.clear();
+                break;
             default:
                 break;
         }
@@ -328,6 +464,9 @@ namespace pg_proxy {
     void
     StatementCache::_commit_transaction()
     {
+        // map for declare hold statements
+        std::map<std::string, QueryStmtPtr> declare_hold_map;
+
         // merge transaction history to session history
         for (auto it = _transaction_history._history.begin(); it != _transaction_history._history.end(); ++it) {
             switch (it->second->type) {
@@ -348,18 +487,35 @@ namespace pg_proxy {
                 // portal commands are only valid within a transaction unless they are DECLARE WITH HOLD
                 // DECLARE WITH HOLD can only support SELECT or VALUES queries that are purely read-only
                 case QueryStmt::DECLARE_HOLD:
-                case QueryStmt::CLOSE:
-                case QueryStmt::CLOSE_ALL:
+                    // keep track of DECLARE HOLD statements
+                    declare_hold_map[it->second->name] = it->second;
+                    break;
+                case QueryStmt::CLOSE: {
+                    // if this close is for a DECLARE HOLD, remove from map
+                    int rc = declare_hold_map.erase(it->second->name);
+                    if (rc == 0) {
+                        continue; // not a DECLARE HOLD, skip
+                    }
+                    break;
+                }
                 case QueryStmt::FETCH:
+                    if (!declare_hold_map.contains(it->second->name)) {
+                        continue; // not a DECLARE HOLD, skip
+                    }
+                    break;
+                case QueryStmt::CLOSE_ALL:
                     break;
                 case QueryStmt::DISCARD_ALL:
-                    _prepared_cache.clear();
+                case QueryStmt::DEALLOCATE:
+                case QueryStmt::DEALLOCATE_ALL:
+                    // clearing the state is handled in the add() with prune
                     break;
                 default:
                     break;
             }
 
-            _session_history.add(it->second, true);
+            _session_history.add(it->second);
+            _session_history.compact(_get_replay_idx());
         }
         _transaction_history.clear();
     }

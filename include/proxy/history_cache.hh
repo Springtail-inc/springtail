@@ -158,21 +158,58 @@ namespace pg_proxy {
          */
         void clear() {
             _history.clear();
-            _current_idx = 0;
+            _current_idx = 1;
         }
 
         /**
          * @brief Add history entry
          * @param entry history entry to add
-         * @param prune if true, do prune the history when inserting
          */
-        void add(QueryStmtPtr entry, bool prune=false);
+        void add(QueryStmtPtr entry);
 
+        /**
+         * @brief Compact the history cache by removing redundant entries; static for testing
+         * @param replay_idx index that sessions have replayed up to
+         * @param history history map to compact
+         * @return compacted history map
+         */
+        static std::map<uint64_t, QueryStmtPtr> compact(uint64_t replay_idx,
+            const std::map<uint64_t, QueryStmtPtr> &history) const;
+
+        /**
+         * @brief Compact the current history cache; updates _history
+         * @param replay_idx index that sessions have replayed up to
+         */
+        void compact(uint64_t replay_idx) {
+            _history = HistoryCache::compact(replay_idx, _history);
+        }
+
+        /**
+         * @brief Get all entries in the statement history cache
+         * @return vector of QueryStmtPtr
+         */
+        std::vector<QueryStmtPtr> get_all_entries() const;
+
+        /**
+         * @brief Get the size of the history cache
+         * @return size_t size of the history cache
+         */
+        size_t get_size() const {
+            return _history.size();
+        }
+
+        /**
+         * @brief Is the history cache empty?
+         * @return true if empty, false otherwise
+         */
+        bool is_empty() const {
+            return _history.empty();
+        }
 
     private:
         friend class StatementCache;
 
-        uint64_t _current_idx=0;                       ///< current index of the history cache
+        uint64_t _current_idx{1};                      ///< current index of the history cache
         std::map<uint64_t, QueryStmtPtr> _history;     ///< history cache, map from idx to entry
 
         /**
@@ -186,9 +223,8 @@ namespace pg_proxy {
         /**
          * @brief Prune the history cache based on the entry (usually being inserted)
          * @param entry entry to prune based on
-         * @param all if true, remove all entries with the same type (name is ignored)
          */
-        void _prune(QueryStmtPtr entry, bool all);
+        void _prune(QueryStmtPtr entry);
     };
     using HistoryCachePtr = std::shared_ptr<HistoryCache>;
 
@@ -199,14 +235,19 @@ namespace pg_proxy {
      * The statement cache holds in progress statements that are not yet committed to the transaction.
      * The transaction cache holds statements that are part of the current transaction.
      * The session cache holds statements that are part of the current session (committed transactions).
-     *
-     * It also contains a prepared statement cache that holds prepared statements.
      */
     class StatementCache {
     public:
-        explicit StatementCache(int stmt_cache_size)
-            : _prepared_cache(stmt_cache_size)
-        { }
+
+         /**
+         * @brief Interface to access internal cache state
+         */
+        struct CacheState {
+            std::vector<QueryStmtPtr> session_history;
+            bool in_error;
+        };
+
+        StatementCache() = default;
 
         /**
          * @brief Add a statement to the cache.
@@ -229,7 +270,6 @@ namespace pg_proxy {
         /**
          * @brief Add a query statement to the cache.
          * @param entry The statement to add.
-         * @param stmt_idx The index of the statement.
          */
         void add(QueryStmtPtr entry) {
             _statement_history.add(entry);
@@ -243,7 +283,7 @@ namespace pg_proxy {
          *         or in the session history (false).
          */
         std::pair<QueryStmtPtr,bool> lookup_prepared(const std::string_view name) {
-            return _lookup(name.size() == 0 ? std::string() : name.data(), QueryStmt::PREPARE);
+            return _lookup(name, QueryStmt::PREPARE);
         }
 
         /**
@@ -254,7 +294,7 @@ namespace pg_proxy {
          *         or in the session history (false).
          */
         std::pair<QueryStmtPtr,bool> lookup_portal(const std::string_view name) {
-            return _lookup(name.size() == 0 ? std::string() : name.data(), QueryStmt::DECLARE);
+            return _lookup(name, QueryStmt::DECLARE);
         }
 
         /**
@@ -279,12 +319,36 @@ namespace pg_proxy {
             _statement_history.clear();
         }
 
-    private:
-        HistoryCache _session_history;
-        HistoryCache _transaction_history;
-        HistoryCache _statement_history;
+       /**
+         * @brief Get state of all internal caches
+         * @return CacheState containing all cache contents
+         */
+        CacheState get_cache_state() const;
 
-        QueryStmtCache _prepared_cache;
+        /**
+         * @brief Add a new session to the replay map
+         * @param session_id The session id
+         */
+        void add_session(uint64_t session_id) {
+            _session_replay_map[session_id] = 0;
+        }
+
+        /**
+         * @brief Remove a session from the replay map
+         * @param session_id The session id
+         */
+        void remove_session(uint64_t session_id) {
+            _session_replay_map.erase(session_id);
+        }
+
+    private:
+        HistoryCache _session_history;     ///< session history cache
+        HistoryCache _transaction_history; ///< transaction history cache
+        HistoryCache _statement_history;   ///< statement history cache
+
+        /** Map of session id to statement index for replay; maps session id to idx */
+        std::unordered_map<uint64_t, uint64_t> _session_replay_map;
+
         bool _in_error = false;
 
         /**
@@ -295,7 +359,7 @@ namespace pg_proxy {
          *         and a boolean indicating if the statement was found in the current transaction (true)
          *         or in the session history (false).
          */
-        std::pair<QueryStmtPtr, bool> _lookup(const std::string &name, QueryStmt::Type type);
+        std::pair<QueryStmtPtr, bool> _lookup(const std::string_view name, QueryStmt::Type type);
 
         /**
          * @brief Commit a single statement to the transaction history if no error occurred.
@@ -324,6 +388,20 @@ namespace pg_proxy {
          * @param name The name of the savepoint.
          */
         void _release_savepoint(const std::string &name);
+
+        /**
+         * @brief Get the min replay index across all sessions
+         * @return uint64_t min replay index
+         */
+        uint64_t _get_replay_idx(void) const {
+            uint64_t min_idx = UINT64_MAX;
+            for (const auto &pair : _session_replay_map) {
+                if (pair.second < min_idx) {
+                    min_idx = pair.second;
+                }
+            }
+            return min_idx;
+        }
     };
 
 } // namespace pg_proxy

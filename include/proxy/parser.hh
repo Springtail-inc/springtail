@@ -67,6 +67,7 @@ namespace pg_proxy {
             bool has_declare_hold=false;      ///< has a WITH HOLD clause (for cursors)
             bool has_is_local=false;
             bool has_param_ref=false;
+            bool has_set_config_session=false; ///< has set_config function call with session scope
 
             // state
             bool has_error=false;
@@ -74,6 +75,9 @@ namespace pg_proxy {
 
             /** prepared or portal statement name (for execute, deallocate, prepare) or var */
             std::string name = {};
+
+            /** value for set_config session variables */
+            std::string set_config_value = {};
 
             /** set of functions */
             std::set<std::string> functions;

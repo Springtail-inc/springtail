@@ -90,6 +90,18 @@ springtail_unit_test(test_replica_shutdown
   LIBS springtail_proxy GTest::gtest_main
 )
 
+springtail_unit_test(test_statement_cache
+  SOURCES test/test_statement_cache.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_proxy GTest::gtest_main
+)
+
+springtail_unit_test(test_history_compact
+  SOURCES test/test_history_compact.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_proxy GTest::gtest_main
+)
+
 # test parsing executable
 add_executable(parsing test/parsing.cc)
 target_include_directories(parsing

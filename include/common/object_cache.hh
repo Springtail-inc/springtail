@@ -314,5 +314,79 @@ namespace springtail {
                 _cache_size = 0;
             }
         }
+
+        /**
+         * @brief Iterator support for accessing all cache entries
+         * @details This provides a way to iterate over all entries in the cache
+         *          without modifying their LRU ordering
+         */
+        class const_iterator {
+        private:
+            typename std::list<CacheEntry>::const_iterator cache_iterator;
+
+        public:
+            explicit const_iterator(typename std::list<CacheEntry>::const_iterator iterator)
+                : cache_iterator(iterator) {}
+
+            /**
+             * @brief Get the key (ID) of the current cache entry
+             * @return const reference to the key
+             */
+            const IdType& key() const {
+                return std::get<0>(*cache_iterator);
+            }
+
+            /**
+             * @brief Get the value of the current cache entry
+             * @return shared pointer to the cached entry
+             */
+            std::shared_ptr<EntryType> value() const {
+                return std::get<1>(*cache_iterator);
+            }
+
+            /**
+             * @brief Get the size of the current cache entry
+             * @return size of the entry
+             */
+            uint64_t size() const {
+                return std::get<2>(*cache_iterator);
+            }
+
+            // Standard iterator operations
+            const_iterator& operator++() {
+                ++cache_iterator;
+                return *this;
+            }
+
+            const_iterator operator++(int) {
+                const_iterator temporary_iterator = *this;
+                ++cache_iterator;
+                return temporary_iterator;
+            }
+
+            bool operator==(const const_iterator& other_iterator) const {
+                return cache_iterator == other_iterator.cache_iterator;
+            }
+
+            bool operator!=(const const_iterator& other_iterator) const {
+                return cache_iterator != other_iterator.cache_iterator;
+            }
+        };
+
+        /**
+         * @brief Get iterator to the beginning of the cache
+         * @return const_iterator pointing to the first entry (most recently used)
+         */
+        const_iterator begin() const {
+            return const_iterator(_cache.begin());
+        }
+
+        /**
+         * @brief Get iterator to the end of the cache
+         * @return const_iterator pointing past the last entry
+         */
+        const_iterator end() const {
+            return const_iterator(_cache.end());
+        }
     };
 }
