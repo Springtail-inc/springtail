@@ -57,6 +57,12 @@ namespace springtail {
         get_extent_schema(uint64_t db_id, uint64_t table_id,
                           const XidLsn &xid, bool allow_undefined = false, bool include_internal_row_id = true) = 0;
 
+        /**
+         * @brief Get the base path for the tables storage location
+         *
+         * @return std::filesystem::path file path
+         */
+        std::filesystem::path get_table_base() const { return _table_base; }
 
     protected:
         /** Helper to convert schema column to map */

@@ -90,6 +90,7 @@ namespace {
                     { "offset", 2, SchemaType::UINT64, 0, false }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
+            _schema_without_row_id = std::make_shared<ExtentSchema>(columns, false, false);
 
             _fields = _schema->get_fields();
             _csv_fields = std::make_shared<FieldArray>();
@@ -109,6 +110,7 @@ namespace {
         }
 
         ExtentSchemaPtr _schema;
+        ExtentSchemaPtr _schema_without_row_id;
         FieldArrayPtr _fields, _csv_fields;
         uint64_t _last_internal_row_id;
 
@@ -187,7 +189,7 @@ namespace {
 
             return std::make_shared<UserMutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
                                                   _primary_keys, keys,
-                                                  tbl_meta, _schema);
+                                                  tbl_meta, _schema, _schema_without_row_id);
         }
 
         std::shared_ptr<Tuple>

@@ -365,7 +365,7 @@ def massage_system_settings(s: dict, enable_ssl: bool, enable_otel: bool) -> dic
     """
     # Always disable SSL for local deployments for Redis
     s["redis"]["ssl"] = False
-    s["proxy"]["mode"] = "shadow"
+    s["proxy"]["mode"] = "normal"
 
     for k in ("write_cache", "sys_tbl_mgr", "log_mgr"):
         s[k]["rpc_config"]["ssl"] = enable_ssl

@@ -654,7 +654,8 @@ namespace indexer_helpers {
                      const std::vector<std::string> &primary_key,
                      const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
-                     ExtentSchemaPtr schema);
+                     ExtentSchemaPtr schema,
+                     ExtentSchemaPtr schema_without_row_id = nullptr);
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -802,6 +803,28 @@ namespace indexer_helpers {
         uint64_t get_next_internal_row_id() {
             return ++_internal_row_id;
         }
+
+        /**
+         * Initialize cached write cache schema and fields for committer performance.
+         * Uses the table's existing _schema to build write cache schema with op/lsn columns.
+         * Must be called before processing extents from write cache.
+         */
+        void initialize_wc_schema();
+
+        /** Returns the cached write cache schema, or nullptr if not initialized */
+        ExtentSchemaPtr wc_schema() const { return _wc_schema; }
+
+        /** Returns the cached op field accessor, or nullptr if not initialized */
+        FieldPtr wc_op_field() const { return _wc_op_field; }
+
+        /** Returns the cached data fields, or nullptr if not initialized */
+        FieldArrayPtr wc_fields() const { return _wc_fields; }
+
+        /** Returns the cached data fields without internal_row_id */
+        FieldArrayPtr actual_table_fields() const { return _actual_table_fields; }
+
+        /** Returns the cached key fields, or nullptr if not initialized */
+        FieldArrayPtr wc_key_fields() const { return _wc_key_fields; }
 
     protected:
         /**
@@ -967,6 +990,8 @@ namespace indexer_helpers {
          */
         SecondaryIndexesCache _secondary_indexes; ///< The mutable secondary index btrees.
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
+        ExtentSchemaPtr _schema_without_row_id; ///< The schema of the data extents of
+                                                ///the table without internal row id.
         ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index.
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
@@ -977,6 +1002,13 @@ namespace indexer_helpers {
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats{}; ///< The stats for the table.
+
+        // Cached write cache schema and fields for committer performance
+        ExtentSchemaPtr _wc_schema;           ///< Pre-computed write cache schema with op/lsn columns
+        FieldPtr _wc_op_field;                ///< Field accessor for __springtail_op
+        FieldArrayPtr _wc_fields;             ///< Field accessors for all data columns
+        FieldArrayPtr _actual_table_fields;   ///< Field accessors for all data columns without internal_row_id
+        FieldArrayPtr _wc_key_fields;         ///< Field accessors for primary key columns
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

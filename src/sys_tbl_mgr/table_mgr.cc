@@ -62,6 +62,7 @@ namespace springtail {
         // construct the mutable table and return it
         XidLsn xid(target_xid);
         auto schema = get_extent_schema(db_id, table_id, xid);
+        auto schema_without_row_id = get_extent_schema(db_id, table_id, xid, false, false);
 
         auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
@@ -79,7 +80,7 @@ namespace springtail {
 
         return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_indexes,
-                                                  *tbl_meta, schema);
+                                                  *tbl_meta, schema, schema_without_row_id);
     }
 
     MutableTablePtr
@@ -106,7 +107,7 @@ namespace springtail {
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema_with_row_id->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema_with_row_id);
+                                                  tbl_meta, schema_with_row_id, schema);
     }
 
     std::map<uint32_t, SchemaColumn>

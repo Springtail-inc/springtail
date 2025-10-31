@@ -20,7 +20,8 @@ rows = [
     ["mock AWS", f"localhost:{os.environ['HOST_PORT_MOTO']}", "aws-mock:7000"],
     ["primary", f"localhost:{os.environ['HOST_PORT_PRIMARY_DB']}", "primary:5432"],
     ["proxy", f"localhost:{os.environ['HOST_PORT_PROXY']}", "proxy:5432"],
-    ["fdw", f"localhost:{os.environ['HOST_PORT_FDW']}", "fdw:5432"],
+    ["fdw1", f"localhost:{os.environ['HOST_PORT_FDW1']}", "fdw1:5432"],
+    ["fdw2", f"localhost:{os.environ['HOST_PORT_FDW2']}", "fdw2:5432"],
     ["controller", f"localhost:19824", "controller:8000"],
 ]
 # print a green dot before

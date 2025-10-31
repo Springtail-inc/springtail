@@ -240,4 +240,30 @@ SchemaCache::_make_space_locked()
     _remove_locked(schema_i);
 }
 
+void
+SchemaCache::remove_db(uint64_t db)
+{
+    std::unique_lock lock(_mutex);
+
+    // cleanup _latest_xid
+    _latest_xid.erase(db);
+
+    // cleanup _index_map
+    auto index_begin  = _index_map.lower_bound({db, 0});
+    auto index_end = _index_map.upper_bound({db, std::numeric_limits<uint64_t>::max()});
+    _index_map.erase(index_begin, index_end);
+
+    // cleanup _schema_map
+    auto schema_it  = _schema_map.lower_bound({db, 0});
+    auto schema_end = _schema_map.upper_bound({db, std::numeric_limits<uint64_t>::max()});
+
+    while(schema_it != schema_end) {
+        // cleanup LRU entry
+        _lru.erase(schema_it->second->lru_i);
+        // remove current schema map entry
+        // returns iterator to the next entry
+        schema_it = _schema_map.erase(schema_it);
+    }
+}
+
 }  // namespace springtail::sys_tbl_mgr

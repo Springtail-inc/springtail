@@ -1,20 +1,9 @@
 #pragma once
 
-#include <stop_token>
-#include <thread>
-#include <queue>
-#include <condition_variable>
-#include <nlohmann/json.hpp>
-#include <unordered_map>
-#include <utility>
-#include <redis/redis_ddl.hh>
-#include <boost/functional/hash.hpp>
-#include <storage/mutable_btree.hh>
-#include <common/common.hh>
-#include <pg_repl/index_reconcile_request.hh>
-#include <proto/sys_tbl_mgr.pb.h>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
+#include <redis/redis_ddl.hh>
+#include <storage/mutable_btree.hh>
 
 namespace springtail::committer {
 
@@ -72,7 +61,7 @@ namespace springtail::committer {
         void build(IndexParams idx);
 
         /**
-         * Drop the index. 
+         * Drop the index.
          * @param db_id The ID of the database.
          * @param index_id The ID of the index to drop.
          */
@@ -80,10 +69,10 @@ namespace springtail::committer {
 
         /**
          * @brief Processes the given db_id/xid's entries for index reconciliation.
-         * 
+         *
          * Iterates through the xid's entries, calling reconcile_index() for each.
          * Cleans up empty entries from the map.
-         * 
+         *
          * @param db_id The database ID to process.
          * @param reconcile_xid XID for which index reconciliation to be done
          * @param end_xid XID at which index will be committed
@@ -102,6 +91,13 @@ namespace springtail::committer {
          * @param XID To manage index DDL counter
          */
         void abort_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid);
+
+        /**
+         * @brief Remove data associated with the given database id
+         *
+         * @param db_id database id
+         */
+        void remove_db(uint64_t db_id) { _cleanup_for_db(db_id); }
 
     private:
         void task(std::stop_token st);
@@ -134,9 +130,9 @@ namespace springtail::committer {
 
         /**
          * @brief Represents the state of an index after the initial build.
-         * 
+         *
          * This structure holds information about the index's root, key, and metadata.
-         * After the initial index build, instances of this struct are added to the 
+         * After the initial index build, instances of this struct are added to the
          * pending reconciliation map for further processing.
          * - `key` contains `dbid` and `tableid`.
          * - `idx` contains `dbid`, `indexid`, and `ddl`.
@@ -205,7 +201,7 @@ namespace springtail::committer {
 
         /**
          * @brief Adds an IndexState to the pending reconciliation map.
-         * 
+         *
          * This method ensures the correct db_id and xid mapping before inserting the IndexState.
          * @param idx_state The IndexState to be added.
          */

@@ -220,7 +220,8 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::UserMgrId,             {ServiceId::DatabaseMgrId}},
     {ServiceId::ProxyServerId,         {ServiceId::ServiceRegisterId,
                                             ServiceId::UserMgrId}},
-    {ServiceId::XidMgrServerId,        {ServiceId::ServiceRegisterId}},
+    {ServiceId::XidMgrServerId,        {ServiceId::ServiceRegisterId,
+                                            ServiceId::RedisDDLId}},
     {ServiceId::XidMgrClientId,        {ServiceId::ServiceRegisterId,
                                             ServiceId::XidMgrServerId}},
     {ServiceId::SysTblMgrServerId,     {ServiceId::ServiceRegisterId,
@@ -233,7 +234,7 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
                                             ServiceId::WriteCacheServerId}},
     {ServiceId::IOMgrId,               {ServiceId::ServiceRegisterId}},
     {ServiceId::VacuumerId,            {ServiceId::IOMgrId,
-                                             ServiceId::XidMgrClientId}},
+                                             ServiceId::RedisDDLId}},
     {ServiceId::TableMgrId,            {ServiceId::SysTblMgrServerId,
                                              ServiceId::StorageCacheId,
                                              ServiceId::SystemTableMgrId}},
@@ -243,22 +244,26 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::SyncTrackerId,         {ServiceId::ServiceRegisterId}},
     {ServiceId::PgFdwMgrId,            {ServiceId::ServiceRegisterId,
                                              ServiceId::XidMgrClientId,
-                                             ServiceId::TableMgrId}},
+                                             ServiceId::TableMgrId,
+                                             ServiceId::RedisDDLId}},
     {ServiceId::PgXidSubscriberMgrId,  {ServiceId::ServiceRegisterId,
                                              ServiceId::XidMgrClientId,
                                              ServiceId::SysTblMgrClientId}},
     {ServiceId::PgDDLMgrId,            {ServiceId::ServiceRegisterId,
                                              ServiceId::XidMgrClientId,
-                                             ServiceId::TableMgrId}},
+                                             ServiceId::TableMgrId,
+                                             ServiceId::RedisDDLId}},
     {ServiceId::PgLogCoordinatorId,    {ServiceId::ServiceRegisterId,
                                              ServiceId::XidMgrServerId,
                                              ServiceId::WriteCacheServerId,
                                              ServiceId::SysTblMgrServerId,
-                                             ServiceId::TableMgrId}},
+                                             ServiceId::TableMgrId,
+                                             ServiceId::RedisDDLId}},
     {ServiceId::StorageCacheId,        {ServiceId::IOMgrId,
                                              ServiceId::VacuumerId}},
     {ServiceId::SystemTableMgrId,      {ServiceId::StorageCacheId,
-                                             ServiceId::IOMgrId}}
+                                             ServiceId::IOMgrId}},
+    {ServiceId::RedisDDLId,             {ServiceId::ServiceRegisterId}}
 };
 
 static const std::map<ServiceId, std::string> dependencies_names = {
@@ -283,7 +288,8 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"},
     {ServiceId::StorageCacheId,        "StorageCache"},
     {ServiceId::VacuumerId,            "Vacuumer"},
-    {ServiceId::SystemTableMgrId,      "SystemTableMgr"}
+    {ServiceId::SystemTableMgrId,      "SystemTableMgr"},
+    {ServiceId::RedisDDLId,            "RedisDDLId"}
 };
 
 const std::string &
