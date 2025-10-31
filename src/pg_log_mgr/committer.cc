@@ -6,6 +6,7 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
+#include <pg_ext/extn_registry.hh>
 
 namespace springtail::committer {
 
@@ -720,10 +721,12 @@ namespace springtail::committer {
             // create new mutable table with target_xid set to final_xid
             // All operations in this batch will be applied at the final XID
             CHECK_GT(batch.final_xid, 0);
-            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid, {PgExtnRegistry::get_instance()->comparator_func});
+
+            ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid, extension_callback);
 
             // Initialize write cache schema once for this table (performance optimization)
-            table->initialize_wc_schema();
+            table->initialize_wc_schema(extension_callback);
 
             batch.table_cache[tid] = table;
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, batch.final_xid);

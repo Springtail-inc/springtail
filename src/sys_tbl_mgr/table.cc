@@ -7,6 +7,7 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
 
+#include <pg_ext/extn_registry.hh>
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
 
@@ -702,7 +703,7 @@ namespace indexer_helpers {
     }
 
     void
-    MutableTable::initialize_wc_schema()
+    MutableTable::initialize_wc_schema(const ExtensionCallback& extension_callback)
     {
         // Use the table's existing schema (_schema is already set in constructor)
         auto schema = _schema;
@@ -720,7 +721,7 @@ namespace indexer_helpers {
         std::vector<SchemaColumn> new_columns{op, lsn};
 
         // Create write cache schema
-        _wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
+        _wc_schema = schema->create_schema(columns, new_columns, sort_keys, extension_callback, true);
 
         // Cache field accessors
         _wc_op_field = _wc_schema->get_field("__springtail_op");

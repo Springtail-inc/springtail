@@ -781,7 +781,7 @@ namespace indexer_helpers {
          * Uses the table's existing _schema to build write cache schema with op/lsn columns.
          * Must be called before processing extents from write cache.
          */
-        void initialize_wc_schema();
+        void initialize_wc_schema(const ExtensionCallback& extension_callback);
 
         /** Returns the cached write cache schema, or nullptr if not initialized */
         ExtentSchemaPtr wc_schema() const { return _wc_schema; }

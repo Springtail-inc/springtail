@@ -33,7 +33,7 @@ set(SCH_MEM_CACHE_SOURCES
 add_library(springtail_sys_tbl_mgr ${SYS_TBL_MGR_SOURCES})
 target_include_directories(springtail_sys_tbl_mgr PUBLIC ${CMAKE_BINARY_DIR}/src PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_sys_tbl_mgr
-  PUBLIC springtail_common springtail_grpc springtail_storage springtail_xid_mgr_client
+  PUBLIC springtail_common springtail_grpc springtail_storage springtail_xid_mgr_client springtail_pgext
   PRIVATE proto_sys_tbl_mgr
   PRIVATE Boost::thread)
 
