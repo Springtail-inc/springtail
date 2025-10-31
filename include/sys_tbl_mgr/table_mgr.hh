@@ -138,9 +138,10 @@ namespace springtail {
                          const std::vector<std::string> &primary_key,
                          const std::vector<Index> &secondary,
                          const TableMetadata &metadata,
-                         ExtentSchemaPtr schema) :
+                         ExtentSchemaPtr schema,
+                         ExtentSchemaPtr schema_without_row_id) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema) {}
+                         secondary, metadata, schema, schema_without_row_id) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing

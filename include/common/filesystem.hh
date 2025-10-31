@@ -196,7 +196,6 @@ namespace springtail {
                           std::string_view suffix)
         {
             std::filesystem::path dir = path.parent_path();
-            std::string current_file = path.filename().string();
 
             // Extract the timestamp from the current log file using the helper function
             auto current_timestamp = extract_timestamp_from_file(path, prefix, suffix);
@@ -346,7 +345,7 @@ namespace springtail {
                 std::filesystem::create_directories(create_path);
             }
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-                auto path = entry.path();
+                auto &path = entry.path();
                 auto filename = path.filename();
                 // Check if it's a regular file and matches the prefix and suffix
                 if (std::filesystem::is_regular_file(path) &&
@@ -365,6 +364,28 @@ namespace springtail {
                         }
                     }
                 }
+            }
+        }
+
+        /**
+         * @brief Remove directory
+         *
+         * @param dir - directory name
+         * @return true - success
+         * @return false - failure
+         */
+        static bool
+        remove_dir(const std::filesystem::path& dir)
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(dir, ec);
+            if (!ec) {
+                LOG_INFO("Removed directory {}", dir.c_str());
+                return true;
+            } else {
+                LOG_ERROR("Failed to removed directory {}: error code {}, error message '{}'",
+                    dir.c_str(), ec.value(), ec.message());
+                return false;
             }
         }
     };

@@ -1,20 +1,11 @@
 #pragma once
 
-#include <chrono>
-#include <common/timestamp.hh>
-
-#include <pg_repl/pg_msg_stream.hh>
-#include <pg_repl/pg_copy_table.hh>
-
-#include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
 #include <pg_log_mgr/pg_log_queue.hh>
-#include <write_cache/write_cache_table_set.hh>
-
-#include <storage/field.hh>
-
+#include <pg_repl/pg_msg_stream.hh>
 #include <sys_tbl_mgr/server.hh>
+#include <write_cache/write_cache_table_set.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -62,7 +53,7 @@ namespace springtail::pg_log_mgr {
         void process_log(const std::filesystem::path &path,
                          uint64_t timestamp,
                          const PgLogQueueEntryPtr& entry);
-                         
+
         /**
          * Set the starting point for XID assignment.
          */
@@ -91,6 +82,17 @@ namespace springtail::pg_log_mgr {
          *                      other files will be removed/archived
          */
         void cleanup_log_files(uint64_t min_timestamp);
+
+        /**
+         * @brief Verify if the log manager is done processing queries.
+         *
+         * @return true
+         * @return false
+         */
+        bool is_done()
+        {
+            return _msg_queue.empty() && (_xid_ts_tracker->get_inflight_xid_count() == 0);
+        }
 
     private:
         /**
@@ -167,7 +169,7 @@ namespace springtail::pg_log_mgr {
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
              * provided xid.
              * @param xid springtail xid
-             * @param md Metadata 
+             * @param md Metadata
              */
             void commit(uint64_t xid, WriteCacheTableSet::Metadata md);
 
@@ -227,7 +229,7 @@ namespace springtail::pg_log_mgr {
 
                 TableEntry() = default;
                 explicit TableEntry(ExtentSchemaPtr table_schema)
-                    : table_schema(table_schema) 
+                    : table_schema(table_schema)
                 {}
 
                 /**

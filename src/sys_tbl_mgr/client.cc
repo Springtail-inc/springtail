@@ -104,6 +104,8 @@ std::shared_ptr<const SchemaMetadata>
 Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
 {
     auto populate = [this](uint64_t db, uint64_t tid, const XidLsn &xid) {
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "populate callback called for: db:tid {}:{}, xid:lsn {}:{}",
+                db, tid, xid.xid, xid.lsn);
         proto::GetSchemaRequest request;
         request.set_db_id(db);
         request.set_table_id(tid);
