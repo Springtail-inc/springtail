@@ -190,6 +190,19 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
     return {last_xid};
 }
 
+void ShmCache::delete_xid_history(DbId db)
+{
+    ipc::scoped_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    auto it = _xid_history_map->find(db);
+    if (it != _xid_history_map->end()) {
+        _xid_history_map->erase(it);
+    }
+}
+
 void ShmCache::cleanup_xid_history()
 {
     ipc::scoped_lock<Mutex> lock(_mutex,

@@ -146,6 +146,11 @@ public:
      */ 
     void cleanup_xid_history();
 
+    /** 
+     * Delete XID history for a DB
+     */
+    void delete_xid_history(DbId db);
+
     /**
      * This must be called periodically (see XID_KEEP_ALIVE_PERIOD).
      * to keep the committed XID as being up to date.
