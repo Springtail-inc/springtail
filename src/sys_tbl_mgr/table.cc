@@ -7,7 +7,6 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
 
-#include <pg_ext/extn_registry.hh>
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
 
