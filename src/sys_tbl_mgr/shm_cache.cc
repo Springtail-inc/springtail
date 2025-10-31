@@ -1,7 +1,9 @@
 #include <absl/log/check.h>
 #include <bits/ranges_algo.h>
+#include <optional>
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <common/logging.hh>
+#include <redis/redis_ddl.hh>
 
 using namespace springtail::sys_tbl_mgr;
 
@@ -100,7 +102,7 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
         // put the schema change xid and last committed xid into history
         auto it = _xid_history_map->find(db);
         if (it == _xid_history_map->end()) {
-            it = _xid_history_map->emplace(xid, XidHistory{_history_alloc}).first;
+            it = _xid_history_map->emplace(db, XidHistory{_history_alloc}).first;
         }
         it->second.emplace_back(xid, last_xid);
     }
@@ -140,18 +142,85 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
     CHECK(lock.owns());
 
     if (*_xid_commit_time == Time()) {
-        return {};
+        return std::nullopt;
     }
 
     if ( (std::chrono::high_resolution_clock::now() -  *_xid_commit_time) > XID_KEEP_ALIVE_PERIOD) {
-        return {};
+        return std::nullopt;
     }
 
-    auto it = _committed_xid_map->find(db);
-    if (it == _committed_xid_map->end()) {
-        return {};
+    Xid last_xid = 0;
+    {
+        auto it = _committed_xid_map->find(db);
+        if (it == _committed_xid_map->end()) {
+            return std::nullopt;
+        }
+        last_xid = it->second;
     }
-    return it->second;
+
+    // Look up history if the history is ahead of the commit, return the committed xid
+    auto it = _xid_history_map->find(db); 
+    if (it == _xid_history_map->end()) {
+        // something is wrong, no history found
+        return std::nullopt;
+    }
+
+    auto pos_i = std::ranges::upper_bound(
+        it->second,
+        schema_xid,
+        [] (Xid a, Xid b) {
+            return a < b;
+        },
+        [] (const XidHistoryEntry& entry) {
+            return entry.schema_xid;
+        }
+    );
+
+    if (pos_i != it->second.end()) {
+        auto latest_schema_xid = pos_i->latest_committed_xid;
+        if (!latest_schema_xid) {
+            return std::nullopt;
+        }
+
+        if (latest_schema_xid <= last_xid) {
+            last_xid = latest_schema_xid;
+        }
+    }
+
+    return {last_xid};
+}
+
+void ShmCache::cleanup_xid_history()
+{
+    ipc::scoped_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    if (_xid_history_map->empty()) {
+        return;
+    }
+
+    for (auto& [db, history] : *_xid_history_map) {
+        if (history.empty()) {
+            continue;
+        }
+        uint64_t min_schema_xid = RedisDDL::get_instance()->min_schema_xid(db);
+
+        // find position lower than min_schema_xid
+        auto it = std::ranges::lower_bound(
+            history,
+            min_schema_xid,
+            [] (Xid a, Xid b) {
+                return a < b;
+            },
+            [] (const XidHistoryEntry& entry) {
+                return entry.schema_xid;
+            }
+        );
+        // erase all smaller xids
+        history.erase(history.begin(), it);
+    }
 }
 
 void

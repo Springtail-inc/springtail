@@ -7,7 +7,6 @@
 #include <xid_mgr/xid_mgr_subscriber.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <common/coordinator.hh>
-#include <redis/redis_ddl.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
@@ -41,6 +40,8 @@ PgXidSubscriberMgr::task(std::stop_token st)
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_ROOTS);
     _cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _cache_size);
 
+    XidHistoryCleaner cleaner{_cache};
+
     auto client = sys_tbl_mgr::Client::get_instance();
     // Client should cache get_roots() responses now
     client->use_roots_cache(_cache);
@@ -54,7 +55,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         // when we get an XID push notification, we pass it to the workers
         // and return immediately. A worker calls get_roots() that will
         // attempt to populate the cache.
-        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {}", db, xid);
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Iron XID push notification {} - {}, schema_changes: {}", db, xid, has_schema_changes);
         _cache->update_committed_xid(db, xid, has_schema_changes);
         _enqueue_populate_job(db, xid);
     };
@@ -98,7 +99,6 @@ PgXidSubscriberMgr::task(std::stop_token st)
         }
         std::this_thread::sleep_for(loop_time_period);
         _cache->keep_alive();
-//        [[maybe_unused]] uint64_t min_schema_xid = RedisDDL::get_instance()->min_schema_xid(1);
     }
     subscriber.reset();
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
@@ -179,4 +179,18 @@ PgXidSubscriberMgr::start()
     auto worker_count = Json::get_or<size_t>(rpc_json, "server_worker_threads", 1);
 
     get_instance()->init(roots_cache_size, worker_count);
+}
+
+void
+PgXidSubscriberMgr::XidHistoryCleaner::_task(std::stop_token st)
+{
+    std::unique_lock lock(_m);
+
+    while(true) {
+        _cv.wait_for(lock, st, CLEANER_INTERVAL, []{ return false; });
+        if (st.stop_requested()) {
+            break;
+        }
+        _cache->cleanup_xid_history();
+    }
 }
