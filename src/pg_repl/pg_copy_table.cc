@@ -750,6 +750,15 @@ namespace springtail
             root_info->set_extent_id(extent);
         }
 
+        if (_schema.secondary_keys.empty()) {
+            // Add look aside index entry for this snapshot
+            // as there is no secondary index, otherwise it will be
+            // present in the metadata roots
+            auto* root_info = roots_req->add_roots();
+            root_info->set_index_id(constant::INDEX_LOOK_ASIDE);
+            root_info->set_extent_id(constant::UNKNOWN_EXTENT);
+        }
+
         auto* stats = roots_req->mutable_stats();
         stats->set_row_count(metadata.stats.row_count);
         stats->set_end_offset(metadata.stats.end_offset);

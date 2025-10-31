@@ -764,10 +764,10 @@ namespace indexer_helpers {
         // Look-aside exists only with secondary indexes
         auto initialize_look_aside = !_secondary_indexes.empty();
 
-        // find look-aside index root
-        auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
-
         if (initialize_look_aside) {
+            // find look-aside index root
+            auto la_it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
+
             // initialize the look-aside index
             if (la_it != roots.end() && la_it->extent_id != constant::UNKNOWN_EXTENT) {
                 create_look_aside_root();
@@ -1046,8 +1046,6 @@ namespace indexer_helpers {
         // Flush the look aside index if available
         if (_look_aside_index) {
             metadata.roots.push_back({constant::INDEX_LOOK_ASIDE, _look_aside_index->finalize()});
-        } else {
-            metadata.roots.push_back({constant::INDEX_LOOK_ASIDE, constant::UNKNOWN_EXTENT});
         }
 
         // now flush the indexes, capturing the roots
