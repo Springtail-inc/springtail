@@ -79,7 +79,7 @@ jobs:
           if [ -z "${OUTPUT_IMAGE_TAG}" ]; then
             # Generate a unique short random tag
             r=$(head /dev/urandom | tr -dc a-f0-9 | head -c6)
-            output_image_tag="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
+            output_image_tag="tmp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
           fi
           
           # Logs in ECR
@@ -95,6 +95,29 @@ jobs:
             echo "springtail_include_time_traces=SPRINGTAIL_INCLUDE_TIME_TRACES=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Make ECR-safe tag from ref_name
+        id: slug
+        shell: bash
+        run: |
+          raw="${GITHUB_REF_NAME}"
+          # normalize + replace invalids
+          tag="$(printf '%s' "$raw" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9._-]+/-/g; s/^[.-]+//; s/[.-]+$//')"
+          
+          # ensure non-empty
+          if [ -z "$tag" ]; then tag="ref"; fi
+          
+          # enforce 128-char limit; keep uniqueness with an 8-char hash if truncated
+          if [ ${#tag} -gt 128 ]; then
+            head="${tag:0:110}"
+            hash="$(printf '%s' "$raw" | sha1sum | cut -c1-8)"
+            tag="${head}-${hash}"
+            tag="${tag:0:128}"
+          fi
+          
+          echo "tag=cache-$tag" >> "$GITHUB_OUTPUT"
+
       - name: Docker Build Push Action
         uses: Warpbuilds/build-push-action@v6
         with:
@@ -103,8 +126,20 @@ jobs:
           push: ${{ inputs.push }}
           load: ${{ !inputs.push }}
           file: .github/workflows/Dockerfile.build
+          platforms: linux/arm64
+          provenance: false
+          sbom: false
+          outputs: >
+            type=registry,
+            oci-mediatypes=true,
+            compression=zstd,           # much faster than gzip
+            compression-level=3,        # good speed/size tradeoff
+            force-compression=true
+          cache-from: type=registry,ref=381492230138.dkr.ecr.us-east-1.amazonaws.com/devsupport:cache-latest
+          cache-to: type=inline
           tags: |
             ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ steps.prepare-build.outputs.output_image_tag }}
+            ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ steps.slug.outputs.tag }}
           build-args: |
             BASE_IMAGE=${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.base_image_tag }}
             CI_BUILD_TYPE=${{ inputs.build_type }}

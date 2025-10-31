@@ -13,7 +13,8 @@ volumes:
   data:
   ingestion_logs:
   proxy_logs:
-  fdw_logs:
+  fdw1_logs:
+  fdw2_logs:
 
 services:
   # The bootstrap box
@@ -232,9 +233,8 @@ services:
     volumes:
       - data:/fsx:ro
       - ./etc/supervisor:/etc/supervisor:rw
-      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
-      - "./opt/springtail/customize-pg.yml:${INSTALL_DIR}/customize-pg.yml:ro"
-      - "fdw_logs:${INSTALL_DIR}/logs:rw"
+      - "./opt/springtail/helpers:${INSTALL_DIR}/helpers"
+      - "fdw1_logs:${INSTALL_DIR}/logs:rw"
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:
       ingestion:
@@ -274,7 +274,7 @@ services:
       - data:/fsx:ro
       - ./etc/supervisor:/etc/supervisor:rw
       - "./opt/springtail/helpers:${INSTALL_DIR}/helpers"
-      - "fdw_logs:${INSTALL_DIR}/logs:rw"
+      - "fdw2_logs:${INSTALL_DIR}/logs:rw"
     command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
     depends_on:
       ingestion:

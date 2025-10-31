@@ -63,8 +63,8 @@ namespace springtail::pg_proxy {
     Parser::dump_context(const StmtContext &context)
     {
         LOG_INFO("Context: location={}, type={}, name={}, is_read_safe={}\n  has_select_query={}, has_unsupported_query={}, has_locking={}, has_into={}, has_declare_hold={}, has_error={}, has_is_local={}, has_set_config_session={}",
-            context.stmt_location, _stmt_names[(int8_t)context.type], context.name, context.is_read_safe, 
-            context.has_select_query, context.has_unsupported_query, context.has_locking, context.has_into, 
+            context.stmt_location, _stmt_names[(int8_t)context.type], context.name, context.is_read_safe,
+            context.has_select_query, context.has_unsupported_query, context.has_locking, context.has_into,
             context.has_declare_hold, context.has_error, context.has_is_local, context.has_set_config_session);
 
         if (context.has_set_config_session && !context.set_config_value.empty()) {

@@ -565,7 +565,7 @@ namespace springtail {
     }
 
     std::vector<std::string>
-    Properties::_get_fdw_ids(const std::string &state)
+    Properties::_get_fdw_ids(const std::vector<std::string> &states)
     {
         nlohmann::json fdw_ids_json = _cache->get_value("fdw_ids");
         if (fdw_ids_json.empty()) {
@@ -577,13 +577,15 @@ namespace springtail {
             CHECK(fdw_id_json.type() == nlohmann::json::value_t::string);
             auto fdw_id = fdw_id_json.get<std::string>();
 
-            // filter by state if provided
-            if (!state.empty()) {
+            // filter by states if provided
+            if (!states.empty()) {
                 // get fdw config and check state
                 nlohmann::json fdw_config = _get_fdw_config(fdw_id);
                 CHECK(fdw_config.contains("state"));
                 std::string fdw_state = fdw_config["state"];
-                if (fdw_state != state) {
+
+                // check if fdw_state is in the states vector
+                if (std::find(states.begin(), states.end(), fdw_state) == states.end()) {
                     continue;
                 }
             }
@@ -670,5 +672,12 @@ namespace springtail {
         nlohmann::json props = _json[Properties::LOGGING_CONFIG];
         std::string pid_path = Json::get_or<std::string>(props, Properties::PID_PATH, "/var/springtail/pids");
         return pid_path;
+    }
+
+    void
+    Properties::set_db_state_in_redis(uint64_t db_id, const std::string &state)
+    {
+        nlohmann::json json_state = state;
+        _cache->set_hash_value_in_redis(DATABASE_STATE_PATH, std::to_string(db_id), json_state);
     }
 }

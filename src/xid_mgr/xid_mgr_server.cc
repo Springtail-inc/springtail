@@ -40,6 +40,10 @@ XidMgrServer::XidMgrServer() : Singleton<XidMgrServer>(ServiceId::XidMgrServerId
 
     _archive_logs = Json::get_or<bool>(json, "archive_logs", false);
 
+    // Just for initialization, otherwise it might lock up a unit test because of a race condition
+    // between shutdown sequence and XID manager thread instantiating RedisDDL for the first time.
+    RedisDDL::get_instance();
+
     _startup();
 }
 
@@ -67,13 +71,12 @@ XidMgrServer::_internal_shutdown()
 void
 XidMgrServer::_internal_run()
 {
-    RedisDDL redis_ddl;
     while (!_is_shutting_down()) {
         // sleep for at least XIG_MGR_MIN_SYNC_MS
         std::this_thread::sleep_for(std::chrono::milliseconds(XIG_MGR_MIN_SYNC_MS));
         std::shared_lock lock(_mutex);
         for (auto &it: _xact_log_data) {
-            it.second.cleanup_history_and_flush(redis_ddl);
+            it.second.cleanup_history_and_flush();
         }
     }
 }
@@ -126,6 +129,18 @@ XidMgrServer::cleanup(uint64_t db_id, uint64_t min_timestamp)
 }
 
 void
+XidMgrServer::cleanup(uint64_t db_id)
+{
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Cleaning up database {}", db_id);
+    std::unique_lock read_lock(_mutex);
+    _xact_log_data.erase(db_id);
+
+    // Remove database directory and everything inside it
+    std::filesystem::path path = _base_path / std::to_string(db_id);
+    fs::remove_dir(path);
+}
+
+void
 XidMgrServer::rotate(uint64_t db_id, uint64_t timestamp)
 {
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Rotate log for database {}, timestamp {}", db_id, timestamp);
@@ -145,8 +160,8 @@ XidMgrServer::_find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &
         // this will sanitize existing logs for recovery, if there are any records at the end with
         // real_commit set to false, it will remove those, so that the log can be written from
         // the last real commit
-        PgXactLogWriter::set_last_xid_in_storage(_base_path / std::to_string(db_id), std::numeric_limits<uint64_t>::max(), _archive_logs);
-        auto result = _xact_log_data.emplace(std::piecewise_construct, std::forward_as_tuple(db_id), std::forward_as_tuple(db_id, _base_path));
+        uint64_t recovered_xid = PgXactLogWriter::set_last_xid_in_storage(_base_path / std::to_string(db_id), std::numeric_limits<uint64_t>::max(), _archive_logs);
+        auto result = _xact_log_data.emplace(std::piecewise_construct, std::forward_as_tuple(db_id), std::forward_as_tuple(db_id, _base_path, recovered_xid));
         it = result.first;
         write_lock.unlock();
 
@@ -172,12 +187,12 @@ XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, boo
 }
 
 void
-XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL &redis_ddl)
+XidMgrServer::DBXactLogData::cleanup_history_and_flush()
 {
     std::unique_lock lock(_mutex);
     if (!_xact_history.empty() && _dirty_history) {
         // get min schema xid
-        uint64_t min_schema_xid = redis_ddl.min_schema_xid(_db_id);
+        uint64_t min_schema_xid = RedisDDL::get_instance()->min_schema_xid(_db_id);
 
         // find position lower than min_schema_xid
         auto it = std::lower_bound(

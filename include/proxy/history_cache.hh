@@ -173,8 +173,8 @@ namespace pg_proxy {
          * @param history history map to compact
          * @return compacted history map
          */
-        static std::map<uint64_t, QueryStmtPtr> compact(uint64_t replay_idx,
-            const std::map<uint64_t, QueryStmtPtr> &history) const;
+        static std::map<uint64_t, QueryStmtPtr>
+        compact(uint64_t replay_idx, const std::map<uint64_t, QueryStmtPtr> &history);
 
         /**
          * @brief Compact the current history cache; updates _history

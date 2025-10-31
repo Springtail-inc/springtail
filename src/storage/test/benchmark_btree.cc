@@ -58,7 +58,7 @@ class BenchmarkHelper {
                          uint64_t xid)
     {
         // construct a mutable b-tree for inserting data
-        auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid, constant::MAX_EXTENT_SIZE);
+        auto btree = std::make_shared<MutableBTree>(0, name, _keys, _schema, xid, constant::MAX_EXTENT_SIZE);
 
         btree->init_empty();
         return btree;
@@ -77,7 +77,7 @@ static void BM_BTreeLookupHelper(benchmark::State& state, bool miss) {
     auto offset = btree->finalize();
 
     // get a pointer to the read-only btree
-    auto tree = std::make_shared<BTree>(path, 1, helper._schema, offset, constant::MAX_EXTENT_SIZE);
+    auto tree = std::make_shared<BTree>(0, path, 1, helper._schema, offset, constant::MAX_EXTENT_SIZE);
     std::mt19937 generator{std::random_device{}()};
     std::uniform_int_distribution<> dist(0, row_count - 1);
 

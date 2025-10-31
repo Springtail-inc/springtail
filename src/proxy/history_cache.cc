@@ -106,6 +106,10 @@ namespace pg_proxy {
                     }
                     break;
 
+                case QueryStmt::LISTEN: // add listen
+                    statement_map[QueryStmt::LISTEN][stmt->name] = {idx, stmt};
+                    break;
+
                 case QueryStmt::RESET: // remove variable(s)
                     if (stmt->name.empty()) { // RESET ALL
                         statement_map[QueryStmt::SET].clear();
@@ -156,10 +160,25 @@ namespace pg_proxy {
                     }
                     break;
 
+                case QueryStmt::UNLISTEN: // remove listen(s)
+                    // safe to clear LISTENs no errors if channel doesn't exist
+                    if (stmt->name.empty()) { // UNLISTEN ALL
+                        statement_map[QueryStmt::LISTEN].clear();
+                    } else {
+                        statement_map[QueryStmt::LISTEN].erase(stmt->name);
+                    }
+                    // keep the UNLISTEN statement
+                    new_history[idx] = stmt;
+                    break;
+
                 case QueryStmt::DISCARD_ALL: // discard all
                     statement_map.clear();
                     // keep the DISCARD ALL statement
                     new_history[idx] = stmt;
+                    break;
+
+                default:
+                    // Other statement types are not tracked for compaction
                     break;
             }
         }

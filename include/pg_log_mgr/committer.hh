@@ -1,31 +1,10 @@
 #pragma once
 
-#include <thread>
-
-#include <boost/thread.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
-
-#include <common/concurrent_queue.hh>
-#include <common/constants.hh>
-#include <common/coordinator.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/properties.hh>
-#include <common/time_trace.hh>
-#include <common/event_frequency.hh>
-
-#include <redis/redis_ddl.hh>
-#include <redis/redis_containers.hh>
-
-#include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/indexer.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
-
-#include <pg_repl/index_reconcile_request.hh>
-
+#include <pg_log_mgr/xid_ready.hh>
+#include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_index.hh>
 
@@ -44,23 +23,6 @@ namespace springtail::committer {
      */
     class Committer {
     public:
-        struct TxCounters {
-            size_t inserts = 0;
-            size_t updates = 0;
-            size_t deletes = 0;
-            size_t truncates = 0;
-            size_t messages = 0;
-
-            TxCounters& operator+=(const TxCounters& rhs) {
-                inserts += rhs.inserts;
-                updates += rhs.updates;
-                deletes += rhs.deletes;
-                truncates += rhs.truncates;
-                messages += rhs.messages;
-                return *this;
-            }
-        };
-
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
                 std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
                 const std::shared_ptr<pg_log_mgr::IndexRequestsManager> &index_requests_mgr, uint32_t indexer_worker_count)
@@ -79,6 +41,13 @@ namespace springtail::committer {
 
         /** Perform cleanup on a failed thread. */
         void cleanup();
+
+        /**
+         * @brief Remove database realted data stored by committer.
+         *
+         * @param db_id database id
+         */
+        void remove_db(uint64_t db_id);
 
         // constants for the coordinator thread IDs
         constexpr static const std::string_view THREAD_TYPE = "commit";
@@ -153,7 +122,7 @@ namespace springtail::committer {
          * @param table The MutableTable being mutated
          * @param wc_extent The WriteCacheExtent containing the mutations
          */
-        TxCounters _process_extent(uint64_t db_id, uint64_t tid, MutableTablePtr table,
+        void _process_extent(uint64_t db_id, uint64_t tid, MutableTablePtr table,
                              const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent);
 
         /**
@@ -205,6 +174,7 @@ namespace springtail::committer {
             std::map<uint64_t, MutableTablePtr> table_cache;  ///< tid → MutableTable
             std::vector<std::shared_ptr<XidReady>> xid_results;  ///< All XidReady messages for this db
             uint64_t final_xid = 0;  ///< The final XID where this batch will commit (determined upfront)
+            std::map<uint64_t, WriteCacheTableSet::Metadata> xid_metadata;  ///< xid → earliest metadata for that XID
         };
 
         /**
@@ -220,7 +190,6 @@ namespace springtail::committer {
         );
 
     private:
-        RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
 
         /**
@@ -254,9 +223,6 @@ namespace springtail::committer {
 
         std::set<uint64_t> _tid_set; ///< Set of in-flight tables being processed.
 
-        /** Cache of mutable tables that are in-flight. */
-        std::map<uint64_t, MutableTablePtr> _table_map;
-
         /** The most recently completed XID by db.  Note: if we are in a table sync, this may be
             ahead of the most recently committed XID at the XidMgr. */
         std::map<uint64_t, uint64_t> _completed_xids;
@@ -272,6 +238,8 @@ namespace springtail::committer {
          */
         std::unique_ptr<Indexer> _indexer;
 
+        /** main mutext data structures access */
+        std::mutex _main_mutex;
         /**
          * @brief shared_ptr to the index requests manager to get
          * index requests (create/drop) for an XID per db

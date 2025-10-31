@@ -50,6 +50,13 @@ public:
     void cleanup(uint64_t db_id, uint64_t min_timestamp);
 
     /**
+     * @brief Cleanup the whole database from xid manager. Only used for database removal
+     *
+     * @param db_id database id
+     */
+    void cleanup(uint64_t db_id);
+
+    /**
      * @brief Rotate database xact log to the new timestamp id
      *
      * @param db_id database id
@@ -85,10 +92,12 @@ private:
          *
          * @param db_id - database id
          * @param base_dir - parent directory of all transaction logs
+         * @param recovered_xid - last committed xid recovered from storage (1 if none)
          */
-        DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir) :
-                      _xact_log(base_dir / std::to_string(db_id)),
-                      _db_id(db_id) {}
+        DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir, uint64_t recovered_xid) :
+                      _xact_log(base_dir / std::to_string(db_id), recovered_xid),
+                      _db_id(db_id),
+                      _last_committed_xid(_xact_log.get_last_xid()) {}
 
         /**
          * @brief Record mapping from pg_xid to xid with some attributes
@@ -103,11 +112,9 @@ private:
 
         /**
          * @brief Cleanup committed history of schema changes
-         *
-         * @param redis_ddl - redis DDL object
          */
         void
-        cleanup_history_and_flush(RedisDDL &redis_ddl);
+        cleanup_history_and_flush();
 
         /**
          * @brief Get the value of the last committed xid
