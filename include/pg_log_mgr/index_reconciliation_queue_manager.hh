@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unordered_map>
+
 #include <pg_repl/index_reconcile_request.hh>
 #include <common/concurrent_queue.hh>
 
@@ -15,7 +17,7 @@ namespace springtail::pg_log_mgr {
 
             /**
              * @brief Adds a new queue with the given DB ID if it does not already exist.
-             * 
+             *
              * @param db_id The identifier for the new queue.
              */
             void add_queue(uint64_t db_id) {
@@ -24,9 +26,9 @@ namespace springtail::pg_log_mgr {
             }
 
             /**
-             * @brief Retrieves an index reconcile request from the 
+             * @brief Retrieves an index reconcile request from the
              *        db's index reconciliation queue
-             * 
+             *
              * @param db_id The database/queue identifier.
              * @param seconds timeout in seconds
              * @return IndexReconcileRequestPtr
@@ -66,7 +68,7 @@ namespace springtail::pg_log_mgr {
 
             /**
              * @brief Removes the queue with the specified DB ID.
-             * 
+             *
              * @param db_id The database/queue identifier to remove.
              */
             void remove_queue(uint64_t db_id) {

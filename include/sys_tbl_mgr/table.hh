@@ -776,6 +776,25 @@ namespace indexer_helpers {
             return _stats;
         }
 
+        /**
+         * Initialize cached write cache schema and fields for committer performance.
+         * Uses the table's existing _schema to build write cache schema with op/lsn columns.
+         * Must be called before processing extents from write cache.
+         */
+        void initialize_wc_schema();
+
+        /** Returns the cached write cache schema, or nullptr if not initialized */
+        ExtentSchemaPtr wc_schema() const { return _wc_schema; }
+
+        /** Returns the cached op field accessor, or nullptr if not initialized */
+        FieldPtr wc_op_field() const { return _wc_op_field; }
+
+        /** Returns the cached data fields, or nullptr if not initialized */
+        FieldArrayPtr wc_fields() const { return _wc_fields; }
+
+        /** Returns the cached key fields, or nullptr if not initialized */
+        FieldArrayPtr wc_key_fields() const { return _wc_key_fields; }
+
     protected:
         /**
          * Page callback on evict() / flush_file() that will perform an _invalidate_indexes() and
@@ -921,6 +940,11 @@ namespace indexer_helpers {
         TableStats _stats{}; ///< The stats for the table.
 
         ExtensionCallback _extension_callback; ///< The extension callback for this table.
+        // Cached write cache schema and fields for committer performance
+        ExtentSchemaPtr _wc_schema;           ///< Pre-computed write cache schema with op/lsn columns
+        FieldPtr _wc_op_field;                ///< Field accessor for __springtail_op
+        FieldArrayPtr _wc_fields;             ///< Field accessors for all data columns
+        FieldArrayPtr _wc_key_fields;         ///< Field accessors for primary key columns
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

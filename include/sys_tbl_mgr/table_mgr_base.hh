@@ -58,6 +58,12 @@ namespace springtail {
                           const XidLsn &xid, const ExtensionCallback &extension_callback = {},
                           bool allow_undefined = false) = 0;
 
+        /**
+         * @brief Get the base path for the tables storage location
+         *
+         * @return std::filesystem::path file path
+         */
+        std::filesystem::path get_table_base() const { return _table_base; }
 
     protected:
         /** Helper to convert schema column to map */

@@ -1,27 +1,10 @@
-#include <fmt/core.h>
-#include <limits>
-#include <memory>
-#include <vector>
-
-#include <common/common.hh>
-#include <common/coordinator.hh>
-#include <common/logging.hh>
-#include <common/open_telemetry.hh>
-#include <common/properties.hh>
-#include <common/redis.hh>
-
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/pg_repl_connection.hh>
-#include <pg_repl/pg_copy_table.hh>
-
+#include <common/time_trace.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
-#include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
 #include <pg_log_mgr/pg_log_recovery.hh>
 #include <pg_log_mgr/sync_tracker.hh>
-
-#include <xid_mgr/xid_mgr_server.hh>
 #include <storage/vacuumer.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -57,6 +40,31 @@ namespace springtail::pg_log_mgr {
                 _on_database_state_changed(path, new_value);
             }
         );
+    }
+
+    nlohmann::json
+    PgLogMgr::get_stats()
+    {
+        static const std::string internal_state_names[] =
+        {
+            "STATE_STARTUP",
+            "STATE_STARTUP_SYNC",
+            "STATE_RUNNING",
+            "STATE_SYNC_STALL",
+            "STATE_SYNCING",
+            "STATE_REPLAYING",
+            "STATE_STOPPED"
+        };
+
+        nlohmann::json json_stats =
+            nlohmann::json::object({
+                {"db_name", _db_name},
+                {"pub_name", _pub_name},
+                {"slot_name", _slot_name},
+                {"internal_state", internal_state_names[_internal_state.get()]}
+            });
+
+            return json_stats;
     }
 
     void
@@ -138,6 +146,8 @@ namespace springtail::pg_log_mgr {
         uint64_t lsn = INVALID_LSN;
         bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
         if (do_init) {
+            PgLogCoordinator::get_instance()->cleanup_database_dir(_db_id);
+
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Started in init state");
             _startup_init();
             _wal_buffer_flag = true;
@@ -587,6 +597,9 @@ namespace springtail::pg_log_mgr {
             return false;
         } catch (const PgConnectionError &e) {
             LOG_ERROR("Error reading data from pg: {}", e.what());
+            if (_shutdown) {
+                return false;
+            }
             // try reconnecting
             try {
                 auto now = common::get_time_in_millis();
@@ -603,8 +616,8 @@ namespace springtail::pg_log_mgr {
                               RECONNECT_TIME_PERIOD_SEC);
 
                     // shutdown
-                    Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-                    PgLogCoordinator::get_instance()->shutdown();
+                    shutdown();
+                    Properties::get_instance()->set_db_state_in_redis(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
                     return false;
                 }
 
@@ -619,8 +632,8 @@ namespace springtail::pg_log_mgr {
             } catch (const PgConnectionError &e) {
                 LOG_ERROR("Error reconnecting to pg: {}", e.what());
                 // shutdown
-                Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-                PgLogCoordinator::get_instance()->shutdown();
+                shutdown();
+                Properties::get_instance()->set_db_state_in_redis(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
                 return false;
             }
         }
@@ -820,7 +833,7 @@ namespace springtail::pg_log_mgr {
 
                 _internal_state.set(STATE_RUNNING);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Sync to complete");
-                
+
                 continue;
             }
 
@@ -841,6 +854,11 @@ namespace springtail::pg_log_mgr {
 
         // unregister thread before exiting
         coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
+        // Wait till pg_log_reader drained the queue and has no inflight commits
+        while(!_pg_log_reader->is_done()) {
+            usleep(100);
+        }
     }
 
     PgLogWriterPtr

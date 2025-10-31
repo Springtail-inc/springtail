@@ -508,6 +508,8 @@ namespace springtail::pg_fdw {
         // NOTE: first call to XidMgrClient needs to be done on the main thread to prevent occasional
         //      deadlock during shutdown for short-lived FDW processes.
         (void)XidMgrClient::get_instance();
+        // NOTE: the same for RedisDDL
+        (void)RedisDDL::get_instance();
         start_thread();
         LOG_INFO("FDW process finished initialization");
     }
@@ -603,7 +605,7 @@ namespace springtail::pg_fdw {
         }
 
         if (init) {
-            springtail_init(false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW);
+            springtail_init(false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW | LOG_SCHEMA);
         }
     }
 
@@ -2222,6 +2224,8 @@ namespace springtail::pg_fdw {
             : table(table), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
         columns = TableMgrClient::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Received columns, column count: {}", columns.size());
+
         for (const auto &entry : columns) {
             name_map[entry.second.name] = entry.second.position;
         }

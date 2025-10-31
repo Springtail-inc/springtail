@@ -81,12 +81,14 @@ namespace springtail {
         /**
          * Constructs an uninitialized tree at the provided XID.
          *
+         * @param database_id The database that this tree belongs to.
          * @param handle The file handle to the underlying on-disk representation.
          * @param keys A list of keys from the schema that are used to sort the entries of the tree.
          * @param cache_size The maximum size of the in-memory cache of pages.
          * @param schema The schema of the leaf entries of the tree.
          */
-        MutableBTree(const std::filesystem::path &file,
+        MutableBTree(uint64_t database_id,
+                     const std::filesystem::path &file,
                      const std::vector<std::string> &keys,
                      ExtentSchemaPtr schema,
                      uint64_t xid,
@@ -514,6 +516,9 @@ namespace springtail {
     private:
         /** The cache of pages for this MutableBTree. */
         PageCachePtr _cache;
+
+        /** The database that this tree belongs to. */
+        uint64_t _database_id;
 
         /** The handle to the underlying on-disk data. */
         std::shared_ptr<IOHandle> _handle;
