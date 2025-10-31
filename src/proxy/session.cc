@@ -343,7 +343,8 @@ namespace springtail::pg_proxy {
             connection_json = {
                 {"endpoint", _connection->endpoint()},
                 {"ssl", _connection->is_ssl_enabled()},
-                {"socket",  _connection->get_socket()}
+                {"socket",  _connection->get_socket()},
+                {"closed", _connection->closed()}
             };
         }
 

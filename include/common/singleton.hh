@@ -32,6 +32,7 @@ namespace springtail {
         StorageCacheId,
         VacuumerId,
         SystemTableMgrId,
+        RedisDDLId,
         ServiceCountId
     };
 

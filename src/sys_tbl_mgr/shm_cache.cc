@@ -40,7 +40,11 @@ ShmCache::~ShmCache()
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache deleted: {} - {}", _name, _created);
     if (_created) {
-        remove(_name);
+        try {
+            remove(_name);
+        } catch (...) {
+            LOG_ERROR("Failed to remove shared memory cache '{}'", _name);
+        }
     }
 }
 
@@ -72,7 +76,9 @@ ShmCache::_init()
 void
 ShmCache::remove(const std::string& name)
 {
-    ipc::shared_memory_object::remove(name.c_str());
+    if (!ipc::shared_memory_object::remove(name.c_str())) {
+        LOG_ERROR("Failed to remove shared memory '{}'", name);
+    }
     Mutex::remove((name + std::string(".mutex")).c_str());
 }
 

@@ -3,7 +3,6 @@
 #include <unordered_map>
 #include <functional>
 #include <list>
-#include <iostream>
 #include <boost/container_hash/hash.hpp>
 #include <common/logging.hh>
 
@@ -312,6 +311,30 @@ namespace springtail {
                 _cache.clear();
                 _lookup.clear();
                 _cache_size = 0;
+            }
+        }
+
+        /**
+         * @brief Drop all entries in the object cache that are verified by callback to be ok to drop.
+         *
+         * @param callback - callback that returns true for an entry that should be removed
+         */
+        void
+        drop_all(std::function<bool(std::shared_ptr<EntryType>)> callback)
+        {
+            auto it = _lookup.begin();
+            while (it != _lookup.end()) {
+                // retrieve the value from the lookup entry
+                CacheEntry &entry = *(it->second);
+                auto value = std::get<1>(entry);
+                if (callback(value)) {
+                    // remove the entry from the cache
+                    _cache_size -= std::get<2>(entry);
+                    _cache.erase(it->second);
+                    it = _lookup.erase(it);
+                } else {
+                    ++it;
+                }
             }
         }
     };

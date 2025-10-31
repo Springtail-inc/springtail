@@ -116,7 +116,7 @@ namespace springtail {
 
                     // read the child extent
                     LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Get page {}", extent_id);
-                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+                    auto child = cache->get(_btree->_database_id, _btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                     --depth;
                     auto begin = child->begin();
@@ -142,7 +142,7 @@ namespace springtail {
                     auto cache = StorageCache::get_instance();
 
                     // get the root page
-                    auto root = cache->get(_btree->_file, _btree->_root_offset, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+                    auto root = cache->get(_btree->_database_id, _btree->_file, _btree->_root_offset, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                     // create a node for the root
                     auto last = root->last();
@@ -154,7 +154,7 @@ namespace springtail {
                         uint64_t child_id = _btree->_branch_child_f->get_uint64(&*(_node->row_i));
 
                         // read the extent
-                        auto child = cache->get(_btree->_file, child_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+                        auto child = cache->get(_btree->_database_id, _btree->_file, child_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                         // create a node for the child an move to it
                         auto last = child->last();
@@ -192,7 +192,7 @@ namespace springtail {
                     // read the child's extent ID
                     uint64_t extent_id = _btree->_branch_child_f->get_uint64(&*(_node->row_i));
                     // read the child extent
-                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
+                    auto child = cache->get(_btree->_database_id, _btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                     --depth;
                     auto last = child->last();
@@ -217,6 +217,7 @@ namespace springtail {
         /**
          * Constructs a new BTree object.
          *
+         * @param database_id The database that this BTree belongs to.
          * @param file The path to the file, used to differentiate records in the shared cache.
          * @param keys A list of keys from the schema that are used to sort the entries of the tree.
          * @param schema The schema of the leaf entries of the tree.
@@ -224,7 +225,8 @@ namespace springtail {
          * @param min_xid The earliest XID referencable by this BTree.
          * @param root_offset The offset of the root extent in the file.
          */
-        BTree(const std::filesystem::path &file,
+        BTree(uint64_t database_id,
+              const std::filesystem::path &file,
               uint64_t xid,
               ExtentSchemaPtr schema,
               uint64_t root_offset,
@@ -304,7 +306,7 @@ namespace springtail {
                 return true;
             }
 
-            auto root = StorageCache::get_instance()->get(_file, _root_offset, _xid, constant::LATEST_XID, _max_extent_size);
+            auto root = StorageCache::get_instance()->get(_database_id, _file, _root_offset, _xid, constant::LATEST_XID, _max_extent_size);
             bool is_empty = root->empty();
 
             return is_empty;
@@ -332,6 +334,9 @@ namespace springtail {
                 return lhs > rhs;
             }
         };
+
+        /** The database that this BTree belongs to. */
+        uint64_t _database_id;
 
         /** The path to the file. */
         std::filesystem::path _file;
