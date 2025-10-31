@@ -1,6 +1,3 @@
-#include <memory>
-#include <mutex>
-
 #include <proxy/buffer_pool.hh>
 
 namespace springtail::pg_proxy {

@@ -1,6 +1,4 @@
-#include <cassert>
 #include <map>
-#include <set>
 
 #include <common/logging.hh>
 

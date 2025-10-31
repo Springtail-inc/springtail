@@ -1,35 +1,10 @@
-#include <iostream>
-#include <sys/socket.h>
 #include <sys/eventfd.h>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
 
 #include <absl/log/log.h>
 
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-
-#include <fmt/core.h>
-
-#include <admin_http/admin_server.hh>
 #include <common/json.hh>
-#include <common/logging.hh>
-#include <common/properties.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/thread_pool.hh>
 
-#include <proxy/client_session.hh>
-#include <proxy/logger.hh>
 #include <proxy/server.hh>
-#include <proxy/server_session.hh>
 #include <proxy/database.hh>
 
 namespace springtail::pg_proxy {

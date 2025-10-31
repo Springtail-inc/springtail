@@ -1,23 +1,10 @@
-#include <cassert>
-
-#include <openssl/err.h>
-
-#include <common/logging.hh>
-#include <common/common.hh>
 #include <common/constants.hh>
 
-#include <pg_repl/pg_types.hh>
-
-#include <proxy/server_session.hh>
 #include <proxy/client_session.hh>
 #include <proxy/server_session.hh>
 #include <proxy/database.hh>
-#include <proxy/user_mgr.hh>
 #include <proxy/errors.hh>
 #include <proxy/server.hh>
-#include <proxy/exception.hh>
-#include <proxy/parser.hh>
-#include <proxy/buffer_pool.hh>
 
 namespace springtail::pg_proxy {
 
