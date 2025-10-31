@@ -115,7 +115,7 @@ namespace {
         }
 
         // finalize the system metadata
-        server->finalize(db_id, xid);
+        server->finalize(db_id, xid, true);
 
         // commit the xid
         LOG_DEBUG(LOG_ALL, LOG_LEVEL_DEBUG1, "Committing xid: {}", xid);

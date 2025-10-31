@@ -254,6 +254,9 @@ namespace springtail::committer {
          */
         std::shared_ptr<pg_log_mgr::IndexRequestsManager> _index_requests_mgr;
 
+
+        constexpr static uint32_t TABLE_SYNC_WORKERS = 1; ///< Number of table sync workers 
+
         /**
          * @brief Table sync processor to handle fsync operations in the background
          */

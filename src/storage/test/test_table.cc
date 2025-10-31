@@ -132,7 +132,7 @@ namespace {
 
             server->create_table(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), tbl_msg);
 
-            server->finalize(_db_id, target_xid);
+            server->finalize(_db_id, target_xid, true);
         }
 
         // secondary keys
@@ -266,7 +266,7 @@ namespace {
         auto mtable = _create_mtable(1000, target_xid, metadata.roots);
 
         // finalize the empty table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -304,7 +304,7 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -409,7 +409,7 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -476,7 +476,7 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -517,7 +517,7 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -596,7 +596,7 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -680,7 +680,7 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -769,7 +769,7 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -846,7 +846,7 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -885,7 +885,7 @@ namespace {
         // finalize and verify the table
         tester.set_verify([this, mtable, target_xid, server]() {
             // create an access table
-            TableMetadata metadata = mtable->finalize();
+            TableMetadata metadata = mtable->finalize(true);
             sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
             server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -949,7 +949,7 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -1144,7 +1144,7 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table after all operations
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
 
@@ -1200,7 +1200,7 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table after create
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, true, 0);
 
@@ -1236,7 +1236,7 @@ namespace {
         }
 
         // finalize the table after update
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, true, 0);
 
@@ -1279,7 +1279,7 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
         server->commit_xid(1, 1, target_xid, false, 0);
         // create an access table

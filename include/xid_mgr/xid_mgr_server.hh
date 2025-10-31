@@ -128,6 +128,7 @@ private:
          * @param xid - Springtail xid
          * @param has_schema_changes - this flag indicates if transaction has schema changes
          * @param real_commit - thi flag indicates if this is a real commit
+         * @param timestamp - timestamp
          * @param wal_tracker - WAL progress tracker
          * @param write_log - If false the entry won't be written to the log file
          */
@@ -174,7 +175,7 @@ private:
          * @param timestamp - file timestamp
          */
         void
-        rotate(uint64_t timestamp);
+        _rotate(uint64_t timestamp);
 
         struct XactHistoryEntry {
             uint64_t schema_xid;  ///< schema xid

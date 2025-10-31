@@ -115,7 +115,7 @@ namespace {
         auto xid = _next_xid();
 
         // finalize
-        _server->finalize(_db, xid.xid);
+        _server->finalize(_db, xid.xid, true);
     }
 
     void SysTblMgr_Test::_set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)

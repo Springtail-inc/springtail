@@ -124,7 +124,7 @@ public:
      * @param call_sync If false, sync() must be called to persist system tables to disk.
      */
     void
-    finalize(uint64_t db_id, uint64_t xid, bool call_sync = true);
+    finalize(uint64_t db_id, uint64_t xid, bool call_sync);
 
     /**
      * @brief Sync system tables

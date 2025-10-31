@@ -716,7 +716,7 @@ namespace indexer_helpers {
          * system tables.
          * @param call_sync If true, will call sync_data_and_indexes() before returning.
          */
-        TableMetadata finalize(bool call_sync = true);
+        TableMetadata finalize(bool call_sync);
 
         /**
          * Returns the schema of the table.

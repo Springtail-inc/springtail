@@ -85,6 +85,7 @@
         "log_size_rollover_threshold": 134217728,
         "archive_logs": true,
         "indexer_worker_threads": 1,
+        "committer_fsync_interval_ms": 500,
         "rpc_config" : {
             "server_port": 5052,
             "server_worker_threads": 32,

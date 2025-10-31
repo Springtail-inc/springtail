@@ -190,10 +190,14 @@ XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, boo
     DCHECK(timestamp >= _last_timestamp) << "timestamp: " << timestamp << " last_timestamp: " << _last_timestamp;
 
     std::unique_lock lock(_mutex);
+    // When we write a log entry we use the the current timestamp
+    // to decide whether we need to rotate the log file. 
+    // We call rotate only when we actually write to the log file, _xact_log.log(...).
+    // Otherwise we store the timestamp in pending log entries for later use.
     if (write_log) {
         if (_pending_log_entries.empty()) {
             if (timestamp > _last_timestamp) {
-                rotate(timestamp);
+                _rotate(timestamp);
                 _last_timestamp = timestamp;
             }
             _xact_log.log(pg_xid, xid, real_commit);
@@ -237,8 +241,11 @@ void XidMgrServer::DBXactLogData::write_log_entry(uint64_t xid)
             break;
         }
 
+        // Here we are about to write a log entry withe add_log_entry.
+        // We use the timestamp stored in the pending log entry
+        // to decide whether we need to rotate the log file. 
         if (pending_it->second.timestamp > _last_timestamp) {
-            rotate(pending_it->second.timestamp);
+            _rotate(pending_it->second.timestamp);
             _last_timestamp = pending_it->second.timestamp;
         }
 
@@ -316,7 +323,7 @@ XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
 }
 
 void
-XidMgrServer::DBXactLogData::rotate(uint64_t timestamp)
+XidMgrServer::DBXactLogData::_rotate(uint64_t timestamp)
 {
     _xact_log.rotate(timestamp);
 }

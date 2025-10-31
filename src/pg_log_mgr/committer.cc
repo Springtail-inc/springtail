@@ -36,7 +36,7 @@ namespace springtail::committer {
         _indexer = std::make_unique<Indexer>(_indexer_worker_count, _index_reconciliation_queue_mgr);
         // we use a fraction of the committer workers for table sync processing
         // we don't want to starve the committer workers with too many fsync tasks
-        _table_sync_processor = std::make_unique<TableSyncProcessor>(_fsync_interval, 1);
+        _table_sync_processor = std::make_unique<TableSyncProcessor>(_fsync_interval, TABLE_SYNC_WORKERS);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -401,7 +401,7 @@ namespace springtail::committer {
         // Step 2: Finalize and commit the reconciliation XID
         if (!_block_commit.contains(db_id)) {
             // Finalize system metadata after index reconciliation
-            sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
+            sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid, true);
 
             // Commit the reconciliation XID (no DDL changes for reconciliation)
             xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, xid, false, result->timestamp());
@@ -439,7 +439,7 @@ namespace springtail::committer {
 
         if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
             // finalize the system metadata
-            sys_tbl_mgr::Server::get_instance()->finalize(db_id, completed_xid);
+            sys_tbl_mgr::Server::get_instance()->finalize(db_id, completed_xid, true);
 
             // perform a commit to the XidMgr
             xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true, result->timestamp());

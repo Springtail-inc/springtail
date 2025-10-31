@@ -80,7 +80,7 @@ protected:
 
         sys_tbl_mgr::Server::get_instance()->drop_namespace(db_id, {6, 6}, drop_ns_msg);
 
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 7);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 7, true);
     }
 
     static void SetUpTestSuite() {
