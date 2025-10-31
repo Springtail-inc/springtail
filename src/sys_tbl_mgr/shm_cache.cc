@@ -201,6 +201,10 @@ void ShmCache::delete_xid_history(DbId db)
     if (it != _xid_history_map->end()) {
         _xid_history_map->erase(it);
     }
+    auto it1 = _committed_xid_map->find(db);
+    if (it1 != _committed_xid_map->end()) {
+        _committed_xid_map->erase(it1);
+    }
 }
 
 void ShmCache::cleanup_xid_history()
