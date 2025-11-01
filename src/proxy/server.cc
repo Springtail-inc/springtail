@@ -216,8 +216,7 @@ namespace springtail::pg_proxy {
             pfd.fd = socket;
             int ret = poll(&pfd, 1, timeout_ms);
             if (ret < 0) {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "System call poll failed with error {}: {}", errno, strerror(errno));
-                PCHECK(false) << "poll() failed";
+                LOG_WARN("System call poll failed with error {}: {}", errno, strerror(errno));
                 continue;
             } else if (ret == 0) {
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Poll timed out");
@@ -226,7 +225,7 @@ namespace springtail::pg_proxy {
 
             int client = accept(socket, nullptr, nullptr);
             if (client >= 0) {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Accepted keepalive connection");
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Accepted keepalive connection");
                 // Wait for remote disconnect with timeout to check shutdown flag
 
                 if (setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv)) < 0) {
