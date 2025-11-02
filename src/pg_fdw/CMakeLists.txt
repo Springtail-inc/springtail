@@ -216,7 +216,6 @@ springtail_unit_test(test_where
          ${POSTGRES_DEP_LIBS}
        ${END_GROUP}
        GTest::gtest_main
-  PRIVATE springtail_pgext
 )
 
 springtail_unit_test(test_xid_subscriber
