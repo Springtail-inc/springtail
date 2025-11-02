@@ -1,16 +1,7 @@
 #pragma once
 
-#include <memory>
-#include <string>
-#include <vector>
-#include <set>
-#include <unordered_map>
-#include <fmt/core.h>
-
 #include <proxy/session.hh>
-#include <proxy/buffer_pool.hh>
-#include <proxy/connection.hh>
-#include <proxy/history_cache.hh>
+#include <proxy/session_msg.hh>
 #include <proxy/parser.hh>
 #include <proxy/authorization.hh>
 

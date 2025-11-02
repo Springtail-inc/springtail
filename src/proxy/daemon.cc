@@ -1,5 +1,3 @@
-#include <iostream>
-#include <csignal>
 #include <boost/program_options.hpp>
 
 // springtail includes

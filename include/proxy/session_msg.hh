@@ -1,16 +1,7 @@
 #pragma once
 
-#include <memory>
-#include <string>
-#include <cstdint>
-#include <vector>
-#include <queue>
-#include <optional>
-#include <deque>
-#include <map>
 #include <shared_mutex>
 
-#include <proxy/buffer_pool.hh>
 #include <proxy/history_cache.hh>
 
 namespace springtail::pg_proxy {

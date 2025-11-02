@@ -1,19 +1,8 @@
-#include <openssl/err.h>
-
-#include <common/logging.hh>
-#include <common/constants.hh>
-
-#include <pg_repl/pg_types.hh>
-
 #include <proxy/auth/md5.h>
-#include <proxy/auth/scram.hh>
 #include <proxy/authorization.hh>
-#include <proxy/buffer_pool.hh>
 #include <proxy/database.hh>
 #include <proxy/errors.hh>
-#include <proxy/exception.hh>
 #include <proxy/server.hh>
-#include <proxy/user_mgr.hh>
 
 namespace springtail::pg_proxy {
 
@@ -286,7 +275,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
     Session::read_msg(_connection, blist);
 
     // iterate through messages
-    for (auto buffer : blist.buffers) {
+    for (auto &buffer : blist.buffers) {
         char code = buffer->get();
         CHECK_EQ(code, 'p');
 
