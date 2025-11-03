@@ -1,18 +1,10 @@
 #pragma once
 
 #include <memory>
-#include <utility>
-#include <functional>
-#include <string>
-#include <atomic>
-
-#include <common/logging.hh>
-#include <common/concurrent_queue.hh>
 
 #include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/user_mgr.hh>
-#include <proxy/session_msg.hh>
 #include <proxy/exception.hh>
 
 namespace springtail::pg_proxy {

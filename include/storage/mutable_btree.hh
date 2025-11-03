@@ -92,7 +92,8 @@ namespace springtail {
                      const std::vector<std::string> &keys,
                      ExtentSchemaPtr schema,
                      uint64_t xid,
-                     uint64_t max_extent_size);
+                     uint64_t max_extent_size,
+                     const ExtensionCallback &extension_callback = {});
 
         MutableBTree() = delete;
 
@@ -555,6 +556,9 @@ namespace springtail {
          */
         bool _finalized;
 
+        /** The extension callback for the tree. */
+        ExtensionCallback _extension_callback;
+
         /** The schema for the leaf nodes. */
         std::shared_ptr<ExtentSchema> _leaf_schema;
         MutableFieldArrayPtr _leaf_fields; ///< The fields of the leaf values.
@@ -793,7 +797,7 @@ namespace springtail {
          * @param schema The schema of the rows in the leaf extents.
          * @param keys The list of columns that make up the sort key of the tree.
          */
-        void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys);
+        void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys, const ExtensionCallback &extension_callback = {});
 
         //// ITERATOR SUPPORT
     public:

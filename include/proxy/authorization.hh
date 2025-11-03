@@ -1,9 +1,5 @@
 #pragma once
 
-#include <memory>
-#include <unordered_map>
-
-#include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>

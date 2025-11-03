@@ -5,8 +5,9 @@
 namespace springtail {
     TablePtr
     TableMgrClient::get_table(uint64_t db_id,
-                        uint64_t table_id,
-                        uint64_t xid)
+                              uint64_t table_id,
+                              uint64_t xid,
+                              const ExtensionCallback &extension_callback)
     {
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
@@ -17,7 +18,7 @@ namespace springtail {
         auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, xid);
 
         // construct the table and return it
-        auto schema = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN});
+        auto schema = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN}, extension_callback);
 
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
@@ -27,7 +28,7 @@ namespace springtail {
 
         return std::make_shared<UserClientTable>(db_id, table_id, xid, _table_base,
                                                  schema->get_sort_keys(), secondary_indexes,
-                                                 *tbl_meta, schema);
+                                                 *tbl_meta, schema, extension_callback);
     }
 
     std::map<uint32_t, SchemaColumn>
@@ -65,10 +66,10 @@ namespace springtail {
 
     std::shared_ptr<ExtentSchema>
     TableMgrClient::get_extent_schema(uint64_t db_id, uint64_t table_id,
-                                      const XidLsn &xid, bool allow_undefined)
+                                      const XidLsn &xid, const ExtensionCallback &extension_callback, bool allow_undefined)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, allow_undefined);
+            return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, extension_callback, allow_undefined);
         }
 
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
@@ -77,7 +78,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta->columns, allow_undefined);
+        return std::make_shared<ExtentSchema>(meta->columns, extension_callback, allow_undefined);
     }
 
 } // namespace

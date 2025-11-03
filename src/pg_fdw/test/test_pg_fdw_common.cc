@@ -186,7 +186,7 @@ TEST_F(PgFdwCommonTest, IterateTableNames_Success)
     std::map<std::string, PgFdwCommon::TableEntry> table_map;
     std::map<uint64_t, PartitionInfo> table_partition_map;
 
-    const std::set<std::string, std::less<>> &table_set = {};
+    const std::set<std::string, std::less<>> table_set;
     // iterate over the table names table and populate the table map
     PgFdwCommon::_iterate_table_names(db_id, schema_xid, namespace_id, false, false, table_set, "public", table_map, table_partition_map);
 
