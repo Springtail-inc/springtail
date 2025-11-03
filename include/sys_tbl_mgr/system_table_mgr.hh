@@ -15,7 +15,7 @@ namespace springtail {
          * Construct a system table.
          */
         virtual TablePtr
-        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid) override;
+        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ExtensionCallback &extension_callback = {}) override;
 
         /**
          * Construct a mutable system table.
@@ -41,7 +41,8 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, bool allow_undefined = false) override;
+                          const XidLsn &xid, const ExtensionCallback &extension_callback = {},
+                          bool allow_undefined = false) override;
 
     protected:
         /**

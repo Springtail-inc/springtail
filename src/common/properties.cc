@@ -181,6 +181,7 @@ namespace springtail {
         _json[FS_CONFIG] = system_json["fs"];
         _json[PROXY_CONFIG] = system_json["proxy"];
         _json[OTEL_CONFIG] = system_json["otel"];
+        _json[EXTENSION_CONFIG] = system_json["extension_config"];
 
         if (system_json.contains("aws_users_override")) {
             // If aws_users_override is present, use it instead of aws secrets mgr

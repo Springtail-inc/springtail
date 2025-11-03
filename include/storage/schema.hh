@@ -206,30 +206,30 @@ namespace springtail {
          * Construct the set of column fields based on the column definitions.
          * @param columns A map from column position to column definition.
          */
-        void _populate(const std::map<uint32_t, SchemaColumn>& columns, bool allow_undefined);
+        void _populate(const std::map<uint32_t, SchemaColumn>& columns, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false);
 
     public:
         /**
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
             }
 
             // populate the field map using the column definitions
-            _populate(column_map, allow_undefined);
+            _populate(column_map, extension_callback, allow_undefined);
         }
 
         /**
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, bool allow_undefined = false)
+        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false)
         {
-            _populate(columns, allow_undefined);
+            _populate(columns, extension_callback, allow_undefined);
         }
 
         /** Returns the fixed width for a single row. */
@@ -282,6 +282,7 @@ namespace springtail {
         create_schema(const std::vector<std::string> &old_columns,
                       const std::vector<SchemaColumn> &new_columns,
                       const std::vector<std::string> &sort_columns,
+                      const ExtensionCallback &extension_callback = {},
                       bool allow_undefined = false) const;
 
         /**
@@ -399,7 +400,7 @@ namespace springtail {
          * @param columns The column definitions for the underlying extent data.
          * @param updates The updates to apply to the extent schema to generate the virtual schema.
          */
-        VirtualSchema(const SchemaMetadata &meta);
+        explicit VirtualSchema(const SchemaMetadata &meta, const ExtensionCallback &extension_callback = {});
 
         /**
          * Checks if the column exists within the virtual schema.
@@ -473,6 +474,7 @@ namespace springtail {
         /** Enum type for user defined types */
         enum Type : int8_t {
             ENUM = 'E',
+            EXTENSION = 'U'
         } type;
 
         UserType(uint64_t id, bool exists=false, int8_t type=constant::USER_TYPE_ENUM)
@@ -491,14 +493,16 @@ namespace springtail {
             exists(exists),
             type(static_cast<Type>(type))
         {
-            DCHECK(type == constant::USER_TYPE_ENUM); // only support enum for now
-            DCHECK(value_json.is_array());
-            for (const auto &obj : value_json) {
-                DCHECK(obj.is_object());
-                auto it = obj.begin();  // Only one key-value pair per object
-                float idx = it.value().get<float>();
-                enum_label_map[it.key()] = idx;
-                enum_index_map[idx] = it.key();
+            DCHECK(type == constant::USER_TYPE_ENUM || type == constant::USER_TYPE_EXTENSION);
+            if (type == constant::USER_TYPE_ENUM) {
+                DCHECK(value_json.is_array());
+                for (const auto &obj : value_json) {
+                    DCHECK(obj.is_object());
+                    auto it = obj.begin();  // Only one key-value pair per object
+                    float idx = it.value().get<float>();
+                    enum_label_map[it.key()] = idx;
+                    enum_index_map[idx] = it.key();
+                }
             }
         }
     };

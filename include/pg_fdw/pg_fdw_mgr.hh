@@ -24,6 +24,7 @@
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
+    #include <catalog/pg_type.h>
     #include <c.h>
     #include <utils/builtins.h>
     #include <libpq-fe.h>
@@ -307,13 +308,12 @@ namespace springtail::pg_fdw {
          * @brief Lookup enum user type from cache based on oid and index
          * @param db_id db_id of the database
          * @param oid pg oid of type (in springtail)
-         * @param index enum index
          * @param xid xid for this request
          * @return user type pointer
          */
-        UserTypePtr _enum_cache_lookup(uint64_t db_id,
-                                       int32_t oid,
-                                       uint64_t xid);
+        static UserTypePtr _enum_cache_lookup(uint64_t db_id,
+                                              int32_t oid,
+                                              uint64_t xid);
 
         /** Helper to convert a springtail enum user type to a datum */
         Datum _get_enum_datum(const PgFdwState *state,
@@ -326,6 +326,25 @@ namespace springtail::pg_fdw {
                                    int32_t springtail_oid,
                                    Oid pg_oid,
                                    Oid label_oid);
+
+        /** Helper to convert a postgres extension data type to springtail extension data id (index/sortorder) */
+        std::vector<char>
+        _get_extension_data_from_pg(const PgFdwState *state,
+                                    Oid pg_oid,
+                                    Datum value);
+
+        /** Helper to get type oid */
+        static Oid _get_type_oid(uint64_t db_id,
+                                 uint64_t xid,
+                                 uint64_t type_oid);
+
+        /** Helper to resolve type information */
+        static Form_pg_type _resolve_type_information(Oid oid);
+
+        /** Helper to perform the comparator function based on the extension type oid */
+        static bool _comparator_function(const ExtensionContext* ctx,
+                                         const std::span<const char> &lhs_value,
+                                         const std::span<const char> &rhs_value);
 
         /** Helper to convert field to PG Datum */
         Datum _get_datum_from_field(const PgFdwState *state,
@@ -403,5 +422,10 @@ namespace springtail::pg_fdw {
 
         /** Helper function to get the last xid */
         uint64_t _update_last_xid(uint64_t schema_xid);
+
+        std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate,
+                                                       const List *qual_list,
+                                                       const List* join_quals,
+                                                       double *rows);
     };
 } // namespace springtail::pg_fdw

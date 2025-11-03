@@ -7,7 +7,8 @@ namespace springtail {
                  uint64_t xid,
                  ExtentSchemaPtr schema,
                  uint64_t root_offset,
-                 uint64_t max_extent_size)
+                 uint64_t max_extent_size,
+                 const ExtensionCallback &extension_callback)
         : _database_id(database_id),
           _file(file),
           _xid(xid),
@@ -24,7 +25,7 @@ namespace springtail {
         // construct the schema for the branches
         // note: don't need a valid sql_type for the internal nodes since they aren't exposed
         SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);
-        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys);
+        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys, extension_callback);
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_fields(keys);

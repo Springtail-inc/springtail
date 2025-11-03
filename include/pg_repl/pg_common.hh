@@ -19,6 +19,7 @@ namespace springtail
         FLOAT64, // float8
         FLOAT32, // float4
         NUMERIC, // numeric data type
+        EXTENSION, // all extension types
         BINARY // all other types
     };
 
@@ -29,6 +30,3 @@ namespace springtail
      */
     SchemaType convert_pg_type(int32_t pg_type, char pg_type_category);
 }
-
-
-
