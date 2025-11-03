@@ -238,6 +238,14 @@ namespace springtail::pg_fdw {
                          const std::string &db_name);
 
         /**
+         * @brief Function for creating extensions for a database
+         * @param conn - connection object
+         * @param db_id - database id
+         */
+        void _create_extensions(LibPqConnectionPtr conn,
+                                const uint64_t db_id);
+
+        /**
          * @brief Function for creating a replicated database schemas
          * @param db_id - database id
          * @param db_name - database name

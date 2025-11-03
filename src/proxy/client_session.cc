@@ -1,23 +1,10 @@
-#include <cassert>
-
-#include <openssl/err.h>
-
-#include <common/logging.hh>
-#include <common/common.hh>
 #include <common/constants.hh>
 
-#include <pg_repl/pg_types.hh>
-
-#include <proxy/server_session.hh>
 #include <proxy/client_session.hh>
 #include <proxy/server_session.hh>
 #include <proxy/database.hh>
-#include <proxy/user_mgr.hh>
 #include <proxy/errors.hh>
 #include <proxy/server.hh>
-#include <proxy/exception.hh>
-#include <proxy/parser.hh>
-#include <proxy/buffer_pool.hh>
 
 namespace springtail::pg_proxy {
 
@@ -536,7 +523,7 @@ namespace springtail::pg_proxy {
         ClientSessionPtr self = shared_from_this();
 
         // Callback from Session::_handle_error()
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Client session shutting down", _id);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Client session shutting down (socket = {})", _id, _connection->get_socket());
 
         // first close connection and remove from server poll list
         // this removes all associated sockets from this session

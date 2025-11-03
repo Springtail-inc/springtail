@@ -1,7 +1,5 @@
 #pragma once
 
-#include <common/logging.hh>
-#include <common/init.hh>
 #include <common/constants.hh>
 
 #include <redis/db_state_change.hh>
