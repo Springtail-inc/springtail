@@ -1,18 +1,10 @@
 #pragma once
 
-#include <memory>
-#include <string_view>
-#include <chrono>
-#include <vector>
-#include <mutex>
-
-#include <spdlog/details/fmt_helper.h>
 #include <spdlog/formatter.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 
 #include <common/logging.hh>
-#include <proxy/buffer_pool.hh>
 
 namespace springtail::pg_proxy {
 
