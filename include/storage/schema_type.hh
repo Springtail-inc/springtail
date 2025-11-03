@@ -19,6 +19,7 @@ namespace springtail {
             case SchemaType::BOOLEAN: return os << "BOOLEAN";
             case SchemaType::FLOAT64: return os << "FLOAT64";
             case SchemaType::FLOAT32: return os << "FLOAT32";
+            case SchemaType::EXTENSION: return os << "EXTENSION";
             case SchemaType::BINARY: return os << "BINARY";
             case SchemaType::NUMERIC: return os << "NUMERIC";
             default: return os << "UNKNOWN";
@@ -39,6 +40,7 @@ namespace springtail {
             case SchemaType::BOOLEAN: return "BOOLEAN";
             case SchemaType::FLOAT64: return "FLOAT64";
             case SchemaType::FLOAT32: return "FLOAT32";
+            case SchemaType::EXTENSION: return "EXTENSION";
             case SchemaType::BINARY: return "BINARY";
             case SchemaType::NUMERIC: return "NUMERIC";
             default: return "UNKNOWN";

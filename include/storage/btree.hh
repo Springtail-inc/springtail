@@ -230,7 +230,8 @@ namespace springtail {
               uint64_t xid,
               ExtentSchemaPtr schema,
               uint64_t root_offset,
-              uint64_t max_extent_size);
+              uint64_t max_extent_size,
+              const ExtensionCallback &extension_callback = {});
 
         BTree() = delete;
 

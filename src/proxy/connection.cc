@@ -1,16 +1,12 @@
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include <unistd.h>
 
-#include <openssl/ssl.h>
+#include <fcntl.h>
+#include <poll.h>
+
 #include <openssl/err.h>
 
-#include <unistd.h>
-
-#include <common/logging.hh>
 #include <proxy/exception.hh>
 #include <proxy/connection.hh>
 
