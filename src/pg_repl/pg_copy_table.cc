@@ -1154,6 +1154,8 @@ namespace springtail
             std::pair<uint64_t, std::string> snapshot_info = copy_table._get_xact_xids();
             copy_result->set_snapshot(snapshot_info.first, snapshot_info.second);
 
+            LOG_INFO("Copy table -> Snapshot info: xid {}, xids {}", snapshot_info.first, snapshot_info.second);
+
             // get the list of user defined types
             auto &&user_type_map = copy_table._get_user_types();
 
@@ -1212,6 +1214,7 @@ namespace springtail
         std::string sync_msg = fmt::format(R"({{"target_xid":{}, "pg_xid":{}}})", result->target_xid, result->pg_xid);
         std::string query = fmt::format(REPL_MSG_QUERY, pg_msg::MSG_PREFIX_COPY_SYNC, sync_msg);
 
+        LOG_INFO("Copy table -> Sending sync message: {}", query);
         _connection.exec(query);
         if (_connection.status() != PGRES_TUPLES_OK) {
             LOG_ERROR("Error sending sync message");
