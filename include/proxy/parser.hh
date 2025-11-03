@@ -6,9 +6,10 @@
 #include <memory>
 
 extern "C" {
-    // from postgres include/nodes/nodes.h
+    // from postgres include/nodes/nodes.h or parsenodes.h
     // don't want to include the whole thing
     struct Node;
+    struct FuncCall;
 };
 
 namespace springtail {
@@ -67,7 +68,6 @@ namespace pg_proxy {
             bool has_declare_hold=false;      ///< has a WITH HOLD clause (for cursors)
             bool has_is_local=false;
             bool has_param_ref=false;
-            bool has_set_config_session=false; ///< has set_config function call with session scope
 
             // state
             bool has_error=false;
@@ -75,9 +75,6 @@ namespace pg_proxy {
 
             /** prepared or portal statement name (for execute, deallocate, prepare) or var */
             std::string name = {};
-
-            /** value for set_config session variables */
-            std::string set_config_value = {};
 
             /** set of functions */
             std::set<std::string> functions;
@@ -139,6 +136,10 @@ namespace pg_proxy {
 
         /** Convert from internal postgres string in node to a C++ string */
         static void _set_string(const char *str, std::string &dest);
+
+        /** Extract set_config function call info for SET variables */
+        static void _extract_set_config(struct FuncCall *func_call, StmtContextPtr context);
+
     };
     using ParserPtr = std::shared_ptr<Parser>;
 } // namespace pg_proxy

@@ -989,23 +989,20 @@ namespace springtail::pg_proxy
         std::map<uint64_t, std::string> db_list = Properties::get_databases();
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
 
-        std::unique_lock db_lock(_db_mutex);
+
         for (const auto& [db_id, db_name]: db_list) {
+            // get initial database state
+            auto db_state = redis::db_state_change::get_db_state(db_id);
+
             // create database object and insert it into the maps
             DatabasePtr db_object = std::make_shared<Database>(db_id, db_name);
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Added database (id, name): ({}, {})", db_id, db_name);
-            _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_name, db_object));
-            _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
+            db_object->set_state(db_state);
+            add_database(db_object);
 
             // subscribe to state change notifications per database
             redis_cache->add_callback(
                 std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(db_id),
                 _cache_watcher_db_states);
-
-            // initialize state
-            redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
-            db_object->set_state(db_state);
-
         }
     }
 
@@ -1034,10 +1031,7 @@ namespace springtail::pg_proxy
         db_object->set_state(db_state);
 
         // update replicated database maps
-        std::unique_lock db_lock(_db_mutex);
-        _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_name, db_object));
-        _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
-        db_lock.unlock();
+        add_database(db_object);
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Added database (id, name): ({}, {})", db_id, db_name);
 

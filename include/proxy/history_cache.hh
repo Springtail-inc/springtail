@@ -30,25 +30,27 @@ namespace pg_proxy {
             NONE = 0,           ///< no statement
             SET = 1,            ///< set variable name
             SET_LOCAL = 2,      ///< set local variable name (transaction scope)
-            RESET = 3,          ///< reset variable name or ALL if name empty
-            PREPARE = 4,        ///< prepared/parse statement name (unamed if empty name)
-            DEALLOCATE = 5,     ///< deallocate name (unamed if empty name)
-            DEALLOCATE_ALL = 6, ///< deallocate all prepared statements
-            DECLARE_HOLD = 7,   ///< open cursor with hold cursor name
-            DECLARE = 8,        ///< open (bind) cursor/portal name only (unamed if empty name)
-            CLOSE = 9,          ///< close cursor/portal name (unamed if empty name)
-            CLOSE_ALL = 10,     ///< close all portals
-            FETCH = 11,         ///< fetch cursor/portal name (NOTE: MOVE mapped to FETCH by parser)
-            DISCARD = 12,       ///< discard
-            DISCARD_ALL = 13,   ///< discard all (close all; reset all, dealloate all, unlisten *)
-            LISTEN = 14,        ///< listen for notification on channel name
-            UNLISTEN = 15,      ///< unlisten on channel name or all channels if name empty
-            SAVEPOINT = 16,     ///< savepoint name
-            ROLLBACK_TO_SAVEPOINT = 17, ///< rollback to savepoint name
-            RELEASE_SAVEPOINT = 18,     ///< release savepoint name
-            BEGIN = 19,         ///< begin transaction
-            COMMIT = 20,        ///< commit transaction
-            ROLLBACK = 21,      ///< rollback transaction
+            RESET = 3,          ///< reset variable name
+            RESET_ALL = 4,      ///< reset all variables
+            PREPARE = 5,        ///< prepared/parse statement name (unamed if empty name)
+            DEALLOCATE = 6,     ///< deallocate name (unamed if empty name)
+            DEALLOCATE_ALL = 7, ///< deallocate all prepared statements
+            DECLARE_HOLD = 8,   ///< open cursor with hold cursor name
+            DECLARE = 9,        ///< open (bind) cursor/portal name only (unamed if empty name)
+            CLOSE = 10,         ///< close cursor/portal name (unamed if empty name)
+            CLOSE_ALL = 11,     ///< close all portals
+            FETCH = 12,         ///< fetch cursor/portal name (NOTE: MOVE mapped to FETCH by parser)
+            DISCARD = 13,       ///< discard
+            DISCARD_ALL = 14,   ///< discard all (close all; reset all, dealloate all, unlisten *)
+            LISTEN = 15,        ///< listen for notification on channel name
+            UNLISTEN = 16,      ///< unlisten on channel name
+            UNLISTEN_ALL = 17,  ///< unlisten all channels
+            SAVEPOINT = 18,     ///< savepoint name
+            ROLLBACK_TO_SAVEPOINT = 19, ///< rollback to savepoint name
+            RELEASE_SAVEPOINT = 20,     ///< release savepoint name
+            BEGIN = 21,         ///< begin transaction
+            COMMIT = 22,        ///< commit transaction
+            ROLLBACK = 23,      ///< rollback transaction
             EXECUTE = 24,       ///< execute statement
             SYNC = 25,          ///< sync for extended query
             DESCRIBE = 26,      ///< describe statement
@@ -220,11 +222,6 @@ namespace pg_proxy {
          */
         void _clear_by_type(QueryStmt::Type type, const std::string &name, bool all);
 
-        /**
-         * @brief Prune the history cache based on the entry (usually being inserted)
-         * @param entry entry to prune based on
-         */
-        void _prune(QueryStmtPtr entry);
     };
     using HistoryCachePtr = std::shared_ptr<HistoryCache>;
 

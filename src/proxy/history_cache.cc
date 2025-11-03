@@ -72,6 +72,7 @@ namespace pg_proxy {
         std::map<uint64_t, QueryStmtPtr> new_history; // hold new compacted history
 
         // Map to track the latest state of statements up to replay_idx
+        // query type -> name -> (index, QueryStmtPtr)
         std::unordered_map<QueryStmt::Type,
             std::unordered_map<std::string, std::pair<uint64_t, QueryStmtPtr>>> statement_map;
 
@@ -92,6 +93,7 @@ namespace pg_proxy {
                     break;
 
                 case QueryStmt::PREPARE: // add prepared statement
+                    DCHECK(!stmt->name.empty()); // unnamed prepares not cached, only within transaction
                     statement_map[QueryStmt::PREPARE][stmt->name] = {idx, stmt};
                     break;
 
@@ -111,18 +113,14 @@ namespace pg_proxy {
                     break;
 
                 case QueryStmt::RESET: // remove variable(s)
-                    if (stmt->name.empty()) { // RESET ALL
-                        statement_map[QueryStmt::SET].clear();
-                    } else {
-                        statement_map[QueryStmt::SET].erase(stmt->name);
-                    }
+                    statement_map[QueryStmt::SET].erase(stmt->name);
                     // keep the RESET statement to reset config variables
                     new_history[idx] = stmt;
                     break;
 
-                case QueryStmt::DEALLOCATE_ALL: // remove all prepared statements
-                    statement_map[QueryStmt::PREPARE].clear();
-                    // keep the DEALLOCATE ALL statement
+                case QueryStmt::RESET_ALL: // remove variable(s)
+                    statement_map[QueryStmt::SET].clear();
+                    // keep the RESET ALL statement to reset config variables
                     new_history[idx] = stmt;
                     break;
 
@@ -137,6 +135,14 @@ namespace pg_proxy {
                         new_history[idx] = stmt;
                     }
                     break;
+
+                case QueryStmt::DEALLOCATE_ALL: // remove all prepared statements
+                    statement_map[QueryStmt::PREPARE].clear();
+                    // keep the DEALLOCATE ALL statement
+                    new_history[idx] = stmt;
+                    break;
+
+
 
                 case QueryStmt::CLOSE:  // remove cursor/portal
                     if (replayed) {
@@ -160,14 +166,16 @@ namespace pg_proxy {
                     }
                     break;
 
-                case QueryStmt::UNLISTEN: // remove listen(s)
+                case QueryStmt::UNLISTEN: // remove listen
                     // safe to clear LISTENs no errors if channel doesn't exist
-                    if (stmt->name.empty()) { // UNLISTEN ALL
-                        statement_map[QueryStmt::LISTEN].clear();
-                    } else {
-                        statement_map[QueryStmt::LISTEN].erase(stmt->name);
-                    }
+                    statement_map[QueryStmt::LISTEN].erase(stmt->name);
                     // keep the UNLISTEN statement
+                    new_history[idx] = stmt;
+                    break;
+
+                case QueryStmt::UNLISTEN_ALL: // remove all listens
+                    statement_map[QueryStmt::LISTEN].clear();
+                    // keep the UNLISTEN ALL statement
                     new_history[idx] = stmt;
                     break;
 
@@ -192,67 +200,6 @@ namespace pg_proxy {
         }
 
         return new_history;
-    }
-
-    void
-    HistoryCache::_prune(QueryStmtPtr entry)
-    {
-        bool all = entry->name.empty();
-        std::string empty_string = {};
-
-        switch (entry->type) {
-            // ignore portal statements (for pruning)
-            case QueryStmt::FETCH:
-            case QueryStmt::DECLARE_HOLD:
-            case QueryStmt::PREPARE:
-                return;
-            // shouldn't see these:
-            case QueryStmt::BEGIN:
-            case QueryStmt::COMMIT:
-            case QueryStmt::ROLLBACK:
-            case QueryStmt::RELEASE_SAVEPOINT:
-            case QueryStmt::ROLLBACK_TO_SAVEPOINT:
-            case QueryStmt::SET_LOCAL:
-            case QueryStmt::DECLARE:
-            case QueryStmt::ANONYMOUS:
-                DCHECK(false);
-                return; // nothing to do
-
-            // these override previous statements
-            case QueryStmt::SET:
-                _clear_by_type(QueryStmt::SET, entry->name, false);
-                break;
-            case QueryStmt::LISTEN:
-                _clear_by_type(QueryStmt::LISTEN, entry->name, false);
-                break;
-
-            // these clear previous statements
-            case QueryStmt::RESET:
-                _clear_by_type(QueryStmt::SET, entry->name, all);
-                break;
-            case QueryStmt::DEALLOCATE:
-                _clear_by_type(QueryStmt::PREPARE, entry->name, false);
-                break;
-            case QueryStmt::DEALLOCATE_ALL:
-                _clear_by_type(QueryStmt::PREPARE, empty_string, true);
-                break;
-            case QueryStmt::CLOSE_ALL:
-                _clear_by_type(QueryStmt::DECLARE_HOLD, empty_string, true);
-                _clear_by_type(QueryStmt::FETCH, empty_string, true);
-                break;
-            case QueryStmt::CLOSE:
-                _clear_by_type(QueryStmt::DECLARE_HOLD, entry->name, false);
-                _clear_by_type(QueryStmt::FETCH, entry->name, false);
-                break;
-            case QueryStmt::UNLISTEN:
-                _clear_by_type(QueryStmt::LISTEN, entry->name, all);
-                break;
-            case QueryStmt::DISCARD_ALL:
-                _history.clear();
-                break;
-            default:
-                break;
-        }
     }
 
     std::pair<QueryStmtPtr, bool>
@@ -417,19 +364,47 @@ namespace pg_proxy {
                 // unnamed prepare / PARSE message or simple query
                 // we clear unamed prepared statements at the end of a simple query
 
-                // add to session level prepared stmt cache
-                _session_history.add(entry);
+                if (!entry->name.empty()) {
+                    // add to session level prepared stmt cache
+                    // no need to add to transaction history,
+                    // as soon as they succeed they are visible; rollbacks don't affect them
+                    _session_history.add(entry);
+                    return;
+                }
 
-                // no need to add to transaction history,
-                // as soon as they succeed they are visible; rollbacks don't affect them
-                return;
+                // unamed prepared statements are added to the transaction history
+                break;
             case QueryStmt::DEALLOCATE:
-                // remove from session level prepared stmt cache
+                // remove prepared statements
                 _transaction_history._clear_by_type(QueryStmt::PREPARE, entry->name, false);
                 break;
             case QueryStmt::DEALLOCATE_ALL:
                 // clear all prepared statements
                 _transaction_history._clear_by_type(QueryStmt::PREPARE, {}, true);
+                break;
+            case QueryStmt::RESET:
+                // remove variable(s)
+                _transaction_history._clear_by_type(QueryStmt::SET, entry->name, false);
+                break;
+            case QueryStmt::RESET_ALL:
+                _transaction_history._clear_by_type(QueryStmt::SET, {}, true);
+                break;
+            case QueryStmt::CLOSE:
+                // remove cursor/portal
+                _transaction_history._clear_by_type(QueryStmt::DECLARE_HOLD, entry->name, false);
+                _transaction_history._clear_by_type(QueryStmt::FETCH, entry->name, false);
+                break;
+            case QueryStmt::CLOSE_ALL:
+                // remove all cursors/portals
+                _transaction_history._clear_by_type(QueryStmt::DECLARE_HOLD, {}, true);
+                _transaction_history._clear_by_type(QueryStmt::FETCH, {}, true);
+                break;
+            case QueryStmt::UNLISTEN:
+                // remove listen(s)
+                _transaction_history._clear_by_type(QueryStmt::LISTEN, entry->name, false);
+                break;
+            case QueryStmt::UNLISTEN_ALL:
+                _transaction_history._clear_by_type(QueryStmt::LISTEN, {}, true);
                 break;
             case QueryStmt::BEGIN:
                 // safe to ignore
@@ -493,22 +468,26 @@ namespace pg_proxy {
                 case QueryStmt::SET_LOCAL:
                 case QueryStmt::BEGIN:
                 case QueryStmt::COMMIT:
-                case QueryStmt::PREPARE:
+                case QueryStmt::PREPARE: // prepares are directly added to session history; unnamed prepares do not survive transaction
                 case QueryStmt::SAVEPOINT:
                 case QueryStmt::ANONYMOUS:
                 case QueryStmt::DECLARE: // only declare hold is across transactions
                     continue;
-                // shouldn't see these, should be handled in commit_statement()
+
+                    // shouldn't see these, should be handled in commit_statement()
                 case QueryStmt::ROLLBACK:
                 case QueryStmt::RELEASE_SAVEPOINT:
                 case QueryStmt::ROLLBACK_TO_SAVEPOINT:
-                    assert(0);
+                    DCHECK(false) << "Unexpected transaction control statement in commit_transaction()";
+                    continue;
+
                 // portal commands are only valid within a transaction unless they are DECLARE WITH HOLD
                 // DECLARE WITH HOLD can only support SELECT or VALUES queries that are purely read-only
                 case QueryStmt::DECLARE_HOLD:
                     // keep track of DECLARE HOLD statements
                     declare_hold_map[it->second->name] = it->second;
                     break;
+
                 case QueryStmt::CLOSE: {
                     // if this close is for a DECLARE HOLD, remove from map
                     int rc = declare_hold_map.erase(it->second->name);
@@ -517,19 +496,15 @@ namespace pg_proxy {
                     }
                     break;
                 }
+
                 case QueryStmt::FETCH:
                     if (!declare_hold_map.contains(it->second->name)) {
                         continue; // not a DECLARE HOLD, skip
                     }
                     break;
-                case QueryStmt::CLOSE_ALL:
-                    break;
-                case QueryStmt::DISCARD_ALL:
-                case QueryStmt::DEALLOCATE:
-                case QueryStmt::DEALLOCATE_ALL:
-                    // clearing the state is handled in the add() with prune
-                    break;
+
                 default:
+                    // compacting state from other removal statements is handled in compact()
                     break;
             }
 

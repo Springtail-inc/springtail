@@ -992,6 +992,18 @@ namespace springtail::pg_proxy {
             const std::string &schema,
             const std::string &table) const;
 
+        /**
+         * @brief Add replicated database
+         * public for testing
+         * @param db_object - database object
+         */
+        void add_database(DatabasePtr db_object) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Added database (id, name): ({}, {})", db_object->get_db_id(), db_object->get_db_name());
+            std::unique_lock<std::shared_mutex> database_lock(_db_mutex);
+            _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_object->get_db_name(), db_object));
+            _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_object->get_db_id(), db_object));
+        }
+
     protected:
         /**
          * @brief Function called by Singleton base class to perform shutdown.

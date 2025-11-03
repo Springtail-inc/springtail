@@ -102,6 +102,12 @@ springtail_unit_test(test_history_compact
   LIBS springtail_proxy GTest::gtest_main
 )
 
+springtail_unit_test(test_simple_query
+  SOURCES test/test_simple_query.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_proxy GTest::gtest_main
+)
+
 # test parsing executable
 add_executable(parsing test/parsing.cc)
 target_include_directories(parsing
