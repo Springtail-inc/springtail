@@ -106,7 +106,10 @@ struct varatt_expanded
 	  VARSIZE_4B(PTR)))
 
 #define SET_VARSIZE_4B(PTR, len) (((varattrib_4b *)(PTR))->va_4byte.va_header = (len) & 0x3FFFFFFF)
+#define SET_VARSIZE_1B(PTR,len) (((varattrib_1b *) (PTR))->va_header = (((uint8_t) (len)) << 1) | 0x01)
 #define SET_VARSIZE(PTR, len) SET_VARSIZE_4B(PTR, len)
 
 #define VARDATA_4B(PTR) (((varattrib_4b *)(PTR))->va_4byte.va_data)
+#define VARDATA_1B(PTR) (((varattrib_1b *) (PTR))->va_data)
 #define VARDATA(PTR) VARDATA_4B(PTR)
+#define VARDATA_ANY(PTR) (VARATT_IS_1B(PTR) ? VARDATA_1B(PTR) : VARDATA_4B(PTR))

@@ -1,4 +1,5 @@
 #include <pg_ext/error.hh>
+#include <pg_ext/node.hh>
 #include <common/logging.hh>
 
 #include <cstdarg>
@@ -17,7 +18,7 @@ static void errdetail_v(const char *fmt, va_list ap)
     char buf[1024] = "";
     int n = vsnprintf(buf, sizeof(buf), fmt ? fmt : "(null)", ap); // NOSONAR - Fmt is validated
     (void)n;
-    LOG_ERROR("Errdetail %s", buf);
+    LOG_ERROR("Errdetail {}", buf);
 }
 
 static int errmsg_v(const char *fmt, va_list ap)
@@ -25,7 +26,7 @@ static int errmsg_v(const char *fmt, va_list ap)
     char buf[1024] = "";
     int n = vsnprintf(buf, sizeof(buf), fmt ? fmt : "(null)", ap); // NOSONAR - Fmt is validated
     (void)n;
-    LOG_ERROR("Errmsg %s", buf);
+    LOG_ERROR("Errmsg {}", buf);
     return 0;
 }
 
@@ -34,7 +35,7 @@ static int errmsg_internal_v(const char *fmt, va_list ap)
     char buf[1024] = "";
     int n = vsnprintf(buf, sizeof(buf), fmt ? fmt : "(null)", ap);  // NOSONAR - Fmt is validated
     (void)n;
-    LOG_ERROR("Errmsg internal %s", buf);
+    LOG_ERROR("Errmsg internal {}", buf);
     return 0;
 }
 
@@ -48,7 +49,7 @@ static int pg_vfprintf(FILE *stream, const char *fmt, va_list ap)
     char buf[1024] = "";
     int written = vsnprintf(buf, sizeof(buf), fmt, ap); // NOSONAR - Fmt is validated
     /* Maintain prior behavior: log the formatted message. */
-    LOG_ERROR("Pg_fprintf %s", buf);
+    LOG_ERROR("Pg_fprintf {}", buf);
     (void)stream; /* stream is unused in current implementation */
     return (written < 0) ? 0 : written;
 }
@@ -63,8 +64,7 @@ void ProcessInterrupts() {
 }
 
 bool errstart(int elevel, const char *domain) {
-    (void)elevel; // silence unused parameter warning
-    LOG_ERROR("\nError started at (domain: %s)", domain ? domain : "none");
+    LOG_ERROR("Error level: {}, Error started at (domain: {})", elevel, domain ? domain : "none");
     return true;
 }
 
@@ -76,13 +76,13 @@ bool errstart_cold(int elevel, const char *domain) {
 void
 errfinish(const char *filename, int lineno, const char *funcname)
 {
-    LOG_ERROR("Filename: %s, Line: %d, Function: %s", filename, lineno, funcname);
+    LOG_ERROR("Filename: {}, Line: {}, Function: {}", filename, lineno, funcname);
 }
 
 bool
 errsave_start(const struct Node *context, const char *domain)
 {
-    LOG_ERROR("Errsave - Start %s", domain);
+    LOG_ERROR("Errsave - Start {} - Context: {}", domain, (int)context->type);
     return true;
 }
 
@@ -90,7 +90,7 @@ void
 errsave_finish(const struct Node *context, const char *filename, int lineno,
 			   const char *funcname)
 {
-    LOG_ERROR("Errsave - Finish %s, Line: %d, Function: %s", filename, lineno, funcname);
+    LOG_ERROR("Errsave - Finish Context: {}, Line: {}, Function: {}", (int)context->type, filename, lineno, funcname);
 }
 
 void errdetail(const char *fmt, ...) // NOSONAR: pg_func - Needs ellipsis
@@ -102,7 +102,7 @@ void errdetail(const char *fmt, ...) // NOSONAR: pg_func - Needs ellipsis
 }
 
 int errcode(int sqlerrcode) {
-    LOG_ERROR("Errcode %d", sqlerrcode);
+    LOG_ERROR("Errcode {}", sqlerrcode);
     return 0;
 }
 
