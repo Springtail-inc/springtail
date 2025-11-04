@@ -192,6 +192,7 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
 
 void ShmCache::delete_xid_history(DbId db)
 {
+    LOG_INFO("Delete db history: {}", db);
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );

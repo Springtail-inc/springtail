@@ -55,7 +55,6 @@ PgXidSubscriberMgr::task(std::stop_token st)
         // when we get an XID push notification, we pass it to the workers
         // and return immediately. A worker calls get_roots() that will
         // attempt to populate the cache.
-        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Iron XID push notification {} - {}, schema_changes: {}", db, xid, has_schema_changes);
         _cache->update_committed_xid(db, xid, has_schema_changes);
         _enqueue_populate_job(db, xid);
     };

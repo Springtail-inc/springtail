@@ -12,6 +12,7 @@
 #include <pg_fdw/constants.hh>
 #include <pg_fdw/pg_fdw_ddl_common.hh>
 #include <pg_fdw/pg_xid_collector.hh>
+#include <sys_tbl_mgr/shm_cache.hh>
 
 namespace springtail::pg_fdw {
 
@@ -144,6 +145,7 @@ namespace springtail::pg_fdw {
 
         // everything in old_db_ids needs to be removed
         for (auto db_id: old_db_ids) {
+            LOG_INFO("Remove replicated database: {}", db_id);
             _remove_replicated_database(db_id);
         }
 
@@ -1950,6 +1952,23 @@ namespace springtail::pg_fdw {
             std::unique_lock conn_lock(_fdw_conn_cache_mutex);
             _fdw_conn_cache.evict(db_id);
         }
+
+        // remove xid history from the shared memory cache
+        // this is best effort, so just log errors
+        try {
+            auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
+            if (cache) {
+                cache->delete_xid_history(db_id);
+            } else {
+                LOG_ERROR("unable to open the roots cache");
+            }
+        } catch (const boost::interprocess::bad_alloc&) {
+            LOG_ERROR("unable to open the roots cache");
+        } catch (const std::exception& e) {
+            LOG_ERROR("exception:{} ", e.what());
+            throw;
+        }
+
     }
 
     std::string
