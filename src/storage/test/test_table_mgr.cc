@@ -114,7 +114,7 @@ namespace {
         drop_msg.table = "x";
         sys_tbl_mgr::Server::get_instance()->drop_table(db_id, {4, 4}, drop_msg);
 
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 4);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 4, true);
 
         // create a table
         PgMsgTable create_parent_table_msg;
@@ -151,7 +151,7 @@ namespace {
 
         sys_tbl_mgr::Server::get_instance()->create_table(db_id, {6, 6}, create_child_table_msg);
 
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 6);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 6, true);
 
         // create a table
         PgMsgTable create_parent_alter_table_msg;
@@ -206,7 +206,7 @@ namespace {
 
         sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {9, 9}, alter_parent_alter_table_msg);
 
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 10);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 10, true);
 
         // create a table
         PgMsgTable create_parent_attach_table_msg;
@@ -243,7 +243,7 @@ namespace {
 
         sys_tbl_mgr::Server::get_instance()->create_table(db_id, {12, 12}, create_child_attach_table_msg);
 
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 13);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 13, true);
 
         // attach partition
         PgMsgAttachPartition attach_partition_msg;
@@ -265,7 +265,7 @@ namespace {
 
         sys_tbl_mgr::Server::get_instance()->attach_partition(db_id, {14, 14}, attach_partition_msg);
 
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 15);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 15, true);
 
         _print_table(db_id, 15);
 
@@ -343,7 +343,7 @@ namespace {
         create_msg.rls_forced = true;
 
         sys_tbl_mgr::Server::get_instance()->create_table(db_id, {2, 2}, create_msg);
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 2);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 2, true);
 
         _print_table(db_id, 2);
 
@@ -362,7 +362,7 @@ namespace {
         alter_msg.rls_forced = false;
 
         sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {3, 3}, alter_msg);
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 3);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 3, true);
 
         _print_table(db_id, 3);
 
@@ -381,7 +381,7 @@ namespace {
         alter_msg2.rls_forced = false;
 
         sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {4, 4}, alter_msg2);
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 4);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 4, true);
 
         _print_table(db_id, 4);
 
@@ -400,7 +400,7 @@ namespace {
         alter_msg3.rls_forced = true;
 
         sys_tbl_mgr::Server::get_instance()->alter_table(db_id, {5, 5}, alter_msg3);
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 5);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, 5, true);
 
         _print_table(db_id, 5);
 
