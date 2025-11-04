@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/init.hh>
+#include <common/constants.hh>
 #include <common/multi_queue_thread_manager.hh>
 #include <common/object_cache.hh>
 
@@ -63,14 +64,13 @@ namespace springtail::pg_fdw {
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         std::mutex _fdw_conn_cache_mutex;  ///< mutex for fdw connection cache
 
-        RedisCache::RedisChangeWatcherPtr _cache_watcher;                   ///< redis cache callback object
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_dbs;               ///< redis cache callback object
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_state;          ///< redis cache callback object
         std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
 
         std::thread _sync_thread;                   ///< thread for syncing policies and roles
         std::condition_variable _sync_shutdown_cv;  ///< condition variable for shutdown notification
         std::mutex _sync_shutdown_mutex;            ///< mutex for shutdown notification
-
-        std::mutex _pending_ddl_mutex;              ///< mutex for pending DDL statements
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -84,10 +84,25 @@ namespace springtail::pg_fdw {
         int _port;                                 ///< port
 
         std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map
-        std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
+        std::set<uint64_t> _active_dbs;            ///< collection of active database ids for FDW
 
-        std::shared_mutex _db_name_mutex;          ///< mutex for access to _db_name_map
-        std::unordered_map<uint64_t, std::string> _db_name_map;     ///< map of database id to database name
+        struct DBData {
+            std::map<uint64_t, nlohmann::json> pending_ddls;    ///< map of xid to pending ddl
+            std::shared_mutex db_mutex;                         ///< mutex for changes to this data structure
+            std::string state{"unknown"};                       ///< current database state
+            uint64_t latest_xid{constant::INVALID_XID};         ///< latest xid
+
+            // default constructor
+            DBData() = default;
+
+            // remove copy and move cononstructors and operators
+            DBData(const DBData&) = delete;
+            DBData& operator=(const DBData&) = delete;
+            DBData(DBData&&) = delete;
+            DBData& operator=(DBData&&) = delete;
+        };
+
+        std::map<uint64_t, DBData> _db_data;        ///< map of database id to DBData
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
 
@@ -277,9 +292,7 @@ namespace springtail::pg_fdw {
          * @brief Function for adding a new replicated database
          * @param db_id - database id
          */
-        void _add_replicated_database(uint64_t db_id,
-                                      const std::optional<std::string> &db_name_opt = std::nullopt,
-                                      bool check_exists = false);
+        void _add_replicated_database(uint64_t db_id);
 
 
         /**
@@ -317,6 +330,74 @@ namespace springtail::pg_fdw {
                                  const std::string &schema_name,
                                  const std::string &table_name,
                                  uint32_t table_oid);
+
+        /**
+         * @brief Add watcher for path in redis cache
+         *
+         * @param path - path
+         * @param watcher - watcher
+         */
+        void _add_cache_watcher(const std::string &path, RedisCache::RedisChangeWatcherPtr watcher);
+
+        /**
+         * @brief Remove watcher for path in redis cache
+         *
+         * @param path - path
+         * @param watcher - watcher
+         */
+        void _remove_cache_watcher(const std::string &path, RedisCache::RedisChangeWatcherPtr watcher);
+
+        /**
+         * @brief Register redis cache watcher for the given database id
+         *
+         * @param db_id - database id
+         */
+        void _register_db_state_watcher(uint64_t db_id);
+
+        /**
+         * @brief Deregister redis cache watcher for the given database id
+         *
+         * @param db_id - database id
+         */
+        void _deregister_db_state_watcher(uint64_t db_id);
+
+        /**
+         * @brief Perform database state change to the given state
+         *
+         * @param db_id - database id
+         * @param state - new database state
+         */
+        void _on_change_database_state(uint64_t db_id, const std::string &state);
+
+        /**
+         * @brief Add previously unknown database
+         *
+         * @param db_id - database id
+         */
+        void _add_database(uint64_t db_id);
+
+        /**
+         * @brief Remove previously known database
+         *
+         * @param db_id - database id
+         */
+        void _remove_database(uint64_t db_id);
+
+        /**
+         * @brief Set latest applied XID for the given database
+         *
+         * @param db_id - database id
+         * @param latest_xid - latest xid
+         */
+        void _set_latest_xid(uint64_t db_id, uint64_t latest_xid);
+
+        /**
+         * @brief Queue request for the thread manager
+         *
+         * @param db_id - database id
+         * @param xid_map - map of xids to ddl
+         */
+        void _queue_request(uint64_t db_id, const std::map<uint64_t, nlohmann::json> &xid_map);
     };
 
 } // springtail::pg_fdw

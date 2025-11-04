@@ -57,6 +57,8 @@ namespace springtail {
         static inline constexpr char DATABASE_STATE_PATH[] = "instance_state";
         /** Redis notification path for FDW configurations */
         static inline constexpr char FDW_CONFIG_PATH[] = "fdw";
+        /** Redis notification path for the list of FDW databases */
+        static inline constexpr char FDW_DBS_PATH[] = "fdw_dbs";
 
         /* Secrets mgr roles */
         /** FDW secrets mgr role */
@@ -259,6 +261,9 @@ namespace springtail {
          * @param state - database state
          */
         void set_db_state_in_redis(uint64_t db_id, const std::string &state);
+
+        std::set<uint64_t> get_fdw_db_ids(const std::string &fdw_id);
+        void set_fdw_db_ids(const std::string &fdw_id, const std::set<uint64_t> &db_ids);
 
     private:
         /** json containing parsed settings file */
