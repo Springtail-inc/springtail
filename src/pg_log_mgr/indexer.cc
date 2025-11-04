@@ -269,6 +269,7 @@ namespace springtail::committer {
             root->truncate();
             root->finalize();
 
+            // Truncate look-aside index if this is the last index in the table getting dropped
             if (is_last_index) {
                 auto la_it = std::ranges::find_if(meta->roots,
                         [&](auto const& v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
@@ -349,6 +350,8 @@ namespace springtail::committer {
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexing build in progress: {}:{}", db_id, index_id);
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid, {PgExtnRegistry::get_instance()->comparator_func});
 
+        // Build look-aside index if this is the first index getting built for the table
+        // This flag is thread-safe, enabled, only for the first index for the table
         if (build_look_aside) {
             std::vector<std::string> look_aside_keys;
             look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
