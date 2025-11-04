@@ -676,15 +676,19 @@ namespace springtail::pg_log_mgr {
             _current_msg_type = data.buffer[0];
         }
 
-        // Create new buffer if it doesn't exist (happens at start of message or after reset)
-        // This ensures we don't reallocate if logger->log_data() returns false multiple times
-        if (!_msg_buffer) {
-            _msg_buffer = std::make_shared<std::vector<char>>();
-            _msg_buffer->reserve(data.msg_length);  // reserve expected size
-        }
+        // In memory buffer mode: create buffer and accumulate data
+        if (_memory_buffer_mode) {
+            // Create new buffer if it doesn't exist (happens at start of message or after reset)
+            // This ensures we don't reallocate if logger->log_data() returns false multiple times
+            if (!_msg_buffer) {
+                _msg_buffer = std::make_shared<std::vector<char>>();
+                _msg_buffer->reserve(data.msg_length);  // reserve expected size
+            }
 
-        // accumulate data into buffer
-        _msg_buffer->insert(_msg_buffer->end(), data.buffer, data.buffer + data.length);
+            // accumulate data into buffer
+            _msg_buffer->insert(_msg_buffer->end(), data.buffer, data.buffer + data.length);
+        }
+        // In file mode: don't create buffer or copy data
 
         // check if we received a full message
         if (!logger->log_data(data, _current_msg_type)) {
@@ -701,11 +705,29 @@ namespace springtail::pg_log_mgr {
             // Callback provided - always use it (recovery mode needs this)
             queue_append_func(_msg_log_start_offset, end_offset, logger->filename());
         } else {
-            // No callback - push directly with memory buffer optimization (normal mode)
-            if (_msg_buffer && !_logger_queue.is_memory_pressure_high()) {
+            // No callback - normal mode with memory buffer optimization
+            if (_memory_buffer_mode) {
+                // In memory mode: push buffer to queue
                 _logger_queue.push_buffer(std::move(_msg_buffer), logger->filename());
+
+                // Check if we should transition to file mode (high watermark exceeded)
+                if (_logger_queue.is_memory_pressure_high()) {
+                    _memory_buffer_mode = false;
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                             "Switching to file mode: memory usage={} bytes",
+                             _logger_queue.get_memory_usage());
+                }
             } else {
+                // In file mode: push file offsets to queue
                 _logger_queue.push(_msg_log_start_offset, end_offset, logger->filename());
+
+                // Check if we should transition back to memory mode (below low watermark)
+                if (_logger_queue.is_memory_pressure_low()) {
+                    _memory_buffer_mode = true;
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                             "Switching to memory mode: memory usage={} bytes",
+                             _logger_queue.get_memory_usage());
+                }
             }
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
         }

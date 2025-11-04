@@ -205,6 +205,7 @@ namespace springtail::pg_log_mgr {
         uint64_t _msg_log_start_offset{0};    ///< start offset of unpushed messages
         char _current_msg_type{0};            ///< current message type being processed
         std::shared_ptr<std::vector<char>> _msg_buffer;  ///< accumulator for current message data
+        bool _memory_buffer_mode{true};       ///< true = use memory buffers, false = file-only mode
 
         /** Process data from replication stream in loop, queue path, offsets */
         void _log_writer_thread();
