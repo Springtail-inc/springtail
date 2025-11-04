@@ -83,6 +83,7 @@
     "archive_logs": true,
     "indexer_worker_threads": 1,
     "committer_fsync_interval_ms": 500,
+    "committer_fsync_worker_threads": 1,
     "rpc_config": {
       "server_cert": "/opt/springtail/certs/server_cert.pem",
       "server_key": "/opt/springtail/certs/server_key.pem",

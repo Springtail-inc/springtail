@@ -38,7 +38,7 @@ namespace springtail::committer {
         _indexer = std::make_unique<Indexer>(_indexer_worker_count, _index_reconciliation_queue_mgr);
         // we use a fraction of the committer workers for table sync processing
         // we don't want to starve the committer workers with too many fsync tasks
-        _table_sync_processor = std::make_unique<TableSyncProcessor>(_fsync_interval, TABLE_SYNC_WORKERS);
+        _table_sync_processor = std::make_unique<TableSyncProcessor>(_fsync_interval, _fsync_worker_count);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;

@@ -86,6 +86,7 @@
         "archive_logs": true,
         "indexer_worker_threads": 1,
         "committer_fsync_interval_ms": 500,
+        "committer_fsync_worker_threads": 1,
         "rpc_config" : {
             "server_port": 5052,
             "server_worker_threads": 32,

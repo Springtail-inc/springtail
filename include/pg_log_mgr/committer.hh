@@ -27,10 +27,12 @@ namespace springtail::committer {
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
                 std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
                 const std::shared_ptr<pg_log_mgr::IndexRequestsManager> &index_requests_mgr, uint32_t indexer_worker_count,
+                uint32_t fsync_worker_count,
                 std::chrono::milliseconds fsync_interval)
             : _worker_count(worker_count),
               _indexer_worker_count(indexer_worker_count),
               _fsync_interval(fsync_interval),
+              _fsync_worker_count(fsync_worker_count),
               _committer_queue(committer_queue),
               _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
               _index_requests_mgr(index_requests_mgr)
@@ -215,6 +217,7 @@ namespace springtail::committer {
          */
         uint32_t _indexer_worker_count;
         std::chrono::milliseconds _fsync_interval; ///< Interval between fsync calls
+        uint32_t _fsync_worker_count; ///< Number of fsync worker threads
 
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
@@ -253,9 +256,6 @@ namespace springtail::committer {
          * index requests (create/drop) for an XID per db
          */
         std::shared_ptr<pg_log_mgr::IndexRequestsManager> _index_requests_mgr;
-
-
-        constexpr static uint32_t TABLE_SYNC_WORKERS = 1; ///< Number of table sync workers 
 
         /**
          * @brief Table sync processor to handle fsync operations in the background
