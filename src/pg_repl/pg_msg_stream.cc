@@ -46,6 +46,10 @@ namespace springtail {
     {
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Setting file to: {}, offset: {}", file, start_offset);
 
+        // Switch from memory buffer mode to file mode if needed
+        _using_memory_buffer = false;
+        _memory_buffer.reset();
+
         if (file != _current_path || !_stream.is_open()) {
             // file isn't currently open, so open it
             // this reads in the header and sets _current_offset
@@ -61,6 +65,23 @@ namespace springtail {
         if (_current_offset != start_offset) {
             _seek_stream(start_offset);
         }
+    }
+
+    void
+    PgMsgStreamReader::set_buffer(std::shared_ptr<std::vector<char>> buffer)
+    {
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Setting memory buffer, size: {}", buffer->size());
+
+        // Close any open file stream
+        if (_stream.is_open()) {
+            _stream.close();
+        }
+
+        // Switch to memory buffer mode
+        _memory_buffer = buffer;
+        _using_memory_buffer = true;
+        _current_offset = 0;
+        _xlog_msg_end_offset = buffer->size();  // Set boundary to buffer size
     }
 
     void
@@ -92,6 +113,12 @@ namespace springtail {
     {
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Seeking to offset: {}, current_offset: {}, xlog_msg_end_offset: {}",
                   file_offset, _current_offset, _xlog_msg_end_offset);
+
+        // For memory buffers, just update the offset (no file operations)
+        if (_using_memory_buffer) {
+            _current_offset = file_offset;
+            return;
+        }
 
         // jumping to next message, read in xlog header
         if (file_offset == _xlog_msg_end_offset) {
@@ -173,24 +200,34 @@ namespace springtail {
     bool
     PgMsgStreamReader::_read_header()
     {
-        if (!_stream.is_open()) {
+        if (!_using_memory_buffer && !_stream.is_open()) {
             LOG_ERROR("Stream is not open, cannot read header");
             throw PgIOError();
         }
 
         // read the header
         char header_buffer[PgMsgStreamHeader::SIZE];
-        _stream.read(header_buffer, PgMsgStreamHeader::SIZE);
-        if (_stream.eof()) {
-            // hit eof
-            LOG_WARN("Hit EOF reading header, path={}, offset={}",
-                      _current_path, _current_offset);
-            return false;
-        }
-        DCHECK_EQ(_stream.gcount(), PgMsgStreamHeader::SIZE)
-            << "Failed to read full header, read " << _stream.gcount() << " bytes";
 
-        _check_fail();
+        if (_using_memory_buffer) {
+            // Read from memory buffer
+            if (!_read_buffer(header_buffer, PgMsgStreamHeader::SIZE)) {
+                LOG_WARN("Hit EOF reading header from memory buffer, offset={}", _current_offset);
+                return false;
+            }
+        } else {
+            // Read from file stream
+            _stream.read(header_buffer, PgMsgStreamHeader::SIZE);
+            if (_stream.eof()) {
+                // hit eof
+                LOG_WARN("Hit EOF reading header, path={}, offset={}",
+                          _current_path, _current_offset);
+                return false;
+            }
+            DCHECK_EQ(_stream.gcount(), PgMsgStreamHeader::SIZE)
+                << "Failed to read full header, read " << _stream.gcount() << " bytes";
+
+            _check_fail();
+        }
 
         _header = PgMsgStreamHeader(header_buffer);
         _header.header_offset = _current_offset;
@@ -231,7 +268,9 @@ namespace springtail {
             return nullptr;
         }
 
-        if (_current_offset == _xlog_msg_end_offset || _current_offset == 0) {
+        // For file mode only: read header when starting new file or at message boundary
+        // Memory buffers don't have headers
+        if (!_using_memory_buffer && (_current_offset == _xlog_msg_end_offset || _current_offset == 0)) {
             // we've reached the end of the current xlog message, so read the next header
             if (!_read_header()) {
                 return nullptr;

@@ -925,8 +925,20 @@ namespace springtail::pg_log_mgr {
                              uint64_t timestamp,
                              const PgLogQueueEntryPtr& entry)
     {
-        // init stream reader
-        _reader.set_file(path, entry->start_offset);
+        // init stream reader based on entry type
+        if (entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER) {
+            // zero-copy path: read directly from memory buffer
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                      "Reading from memory buffer: size={}, path={}",
+                      entry->buffer_size, path);
+            _reader.set_buffer(entry->memory_buffer);
+        } else {
+            // traditional path: read from file
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                      "Reading from file: path={}, start_offset={}, end_offset={}",
+                      path, entry->start_offset, entry->end_offset);
+            _reader.set_file(path, entry->start_offset);
+        }
 
         static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
@@ -951,10 +963,19 @@ namespace springtail::pg_log_mgr {
             PgMsgPtr msg = _reader.read_message(filter, eos);
 
             if (msg != nullptr) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                          "Read message: msg_type={}, offset={}, eos={}, entry_type={}",
+                          static_cast<int>(msg->msg_type), _reader.offset(), eos,
+                          entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER ? "MEMORY" : "FILE");
                 msg->pg_log_timestamp = timestamp;
 
                 // process the message
                 this->enqueue_msg(msg);
+            } else {
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                          "Read null message: offset={}, eos={}, entry_type={}",
+                          _reader.offset(), eos,
+                          entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER ? "MEMORY" : "FILE");
             }
         }
     }

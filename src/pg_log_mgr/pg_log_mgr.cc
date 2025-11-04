@@ -43,6 +43,10 @@ namespace springtail::pg_log_mgr {
       _log_size_rollover_threshold(log_size_rollover_threshold), _port(port),
       _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
       _repl_log_path(repl_log_path),
+      _logger_queue(
+          Json::get_or<size_t>(Properties::get(Properties::LOG_MGR_CONFIG), "reader_queue_mem_high_watermark", PgLogQueue::DEFAULT_MEMORY_HIGH_WATERMARK),
+          Json::get_or<size_t>(Properties::get(Properties::LOG_MGR_CONFIG), "reader_queue_mem_low_watermark", PgLogQueue::DEFAULT_MEMORY_LOW_WATERMARK)
+      ),
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
@@ -654,9 +658,18 @@ namespace springtail::pg_log_mgr {
 
         // if this is the start of a new message, record its message type
         if (data.msg_offset == 0) {
-            // record the message type
             _current_msg_type = data.buffer[0];
         }
+
+        // Create new buffer if it doesn't exist (happens at start of message or after reset)
+        // This ensures we don't reallocate if logger->log_data() returns false multiple times
+        if (!_msg_buffer) {
+            _msg_buffer = std::make_shared<std::vector<char>>();
+            _msg_buffer->reserve(data.msg_length);  // reserve expected size
+        }
+
+        // accumulate data into buffer
+        _msg_buffer->insert(_msg_buffer->end(), data.buffer, data.buffer + data.length);
 
         // check if we received a full message
         if (!logger->log_data(data, _current_msg_type)) {
@@ -667,10 +680,22 @@ namespace springtail::pg_log_mgr {
         // verify full message
         DCHECK_EQ(data.msg_offset + data.length, data.msg_length);
 
-        // queue msg and update start offset for next message
+        // queue msg
         auto end_offset = logger->offset();
-        queue_append_func(_msg_log_start_offset, end_offset, logger->filename());
+        if (queue_append_func) {
+            // Callback provided - always use it (recovery mode needs this)
+            queue_append_func(_msg_log_start_offset, end_offset, logger->filename());
+        } else {
+            // No callback - push directly with memory buffer optimization (normal mode)
+            if (_msg_buffer && !_logger_queue.is_memory_pressure_high()) {
+                _logger_queue.push_buffer(std::move(_msg_buffer), logger->filename());
+            } else {
+                _logger_queue.push(_msg_log_start_offset, end_offset, logger->filename());
+            }
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
+        }
         _msg_log_start_offset = end_offset;
+        _msg_buffer.reset();  // clear buffer for next message
 
         // if we got here, we have a complete xlog message
         // only rotate the log on commit messages
@@ -723,7 +748,6 @@ namespace springtail::pg_log_mgr {
                             PgLogQueueEntry &entry = post_recovery_queue.back();
                             if (entry.path == file_path && entry.end_offset == start_offset) {
                                 entry.end_offset = end_offset;
-                                entry.num_messages++;
                                 return;
                             }
                         }
@@ -750,15 +774,8 @@ namespace springtail::pg_log_mgr {
                 Coordinator::mark_alive(keep_alive);
 
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in normal mode");
-                if (!_writer_read_data(data, logger,
-                    [this](uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &file_path) {
-                        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Queueing log entry: start_offset={}, end_offset={}, file_path={}",
-                                  start_offset, end_offset, file_path);
-
-                        _logger_queue.push(start_offset, end_offset, file_path);
-                        open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_QUEUE_SIZE, _logger_queue.size());
-                    }
-                )) {
+                // No callback - _writer_read_data will push directly to _logger_queue with memory optimization
+                if (!_writer_read_data(data, logger)) {
                     break;
                 }
             }
@@ -798,11 +815,11 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Got log entry: path={}, start_offset={}, num_messages={}",
-                      log_entry->path, log_entry->start_offset, log_entry->num_messages);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Got log entry: path={}, start_offset={}",
+                      log_entry->path, log_entry->start_offset);
 
             // check for stall message, if so then wait for sync to complete
-            if (log_entry->is_stall_message) {
+            if (log_entry->type == PgLogQueueEntry::Type::STALL) {
                 assert (_internal_state.is(STATE_SYNC_STALL));
                 // wait for sync to complete
                 _internal_state.set(STATE_SYNCING);
@@ -822,8 +839,8 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Processing log entry: path={}, start_offset={}, num_messages={}",
-                      log_entry->path, log_entry->start_offset, log_entry->num_messages);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Processing log entry: path={}, start_offset={}",
+                      log_entry->path, log_entry->start_offset);
 
             // extract timestamp from file name if different file
             if (last_timestamp == 0 || last_path != log_entry->path) {
