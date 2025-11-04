@@ -24,9 +24,6 @@ namespace springtail::test {
         Json::get_to<std::filesystem::path>(json, "transaction_log_path", xid_dir);
         xid_dir = Properties::make_absolute_path(xid_dir);
         std::filesystem::remove_all(xid_dir);
-        auto now = std::chrono::system_clock::now();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
-        xid_mgr::XidMgrServer::get_instance()->rotate(1, timestamp.count());
         xid_mgr::XidMgrServer::get_instance()->cleanup_on_shutdown();
     }
 

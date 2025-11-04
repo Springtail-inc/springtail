@@ -41,7 +41,7 @@ namespace {
             ns_msg.name = "public";
             server->create_namespace(1, XidLsn(target_xid, 0), ns_msg);
 
-            xid_server->commit_xid(1, 1, target_xid, false);
+            xid_server->commit_xid(1, 1, target_xid, false, 0);
         }
 
         static void TearDownTestSuite() {
@@ -115,11 +115,11 @@ namespace {
         }
 
         // finalize the system metadata
-        server->finalize(db_id, xid);
+        server->finalize(db_id, xid, true);
 
         // commit the xid
         LOG_DEBUG(LOG_ALL, LOG_LEVEL_DEBUG1, "Committing xid: {}", xid);
-        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 1, xid, false);
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 1, xid, false, 0);
 
         // create an access table
         auto table = TableMgr::get_instance()->get_table(db_id, oid, xid);

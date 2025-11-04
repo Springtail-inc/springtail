@@ -108,7 +108,9 @@ namespace {
             for (int i = 0; i < iterations; i++) {
                 std::unique_lock<std::mutex> lock(_mx);
                 uint64_t xid = client->get_committed_xid(1, 0);
-                server->commit_xid(1, 1, xid + 1, false);
+                auto now = std::chrono::system_clock::now();
+                auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+                server->commit_xid(1, 1, xid + 1, false, timestamp.count());
             }
 
             LOG_INFO("Thread: {}, finished", thread_id);
@@ -144,14 +146,14 @@ namespace {
     {
         XidMgrClient *client = XidMgrClient::get_instance();
         xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
-        auto now = std::chrono::system_clock::now();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
-        server->rotate(1, timestamp.count());
         uint64_t xid = client->get_committed_xid(1, 0);
 
-        server->commit_xid(1, 1, xid + 1, false);
-        server->commit_xid(1, 1, xid + 2, false);
-        server->commit_xid(1, 1, xid + 3, false);
+        auto now = std::chrono::system_clock::now();
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+
+        server->commit_xid(1, 1, xid + 1, false, timestamp.count());
+        server->commit_xid(1, 1, xid + 2, false, timestamp.count());
+        server->commit_xid(1, 1, xid + 3, false, timestamp.count());
 
         sleep(1);
 

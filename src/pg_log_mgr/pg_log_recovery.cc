@@ -69,7 +69,7 @@ PgLogRecovery::_revert_system_tables()
     sys_tbl_mgr::Server::get_instance()->revert(_db_id, _committed_xid);
 
     // perform a commit at the next XID to ensure we have a clean snapshot from this point
-    sys_tbl_mgr::Server::get_instance()->finalize(_db_id, _committed_xid + 1);
+    sys_tbl_mgr::Server::get_instance()->finalize(_db_id, _committed_xid + 1, true);
 }
 
 bool
