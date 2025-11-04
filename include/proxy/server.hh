@@ -1,22 +1,10 @@
 #pragma once
 
-#include <atomic>
-#include <memory>
-#include <map>
-#include <set>
 #include <filesystem>
-#include <mutex>
-#include <unordered_map>
-
-#include <openssl/ssl.h>
 
 #include <common/thread_pool.hh>
-#include <common/init.hh>
 
-#include <proxy/connection.hh>
 #include <proxy/session.hh>
-
-#include <proxy/buffer_pool.hh>
 #include <proxy/logger.hh>
 
 namespace springtail::pg_proxy {

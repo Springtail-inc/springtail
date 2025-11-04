@@ -48,6 +48,8 @@ namespace springtail {
         static inline constexpr char PROXY_CONFIG[] = "proxy";
         /** Open telemetry configuration section */
         static inline constexpr char OTEL_CONFIG[] = "otel";
+        /** Extension config section */
+        static inline constexpr char EXTENSION_CONFIG[] = "extension_config";
         /** AWS Users Override -- instead of using secrets mgr */
         static inline constexpr char AWS_USERS_OVERRIDE[] = "aws_users_override";
 
@@ -249,6 +251,16 @@ namespace springtail {
         void set_fdw_state(const std::string &state) {
             _set_fdw_state(_get_fdw_id(), state);
         }
+
+        /**
+         * @brief Set the db state directly in redis bypassing the properties storage.
+         *      This proparties storage will get automatically updated through redis cache
+         *      notification mechanism.
+         *
+         * @param db_id - database id
+         * @param state - database state
+         */
+        void set_db_state_in_redis(uint64_t db_id, const std::string &state);
 
     private:
         /** json containing parsed settings file */

@@ -358,6 +358,7 @@ class Properties:
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
+        sys_config_json['extension_config'] = system_json['extension_config']
 
         if 'aws_users_override' in system_json:
             sys_config_json['aws_users_override'] = system_json['aws_users_override']

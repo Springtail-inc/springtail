@@ -1,16 +1,9 @@
-#include <chrono>
-#include <memory>
-#include <thread>
-
-#include <common/filesystem.hh>
-#include <common/open_telemetry.hh>
-#include <common/coordinator.hh>
+#include <common/time_trace.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/sync_tracker.hh>
 
-#include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>
@@ -163,7 +156,9 @@ namespace springtail::pg_log_mgr {
 
         std::vector<SchemaColumn> new_columns{op, lsn};
 
-        schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
+        ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+        schema = table_schema->create_schema(columns, new_columns, sort_keys, extension_callback, true);
+
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
 
@@ -269,7 +264,7 @@ namespace springtail::pg_log_mgr {
             if (entry.schema == nullptr) {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, {PgExtnRegistry::get_instance()->comparator_func}, true);
                 }
                 entry.update_schema();
             }
@@ -357,7 +352,7 @@ namespace springtail::pg_log_mgr {
                 XidLsn current(current_xid);
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, {PgExtnRegistry::get_instance()->comparator_func}, true);
                 }
                 entry.update_schema();
             }
@@ -579,7 +574,8 @@ namespace springtail::pg_log_mgr {
                         });
             }
 
-            entry.table_schema = std::make_shared<ExtentSchema>(columns, true);
+            ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+            entry.table_schema = std::make_shared<ExtentSchema>(columns, extension_callback, true);
             entry.update_schema();
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set

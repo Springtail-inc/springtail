@@ -50,6 +50,13 @@ public:
      */
     void invalidate_db(uint64_t db, const XidLsn &xid);
 
+    /**
+     * @brief Remove the data stored in the cache for the given database id
+     *
+     * @param db database id
+     */
+    void remove_db(uint64_t db);
+
 private:
     struct SchemaEntry;
     using SchemaEntryPtr = std::shared_ptr<SchemaEntry>;

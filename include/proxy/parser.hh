@@ -2,7 +2,6 @@
 
 #include <functional>
 #include <set>
-#include <string>
 #include <memory>
 
 extern "C" {

@@ -81,16 +81,19 @@ namespace springtail {
         /**
          * Constructs an uninitialized tree at the provided XID.
          *
+         * @param database_id The database that this tree belongs to.
          * @param handle The file handle to the underlying on-disk representation.
          * @param keys A list of keys from the schema that are used to sort the entries of the tree.
          * @param cache_size The maximum size of the in-memory cache of pages.
          * @param schema The schema of the leaf entries of the tree.
          */
-        MutableBTree(const std::filesystem::path &file,
+        MutableBTree(uint64_t database_id,
+                     const std::filesystem::path &file,
                      const std::vector<std::string> &keys,
                      ExtentSchemaPtr schema,
                      uint64_t xid,
-                     uint64_t max_extent_size);
+                     uint64_t max_extent_size,
+                     const ExtensionCallback &extension_callback = {});
 
         MutableBTree() = delete;
 
@@ -514,6 +517,9 @@ namespace springtail {
         /** The cache of pages for this MutableBTree. */
         PageCachePtr _cache;
 
+        /** The database that this tree belongs to. */
+        uint64_t _database_id;
+
         /** The handle to the underlying on-disk data. */
         std::shared_ptr<IOHandle> _handle;
 
@@ -540,6 +546,9 @@ namespace springtail {
          * safe when the tree is not finalized.
          */
         bool _finalized;
+
+        /** The extension callback for the tree. */
+        ExtensionCallback _extension_callback;
 
         /** The schema for the leaf nodes. */
         std::shared_ptr<ExtentSchema> _leaf_schema;
@@ -779,7 +788,7 @@ namespace springtail {
          * @param schema The schema of the rows in the leaf extents.
          * @param keys The list of columns that make up the sort key of the tree.
          */
-        void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys);
+        void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys, const ExtensionCallback &extension_callback = {});
 
         //// ITERATOR SUPPORT
     public:

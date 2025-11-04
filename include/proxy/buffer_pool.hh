@@ -3,9 +3,6 @@
 #include <memory>
 #include <cassert>
 #include <mutex>
-#include <atomic>
-#include <vector>
-#include <thread>
 #include <condition_variable>
 #include <queue>
 

@@ -2,6 +2,9 @@
 
 #include <type_traits>
 #include <bit>
+#include <fmt/format.h>
+#include <common/constants.hh>
+#include <common/logging.hh>
 
 #include <absl/log/check.h>
 #include <pg_repl/pg_types.hh>
@@ -100,6 +103,17 @@ namespace springtail {
             throw TypeError("Getting binary type unsupported for this field.");
         }
 
+        virtual const std::span<const char> get_extension(const void *row) const {
+            throw TypeError("Getting extension type unsupported for this field.");
+        }
+
+        virtual bool compare_extension(const char* op_str,
+                                       const std::span<const char> &lhval,
+                                       const std::span<const char> &rhval) const
+        {
+            throw TypeError("Comparing extension type unsupported for this field.");
+        }
+
         bool
         less_than(const void *lhs_row,
                   const std::shared_ptr<Field>& rhs,
@@ -192,6 +206,14 @@ namespace springtail {
                 return false;
             }
 
+            case SchemaType::EXTENSION: {
+                auto lhval = this->get_extension(lhs_row);
+                auto rhval = rhs->get_extension(rhs_row);
+                const char* op_str = "<";
+                auto cmp = this->compare_extension(op_str, lhval, rhval);
+                return cmp;
+            }
+
             default:
                 LOG_ERROR("Unsupported data type: {}", (int)this->get_type());
                 throw TypeError();
@@ -280,6 +302,14 @@ namespace springtail {
                 return (cmp == 0);
             }
 
+            case SchemaType::EXTENSION: {
+                auto lhval = this->get_extension(lhs_row);
+                auto rhval = rhs->get_extension(rhs_row);
+                const char* op_str = "=";
+                auto cmp = this->compare_extension(op_str, lhval, rhval);
+                return cmp;
+            }
+
             default:
                 LOG_ERROR("Unsupported data type: {}", (int)this->get_type());
                 throw TypeError();
@@ -359,6 +389,10 @@ namespace springtail {
 
         virtual void set_binary(void *row, const std::span<const char> &val) {
             throw TypeError("Setting binary type unsupported for this field.");
+        }
+
+        virtual void set_extension(void *row, const std::span<const char> &val) {
+            throw TypeError("Setting extension type unsupported for this field.");
         }
 
         // set this field from the value of another field
@@ -454,6 +488,10 @@ namespace springtail {
                 this->set_binary(lhs, field->get_binary(rhs));
                 break;
 
+            case SchemaType::EXTENSION:
+                this->set_extension(lhs, field->get_extension(rhs));
+                break;
+
             default:
                 LOG_ERROR("Unsupported data type: {}", (int)this->get_type());
                 throw TypeError();
@@ -482,6 +520,25 @@ namespace springtail {
               _can_undefined(false),
               _offset(offset),
               _bool_bitmask(static_cast<char>(1) << bool_bit)
+        { }
+
+        ExtentField(SchemaType type, uint32_t offset, const ExtensionCallback &extension_callback, int32_t type_oid)
+            : _type(type),
+              _can_null(false),
+              _can_undefined(false),
+              _offset(offset),
+              _extension_callback(extension_callback),
+              _type_oid(type_oid)
+        { }
+
+        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, const ExtensionCallback &extension_callback, int32_t type_oid)
+            : _type(type),
+              _can_null(false),
+              _can_undefined(false),
+              _offset(offset),
+              _bool_bitmask(static_cast<char>(1) << bool_bit),
+              _extension_callback(extension_callback),
+              _type_oid(type_oid)
         { }
 
         void
@@ -648,6 +705,16 @@ namespace springtail {
             return e_row->get_binary(var_off);
         }
 
+        const std::span<const char> get_extension(const void *row) const override {
+            // must be extension type
+            DCHECK_EQ(_type, SchemaType::EXTENSION);
+
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            uint32_t var_off = 0;
+            std::memcpy(&var_off, e_row->data() + _offset, sizeof(uint32_t));
+            return e_row->get_binary(var_off);
+        }
+
         void set_undefined(void *row, bool is_undefined) override {
             auto e_row = reinterpret_cast<Extent::Row *>(row);
             _set_bit(*e_row, _undefined_offset, _undefined_bitmask, is_undefined);
@@ -751,6 +818,34 @@ namespace springtail {
             std::memcpy(e_row->data() + _offset, &offset, sizeof(uint32_t));
         }
 
+        void set_extension(void *row, const std::span<const char> &value) override {
+            DCHECK_EQ(_type, SchemaType::EXTENSION);
+
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+
+            // store the string into the variable data
+            uint32_t offset = e_row->set_binary(value);
+
+            // store the offset into the fixed data
+            std::memcpy(e_row->data() + _offset, &offset, sizeof(uint32_t));
+        }
+
+        bool
+        compare_extension(const char* op_str,
+                          const std::span<const char> &lhval,
+                          const std::span<const char> &rhval) const override
+        {
+            DCHECK(_extension_callback.comparator_func != nullptr);
+            DCHECK(_type_oid >= constant::FIRST_USER_DEFINED_PG_OID);
+
+            // Build a local context for this comparison to respect const correctness
+            ExtensionContext ctx = _extension_callback.context;
+            ctx.type_oid = _type_oid;
+            ctx.op_str = op_str;
+
+            // Invoke comparator with pointer to context as required by the signature
+            return _extension_callback.comparator_func(&ctx, lhval, rhval);
+        }
 
     private:
         bool
@@ -791,6 +886,9 @@ namespace springtail {
 
         uint32_t _undefined_offset;
         uint8_t _undefined_bitmask;
+
+        ExtensionCallback _extension_callback;
+        int32_t _type_oid;
     };
     using ExtentFieldPtr = std::shared_ptr<ExtentField>;
 
@@ -811,14 +909,13 @@ namespace springtail {
     class ConstTypeField : public ConstField {
     private:
         T _value;
+        bool is_extn;
+        ExtensionCallback _extension_callback;
+        int32_t _type_oid;
 
     public:
-        explicit ConstTypeField(const T &value)
-            : _value(value)
-        { }
-
-        explicit ConstTypeField(T &&value)
-            : _value(std::move(value))
+        explicit ConstTypeField(const T &value, bool is_extn = false, ExtensionCallback const& extension_callback = {}, int32_t type_oid = 0)
+            : _value(value), is_extn(is_extn), _extension_callback(extension_callback), _type_oid(type_oid)
         { }
 
         SchemaType get_type() const override {
@@ -847,7 +944,7 @@ namespace springtail {
             } else if constexpr(std::is_same_v<T, std::string>) {
                 return SchemaType::TEXT;
             } else if constexpr(std::is_same_v<T, std::vector<char>>) {
-                return SchemaType::BINARY;
+                return is_extn ? SchemaType::EXTENSION : SchemaType::BINARY;
             } else {
                 static_assert("bad field type");
             }
@@ -957,6 +1054,31 @@ namespace springtail {
             } else {
                 throw TypeError();
             }
+        }
+
+        const std::span<const char> get_extension(const void *row) const override {
+            if constexpr(std::is_same_v<T, std::vector<char>>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        bool
+        compare_extension(const char* op_str,
+                          const std::span<const char> &lhval,
+                          const std::span<const char> &rhval) const override
+        {
+            DCHECK(_extension_callback.comparator_func != nullptr);
+            DCHECK(_type_oid >= constant::FIRST_USER_DEFINED_PG_OID);
+
+            // Build a local context for this comparison to respect const correctness
+            ExtensionContext ctx = _extension_callback.context;
+            ctx.type_oid = _type_oid;
+            ctx.op_str = op_str;
+
+            // Invoke comparator with pointer to context as required by the signature
+            return _extension_callback.comparator_func(&ctx, lhval, rhval);
         }
     };
 
@@ -1331,6 +1453,10 @@ namespace springtail {
                     value += fmt::format("<binary>:");
                     break;
 
+                case SchemaType::EXTENSION:
+                    value += fmt::format("<extension>:");
+                    break;
+
                 default:
                     LOG_ERROR("Unsupported data type: {}", (int)this->field(i)->get_type());
                     throw TypeError();
@@ -1626,6 +1752,17 @@ namespace springtail {
             return std::span<const char>(col.data.begin(), col.data.size());
         }
 
+        const std::span<const char> get_extension(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+
+            // XXX we only support binary data for native types
+            DCHECK_EQ(col.type, 'b');
+
+            // read in the binary data as a string
+            return std::span<const char>(col.data.begin(), col.data.size());
+        }
+
     protected:
         SchemaType _type;
         uint32_t _offset;  ///< Column offset in the tuple data
@@ -1640,9 +1777,9 @@ namespace springtail {
         PgEnumField(SchemaType type, uint32_t offset, UserTypePtr ut)
             : PgLogField(type, offset), _ut(ut)
         {
-            DCHECK_EQ(type, SchemaType::FLOAT32);
+            DCHECK(type == SchemaType::FLOAT32 || type == SchemaType::BINARY || type == SchemaType::EXTENSION);
             DCHECK_NE(ut, nullptr);
-            DCHECK_EQ(ut->type, UserType::ENUM);
+            DCHECK(ut->type == UserType::ENUM || ut->type == UserType::EXTENSION);
         }
 
         bool is_null(const void *row) const override
@@ -1664,6 +1801,15 @@ namespace springtail {
             // lookup the label in the enum map
             float index = _ut->enum_label_map.at(label);
             return index;
+        }
+
+        const std::span<const char> get_extension(const void *row) const override
+        {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+
+            // read in the binary data as a string
+            return std::span<const char>(col.data.begin(), col.data.size());
         }
 
     private:
@@ -1747,6 +1893,14 @@ namespace springtail {
                             auto &&tmp = field->get_binary(tuple->row());
                             std::vector<char> value(tmp.begin(), tmp.end());
                             _fields.push_back(std::make_shared<ConstTypeField<std::vector<char>>>(std::move(value)));
+                        }
+                        break;
+                    case(SchemaType::EXTENSION):
+                        {
+                            // note: perform a copy here to store the constant value
+                            auto &&tmp = field->get_extension(tuple->row());
+                            std::vector<char> value(tmp.begin(), tmp.end());
+                            _fields.push_back(std::make_shared<ConstTypeField<std::vector<char>>>(std::move(value), true));
                         }
                         break;
                     default:

@@ -127,6 +127,7 @@ set(MODULES
   proxy
   pg_fdw
   test
+  pg_ext
 )
 
 ## iterate over modules and add subdirectory

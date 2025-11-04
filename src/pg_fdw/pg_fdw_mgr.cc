@@ -37,8 +37,9 @@ extern "C" {
     #include <postgres_ext.h>
     #include <access/htup_details.h>
     #include <access/transam.h>
-    #include <catalog/pg_type.h>
+    #include <catalog/namespace.h>
     #include <catalog/pg_enum.h>
+    #include <catalog/pg_operator.h>
     #include <utils/builtins.h>
     #include <utils/syscache.h>
     #include <utils/typcache.h>
@@ -280,6 +281,9 @@ namespace springtail::pg_fdw {
         // the type category doesn't matter for these checks since enum check is done above
         SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
         if (column.type == pg_schema_type) {
+            if ( pg_schema_type == SchemaType::EXTENSION ){
+                return true;
+            }
             if (pg_schema_type == SchemaType::BINARY) {
                 return false;
             }
@@ -396,14 +400,18 @@ namespace springtail::pg_fdw {
         return quals;
     }
 
-    std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows)
+    std::unique_ptr<PgFdwState>
+    PgFdwMgr::_create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows)
     {
         // we create a temporary scan state here because for historical reasons
         // it has some API's needed by this function. The state will be deleted
         // when the function exits.
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
 
-        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid);
+        ExtensionContext extension_context = {tr.db_id, tr.xid};
+        ExtensionCallback extension_callback = {_comparator_function, extension_context};
+
+        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
@@ -500,6 +508,8 @@ namespace springtail::pg_fdw {
         // NOTE: first call to XidMgrClient needs to be done on the main thread to prevent occasional
         //      deadlock during shutdown for short-lived FDW processes.
         (void)XidMgrClient::get_instance();
+        // NOTE: the same for RedisDDL
+        (void)RedisDDL::get_instance();
         start_thread();
         LOG_INFO("FDW process finished initialization");
     }
@@ -595,7 +605,7 @@ namespace springtail::pg_fdw {
         }
 
         if (init) {
-            springtail_init(false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW);
+            springtail_init(false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW | LOG_SCHEMA);
         }
     }
 
@@ -1501,6 +1511,129 @@ namespace springtail::pg_fdw {
         elog(ERROR, "Springtail exception: %s", error.what());
     }
 
+    std::vector<char>
+    PgFdwMgr::_get_extension_data_from_pg(const PgFdwState *state,
+                                Oid pg_oid,
+                                Datum value)
+    {
+        // Look up the type info
+        HeapTuple tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_oid));
+        if (!HeapTupleIsValid(tup))
+            elog(ERROR, "FDW: cache lookup failed for type %u", pg_oid);
+
+        auto typ = (Form_pg_type) GETSTRUCT(tup);
+        Oid send_func_oid = typ->typsend;
+        ReleaseSysCache(tup);
+
+        if (!OidIsValid(send_func_oid))
+            elog(ERROR, "type %u has no typsend function", pg_oid);
+
+        // Call typsend
+        FmgrInfo flinfo;
+        fmgr_info(send_func_oid, &flinfo);
+
+        // typsend always returns a bytea Datum
+        Datum bytea_datum = FunctionCall1(&flinfo, value);
+        bytea *ba = DatumGetByteaP(bytea_datum);
+
+        int len = VARSIZE_ANY_EXHDR(ba);
+        char *raw = VARDATA_ANY(ba);
+
+        std::vector<char> bytes(raw, raw + len);
+        return bytes;
+    }
+
+    std::string
+    datum_to_string(Datum value, Oid pg_oid)
+    {
+        Oid out_func_oid = 0;
+        bool is_varlena = false;
+        getTypeOutputInfo(pg_oid, &out_func_oid, &is_varlena);
+
+        char *cstring = OidOutputFunctionCall(out_func_oid, value);
+
+        std::string result(cstring);
+        pfree(cstring);
+        return result;
+    }
+
+    Oid
+    PgFdwMgr::_get_type_oid(uint64_t db_id,
+                            uint64_t xid,
+                            uint64_t type_oid)
+    {
+        UserTypePtr utp = _enum_cache_lookup(db_id, type_oid, xid);
+        CHECK_NE(utp, nullptr);
+
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG3, "Enum cache lookup for oid: {}, name: {}", type_oid, utp->name);
+        // Get the oid for the type using type name and type namespace
+        Oid oid = TypenameGetTypid(utp->name.c_str());
+        if (!OidIsValid(oid)) {
+            elog(ERROR, "FDW: Unable to get oid by extn type name %s", utp->name.c_str());
+        }
+
+        return oid;
+    }
+
+    Form_pg_type
+    PgFdwMgr::_resolve_type_information(Oid oid)
+    {
+        HeapTuple tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(oid));
+        if (!HeapTupleIsValid(tup)) {
+            elog(ERROR, "FDW: cache lookup failed for extn type %u", oid);
+        }
+        auto typeForm = (Form_pg_type) GETSTRUCT(tup);
+        ReleaseSysCache(tup);
+
+        return typeForm;
+    }
+
+    bool
+    PgFdwMgr::_comparator_function(const ExtensionContext* ctx,
+                                   const std::span<const char> &lhs_value,
+                                   const std::span<const char> &rhs_value)
+    {
+        uint64_t db_id = ctx->db_id;
+        uint64_t xid = ctx->xid;
+        uint64_t type_oid = ctx->type_oid;
+        const char* op_str = ctx->op_str;
+
+        // Resolve the Oid of the field type
+        Oid oid = _get_type_oid(db_id, xid, type_oid);
+
+        // Get the pgForm for the type
+        auto typeForm = _resolve_type_information(oid);
+
+        // Get the Oid of the operator
+        char *opname = pstrdup(op_str);
+        Oid opOid = OpernameGetOprid(list_make1(makeString(opname)), typeForm->oid, typeForm->oid);
+
+        HeapTuple tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(opOid));
+        if (!HeapTupleIsValid(tuple)) {
+            elog(ERROR, "cache lookup failed for operator %u", opOid);
+        }
+        auto oprForm = (Form_pg_operator) GETSTRUCT(tuple);
+        Oid funcOid = oprForm->oprcode;
+        std::string op_name = oprForm->oprname.data;
+        ReleaseSysCache(tuple);
+
+        // Get the function info
+        FmgrInfo flinfo;
+        fmgr_info(funcOid, &flinfo);
+
+        // Convert the values to Datum
+        Datum leftDatum = _binary_to_datum(lhs_value, oid, typeForm->typmodin);
+        std::string stringLeftDatum = datum_to_string(leftDatum, oid);
+
+        Datum rightDatum = _binary_to_datum(rhs_value, oid, typeForm->typmodin);
+        std::string stringRightDatum = datum_to_string(rightDatum, oid);
+
+        Datum result = FunctionCall2(&flinfo, leftDatum, rightDatum);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG3, "Operator = Result: {} {} {} = {}", stringLeftDatum,
+                  op_name, stringRightDatum, DatumGetBool(result));
+        return DatumGetBool(result);
+    }
+
     float
     PgFdwMgr::_get_enum_id_from_pg(const PgFdwState *state,
                                    int32_t springtail_oid,
@@ -1581,9 +1714,18 @@ namespace springtail::pg_fdw {
     {
         // check for user defined type
         if (springtail_oid >= FirstNormalObjectId) {
-            // user type; enum, lookup index to label
-            assert(field->get_type() == SchemaType::FLOAT32);
-            return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(&row));
+            auto type = field->get_type();
+            assert(type == SchemaType::FLOAT32 ||
+                type == SchemaType::BINARY ||
+                type == SchemaType::EXTENSION);
+
+            if (type == SchemaType::FLOAT32) {
+                return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(&row));
+            }
+
+            // Both BINARY and EXTENSION handled the same way:
+            auto&& value = field->get_extension(&row);
+            return _binary_to_datum(value, pg_oid, atttypmod);
         }
 
         // otherwise convert they row by the schema type
@@ -2006,12 +2148,24 @@ namespace springtail::pg_fdw {
             default:
                 // handle enum user defined type
                 if (qual->base.typeoid >= FirstNormalObjectId) {
-                    Oid oid = DatumGetObjectId(qual->value);
-                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found user defined type datum qual field: {}", oid);
+                    if (column.type == SchemaType::EXTENSION) {
+                        // if the type is an extension type, get the extension value instead of the enum value
+                        std::vector<char> extension_value = _get_extension_data_from_pg(state, qual->base.typeoid, qual->value);
 
-                    // do reverse mapping lookup to get the enum idx from springtail
-                    float enum_id = _get_enum_id_from_pg(state, column.pg_type, qual->base.typeoid, oid);
-                    fields->at(idx) = std::make_shared<ConstTypeField<float>>(enum_id);
+                        ExtensionContext extension_context = {state->db_id, state->xid};
+                        ExtensionCallback extension_callback = {_comparator_function, extension_context};
+
+                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true, extension_callback, column.pg_type);
+                    } else {
+                        Oid oid = DatumGetObjectId(qual->value);
+                        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1,
+                                  "Found user defined type datum qual field: {}", oid);
+
+                        // do reverse mapping lookup to get the enum idx from springtail
+                        float enum_id =
+                            _get_enum_id_from_pg(state, column.pg_type, qual->base.typeoid, oid);
+                        fields->at(idx) = std::make_shared<ConstTypeField<float>>(enum_id);
+                    }
                     break;
                 }
                 elog(ERROR, "Unsupported type for constant field: %d", qual->base.typeoid);
@@ -2049,6 +2203,8 @@ namespace springtail::pg_fdw {
     UserTypePtr
     PgFdwMgr::_enum_cache_lookup(uint64_t db_id, int32_t oid, uint64_t xid)
     {
+        static LruObjectCache<int32_t, UserType> _user_type_cache(MAX_USER_TYPE_CACHE);
+
         // first check the _user_type_cache for the oid
         LOG_DEBUG(LOG_FDW,LOG_LEVEL_DEBUG1,  "Enum cache lookup for oid: {}", oid);
 
@@ -2068,6 +2224,8 @@ namespace springtail::pg_fdw {
             : table(table), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
         columns = TableMgrClient::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Received columns, column count: {}", columns.size());
+
         for (const auto &entry : columns) {
             name_map[entry.second.name] = entry.second.position;
         }

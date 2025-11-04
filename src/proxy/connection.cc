@@ -1,16 +1,12 @@
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include <unistd.h>
 
-#include <openssl/ssl.h>
+#include <fcntl.h>
+#include <poll.h>
+
 #include <openssl/err.h>
 
-#include <unistd.h>
-
-#include <common/logging.hh>
 #include <proxy/exception.hh>
 #include <proxy/connection.hh>
 
@@ -28,23 +24,59 @@ namespace springtail::pg_proxy {
     std::string
     ProxyConnection::_get_peer_name()
     {
-        char host[NI_MAXHOST];
-        char service[NI_MAXSERV];
-        struct sockaddr_storage addr;
-        socklen_t len = sizeof(addr);
+        struct sockaddr_storage peer_addr;
+        struct sockaddr_storage sock_addr;
+        socklen_t len = sizeof(struct sockaddr_storage);
 
-        if (getpeername(_socket, (struct sockaddr *)&addr, &len) == -1) {
+        if (getpeername(_socket, (struct sockaddr *)&peer_addr, &len) == -1) {
             LOG_ERROR("Error getting peer name: {}", strerror(errno));
             return "unknown";
         }
 
-        int rc = getnameinfo((struct sockaddr *)&addr, len, host, sizeof(host), service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV);
-        if (rc != 0) {
-            LOG_ERROR("Error getting name info: {}", gai_strerror(rc));
+        if (getsockname(_socket, (struct sockaddr *)&sock_addr, &len) == -1) {
+            LOG_ERROR("Error getting socket name: {}", strerror(errno));
             return "unknown";
         }
 
-        return std::string(host) + ":" + std::string(service);
+        std::string proto;
+        char peer_ipstr[INET6_ADDRSTRLEN]{0};
+        char sock_ipstr[INET6_ADDRSTRLEN]{0};
+        uint16_t peer_port = 0;
+        uint16_t sock_port = 0;
+
+        if (peer_addr.ss_family == AF_INET) {
+            const struct sockaddr_in *sa4 = reinterpret_cast<const struct sockaddr_in *>(&peer_addr);
+            inet_ntop(AF_INET, &(sa4->sin_addr), peer_ipstr, sizeof(peer_ipstr));
+            peer_port = ntohs(sa4->sin_port);
+            sa4 = reinterpret_cast<const struct sockaddr_in *>(&sock_addr);
+            inet_ntop(AF_INET, &(sa4->sin_addr), sock_ipstr, sizeof(sock_ipstr));
+            sock_port = ntohs(sa4->sin_port);
+            proto = "tcp4";
+        } else if (peer_addr.ss_family == AF_INET6) {
+            const struct sockaddr_in6 *sa6 = reinterpret_cast<const struct sockaddr_in6 *>(&peer_addr);
+            inet_ntop(AF_INET6, &(sa6->sin6_addr), peer_ipstr, sizeof(peer_ipstr));
+            peer_port = ntohs(sa6->sin6_port);
+            sa6 = reinterpret_cast<const struct sockaddr_in6 *>(&sock_addr);
+            inet_ntop(AF_INET, &(sa6->sin6_addr), sock_ipstr, sizeof(sock_ipstr));
+            sock_port = ntohs(sa6->sin6_port);
+            proto = "tcp6";
+        } else {
+            proto = "unknown";
+        }
+
+        std::string addr_str = fmt::format("{}: {}:{} <-> {}:{}",
+                    proto, sock_ipstr, sock_port, peer_ipstr, peer_port);
+
+        char host[NI_MAXHOST]{0};
+        char service[NI_MAXSERV]{0};
+
+        int rc = getnameinfo((struct sockaddr *)&peer_addr, len, host, sizeof(host), service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV);
+        if (rc != 0) {
+            LOG_ERROR("Error getting name info: {}", gai_strerror(rc));
+        }
+
+        addr_str += "(" + std::string(host) + ":" + std::string(service) + ")";
+        return addr_str;
     }
 
     void

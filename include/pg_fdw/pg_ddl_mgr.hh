@@ -1,20 +1,10 @@
 #pragma once
 
-#include <vector>
-#include <optional>
-
-#include <nlohmann/json.hpp>
-
 #include <common/init.hh>
 #include <common/multi_queue_thread_manager.hh>
-
-#include <redis/redis_ddl.hh>
-
-#include <sys_tbl_mgr/system_tables.hh>
+#include <common/object_cache.hh>
 
 #include <pg_repl/libpq_connection.hh>
-#include <pg_fdw/pg_fdw_ddl_common.hh>
-#include <pg_fdw/exception.hh>
 
 namespace springtail::pg_fdw {
     /**
@@ -95,6 +85,9 @@ namespace springtail::pg_fdw {
 
         std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
+
+        std::shared_mutex _db_name_mutex;          ///< mutex for access to _db_name_map
+        std::unordered_map<uint64_t, std::string> _db_name_map;     ///< map of database id to database name
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
 
@@ -243,6 +236,14 @@ namespace springtail::pg_fdw {
         void _create_database(LibPqConnectionPtr conn,
                          const uint64_t db_id,
                          const std::string &db_name);
+
+        /**
+         * @brief Function for creating extensions for a database
+         * @param conn - connection object
+         * @param db_id - database id
+         */
+        void _create_extensions(LibPqConnectionPtr conn,
+                                const uint64_t db_id);
 
         /**
          * @brief Function for creating a replicated database schemas

@@ -1,35 +1,10 @@
-#include <iostream>
-#include <sys/socket.h>
 #include <sys/eventfd.h>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
 
 #include <absl/log/log.h>
 
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-
-#include <fmt/core.h>
-
-#include <admin_http/admin_server.hh>
 #include <common/json.hh>
-#include <common/logging.hh>
-#include <common/properties.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/thread_pool.hh>
 
-#include <proxy/client_session.hh>
-#include <proxy/logger.hh>
 #include <proxy/server.hh>
-#include <proxy/server_session.hh>
 #include <proxy/database.hh>
 
 namespace springtail::pg_proxy {
@@ -148,15 +123,26 @@ namespace springtail::pg_proxy {
 
                     // _sessions maps may have multiple entries for the same client session
                     std::set<SessionPtr> client_sessions;
+                    std::set<SessionPtr> pooled_sessions;
                     for (const auto &[fd, session]: _sessions) {
                         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Admin /info request session: fd={}, id={}", fd, session->id());
-                        client_sessions.insert(session);
+                        if (session->type() == Session::Type::CLIENT) {
+                            client_sessions.insert(session);
+                        } else {
+                            pooled_sessions.insert(session);
+                        }
                     }
 
                     // go through the unique client sessions and get their JSON
-                    nlohmann::json sessions_array = nlohmann::json::array();
+                    nlohmann::json client_sessions_array = nlohmann::json::array();
                     for (const auto &session: client_sessions) {
-                        sessions_array.push_back(session->to_json());
+                        client_sessions_array.push_back(session->to_json());
+                    }
+
+                    // go through the unique pooled sessions and get their JSON
+                    nlohmann::json pooled_sessions_array = nlohmann::json::array();
+                    for (const auto &session: pooled_sessions) {
+                        pooled_sessions_array.push_back(session->to_json());
                     }
 
                     json_response = nlohmann::json::object({
@@ -168,7 +154,8 @@ namespace springtail::pg_proxy {
                         {"primary", primary_json},
                         {"replicas", replica_json},
                         {"client_count", static_cast<int>(client_sessions.size())},
-                        {"client_sessions", sessions_array}
+                        {"client_sessions", client_sessions_array},
+                        {"pooled_sessions", pooled_sessions_array}
                     });
 
                     LOG_INFO("Admin /info request response: {}", json_response.dump());
@@ -214,31 +201,56 @@ namespace springtail::pg_proxy {
 
         LOG_INFO("Keepalive socket listening on port {}", port);
 
+        struct pollfd pfd;
+        pfd.events = POLLIN;
+
+        // set 1 second timeout
+        const int timeout_ms = 1000;
+
+        struct timeval tv;
+        // Set the receive timeout to 1 second
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+
         while (!_shutdown) {
+            pfd.fd = socket;
+            int ret = poll(&pfd, 1, timeout_ms);
+            if (ret < 0) {
+                LOG_WARN("System call poll failed with error {}: {}", errno, strerror(errno));
+                continue;
+            } else if (ret == 0) {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Poll timed out");
+                continue;
+            }
+
             int client = accept(socket, nullptr, nullptr);
             if (client >= 0) {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Accepted keepalive connection");
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Accepted keepalive connection");
                 // Wait for remote disconnect with timeout to check shutdown flag
+
+                if (setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv)) < 0) {
+                    DCHECK(false) << "setsockopt() failed";
+                    LOG_ERROR("System call setsockopt failed with error {}: {}", errno, strerror(errno));
+                    ::close(client);
+                    continue;
+                }
+
                 char buf[32];
-                fd_set readfds;
-                struct timeval tv;
-
                 while (!_shutdown) {
-                    FD_ZERO(&readfds);
-                    FD_SET(client, &readfds);
-                    tv.tv_sec = 1;  // 1 second timeout
-                    tv.tv_usec = 0;
-
-                    int ret = select(client + 1, &readfds, nullptr, nullptr, &tv);
-                    if (ret < 0) {
-                        break;  // Error
-                    } else if (ret == 0) {
-                        continue;  // Timeout, check shutdown flag
-                    }
-
                     // Data available to read
                     ssize_t n = read(client, buf, sizeof(buf));
-                    if (n <= 0) break;  // EOF or error
+                    if (n == -1) {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            continue;
+                        } else {
+                            // any other failure
+                            break;
+                        }
+                    } else if (n == 0) {
+                        // 0-read, peer has closed connection
+                        break;
+                    }
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Received {} byte(s)", n);
                 }
                 ::close(client);
             }
@@ -559,11 +571,13 @@ namespace springtail::pg_proxy {
             ::SSL_CTX_free(_ssl_ctx_client);
         }
 
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Shutting down thread pool");
         // shutdown thread pool
         _thread_pool->shutdown();
 
         // wait for keepalive thread to finish
         if (_keep_alive_thread.joinable()) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Shutting down keep alive thread");
             _keep_alive_thread.join();
         }
 
@@ -682,6 +696,7 @@ namespace springtail::pg_proxy {
             // this is the primary session used for lookup
             // go through the set of sockets and remove them
             for (auto socket : session_itr->second) {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Found session socket {}", socket);
                 _waiting_sessions.erase(socket);
                 _sessions.erase(socket);
             }
@@ -712,6 +727,8 @@ namespace springtail::pg_proxy {
             // remove the socket from the set of sockets associated with the primary session
             primary_itr->second.erase(socket);
         }
+
+        _sessions.erase(itr);
     }
 
     void

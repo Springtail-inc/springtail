@@ -143,4 +143,20 @@ namespace springtail {
         return false;
     }
 
+    void
+    IOMgr::drop_all_fh(const std::filesystem::path &prefix)
+    {
+        // lock cache
+        std::scoped_lock<std::mutex> lock(_cache_mutex);
+
+        _file_cache->drop_all([&prefix](std::shared_ptr<IOFile> io_file) -> bool {
+            auto file_path = io_file->get_path();
+            if (file_path.string().starts_with(prefix.string())) {
+                return true;
+            }
+            return false;
+        });
+    }
+
+
 } // namespace springtail

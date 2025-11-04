@@ -1,28 +1,16 @@
-#include <common/counter.hh>
-#include <common/common.hh>
-#include <common/coordinator.hh>
-#include <common/json.hh>
-#include <common/logging.hh>
-#include <common/open_telemetry.hh>
-#include <common/properties.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/constants.hh>
-
 #include <redis/db_state_change.hh>
 #include <redis/redis_ddl.hh>
-
-#include <pg_repl/exception.hh>
-#include <pg_repl/libpq_connection.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr_client.hh>
 
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_ddl_mgr.hh>
 
 #include <pg_fdw/constants.hh>
+#include <pg_fdw/pg_fdw_ddl_common.hh>
 #include <pg_fdw/pg_xid_collector.hh>
 
 namespace springtail::pg_fdw {
@@ -86,7 +74,7 @@ namespace springtail::pg_fdw {
         "  FOR r IN (SELECT rolname "
         "            FROM pg_roles "
         "            WHERE rolname NOT LIKE 'pg_%' AND "
-	"                      rolname <> '{}' AND "
+	    "                  rolname <> '{}' AND "
         "                  rolname NOT IN (SELECT DISTINCT rolname FROM pg_roles JOIN pg_database ON pg_roles.oid = datdba) "
         "           ) LOOP "
         "    EXECUTE format('DROP ROLE IF EXISTS %s', r.rolname); "
@@ -143,8 +131,8 @@ namespace springtail::pg_fdw {
         CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
 
         // get a vector of old database ids from _log_mgrs
-        std::shared_lock<std::shared_mutex> lock(_db_mutex);
-        auto keys = std::views::keys(_db_xid_map);
+        std::shared_lock lock(_db_name_mutex);
+        auto keys = std::views::keys(_db_name_map);
         lock.unlock();
         std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
 
@@ -703,9 +691,10 @@ namespace springtail::pg_fdw {
 
             std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(&row));
             std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(&row));
+            int8_t type = fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row);
 
             // only enums supported
-            DCHECK_EQ(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row), constant::USER_TYPE_ENUM);
+            DCHECK(type == constant::USER_TYPE_ENUM || type == constant::USER_TYPE_EXTENSION);
 
             // insert into map by namespace_id
             LOG_INFO("Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
@@ -1084,29 +1073,59 @@ namespace springtail::pg_fdw {
 
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Sorted DDLS: {}", sorted_ddls.dump(4));
 
-                    if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
+                    uint64_t current_xid = constant::INVALID_XID;
+                    if (_db_xid_map.contains(db_id)) {
+                        current_xid = _db_xid_map[db_id];
+                    }
+                    if (current_xid >= schema_xid) {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
-                                    db_id, _db_xid_map[db_id], schema_xid);
+                                    db_id, current_xid, schema_xid);
                     } else {
                         LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
-                                  db_id, _db_xid_map[db_id], schema_xid);
+                                  db_id, current_xid, schema_xid);
                         db_map[db_id][schema_xid] = sorted_ddls;
                     }
                 }
 
+                db_lock.unlock();
+
                 if (db_map.empty()) {
                     LOG_WARN("All schemas have already been applied");
-                    db_lock.unlock();
                     RedisDDL::get_instance()->commit_fdw_no_update(_fdw_id);
                     continue;
                 }
-
-                db_lock.unlock();
 
                 // queue each DBs DDL statements for processing
                 for (const auto &[db_id, xid_map] : db_map) {
                     _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
                         db_id, [this, db_id, xid_map]() {
+                            while (true) {
+                                std::shared_lock db_name_lock(_db_name_mutex);
+                                std::shared_lock db_xid_lock(_db_mutex);
+                                if (!_db_name_map.contains(db_id)) {
+                                    if (_db_xid_map.contains(db_id)) {
+                                        // warn and return
+                                        LOG_WARN("DDL changes for database {} won't be applied as database is being removed", db_id);
+                                        return;
+                                    } else {
+                                        db_xid_lock.unlock();
+                                        db_name_lock.unlock();
+                                        try {
+                                            std::string db_state = Properties::get_db_state(db_id);
+                                            if (db_state != redis::db_state_change::REDIS_STATE_INITIALIZE) {
+                                                return;
+                                            }
+                                        } catch (RedisNotFoundError &e) {
+                                            LOG_ERROR("Failed to find database state: {}", e.what());
+                                            return;
+                                        }
+                                        // sleep and continue
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                        continue;
+                                    }
+                                }
+                                break;
+                            }
                             try {
                                 uint64_t schema_xid = xid_map.rbegin()->first;
                                 auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
@@ -1115,12 +1134,10 @@ namespace springtail::pg_fdw {
                                     LOG_FDW, LOG_LEVEL_DEBUG1, "Updating redis ddl @ through schema XID: {}, db_id: {}",
                                     schema_xid, db_id);
 
-
-
                                 // apply the DDL statements
                                 bool status = _update_schemas(db_id, xid_map);
                                 if (!status) {
-                                    // error occured, abort the DDL
+                                    // error occurred, abort the DDL
                                     LOG_ERROR("Failed to apply DDL statements");
                                     RedisDDL::get_instance()->abort_fdw(_fdw_id);
                                     DCHECK(false);
@@ -1233,10 +1250,10 @@ namespace springtail::pg_fdw {
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
         LibPqConnectionPtr conn = _get_fdw_connection(db_id, db_name);
+        std::vector<std::string> txn;
 
         try {
             // generate a DDL statement for each JSON in the transaction
-            std::vector<std::string> txn;
             for (auto &[xid, ddls] : xid_map) {
                 for (const auto &ddl : ddls) {
                     auto query_string = _gen_sql_from_json(conn, SPRINGTAIL_FDW_SERVER_NAME, ddl);
@@ -1488,7 +1505,11 @@ namespace springtail::pg_fdw {
             const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
             const auto value_json_str = ddl.at("value").get<std::string>();
+            const auto type = ddl.at("type").get<int8_t>();
 
+            if (type == constant::USER_TYPE_EXTENSION) {
+                return "";
+            }
             return _get_create_type_query(escaped_schema, escaped_name, value_json_str, conn);
         }
         else if (action == "ut_drop") {
@@ -1627,6 +1648,34 @@ namespace springtail::pg_fdw {
     }
 
     void
+    PgDDLMgr::_create_extensions(LibPqConnectionPtr conn,
+                                 const uint64_t db_id)
+    {
+        nlohmann::json extension_config_json = Properties::get(Properties::EXTENSION_CONFIG);
+        if (extension_config_json.is_null()) {
+            LOG_WARN("No extension configuration found for database {}", db_id);
+            return;
+        }
+
+        // Get the extensions for this specific database ID
+        std::string db_id_str = std::to_string(db_id);
+        if (!extension_config_json.contains(db_id_str)) {
+            LOG_WARN("No extensions configured for database {}", db_id);
+            return;
+        }
+
+        auto db_extensions = extension_config_json[db_id_str];
+
+        for (auto& ext : db_extensions.items()) {
+            auto extension_name = ext.key();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG2, "Creating extension: {} for db_id: {}",
+                      extension_name, db_id);
+            conn->exec(fmt::format("CREATE EXTENSION IF NOT EXISTS {} WITH SCHEMA PUBLIC", extension_name));
+            conn->clear();
+        }
+    }
+
+    void
     PgDDLMgr::_create_schemas(const uint64_t db_id,
                               const std::string &db_name)
     {
@@ -1640,7 +1689,11 @@ namespace springtail::pg_fdw {
         // get user types from system tables
         auto &&user_types = _get_usertypes(db_id, xid);
 
+        // connect to the database on the fdw
         auto conn = _get_fdw_connection(db_id, db_name);
+
+        // create the extensions enabled for this DB
+        _create_extensions(conn, db_id);
 
         // drop and create the fdw extension
         conn->exec(fmt::format("DROP EXTENSION IF EXISTS {} CASCADE", SPRINGTAIL_FDW_EXTENSION));
@@ -1674,7 +1727,13 @@ namespace springtail::pg_fdw {
                     const std::string &type_name = entry.second.first;
                     const std::string &value_json_str = entry.second.second;
                     std::string escaped_type = conn->escape_identifier(type_name);
-                    LOG_DEBUG(LOG_FDW,LOG_LEVEL_DEBUG1,  "Creating user type: {}.{} = {}", escaped_schema, escaped_type, value_json_str);
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating user type: {}.{} = {}",
+                              escaped_schema, escaped_type, value_json_str);
+                    // If its an Extension type, the JSON would be empty, skip the create type
+                    if (value_json_str.empty() || value_json_str == "{}") {
+                        LOG_ERROR("Empty value for user type: {}.{}", escaped_schema, escaped_type);
+                        continue;
+                    }
                     std::string create_type_query = _get_create_type_query(escaped_schema, escaped_type, value_json_str, conn);
                     conn->exec(create_type_query);
                     conn->clear();
@@ -1756,7 +1815,6 @@ namespace springtail::pg_fdw {
 
         auto &ns_row = *table_iter;
         uint64_t ns_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&ns_row);
-        std::string ns_name(ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&ns_row));
         uint64_t ns_xid = ns_fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&ns_row);
         bool ns_exists = ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&ns_row);
         DCHECK(ns_xid <= xid);
@@ -1822,14 +1880,15 @@ namespace springtail::pg_fdw {
             // check if the database already exists in the fdw
             // flag is set if coming from redis callback for adding db
             {
-                std::shared_lock shared_lock(_db_mutex);
-                if (_db_xid_map.contains(db_id)) {
+                std::shared_lock shared_lock(_db_name_mutex);
+                if (_db_name_map.contains(db_id)) {
                     LOG_INFO("Database {} already exists in the fdw", db_name);
                     return;
                 }
             }
 
-            // looks like it exists in xid map, so get a connection and really check
+            // NOTE: I think it is no longer needed
+            // looks like it does not exist in database name map, so get a connection and really check
             conn = _get_fdw_connection(std::nullopt, "template1");
             std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
             conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
@@ -1839,15 +1898,7 @@ namespace springtail::pg_fdw {
                 return;
             }
             conn->clear();
-
-            {
-                // remove from xid map
-                std::unique_lock unique_lock(_db_mutex);
-                _db_xid_map.erase(db_id);
-            }
-        }
-
-        if (!conn) {
+        } else {
             conn = _get_fdw_connection(std::nullopt, "template1");
         }
 
@@ -1857,32 +1908,48 @@ namespace springtail::pg_fdw {
 
         // create schemas
         _create_schemas(db_id, db_name);
+
+        {
+            std::unique_lock lock(_db_name_mutex);
+            _db_name_map.emplace(db_id, db_name);
+        }
     }
 
     void
     PgDDLMgr::_remove_replicated_database(uint64_t db_id)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        std::shared_lock shared_lock(_db_mutex);
-        if (!_db_xid_map.contains(db_id)) {
-            return;
+        std::string db_name;
+        {
+            std::unique_lock lock(_db_name_mutex);
+            auto it = _db_name_map.find(db_id);
+            if (it == _db_name_map.end()) {
+                return;
+            }
+            db_name = it->second;
+            _db_name_map.erase(it);
         }
-        shared_lock.unlock();
 
-        // read db_config to get database name
-        nlohmann::json db_config = Properties::get_db_config(db_id);
-        std::string db_name = db_config["name"];
+        RedisDDL::get_instance()->clear_ddls(db_id);
 
         // drop database
         LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
         std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
-        conn->exec(drop_db);
+        conn->exec_no_throw(drop_db);
         conn->disconnect();
 
         // remove it from internal storage
-        std::unique_lock unique_lock(_db_mutex);
-        _db_xid_map.erase(db_id);
+        {
+            std::unique_lock unique_lock(_db_mutex);
+            _db_xid_map.erase(db_id);
+        }
+
+        // remove connections from connection cache
+        {
+            std::unique_lock conn_lock(_fdw_conn_cache_mutex);
+            _fdw_conn_cache.evict(db_id);
+        }
     }
 
     std::string

@@ -60,7 +60,8 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     }
 
     StorageCache::SafePagePtr
-    StorageCache::get(const std::filesystem::path &file,
+    StorageCache::get(uint64_t database_id,
+                      const std::filesystem::path &file,
                       uint64_t extent_id,
                       uint64_t access_xid,
                       uint64_t target_xid,
@@ -81,12 +82,12 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            return {_page_cache.get(), _page_cache->get_empty(file, target_xid, max_extent_size), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get_empty(database_id, file, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid) {
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get(database_id, file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // if the target is ahead of the access, but there is roll-forward request, then it means
@@ -95,7 +96,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get(database_id, file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -143,9 +144,16 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         _metric_counters->increment<metrics::StorageCache::DropCalls>();
     }
 
+    void
+    StorageCache::evict_for_database(uint64_t database_id)
+    {
+        _page_cache->evict_for_database(database_id);
+    }
+
 
     StorageCache::PagePtr
-    StorageCache::PageCache::get(const std::filesystem::path &file,
+    StorageCache::PageCache::get(uint64_t database_id,
+                                 const std::filesystem::path &file,
                                  uint64_t extent_id,
                                  uint64_t access_xid,
                                  uint64_t target_xid,
@@ -172,18 +180,19 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
         // note: not in the cache, need to create a new Page
-        return _create(file, extent_id, target_xid, { extent_id }, max_extent_size);
+        return _create(database_id, file, extent_id, target_xid, { extent_id }, max_extent_size);
     }
 
     StorageCache::PagePtr
-    StorageCache::PageCache::get_empty(const std::filesystem::path &file,
+    StorageCache::PageCache::get_empty(uint64_t database_id,
+                                       const std::filesystem::path &file,
                                        uint64_t xid, uint64_t max_extent_size)
     {
         LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
         _make_page_space();
-        return std::make_shared<Page>(file, xid, max_extent_size);
+        return std::make_shared<Page>(database_id, file, xid, max_extent_size);
     }
 
     void
@@ -450,7 +459,8 @@ StorageCache::PageCache::background_cleaner()
     }
 
     StorageCache::PagePtr
-    StorageCache::PageCache::_create(const std::filesystem::path &file,
+    StorageCache::PageCache::_create(uint64_t database_id,
+                                     const std::filesystem::path &file,
                                      uint64_t extent_id,
                                      uint64_t xid,
                                      const std::vector<uint64_t> &offsets,
@@ -459,10 +469,13 @@ StorageCache::PageCache::background_cleaner()
         LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
 
         // create the page object with the given <file, extent_id> valid at the requested XID
-        auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets, max_extent_size);
+        auto page = std::make_shared<Page>(database_id, file, extent_id, xid, xid, offsets, max_extent_size);
 
         // add it to the cache; note: use count starts at 1
         _cache[page->key()][xid] = page;
+
+        // register this file with the database
+        _database_files[database_id].insert(file);
 
         // make space for the page; evict if we need to make space
         // note: we do this after creating the Page to avoid a race where two people might create
@@ -643,7 +656,8 @@ StorageCache::PageCache::background_cleaner()
         return page_i->second;
     }
 
-    StorageCache::Page::Page(const std::filesystem::path &file,
+    StorageCache::Page::Page(uint64_t database_id,
+                             const std::filesystem::path &file,
                              uint64_t extent_id,
                              uint64_t start_xid,
                              uint64_t end_xid,
@@ -651,6 +665,7 @@ StorageCache::PageCache::background_cleaner()
                              uint64_t max_extent_size)
         : _use_count(1),
           _is_dirty(false),
+          _database_id(database_id),
           _file(file),
           _extent_id(extent_id),
           _start_xid(start_xid),
@@ -663,10 +678,12 @@ StorageCache::PageCache::background_cleaner()
         }
     }
 
-    StorageCache::Page::Page(const std::filesystem::path &file,
+    StorageCache::Page::Page(uint64_t database_id,
+                             const std::filesystem::path &file,
                              uint64_t xid, uint64_t max_extent_size)
         : _use_count(1),
           _is_dirty(false),
+          _database_id(database_id),
           _file(file),
           _extent_id(constant::UNKNOWN_EXTENT),
           _start_xid(xid),
@@ -689,7 +706,7 @@ StorageCache::PageCache::background_cleaner()
         CHECK(_extents.empty());
 
         // create an empty extent
-        auto extent = cache->_data_cache->get_empty(_file, header);
+        auto extent = cache->_data_cache->get_empty(_file, header, _database_id);
 
         _extents.emplace_back(extent->cache_id(), false, extent);
 
@@ -729,7 +746,7 @@ StorageCache::PageCache::background_cleaner()
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *tuple,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             auto extent = ref.make_safe_extent(_file);
+                                             auto extent = ref.make_safe_extent(_file, _database_id);
                                              auto &&row = (*extent)->back();
                                              return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
@@ -737,7 +754,7 @@ StorageCache::PageCache::background_cleaner()
             return end();
         }
 
-        auto extent = extent_i->make_safe_extent(_file);
+        auto extent = extent_i->make_safe_extent(_file, _database_id);
 
         // perform a lower-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::lower_bound(**extent, *tuple,
@@ -762,7 +779,7 @@ StorageCache::PageCache::background_cleaner()
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::upper_bound(_extents.begin(), _extents.end(), *tuple,
                                  [this, &schema](const Tuple &key, const ExtentRef &ref) {
-                                     auto extent = ref.make_safe_extent(_file);
+                                     auto extent = ref.make_safe_extent(_file, _database_id);
                                      auto &&row = (*extent)->back();
                                      auto tuple = FieldTuple(schema->get_sort_fields(), &row);
                                      return key.less_than(tuple);
@@ -772,7 +789,7 @@ StorageCache::PageCache::background_cleaner()
             return end();
         }
 
-        auto extent = extent_i->make_safe_extent(_file);
+        auto extent = extent_i->make_safe_extent(_file, _database_id);
 
         // perform a upper-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::upper_bound(**extent, *tuple,
@@ -827,7 +844,7 @@ StorageCache::PageCache::background_cleaner()
     {
         // iterate through the extents to find the requested index in the page
         for (auto extent_i = _extents.begin(); extent_i != _extents.end(); ++extent_i) {
-            auto extent = extent_i->make_safe_extent(_file);
+            auto extent = extent_i->make_safe_extent(_file, _database_id);
 
             uint32_t row_count = (*extent)->row_count();
             if (index < row_count) {
@@ -861,7 +878,7 @@ StorageCache::PageCache::background_cleaner()
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             auto extent = ref.make_safe_extent(_file);
+                                             auto extent = ref.make_safe_extent(_file, _database_id);
                                              auto &&row = (*extent)->back();
                                              return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
@@ -871,7 +888,7 @@ StorageCache::PageCache::background_cleaner()
         }
 
         // make sure that we've got a mutable version of the extent
-        auto extent = extent_i->make_dirty_safe_extent(_file);
+        auto extent = extent_i->make_dirty_safe_extent(_file, _database_id);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -913,7 +930,7 @@ StorageCache::PageCache::background_cleaner()
         if (_extents.empty()) {
             // create an empty extent
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
-            auto extent = SafeExtent(_file, std::move(header));
+            auto extent = SafeExtent(_file, std::move(header), _database_id);
             _extents.emplace_back(extent.get_ref());
 
             // insert the tuple into the extent
@@ -925,7 +942,7 @@ StorageCache::PageCache::background_cleaner()
         // retrieve the last extent
         auto extent_i = --_extents.end();
 
-        auto extent = extent_i->make_dirty_safe_extent(_file);
+        auto extent = extent_i->make_dirty_safe_extent(_file, _database_id);
 
         // append a row
         auto row = (*extent)->append();
@@ -948,7 +965,7 @@ StorageCache::PageCache::background_cleaner()
         if (_extents.empty()) {
             // create an empty extent
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
-            auto extent = SafeExtent(_file, std::move(header));
+            auto extent = SafeExtent(_file, std::move(header), _database_id);
             _extents.emplace_back(extent.get_ref());
 
             // insert the tuple into the extent
@@ -964,7 +981,7 @@ StorageCache::PageCache::background_cleaner()
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             auto extent = ref.make_safe_extent(_file);
+                                             auto extent = ref.make_safe_extent(_file, _database_id);
                                              auto &&row = (*extent)->back();
                                              return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
@@ -973,7 +990,7 @@ StorageCache::PageCache::background_cleaner()
         }
 
         // make sure that we've got a mutable version of the extent
-        auto extent = extent_i->make_dirty_safe_extent(_file);
+        auto extent = extent_i->make_dirty_safe_extent(_file, _database_id);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -1017,7 +1034,7 @@ StorageCache::PageCache::background_cleaner()
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             auto extent = ref.make_safe_extent(_file);
+                                             auto extent = ref.make_safe_extent(_file, _database_id);
                                              auto &&row = (*extent)->back();
                                              return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
@@ -1025,7 +1042,7 @@ StorageCache::PageCache::background_cleaner()
         CHECK(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
-        auto extent = extent_i->make_dirty_safe_extent(_file);
+        auto extent = extent_i->make_dirty_safe_extent(_file, _database_id);
 
         // find the update position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -1058,7 +1075,7 @@ StorageCache::PageCache::background_cleaner()
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             auto extent = ref.make_safe_extent(_file);
+                                             auto extent = ref.make_safe_extent(_file, _database_id);
                                              auto &&row = (*extent)->back();
                                              return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
@@ -1066,7 +1083,7 @@ StorageCache::PageCache::background_cleaner()
         CHECK(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
-        auto extent = extent_i->make_dirty_safe_extent(_file);
+        auto extent = extent_i->make_dirty_safe_extent(_file, _database_id);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -1102,7 +1119,7 @@ StorageCache::PageCache::background_cleaner()
         auto extent_i = _extents.begin();
         uint32_t row_pos;
         while (!found && extent_i != _extents.end()) {
-            auto extent = extent_i->make_safe_extent(_file);
+            auto extent = extent_i->make_safe_extent(_file, _database_id);
             for (row_pos = 0; row_pos < (*extent)->row_count(); ++row_pos) {
                 auto row = *((*extent)->at(row_pos));
                 if (value->equal_strict(FieldTuple(fields, &row))) {
@@ -1122,7 +1139,7 @@ StorageCache::PageCache::background_cleaner()
         _is_dirty = true;
 
         // mark the extent as dirty and remove the row from it
-        auto extent = extent_i->make_dirty_safe_extent(_file);
+        auto extent = extent_i->make_dirty_safe_extent(_file, _database_id);
         auto it = (*extent)->at(row_pos);
         (*extent)->remove(it);
 
@@ -1153,10 +1170,10 @@ StorageCache::PageCache::background_cleaner()
         for (auto &ref : _extents) {
             // get a new extent
             ExtentHeader new_header(_header().type, target_xid, target_schema->row_size(), target_schema->field_types());
-            auto new_extent = cache->_data_cache->get_empty(_file, new_header);
+            auto new_extent = cache->_data_cache->get_empty(_file, new_header, _database_id);
 
             // get the old extent
-            auto old_extent = ref.make_safe_extent(_file);
+            auto old_extent = ref.make_safe_extent(_file, _database_id);
 
             LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "{}@{} (size: {}) to {}@{} (size: {})",
                                 (*old_extent)->extent_id(),
@@ -1244,7 +1261,7 @@ StorageCache::PageCache::background_cleaner()
             } else {
                 // XXX if the extent was already flushed to disk in the background, we don't
                 //     actually need to read it in again here, we just need to get the extent ID
-                auto &&e = ref.make_safe_extent(_file);
+                auto &&e = ref.make_safe_extent(_file, _database_id);
                 if ((*e)->state() == CacheExtent::State::DIRTY) {
                     // update the extent header
                     (*e)->header() = header;
@@ -1384,7 +1401,8 @@ StorageCache::PageCache::background_cleaner()
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::get(const std::filesystem::path &file,
                                  const ExtentRef &ref,
-                                 bool mark_dirty)
+                                 bool mark_dirty,
+                                 uint64_t database_id)
     {
         boost::unique_lock lock(_mutex);
 
@@ -1399,11 +1417,11 @@ StorageCache::PageCache::background_cleaner()
         // if the ref is of a DIRTY/MUTABLE page
         if (!ref.is_clean()) {
             // retrieve it from the dirty cache
-            return _get(ref.id(), mark_dirty);
+            return _get(ref.id(), mark_dirty, database_id);
         }
 
         // if the ref is of a CLEAN page
-        auto extent = _get_clean(file, ref.id());
+        auto extent = _get_clean(file, ref.id(), database_id);
 
         if (mark_dirty) {
             // we create a DIRTY copy of it by calling extract()
@@ -1415,7 +1433,8 @@ StorageCache::PageCache::background_cleaner()
 
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::_get(uint64_t cache_id,
-                                  bool mark_dirty)
+                                  bool mark_dirty,
+                                  uint64_t database_id)
     {
         CacheExtentPtr extent = nullptr;
 
@@ -1432,7 +1451,7 @@ StorageCache::PageCache::background_cleaner()
 
             // note: no one should know about the cache ID except for the owning page, so this
             //       should never return nullptr since there should never be two concurrent readers
-            extent = _read_extent(value.second, value.first, [this, cache_id](CacheExtentPtr extent) {
+            extent = _read_extent(value.second, value.first, database_id, [this, cache_id](CacheExtentPtr extent) {
                 // mark it as mutable since it comes from the dirty cache
                 extent->_state = CacheExtent::State::MUTABLE;
                 extent->_cache_id = cache_id;
@@ -1505,7 +1524,8 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
 
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::get_empty(const std::filesystem::path &file,
-                                       const ExtentHeader &header)
+                                       const ExtentHeader &header,
+                                       uint64_t database_id)
     {
         boost::unique_lock lock(_mutex);
 
@@ -1513,7 +1533,7 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         _make_extent_space();
 
         // create an empty extent
-        auto extent = std::make_shared<CacheExtent>(header, file);
+        auto extent = std::make_shared<CacheExtent>(header, file, database_id);
 
         // assign the extent a unique cache ID and add it to the dirty cache
         _gen_cache_id(extent);
@@ -1639,6 +1659,30 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         extent->_state = CacheExtent::State::INVALID;
     }
 
+    void
+    StorageCache::DataCache::invalidate_clean(CacheExtentPtr extent)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // note: extent must be CLEAN or MUTABLE for this to be a valid operation
+        CHECK(extent->_state == CacheExtent::State::CLEAN ||
+              extent->_state == CacheExtent::State::MUTABLE);
+        CHECK_EQ(extent->_use_count, 1);
+
+        // remove from the appropriate cache
+        if (extent->_state == CacheExtent::State::CLEAN) {
+            _clean_cache.erase(extent->key());
+        } else {
+            // MUTABLE extents are in the dirty_cache
+            _dirty_cache.erase(extent->_cache_id);
+            _cache_id_map.erase(extent->_cache_id);
+        }
+
+        // mark the extent as no longer valid to ensure it doesn't get released back into the cache
+        // by a concurrent user
+        extent->_state = CacheExtent::State::INVALID;
+    }
+
     std::pair<StorageCache::ExtentRef, StorageCache::ExtentRef>
     StorageCache::DataCache::split(CacheExtentPtr extent, ExtentSchemaPtr schema)
     {
@@ -1677,8 +1721,56 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
                                                { second->_cache_id, false, second });
     }
 
+    void
+    StorageCache::DataCache::evict_for_database(uint64_t database_id)
+    {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "DataCache::evict_for_database database_id={}", database_id);
+
+        boost::unique_lock lock(_mutex);
+
+        std::vector<CacheExtentPtr> extents_to_evict;
+
+        // Collect and remove extents from clean_cache
+        for (auto cache_i = _clean_cache.begin(); cache_i != _clean_cache.end(); ) {
+            if (cache_i->second->_database_id == database_id) {
+                extents_to_evict.push_back(cache_i->second);
+                cache_i = _clean_cache.erase(cache_i);
+            } else {
+                ++cache_i;
+            }
+        }
+
+        // Collect and remove extents from dirty_cache
+        for (auto cache_i = _dirty_cache.begin(); cache_i != _dirty_cache.end(); ) {
+            if (cache_i->second->_database_id == database_id) {
+                extents_to_evict.push_back(cache_i->second);
+                _cache_id_map.erase(cache_i->second->_cache_id);
+                cache_i = _dirty_cache.erase(cache_i);
+            } else {
+                ++cache_i;
+            }
+        }
+
+        // Remove from LRU lists and mark as INVALID
+        for (const auto &extent: extents_to_evict) {
+            // Extent must not be in use for safe eviction
+            DCHECK_EQ(extent->_use_count, 0);
+
+            // Could be on dirty or clean LRU depending on state
+            if (extent->_state == CacheExtent::State::DIRTY) {
+                _dirty_lru.erase(extent->_pos);
+            } else {
+                _clean_lru.erase(extent->_pos);
+            }
+
+            // Mark as INVALID so it won't be reused
+            extent->_state = CacheExtent::State::INVALID;
+            --_size;
+        }
+    }
+
     StorageCache::CacheExtentPtr
-    StorageCache::DataCache::_get_clean(const std::filesystem::path& file, uint64_t extent_id)
+    StorageCache::DataCache::_get_clean(const std::filesystem::path& file, uint64_t extent_id, uint64_t database_id)
     {
 
         std::pair<uint64_t, const std::string&> key{extent_id, file.native()};
@@ -1709,14 +1801,14 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
                 break;
             }
 
+            // Record cache MISS
+            _tracer.record_miss(file, extent_id, 0);
+
             // extent not cached, so read from disk
             // note: may return nullptr, indicating someone else just read the extent from disk and
             //       that we should check the cache again
             //
-            // Record cache MISS
-            _tracer.record_miss(file, extent_id, 0);
-
-            extent = _read_extent(file, extent_id, [this, extent_id, &file](CacheExtentPtr ext) {
+            extent = _read_extent(file, extent_id, database_id, [this, extent_id, &file](CacheExtentPtr ext) {
                     // insert the extent into the cache
                     // note: we don't place into the LRU list since the extent will be in-use
                     _clean_cache.insert({ {extent_id, file.native()}, ext });
@@ -1908,6 +2000,7 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
 
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::_read_extent(const std::filesystem::path& file, uint64_t extent_id,
+                                          uint64_t database_id,
                                           std::function<void(CacheExtentPtr)> callback)
     {
         std::pair<uint64_t, const std::string&> key{extent_id, file.native()};
@@ -1946,8 +2039,12 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
         // read the extent
         auto handle = IOMgr::get_instance()->open(file, IOMgr::READ, true);
         auto response = handle->read(extent_id);
+        DCHECK(response->is_success()) << "Failed to read extent " << extent_id
+                                     << " from file " << file.native()
+                                     << ", status: " << response->status;
         auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id,
-                                                    response->next_offset - response->offset);
+                                                    response->next_offset - response->offset,
+                                                    database_id);
 
         // reacquire the lock once IO complete
         lock.lock();
@@ -2023,10 +2120,95 @@ StorageCache::DataCache::_wait_for_flush(const CacheExtentPtr& extent)
 
     StorageCache::SafeExtent::SafeExtent(const std::filesystem::path &file,
             const ExtentRef &ref,
-            bool mark_dirty)
+            bool mark_dirty,
+            uint64_t database_id)
     {
-        _extent = StorageCache::get_instance()->_data_cache->get(file, ref, mark_dirty);
+        _extent = StorageCache::get_instance()->_data_cache->get(file, ref, mark_dirty, database_id);
         DCHECK(_extent);
+    }
+
+    void
+    StorageCache::PageCache::evict_for_database(uint64_t database_id)
+    {
+        LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "PageCache::evict_for_database database_id={}", database_id);
+
+        auto data_cache = StorageCache::get_instance()->_data_cache;
+        std::list<PagePtr> pages_to_evict;
+        std::set<std::filesystem::path> files;
+
+        // Hold the lock for the entire operation
+        {
+            boost::unique_lock lock(_mutex);
+
+            // Iterate through the entire _cache to find pages for this database
+            for (auto &cache_entry : _cache) {
+                for (auto &xid_entry : cache_entry.second) {
+                    auto page = xid_entry.second;
+                    if (page->_database_id == database_id) {
+                        pages_to_evict.push_back(page);
+                    }
+                }
+            }
+
+            // Get the files associated with this database
+            auto db_i = _database_files.find(database_id);
+            if (db_i != _database_files.end()) {
+                files = db_i->second;
+            }
+
+            // Evict the Page objects from the cache
+            for (const auto &page : pages_to_evict) {
+                // Evict the Page object from the PageCache
+                auto cache_i = _cache.find(page->key());
+                if (cache_i != _cache.end()) {
+                    cache_i->second.erase(page->xid());
+                    if (cache_i->second.empty()) {
+                        _cache.erase(cache_i);
+                    }
+                }
+
+                // Page must not be in use for safe eviction
+                DCHECK_EQ(page->_use_count, 0);
+
+                // Remove from LRU list
+                if (page->_is_dirty) {
+                    _dirty_lru.erase(page->_lru_pos);
+                } else {
+                    _clean_lru.erase(page->_lru_pos);
+                }
+
+                // Decrement the size counter
+                --_size;
+            }
+
+            // Clean up the flush list for all files associated with this database
+            for (const auto &file : files) {
+                auto file_i = _flush_list.find(file);
+                if (file_i != _flush_list.end()) {
+                    // Remove all pages for this database from the flush list
+                    auto &flush_pages = file_i->second;
+                    for (auto page_i = flush_pages.begin(); page_i != flush_pages.end(); ) {
+                        if ((*page_i)->_database_id == database_id) {
+                            page_i = flush_pages.erase(page_i);
+                        } else {
+                            ++page_i;
+                        }
+                    }
+
+                    // If the flush list for this file is now empty, remove it
+                    if (flush_pages.empty()) {
+                        _flush_list.erase(file_i);
+                    }
+                }
+            }
+
+            // Remove the database from the tracking map
+            _database_files.erase(database_id);
+        }
+
+        // Evict any remaining extents for this database from the DataCache
+        // This catches extents that may have been evicted from pages but still in DataCache
+        data_cache->evict_for_database(database_id);
     }
 
 }

@@ -1,17 +1,8 @@
 #pragma once
 
-#include <memory>
-#include <queue>
-#include <set>
-#include <unordered_map>
-#include <fmt/core.h>
-
 #include <proxy/session.hh>
 #include <proxy/client_session.hh>
 #include <proxy/session_msg.hh>
-#include <proxy/user_mgr.hh>
-#include <proxy/buffer_pool.hh>
-#include <proxy/authorization.hh>
 
 namespace springtail::pg_proxy {
 

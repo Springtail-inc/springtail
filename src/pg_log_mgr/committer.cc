@@ -1,18 +1,12 @@
-#include <common/constants.hh>
-#include <common/coordinator.hh>
-#include <common/logging.hh>
-#include <pg_log_mgr/pg_redis_xact.hh>
-#include <proto/pg_copy_table.pb.h>
-#include <chrono>
-#include <memory>
+#include <common/time_trace.hh>
+#include <pg_log_mgr/committer.hh>
 #include <redis/db_state_change.hh>
+#include <storage/vacuumer.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
-
-#include <pg_log_mgr/committer.hh>
-#include <storage/vacuumer.hh>
+#include <pg_ext/extn_registry.hh>
 
 namespace springtail::committer {
 
@@ -24,6 +18,15 @@ namespace springtail::committer {
         auto it =
             std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
         return it != meta->roots.end();
+    }
+
+    void
+    Committer::remove_db(uint64_t db_id)
+    {
+        _indexer->remove_db(db_id);
+        std::unique_lock lock(_main_mutex);
+        _db_to_timestamp.erase(db_id);
+        _completed_xids.erase(db_id);
     }
 
     void
@@ -68,6 +71,8 @@ namespace springtail::committer {
 
             // clear batch state from previous iteration
             _batch_state.clear();
+
+            std::unique_lock lock(_main_mutex);
 
             // process all messages, grouping by db_id and handling special cases
             // use iterator-based loop to allow peeking ahead for batch boundaries
@@ -716,10 +721,12 @@ namespace springtail::committer {
             // create new mutable table with target_xid set to final_xid
             // All operations in this batch will be applied at the final XID
             CHECK_GT(batch.final_xid, 0);
-            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid);
+
+            ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid, extension_callback);
 
             // Initialize write cache schema once for this table (performance optimization)
-            table->initialize_wc_schema();
+            table->initialize_wc_schema(extension_callback);
 
             batch.table_cache[tid] = table;
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, batch.final_xid);

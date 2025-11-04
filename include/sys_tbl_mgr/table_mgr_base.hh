@@ -24,7 +24,7 @@ namespace springtail {
          * @return TablePtr - pointer to the table object
          */
         virtual TablePtr
-        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid) = 0;
+        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ExtensionCallback &extension_callback = {}) = 0;
 
         /**
          * Retrieve the column metadata for a given table at a given XID/LSN.
@@ -55,8 +55,15 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, bool allow_undefined = false) = 0;
+                          const XidLsn &xid, const ExtensionCallback &extension_callback = {},
+                          bool allow_undefined = false) = 0;
 
+        /**
+         * @brief Get the base path for the tables storage location
+         *
+         * @return std::filesystem::path file path
+         */
+        std::filesystem::path get_table_base() const { return _table_base; }
 
     protected:
         /** Helper to convert schema column to map */

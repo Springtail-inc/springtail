@@ -1,11 +1,6 @@
 #include <common/json.hh>
-#include <common/logging.hh>
-#include <common/properties.hh>
 
-#include <proxy/client_session.hh>
 #include <proxy/database.hh>
-#include <proxy/exception.hh>
-
 #include <redis/redis_db_tables.hh>
 
 namespace springtail::pg_proxy
@@ -502,7 +497,7 @@ namespace springtail::pg_proxy
     {
         std::shared_lock lock(_base_mutex);
         // iterate over all replicas and evict expired sessions
-        for (auto instance : _active_instances) {
+        for (auto &instance : _active_instances) {
             instance->release_expired_sessions();
         }
     }
@@ -1076,6 +1071,8 @@ namespace springtail::pg_proxy
 
         // remove from primary set
         _primary_set->remove_database(db_id);
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Removed database (id, name): ({}, {})", db_id, db_name);
     }
 
     std::optional<std::string>
