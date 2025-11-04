@@ -106,7 +106,7 @@ XidMgrServer::commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit, timestamp, tracker, false);
-    _service->notify_subscriber(db_id, xid);
+    _service->...  notify_subscriber(db_id, xid, has_schema_changes);
 }
 
 void 
