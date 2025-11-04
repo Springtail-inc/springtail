@@ -20,6 +20,7 @@ generate_fields(ExtentPtr extent)
                 break;
 
             case (SchemaType::TEXT):
+            case (SchemaType::EXTENSION):
             case (SchemaType::BINARY):
             case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
@@ -69,6 +70,7 @@ generate_fields(ExtentPtr extent)
                 break;
 
             case (SchemaType::TEXT):
+            case (SchemaType::EXTENSION):
             case (SchemaType::BINARY):
             case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
@@ -138,6 +140,10 @@ get_type_name(FieldPtr field)
 
         case (SchemaType::BINARY):
             name = "binary";
+            break;
+
+        case (SchemaType::EXTENSION):
+            name = "extension";
             break;
 
         case (SchemaType::UINT32):

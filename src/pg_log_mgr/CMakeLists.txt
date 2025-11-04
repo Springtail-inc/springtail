@@ -26,6 +26,7 @@ target_link_libraries(springtail_pglog
            springtail_storage
            springtail_sys_tbl_mgr
     PRIVATE nlohmann_json::nlohmann_json
+    PRIVATE springtail_pgext
     PRIVATE fmt::fmt)
 
 add_executable(pg_log_mgr_daemon pg_log_mgr_daemon.cc)

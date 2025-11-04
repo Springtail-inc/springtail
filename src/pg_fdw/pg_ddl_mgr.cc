@@ -877,9 +877,10 @@ namespace springtail::pg_fdw {
 
             std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(&row));
             std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(&row));
+            int8_t type = fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row);
 
             // only enums supported
-            DCHECK_EQ(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row), constant::USER_TYPE_ENUM);
+            DCHECK(type == constant::USER_TYPE_ENUM || type == constant::USER_TYPE_EXTENSION);
 
             // insert into map by namespace_id
             LOG_INFO("Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
@@ -1636,7 +1637,11 @@ namespace springtail::pg_fdw {
             const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
             const auto value_json_str = ddl.at("value").get<std::string>();
+            const auto type = ddl.at("type").get<int8_t>();
 
+            if (type == constant::USER_TYPE_EXTENSION) {
+                return "";
+            }
             return _get_create_type_query(escaped_schema, escaped_name, value_json_str, conn);
         }
         else if (action == "ut_drop") {
@@ -1775,6 +1780,34 @@ namespace springtail::pg_fdw {
     }
 
     void
+    PgDDLMgr::_create_extensions(LibPqConnectionPtr conn,
+                                 const uint64_t db_id)
+    {
+        nlohmann::json extension_config_json = Properties::get(Properties::EXTENSION_CONFIG);
+        if (extension_config_json.is_null()) {
+            LOG_WARN("No extension configuration found for database {}", db_id);
+            return;
+        }
+
+        // Get the extensions for this specific database ID
+        std::string db_id_str = std::to_string(db_id);
+        if (!extension_config_json.contains(db_id_str)) {
+            LOG_WARN("No extensions configured for database {}", db_id);
+            return;
+        }
+
+        auto db_extensions = extension_config_json[db_id_str];
+
+        for (auto& ext : db_extensions.items()) {
+            auto extension_name = ext.key();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG2, "Creating extension: {} for db_id: {}",
+                      extension_name, db_id);
+            conn->exec(fmt::format("CREATE EXTENSION IF NOT EXISTS {} WITH SCHEMA PUBLIC", extension_name));
+            conn->clear();
+        }
+    }
+
+    void
     PgDDLMgr::_create_schemas(const uint64_t db_id,
                               const std::string &db_name)
     {
@@ -1788,7 +1821,11 @@ namespace springtail::pg_fdw {
         // get user types from system tables
         auto &&user_types = _get_usertypes(db_id, xid);
 
+        // connect to the database on the fdw
         auto conn = _get_fdw_connection(db_id, db_name);
+
+        // create the extensions enabled for this DB
+        _create_extensions(conn, db_id);
 
         // drop and create the fdw extension
         conn->exec(fmt::format("DROP EXTENSION IF EXISTS {} CASCADE", SPRINGTAIL_FDW_EXTENSION));
@@ -1822,7 +1859,13 @@ namespace springtail::pg_fdw {
                     const std::string &type_name = entry.second.first;
                     const std::string &value_json_str = entry.second.second;
                     std::string escaped_type = conn->escape_identifier(type_name);
-                    LOG_DEBUG(LOG_FDW,LOG_LEVEL_DEBUG1,  "Creating user type: {}.{} = {}", escaped_schema, escaped_type, value_json_str);
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating user type: {}.{} = {}",
+                              escaped_schema, escaped_type, value_json_str);
+                    // If its an Extension type, the JSON would be empty, skip the create type
+                    if (value_json_str.empty() || value_json_str == "{}") {
+                        LOG_ERROR("Empty value for user type: {}.{}", escaped_schema, escaped_type);
+                        continue;
+                    }
                     std::string create_type_query = _get_create_type_query(escaped_schema, escaped_type, value_json_str, conn);
                     conn->exec(create_type_query);
                     conn->clear();

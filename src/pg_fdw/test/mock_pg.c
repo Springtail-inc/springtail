@@ -10,6 +10,8 @@
 #include <nodes/value.h>
 #include <nodes/primnodes.h>
 #include <storage/pmsignal.h>
+#include <catalog/namespace.h>
+#include <fmgr.h>
 
 
 static inline Node *
@@ -294,3 +296,55 @@ extern struct varlena *pg_detoast_datum(struct varlena *datum)
     return 0;
 }
 
+List* list_make1_impl(NodeTag t, ListCell datum1) {
+    List* list = (List*)palloc(sizeof(List));
+    list->type = t;
+    list->length = 1;
+    list->max_length = 1;
+    list->elements = (ListCell*)palloc(sizeof(ListCell));
+    list->elements[0] = datum1;
+    return list;
+}
+
+void fmgr_info(Oid functionId, FmgrInfo* finfo) {
+    // Minimal implementation for testing
+    finfo->fn_oid = functionId;
+    finfo->fn_nargs = 2;  // Assuming 2 args for the operator
+    finfo->fn_strict = true;
+    finfo->fn_retset = false;
+    finfo->fn_stats = 0;
+    finfo->fn_extra = NULL;
+    finfo->fn_expr = NULL;
+}
+
+Oid OpernameGetOprid(List *names, Oid oprleft, Oid oprright){
+    return 1234;
+}
+
+Datum FunctionCall2Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2) {
+    // For testing, just return a dummy boolean result
+    return BoolGetDatum(true);
+}
+
+Datum FunctionCall1Coll(FmgrInfo* flinfo, Oid collation, Datum arg1) {
+    // For testing, just return a dummy boolean result
+    return BoolGetDatum(true);
+}
+
+void getTypeOutputInfo(Oid type_id, Oid *out_func, bool *is_varlena)
+{
+    // Dummy implementation
+    *out_func = 0;
+    *is_varlena = false;
+}
+
+char *OidOutputFunctionCall(Oid function_id, Datum val)
+{
+    // Dummy implementation that returns a constant string
+    return pstrdup("dummy_output");
+}
+
+Oid
+TypenameGetTypid(const char *typname) {
+    return 1234;
+}

@@ -1422,6 +1422,10 @@ Server::_check_index_columns(uint64_t db_id, const proto::IndexInfo & index_info
             case NUMERICOID:
                 break;
             default:
+                // Support for user-defined types
+                if (column_type >= constant::FIRST_USER_DEFINED_PG_OID) {
+                    return true;
+                }
                 LOG_ERROR("Unsupported index column type {} for index column: table {}, index {}",
                     column_type, idx_position,
                     index_info.table_id(), index_info.name());
