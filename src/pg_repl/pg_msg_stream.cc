@@ -49,6 +49,9 @@ namespace springtail {
         // Switch from memory buffer mode to file mode if needed
         _using_memory_buffer = false;
         _memory_buffer.reset();
+        // Set _xlog_msg_end_offset to start_offset so header reading logic works correctly
+        // (read_message checks if _current_offset == _xlog_msg_end_offset to read header)
+        _xlog_msg_end_offset = start_offset;
 
         if (file != _current_path || !_stream.is_open()) {
             // file isn't currently open, so open it
