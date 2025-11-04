@@ -171,7 +171,7 @@ namespace indexer_helpers {
         };
 
         std::shared_ptr<ExtentSchema>
-        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
+        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns, const ExtensionCallback &extension_callback = {})
         {
             // get the column names in the order they appear in the index
             auto &&col_names = schema->get_column_names(index_columns);
@@ -181,7 +181,7 @@ namespace indexer_helpers {
             auto key = col_names;
             key.push_back(constant::INTERNAL_ROW_ID);
 
-            return schema->create_index_schema(col_names, { internal_row_id }, key);
+            return schema->create_index_schema(col_names, { internal_row_id }, key, extension_callback);
         }
     }
 
@@ -191,13 +191,15 @@ namespace indexer_helpers {
                  const std::filesystem::path &table_base,
                  const std::vector<std::string> &primary_key,
                  const std::vector<Index> &secondary,
-                 const TableMetadata& metadata,
-                 ExtentSchemaPtr schema)
+                 const TableMetadata &metadata,
+                 ExtentSchemaPtr schema,
+                 const ExtensionCallback &extension_callback)
         : _db_id(db_id),
           _id(table_id),
           _xid(xid),
           _primary_key(primary_key),
-          _schema(schema)
+          _schema(schema),
+          _extension_callback(extension_callback)
     {
         std::vector<TableRoot> roots;
         uint64_t snapshot_xid = 0;
@@ -215,7 +217,7 @@ namespace indexer_helpers {
         }
 
         // store the roots schema / field
-        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA, false, false);
+        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA, ExtensionCallback{}, false, false);
         _roots_root_f = _roots_schema->get_field("root");
         _roots_index_id_f = _roots_schema->get_field("index_id");
 
@@ -262,9 +264,9 @@ namespace indexer_helpers {
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
-            primary_schema = _schema->create_index_schema({}, { extent_c }, non_primary_key);
+            primary_schema = _schema->create_index_schema({}, { extent_c }, non_primary_key, extension_callback);
         } else {
-            primary_schema = _schema->create_index_schema(primary_key, { extent_c }, primary_key);
+            primary_schema = _schema->create_index_schema(primary_key, { extent_c }, primary_key, extension_callback);
         }
 
         auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
@@ -275,7 +277,8 @@ namespace indexer_helpers {
                                                  xid,
                                                  primary_schema,
                                                  it->extent_id,
-                                                 get_max_extent_size());
+                                                 get_max_extent_size(),
+                                                 extension_callback);
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
         _pkey_fields = primary_schema->get_fields();
@@ -297,7 +300,7 @@ namespace indexer_helpers {
             if (!idx_cols.empty()) {
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
-                auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id);
+                auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id, extension_callback);
                 assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
                 _secondary_indexes[idx.id] = {btree, idx_cols};
             }
@@ -305,7 +308,7 @@ namespace indexer_helpers {
 
         std::vector<std::string> look_aside_keys;
         look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
-        _look_aside_schema = _schema->create_index_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys);
+        _look_aside_schema = _schema->create_index_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys, extension_callback);
         // Initialize look aside index
         it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
         if (it != roots.end()) {
@@ -314,7 +317,7 @@ namespace indexer_helpers {
                     xid,
                     _look_aside_schema,
                     it->extent_id,
-                    get_max_extent_size_secondary());
+                    get_max_extent_size_secondary(), extension_callback);
         }
     }
 
@@ -364,7 +367,7 @@ namespace indexer_helpers {
             }
 
             if (!index_only) {
-                auto index_schema = _create_index_schema(_schema, cols);
+                auto index_schema = _create_index_schema(_schema, cols, _extension_callback);
                 return Iterator(this, btree, i, index_schema);
             }
             return Iterator(this, btree, i);
@@ -410,7 +413,7 @@ namespace indexer_helpers {
             }
 
             if (!index_only) {
-                auto index_schema = _create_index_schema(_schema, cols);
+                auto index_schema = _create_index_schema(_schema, cols, _extension_callback);
                 return Iterator(this, btree, i, index_schema);
             }
             return Iterator(this, btree, i);
@@ -456,7 +459,7 @@ namespace indexer_helpers {
             }
 
             if (!index_only) {
-                auto index_schema = _create_index_schema(_schema, cols);
+                auto index_schema = _create_index_schema(_schema, cols, _extension_callback);
                 return Iterator(this, btree, i, index_schema);
             }
             return Iterator(this, btree, i);
@@ -548,7 +551,7 @@ namespace indexer_helpers {
                 return Iterator(this, btree, i);
             }
 
-            auto index_schema = _create_index_schema(_schema, cols);
+            auto index_schema = _create_index_schema(_schema, cols, _extension_callback);
             return Iterator(this, btree, i, index_schema);
         }
     }
@@ -557,7 +560,7 @@ namespace indexer_helpers {
     Table::get_index_schema(uint64_t index_id) const
     {
         auto const& [btree, cols] = _secondary_indexes.at(index_id);
-        return _create_index_schema(_schema, cols);
+        return _create_index_schema(_schema, cols, _extension_callback);
     }
 
     std::vector<std::string>
@@ -605,17 +608,17 @@ namespace indexer_helpers {
     }
 
     BTreePtr
-    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset)
+    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ExtensionCallback &extension_callback)
     {
-        auto index_schema = _create_index_schema(_schema, index_columns);
+        auto index_schema = _create_index_schema(_schema, index_columns, extension_callback);
         auto btree = std::make_shared<BTree>(_db_id,
                 _table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 _xid, index_schema,
                 offset,
-                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary());
+                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary(),
+                extension_callback);
         return btree;
     }
-
 
     MutableTable::MutableTable(uint64_t db_id,
                                uint64_t table_id,
@@ -626,7 +629,8 @@ namespace indexer_helpers {
                                const std::vector<Index> &secondary,
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
-                               ExtentSchemaPtr schema_without_table_id)
+                               ExtentSchemaPtr schema_without_table_id,
+                               const ExtensionCallback &extension_callback)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
@@ -651,7 +655,7 @@ namespace indexer_helpers {
         std::filesystem::create_directories(_table_dir);
 
         // store the roots schema / field
-        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA, false, false);
+        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA, ExtensionCallback{}, false, false);
         _roots_root_f = _roots_schema->get_mutable_field("root");
         _roots_index_id_f = _roots_schema->get_mutable_field("index_id");
         _roots_last_internal_row_id_f = _roots_schema->get_mutable_field("last_internal_row_id");
@@ -696,21 +700,21 @@ namespace indexer_helpers {
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
-            primary_schema = _schema->create_index_schema({}, { extent_c }, non_primary_key);
+            primary_schema = _schema->create_index_schema({}, { extent_c }, non_primary_key, extension_callback);
 
             _primary_index = std::make_shared<MutableBTree>(_db_id,
                                                             _table_dir / constant::INDEX_PRIMARY_FILE,
                                                             non_primary_key,
                                                             primary_schema,
-                                                            _target_xid, get_max_extent_size());
+                                                            _target_xid, get_max_extent_size(), extension_callback);
         } else {
-            primary_schema = _schema->create_index_schema(primary_key, { extent_c }, primary_key);
+            primary_schema = _schema->create_index_schema(primary_key, { extent_c }, primary_key, extension_callback);
 
             _primary_index = std::make_shared<MutableBTree>(_db_id,
                                                             _table_dir / constant::INDEX_PRIMARY_FILE,
                                                             primary_key,
                                                             primary_schema,
-                                                            _target_xid, get_max_extent_size());
+                                                            _target_xid, get_max_extent_size(), extension_callback);
         }
 
 
@@ -744,7 +748,7 @@ namespace indexer_helpers {
             }
             if (!idx_cols.empty()) {
 
-                auto btree = create_index_root(idx.id, idx_cols);
+                auto btree = create_index_root(idx.id, idx_cols, extension_callback);
 
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
@@ -770,11 +774,11 @@ namespace indexer_helpers {
 
             // initialize the look-aside index
             if (la_it != roots.end() && la_it->extent_id != constant::UNKNOWN_EXTENT) {
-                create_look_aside_root();
+                create_look_aside_root(extension_callback);
                 LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init with root: {}", la_it->extent_id);
                 _look_aside_index->init(la_it->extent_id);
             } else {
-                create_look_aside_root();
+                create_look_aside_root(extension_callback);
                 LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Look-aside init empty");
                 _look_aside_index->init_empty();
             }
@@ -782,7 +786,7 @@ namespace indexer_helpers {
     }
 
     void
-    MutableTable::initialize_wc_schema()
+    MutableTable::initialize_wc_schema(const ExtensionCallback& extension_callback)
     {
         // Use the table's existing schema (_schema is already set in constructor)
         auto schema = _schema_without_row_id;
@@ -800,7 +804,7 @@ namespace indexer_helpers {
         std::vector<SchemaColumn> new_columns{op, lsn};
 
         // Create write cache schema
-        _wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
+        _wc_schema = schema->create_schema(columns, new_columns, sort_keys, extension_callback, true);
 
         // Get table only fields, and then add internal_row_id for wc_fields
         _actual_table_fields = _wc_schema->get_fields(columns);
@@ -1091,7 +1095,7 @@ namespace indexer_helpers {
     }
 
     MutableBTreePtr
-    MutableTable::create_look_aside_root()
+    MutableTable::create_look_aside_root(const ExtensionCallback& extension_callback)
     {
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, 0, false);
@@ -1100,17 +1104,17 @@ namespace indexer_helpers {
         std::vector<std::string> look_aside_keys;
         look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
 
-        _look_aside_schema = _schema->create_index_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys);
+        _look_aside_schema = _schema->create_index_schema({}, { internal_row_id, extent_c, row_c }, look_aside_keys, extension_callback);
         _look_aside_index = std::make_shared<MutableBTree>(_db_id, _table_dir / constant::INDEX_LOOK_ASIDE_FILE,
                 look_aside_keys,
                 _look_aside_schema,
-                _target_xid, get_max_extent_size_secondary());
+                _target_xid, get_max_extent_size_secondary(), extension_callback);
 
         return _look_aside_index;
     }
 
     MutableBTreePtr
-    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
+    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback)
     {
         // get the column names in the order they appear in the index
         auto &&col_names = _schema->get_column_names(index_columns);
@@ -1120,13 +1124,14 @@ namespace indexer_helpers {
         auto key = col_names;
         key.push_back(constant::INTERNAL_ROW_ID);
 
-        auto index_schema = _schema->create_index_schema(col_names, { internal_row_id }, key);
+        auto index_schema = _schema->create_index_schema(col_names, { internal_row_id }, key, extension_callback);
 
         auto btree = std::make_shared<MutableBTree>(_db_id,
                 _table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 key, index_schema,
                 _target_xid,
-                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary()
+                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary(),
+                extension_callback
                 );
         return btree;
     }
@@ -1643,7 +1648,7 @@ MutableTable::_get_extent_id(TuplePtr search_key) {
                     btree->end());
         } else {
             auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
-            auto index_schema = _create_index_schema(table->_schema, cols);
+            auto index_schema = _create_index_schema(table->_schema, cols, table->_extension_callback);
             _tracker.emplace<Secondary>(table, btree,
                     btree->end(), index_schema );
         }

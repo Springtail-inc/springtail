@@ -48,6 +48,8 @@ namespace springtail {
         static inline constexpr char PROXY_CONFIG[] = "proxy";
         /** Open telemetry configuration section */
         static inline constexpr char OTEL_CONFIG[] = "otel";
+        /** Extension config section */
+        static inline constexpr char EXTENSION_CONFIG[] = "extension_config";
         /** AWS Users Override -- instead of using secrets mgr */
         static inline constexpr char AWS_USERS_OVERRIDE[] = "aws_users_override";
 

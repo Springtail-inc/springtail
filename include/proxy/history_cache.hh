@@ -1,18 +1,12 @@
 #pragma once
 
-#include <string>
-#include <memory>
 #include <variant>
-#include <cstdint>
 #include <map>
-#include <vector>
 
-//#include <fmt/format.h>
 #include <absl/log/check.h>
 #include <xxhash.h>
 
 #include <common/object_cache.hh>
-#include <common/logging.hh>
 
 #include <proxy/buffer_pool.hh>
 

@@ -90,7 +90,7 @@ namespace {
                     { "offset", 2, SchemaType::UINT64, 0, false }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
-            _schema_without_row_id = std::make_shared<ExtentSchema>(columns, false, false);
+            _schema_without_row_id = std::make_shared<ExtentSchema>(columns, ExtensionCallback{}, false, false);
 
             _fields = _schema->get_fields();
             _csv_fields = std::make_shared<FieldArray>();

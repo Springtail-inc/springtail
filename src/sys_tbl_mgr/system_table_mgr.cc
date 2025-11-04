@@ -40,7 +40,8 @@ SystemTableMgr::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &acce
 }
 
 std::shared_ptr<ExtentSchema>
-SystemTableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid, bool allow_undefined, bool include_internal_row_id)
+SystemTableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid,
+                                  const ExtensionCallback &extension_callback, bool allow_undefined, bool include_internal_row_id)
 {
     return _get_extent_schema(table_id);
 }
@@ -90,7 +91,7 @@ SystemTableMgr::_get_secondary_keys() {
 }
 
 TablePtr
-SystemTableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid)
+SystemTableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ExtensionCallback &extension_callback)
 {
     DCHECK(table_id < constant::MAX_SYSTEM_TABLE_ID);
     // initialize the system tables using the look-aside root files
@@ -243,4 +244,3 @@ SystemTableMgr::get_mutable_system_table(uint64_t db_id, uint64_t table_id,
         throw SchemaError();
     }
 }
-

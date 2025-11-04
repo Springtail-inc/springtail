@@ -1,15 +1,7 @@
 #pragma once
 
 #include <memory>
-#include <atomic>
 #include <set>
-#include <vector>
-
-#include <unistd.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <poll.h>
 
 #include <openssl/ssl.h>
 
