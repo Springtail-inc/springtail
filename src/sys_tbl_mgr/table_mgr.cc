@@ -6,9 +6,7 @@
 namespace springtail {
 
     TablePtr
-    TableMgr::get_table(uint64_t db_id,
-                        uint64_t table_id,
-                        uint64_t xid)
+    TableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ExtensionCallback &extension_callback)
     {
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
@@ -19,7 +17,7 @@ namespace springtail {
         auto &&tbl_meta = sys_tbl_mgr::Server::get_instance()->get_roots(db_id, table_id, xid);
 
         // construct the table and return it
-        auto schema = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN});
+        auto schema = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN}, extension_callback);
 
         auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
@@ -28,8 +26,8 @@ namespace springtail {
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         return std::make_shared<UserTable>(db_id, table_id, xid, _table_base,
-                                           schema->get_sort_keys(), secondary_indexes,
-                                           *tbl_meta, schema);
+                                        schema->get_sort_keys(), secondary_indexes,
+                                        *tbl_meta, schema, extension_callback);
     }
 
     std::optional<std::filesystem::path>
@@ -46,7 +44,8 @@ namespace springtail {
     TableMgr::get_mutable_table(uint64_t db_id,
                                 uint64_t table_id,
                                 uint64_t access_xid,
-                                uint64_t target_xid)
+                                uint64_t target_xid,
+                                const ExtensionCallback &extension_callback)
     {
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
@@ -61,8 +60,8 @@ namespace springtail {
 
         // construct the mutable table and return it
         XidLsn xid(target_xid);
-        auto schema = get_extent_schema(db_id, table_id, xid);
-        auto schema_without_row_id = get_extent_schema(db_id, table_id, xid, false, false);
+        auto schema = get_extent_schema(db_id, table_id, xid, extension_callback);
+        auto schema_without_row_id = get_extent_schema(db_id, table_id, xid, extension_callback, false, false);
 
         auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
@@ -80,7 +79,7 @@ namespace springtail {
 
         return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_indexes,
-                                                  *tbl_meta, schema, schema_without_row_id);
+                                                  *tbl_meta, schema, schema_without_row_id, extension_callback);
     }
 
     MutableTablePtr
@@ -88,7 +87,8 @@ namespace springtail {
                                  uint64_t table_id,
                                  uint64_t snapshot_xid,
                                  ExtentSchemaPtr schema,
-                                 const std::vector<Index>& secondary_keys)
+                                 const std::vector<Index>& secondary_keys,
+                                 const ExtensionCallback &extension_callback)
     {
         TableMetadata tbl_meta{};
         tbl_meta.snapshot_xid = snapshot_xid;
@@ -107,7 +107,7 @@ namespace springtail {
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema_with_row_id->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema_with_row_id, schema);
+                                                  tbl_meta, schema_with_row_id, schema, extension_callback);
     }
 
     std::map<uint32_t, SchemaColumn>
@@ -145,11 +145,11 @@ namespace springtail {
 
     std::shared_ptr<ExtentSchema>
     TableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id,
-                                const XidLsn &xid, bool allow_undefined,
+                                const XidLsn &xid, const ExtensionCallback &extension_callback, bool allow_undefined,
                                 bool include_internal_row_id)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, allow_undefined);
+            return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, extension_callback, allow_undefined);
         }
 
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
@@ -158,7 +158,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta->columns, allow_undefined, include_internal_row_id);
+        return std::make_shared<ExtentSchema>(meta->columns, extension_callback, allow_undefined, include_internal_row_id);
     }
 
     void

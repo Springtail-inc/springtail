@@ -13,7 +13,7 @@ namespace springtail {
          * constructed at lsn == MAX_LSN within the provided xid.
          */
         virtual TablePtr
-        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid) override;
+        get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ExtensionCallback &extension_callback = {}) override;
 
         /**
          * Retrieve the column metadata for a given table at a given XID/LSN.
@@ -33,7 +33,8 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, bool allow_undefined = false, bool include_internal_row_id = true) override;
+                          const XidLsn &xid, const ExtensionCallback &extension_callback,
+                          bool allow_undefined = false, bool include_internal_row_id = true) override;
 
     private:
         /**
@@ -64,15 +65,16 @@ namespace springtail {
                         const std::vector<std::string> &primary_key,
                         const std::vector<Index> &secondary,
                         const TableMetadata &metadata,
-                        ExtentSchemaPtr schema) :
-            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema) {}
+                        ExtentSchemaPtr schema,
+                        const ExtensionCallback &extension_callback) :
+            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, extension_callback) {}
 
         /**
          * Retrieves the schema for the table at a given XID.
          */
         virtual ExtentSchemaPtr extent_schema() const override
         {
-            return TableMgrClient::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid));
+            return TableMgrClient::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid), _extension_callback);
         }
 
         /**

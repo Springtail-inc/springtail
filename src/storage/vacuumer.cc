@@ -66,14 +66,14 @@ Vacuumer::_init()
             { "size", 2, SchemaType::UINT64, 0, false},
             { "file_dropped", 3, SchemaType::BOOLEAN, 0, false}
             });
-    _global_vacuum_schema = std::make_shared<ExtentSchema>(global_vacuum_columns, false, false);
+    _global_vacuum_schema = std::make_shared<ExtentSchema>(global_vacuum_columns, ExtensionCallback{}, false, false);
 
     // individual vacuum file schema
     std::vector<SchemaColumn> vacuum_file_columns({
             { "offset", 0, SchemaType::UINT64, 0, false, 0 },
             { "size", 1, SchemaType::UINT64, 0, false }
             });
-    _vacuum_file_schema = std::make_shared<ExtentSchema>(vacuum_file_columns, false, false);
+    _vacuum_file_schema = std::make_shared<ExtentSchema>(vacuum_file_columns, ExtensionCallback{}, false, false);
 
     // Vacuum enabled - true/false
     Json::get_to<bool>(vacuum_config_json, "enabled", _vacuum_start_enabled);

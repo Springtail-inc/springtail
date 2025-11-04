@@ -421,13 +421,14 @@ namespace indexer_helpers {
          * Table constructor.
          */
         Table(uint64_t db_id,
-              uint64_t table_id,
-              uint64_t xid,
-              const std::filesystem::path &table_base,
-              const std::vector<std::string> &primary_key,
-              const std::vector<Index> &secondary,
-              const TableMetadata& metadata,
-              ExtentSchemaPtr schema);
+            uint64_t table_id,
+            uint64_t xid,
+            const std::filesystem::path &table_base,
+            const std::vector<std::string> &primary_key,
+            const std::vector<Index> &secondary,
+            const TableMetadata &metadata,
+            ExtentSchemaPtr schema,
+            const ExtensionCallback &extension_callback = {});
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -601,7 +602,7 @@ namespace indexer_helpers {
          * Creates read-only index of the table.
          */
         BTreePtr
-        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
+        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ExtensionCallback &extension_callback = {});
 
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
@@ -634,7 +635,8 @@ namespace indexer_helpers {
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
         FieldPtr _roots_index_id_f; ///< The field accessor to read the root index ID from each row in the "roots" file.
 
-        TableStats _stats{}; ///< The statistics for this table.
+        TableStats _stats; ///< The statistics for this table.
+        ExtensionCallback _extension_callback; ///< The extension callback for this table.
     };
     typedef std::shared_ptr<Table> TablePtr;
 
@@ -655,7 +657,8 @@ namespace indexer_helpers {
                      const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
-                     ExtentSchemaPtr schema_without_row_id = nullptr);
+                     ExtentSchemaPtr schema_without_row_id = nullptr,
+                     const ExtensionCallback &extension_callback = {});
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -763,7 +766,7 @@ namespace indexer_helpers {
          * @param index_id PG index ID.
          * @param index_columns Positions of the index columns.
          */
-        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns);
+        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {});
 
         /**
          * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
@@ -797,7 +800,7 @@ namespace indexer_helpers {
          * Uses the table's existing _schema to build write cache schema with op/lsn columns.
          * Must be called before processing extents from write cache.
          */
-        void initialize_wc_schema();
+        void initialize_wc_schema(const ExtensionCallback& extension_callback);
 
         /** Returns the cached write cache schema, or nullptr if not initialized */
         ExtentSchemaPtr wc_schema() const { return _wc_schema; }
@@ -991,6 +994,7 @@ namespace indexer_helpers {
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats{}; ///< The stats for the table.
 
+        ExtensionCallback _extension_callback; ///< The extension callback for this table.
         // Cached write cache schema and fields for committer performance
         ExtentSchemaPtr _wc_schema;           ///< Pre-computed write cache schema with op/lsn columns
         FieldPtr _wc_op_field;                ///< Field accessor for __springtail_op

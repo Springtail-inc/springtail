@@ -1,15 +1,6 @@
-#include <cassert>
-#include <atomic>
-
-#include <common/logging.hh>
-#include <common/constants.hh>
-
 #include <proxy/database.hh>
 #include <proxy/session.hh>
 #include <proxy/server.hh>
-#include <proxy/connection.hh>
-#include <proxy/exception.hh>
-#include <proxy/buffer_pool.hh>
 #include <proxy/session_msg.hh>
 #include <proxy/client_session.hh>
 

@@ -1,17 +1,8 @@
-#include <openssl/ssl.h>
-#include <openssl/err.h>
+#include <sys/socket.h>
 
-#include <common/logging.hh>
-#include <common/common.hh>
-#include <common/constants.hh>
-
-#include <proxy/session.hh>
 #include <proxy/server_session.hh>
 #include <proxy/server.hh>
-#include <proxy/connection.hh>
 #include <proxy/errors.hh>
-#include <proxy/exception.hh>
-#include <proxy/buffer_pool.hh>
 #include <proxy/database.hh>
 #include <proxy/util.hh>
 

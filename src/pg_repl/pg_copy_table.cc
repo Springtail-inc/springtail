@@ -12,10 +12,9 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
-extern "C" {
-    #include <postgres.h>
-    #include <catalog/pg_type.h>
-}
+#include <pg_ext/extn_registry.hh>
+
+#include <postgresql/server/catalog/pg_type_d.h>
 
 /* See: https://www.postgresql.org/docs/current/datatype.html for postgres types */
 
@@ -34,6 +33,21 @@ namespace springtail
         "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', '__pg_springtail_triggers') "
         "{}" // Placeholder for namespace condition
         "GROUP BY t.oid, t.typname, n.nspname, n.oid";
+
+    static constexpr char EXTN_QUERY[] =
+        "SELECT t.oid as enum_type_oid, "
+        "       e.extname AS extension, "
+        "       n.oid::integer AS namespace_oid, "
+        "       n.nspname::text AS schema, "
+        "       t.typname::text AS enum_type_name "
+        "FROM pg_type t "
+        "JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "JOIN pg_depend d    ON d.objid = t.oid "
+        "JOIN pg_extension e ON e.oid = d.refobjid "
+        "WHERE t.typtype IN ('b', 'c', 'd', 'e') "
+        "AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+        "{}" // Placeholder for namespace condition
+        "ORDER BY e.extname, t.typname;";
 
     /** Enum lookup query */
     static constexpr char ENUM_LOOKUP_QUERY[] =
@@ -676,14 +690,15 @@ namespace springtail
             }
         }
 
-        auto schema = std::make_shared<ExtentSchema>(_schema.columns, false, false);
+        ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+        auto schema = std::make_shared<ExtentSchema>(_schema.columns, extension_callback, false, false);
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
                                                                   schema, _schema.secondary_keys);
 
         // mark the copy as inflight and record the snapshot details
         // note: we create a version of the schema that may contain undefined data so that we can
         //       correctly record updates with unchanged data from the replication stream
-        auto update_schema = std::make_shared<ExtentSchema>(_schema.columns, true, false);
+        auto update_schema = std::make_shared<ExtentSchema>(_schema.columns, extension_callback, true, false);
         pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
                                                                snapshot_details, update_schema);
 
@@ -922,6 +937,16 @@ namespace springtail
                 break;
             }
 
+            case (SchemaType::EXTENSION): {
+                std::string_view tmp(row.data() + pos, length);
+
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Converting extension type '{}' into EXTENSION", pg_type);
+                std::vector<char> data(tmp.begin(), tmp.end());
+                fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data, true));
+                pos += length;
+                break;
+            }
+
             default:
                 throw TypeError(fmt::format("PG doesn't support type: {}",
                                             static_cast<uint8_t>(type)));
@@ -1134,6 +1159,8 @@ namespace springtail
             std::pair<uint64_t, std::string> snapshot_info = copy_table._get_xact_xids();
             copy_result->set_snapshot(snapshot_info.first, snapshot_info.second);
 
+            LOG_INFO("Copy table -> Snapshot info: xid {}, xids {}", snapshot_info.first, snapshot_info.second);
+
             // get the list of user defined types
             auto &&user_type_map = copy_table._get_user_types();
 
@@ -1192,6 +1219,7 @@ namespace springtail
         std::string sync_msg = fmt::format(R"({{"target_xid":{}, "pg_xid":{}}})", result->target_xid, result->pg_xid);
         std::string query = fmt::format(REPL_MSG_QUERY, pg_msg::MSG_PREFIX_COPY_SYNC, sync_msg);
 
+        LOG_INFO("Copy table -> Sending sync message: {}", query);
         _connection.exec(query);
         if (_connection.status() != PGRES_TUPLES_OK) {
             LOG_ERROR("Error sending sync message");
@@ -1311,6 +1339,133 @@ namespace springtail
 
         // disconnect from the database
         copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::create_extn_types(uint64_t db_id, uint64_t xid)
+    {
+        PgCopyTable copy_table;
+
+        // connect to the database
+        copy_table.connect(db_id);
+
+        // get the list of user defined types
+        std::string schema_condition = _get_schema_condition(copy_table._connection, db_id);
+        copy_table._connection.exec(fmt::format(EXTN_QUERY, schema_condition));
+
+        if (copy_table._connection.ntuples() == 0) {
+            LOG_INFO("No extension types found for db_id: {}", db_id);
+            copy_table._connection.clear();
+            copy_table.disconnect();
+            return;
+        }
+
+        auto server = sys_tbl_mgr::Server::get_instance();
+        // iterate through the results and get the user defined types
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            uint32_t enum_type_oid = copy_table._connection.get_int32(i, 0);
+            std::string extension_name = copy_table._connection.get_string(i, 1);
+            uint32_t namespace_oid = copy_table._connection.get_int32(i, 2);
+            std::string namespace_name = copy_table._connection.get_string(i, 3);
+            std::string extn_type_name = copy_table._connection.get_string(i, 4);
+
+            PgMsgUserType msg;
+            msg.lsn = 0;
+            msg.oid = enum_type_oid;
+            msg.xid = xid;
+            msg.namespace_id = namespace_oid;
+            msg.namespace_name = namespace_name;
+            msg.name = extn_type_name;
+            msg.value_json = "{}";
+            msg.type = constant::USER_TYPE_EXTENSION;
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Creating extension type: {}", extn_type_name);
+
+            server->create_usertype(db_id, {xid, 0}, msg);
+        }
+
+        // disconnect from the database
+        copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::_load_extn_types(uint64_t db_id, const std::string& extension)
+    {
+        auto extn_registry = PgExtnRegistry::get_instance();
+        PgCopyTable copy_table;
+
+        // connect to the database
+        copy_table.connect(db_id);
+
+        copy_table._connection.exec(fmt::format(PgExtnRegistry::TYPE_QUERY, extension));
+
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            uint32_t type_oid = copy_table._connection.get_int32(i, 0);
+            std::string type_input = copy_table._connection.get_string(i, 1);
+            std::string type_output = copy_table._connection.get_string(i, 2);
+            std::string type_receive = copy_table._connection.get_string(i, 3);
+            std::string type_send = copy_table._connection.get_string(i, 4);
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Adding type: {}, input: {}, output: {}, receive: {}, send: {} for extension: {}", type_oid, type_input, type_output, type_receive, type_send, extension);
+            extn_registry->add_type(extension, type_oid, type_input, type_output, type_receive, type_send);
+        }
+
+        copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::_load_extn_operators(uint64_t db_id, const std::string& extension)
+    {
+        auto extn_registry = PgExtnRegistry::get_instance();
+        PgCopyTable copy_table;
+
+        // connect to the database
+        copy_table.connect(db_id);
+
+        copy_table._connection.exec(fmt::format(PgExtnRegistry::OPER_QUERY, extension));
+
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            uint32_t oper_oid = copy_table._connection.get_int32(i, 0);
+            std::string oper_name = copy_table._connection.get_string(i, 1);
+            std::string oper_proc = copy_table._connection.get_string(i, 2);
+            std::string proc_name = copy_table._connection.get_string(i, 3);
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding operator: {}, name: {}, proc: {} for extension: {}", oper_oid, oper_name, proc_name, extension);
+            extn_registry->add_operator(extension, oper_oid, oper_name, proc_name);
+        }
+
+        copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::init_pg_extn_registry(uint64_t db_id, uint64_t xid)
+    {
+        nlohmann::json extension_config_json = Properties::get(Properties::EXTENSION_CONFIG);
+        if (extension_config_json.is_null()) {
+            LOG_WARN("No extension configuration found for database {}", db_id);
+            return;
+        }
+
+        // Get the extensions for this specific database ID
+        std::string db_id_str = std::to_string(db_id);
+        if (!extension_config_json.contains(db_id_str)) {
+            LOG_WARN("No extensions configured for database {}", db_id);
+            return;
+        }
+
+        auto db_extensions = extension_config_json[db_id_str];
+        std::string lib_path = extension_config_json.value("lib_path", "/usr/lib/postgresql/16/lib/");
+
+        for (auto& ext : db_extensions.items()) {
+            auto extension_name = ext.key();
+            std::string extension_lib_path = fmt::format("{}{}.so", lib_path, extension_name);
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Initializing library for extension: {} for db_id: {}",
+                      extension_name, db_id);
+            PgExtnRegistry::get_instance()->init_libraries(db_id, extension_name, extension_lib_path);
+            _load_extn_types(db_id, extension_name);
+            _load_extn_operators(db_id, extension_name);
+        }
     }
 
     void

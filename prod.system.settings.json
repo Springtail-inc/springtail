@@ -95,6 +95,20 @@
       "client_connections": 8
     }
   },
+  "extension_config": {
+    "lib_path": "/usr/lib/postgresql/16/lib/",
+    "1": {
+      "cube": {
+        "version": "1.5"
+      },
+      "hstore": {
+        "version": "1.8"
+      },
+      "pg_trgm": {
+        "version": "1.6"
+      }
+    }
+  },
   "proxy": {
     "enable_ssl": true,
     "port": 5432,
