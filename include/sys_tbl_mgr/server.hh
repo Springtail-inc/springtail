@@ -596,7 +596,60 @@ private:
                      std::optional<std::reference_wrapper<proto::IndexInfo>> dropped_index_info_ref = std::nullopt);
 
     /**
+     * Check if a table has a complete parent chain (all ancestors exist)
+     *
+     * @param db_id Database ID
+     * @param table_id Table ID to check
+     * @param xid XID for visibility
+     * @return true if all parents exist, false if any parent is missing
+     */
+    bool _has_complete_parent_chain(uint64_t db_id,
+                                    uint64_t table_id,
+                                    const XidLsn& xid);
+
+    /**
+     * Get direct children of a partitioned table (non-recursive)
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Parent table ID
+     * @param xid XID for visibility
+     * @return Vector of child table IDs
+     */
+    std::vector<uint64_t> _get_direct_children(uint64_t db_id,
+                                                uint64_t parent_table_id,
+                                                const XidLsn& xid);
+
+    /**
+     * Generate DDL JSON from existing system table data
+     *
+     * @param db_id Database ID
+     * @param table_id Table ID
+     * @param xid XID for visibility
+     * @return DDL JSON object for CREATE TABLE
+     */
+    nlohmann::json _generate_create_ddl_from_sys_tables(uint64_t db_id,
+                                                         uint64_t table_id,
+                                                         const XidLsn& xid);
+
+    /**
+     * Recursively generate DDL for entire partition subtree
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Root parent table ID
+     * @param xid XID for visibility
+     * @param ddl_array_out Output: appends child DDLs in depth-first order
+     * @param depth Current recursion depth (for safety limit)
+     */
+    void _generate_child_tree_ddls(uint64_t db_id,
+                                   uint64_t parent_table_id,
+                                   const XidLsn& xid,
+                                   std::vector<nlohmann::json>& ddl_array_out,
+                                   int depth = 0);
+
+    /**
      * Performs a create_table() assuming that the correct locks are already held.
+     *
+     * @return JSON array: empty [] if parent chain incomplete, otherwise array of DDL objects
      */
     nlohmann::json _create_table(const proto::TableRequest& request);
 

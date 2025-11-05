@@ -1083,9 +1083,28 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
                         create_req.table().id(), create_req.xid(), create_req.lsn());
 
     assert(create_req.lsn() == constant::RESYNC_CREATE_LSN);
-    auto&& create_ddl = this->_create_table(create_req);
-    create_ddl["is_resync"] = is_resync;
-    ddls.push_back(create_ddl);
+    auto&& create_ddl_array = this->_create_table(create_req);
+
+    DCHECK(create_ddl_array.is_array());  // Always an array now
+
+    if (create_ddl_array.empty()) {
+        // Empty array - parent chain incomplete, DDL deferred
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "DDL deferred during resync for table {} - parent chain incomplete",
+                  create_req.table().id());
+
+    } else {
+        // Non-empty array - mark first element (root parent) with is_resync flag
+        create_ddl_array[0]["is_resync"] = is_resync;
+
+        for (const auto& ddl_item : create_ddl_array) {
+            ddls.push_back(ddl_item);
+        }
+
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "Resync generated {} DDL statement(s) (parent + descendants)",
+                  create_ddl_array.size());
+    }
 
     for (const proto::IndexRequest& index : index_reqs) {
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Create index: {}:{} @ {}:{}", index.db_id(),
@@ -1568,6 +1587,189 @@ Server::_drop_index(const XidLsn& xid,
     _upsert_index_name(db_id, index_info, xid, keys);
 }
 
+bool
+Server::_has_complete_parent_chain(uint64_t db_id,
+                                   uint64_t table_id,
+                                   const XidLsn& xid)
+{
+    uint64_t current_table = table_id;
+
+    while (true) {
+        auto table_info = _get_table_info(db_id, current_table, xid);
+        if (!table_info) {
+            // Table doesn't exist - parent chain is incomplete
+            return false;
+        }
+
+        if (!table_info->parent_table_id.has_value()) {
+            // Reached root parent (no further ancestor) - chain is complete
+            return true;
+        }
+
+        // Move up to parent
+        current_table = table_info->parent_table_id.value();
+    }
+}
+
+std::vector<uint64_t>
+Server::_get_direct_children(uint64_t db_id,
+                             uint64_t parent_table_id,
+                             const XidLsn& xid)
+{
+    std::vector<uint64_t> children;
+
+    auto table = _get_system_table(db_id, sys_tbl::TableNames::ID);
+    auto schema = table->extent_schema();
+    auto fields = schema->get_fields();
+
+    uint64_t current_table_id = 0;
+    std::optional<uint64_t> current_parent_id = std::nullopt;
+    bool current_exists = false;
+    bool found_any = false;
+
+    auto check_and_add = [&]() {
+        if (found_any && current_exists &&
+            current_parent_id.has_value() &&
+            current_parent_id.value() == parent_table_id) {
+            children.push_back(current_table_id);
+        }
+    };
+
+    // Full scan using begin() and end()
+    for (auto it = table->begin(); it != table->end(); ++it) {
+        auto& row = *it;
+
+        uint64_t row_table_id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+        uint64_t row_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
+        uint64_t row_lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
+
+        // If we've moved to a new table, check if the previous one was a child
+        if (found_any && row_table_id != current_table_id) {
+            check_and_add();
+            found_any = false;
+        }
+
+        // Skip rows that are newer than our XID/LSN
+        if (row_xid > xid.xid || (row_xid == xid.xid && row_lsn > xid.lsn)) {
+            continue;
+        }
+
+        // This is the latest visible version for this table_id
+        current_table_id = row_table_id;
+        current_exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+
+        if (!fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->is_null(&row)) {
+            current_parent_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+        } else {
+            current_parent_id = std::nullopt;
+        }
+
+        found_any = true;
+    }
+
+    // Don't forget to check the last table
+    check_and_add();
+
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+              "Found {} direct children for table {}", children.size(), parent_table_id);
+
+    return children;
+}
+
+nlohmann::json
+Server::_generate_create_ddl_from_sys_tables(uint64_t db_id,
+                                              uint64_t table_id,
+                                              const XidLsn& xid)
+{
+    auto table_info = _get_table_info(db_id, table_id, xid);
+    DCHECK(table_info != nullptr && table_info->exists);
+
+    nlohmann::json ddl;
+    ddl["action"] = "create";
+    ddl["tid"] = table_info->id;
+    ddl["xid"] = table_info->xid;
+    ddl["lsn"] = table_info->lsn;
+    ddl["table"] = table_info->name;
+    ddl["rls_enabled"] = table_info->rls_enabled;
+    ddl["rls_forced"] = table_info->rls_forced;
+
+    // Get namespace
+    auto ns_info = _get_namespace_info(db_id, table_info->namespace_id, xid);
+    ddl["schema"] = ns_info->name;
+
+    // Parent info (if this is a child)
+    if (table_info->parent_table_id.has_value()) {
+        auto parent_info = _get_table_info(db_id, table_info->parent_table_id.value(), xid);
+        if (parent_info) {
+            ddl["parent_table_id"] = table_info->parent_table_id.value();
+            ddl["parent_table_name"] = parent_info->name;
+
+            auto parent_ns = _get_namespace_info(db_id, parent_info->namespace_id, xid);
+            ddl["parent_namespace_name"] = parent_ns->name;
+        }
+    }
+
+    // Partition info
+    if (table_info->partition_key.has_value()) {
+        ddl["partition_key"] = table_info->partition_key.value();
+    }
+    if (table_info->partition_bound.has_value()) {
+        ddl["partition_bound"] = table_info->partition_bound.value();
+    }
+
+    // Get columns using existing _get_schema_info()
+    ddl["columns"] = nlohmann::json::array();
+    auto schema_info = _get_schema_info(db_id, table_id, xid, xid);
+    for (const auto& col : schema_info->columns()) {
+        nlohmann::json col_json;
+        col_json["name"] = col.name();
+        col_json["type"] = col.pg_type();
+        col_json["type_name"] = col.type_name();
+        col_json["type_namespace"] = col.type_namespace();
+        col_json["nullable"] = col.is_nullable();
+        if (col.has_default_value()) {
+            col_json["default"] = col.default_value();
+        }
+        ddl["columns"].push_back(col_json);
+    }
+
+    return ddl;
+}
+
+void
+Server::_generate_child_tree_ddls(uint64_t db_id,
+                                  uint64_t parent_table_id,
+                                  const XidLsn& xid,
+                                  std::vector<nlohmann::json>& ddl_array_out,
+                                  int depth)
+{
+    const int MAX_DEPTH = 128;  // Safety limit
+
+    if (depth > MAX_DEPTH) {
+        LOG_ERROR("Maximum partition depth exceeded for table {}", parent_table_id);
+        return;
+    }
+
+    auto children = _get_direct_children(db_id, parent_table_id, xid);
+
+    for (uint64_t child_id : children) {
+        auto child_info = _get_table_info(db_id, child_id, xid);
+        if (!child_info || !child_info->exists) {
+            continue;
+        }
+
+        // Generate DDL for this child
+        nlohmann::json child_ddl = _generate_create_ddl_from_sys_tables(db_id, child_id, xid);
+        ddl_array_out.push_back(child_ddl);
+
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "Generated DDL for child table {} at depth {}", child_id, depth);
+
+        // Recursively process this child's children
+        _generate_child_tree_ddls(db_id, child_id, xid, ddl_array_out, depth + 1);
+    }
+}
+
 nlohmann::json
 Server::_create_table(const proto::TableRequest& request)
 {
@@ -1592,21 +1794,32 @@ Server::_create_table(const proto::TableRequest& request)
 
     // partition info
     std::optional<uint64_t> parent_table_id = std::nullopt;
+    bool has_complete_parent_chain = true;  // Track result to avoid re-checking
+
     if (request.table().has_parent_table_id() && request.table().parent_table_id() != constant::INVALID_TABLE) {
         parent_table_id = request.table().parent_table_id();
-        ddl["parent_table_id"] = parent_table_id.value();
-        if (parent_table_id.has_value()) {
+
+        // Check if the complete parent chain exists (expensive operation - cache result)
+        has_complete_parent_chain = _has_complete_parent_chain(request.db_id(), request.table().id(), xid);
+
+        if (!has_complete_parent_chain) {
+            // Parent chain is incomplete - defer DDL generation
+            LOG_INFO("Parent chain incomplete for table {} - deferring DDL generation",
+                     request.table().id());
+
+            // CRITICAL: Still complete all system table operations below
+            // (table_info, roots, columns, indexes, cache updates)
+            // Then return empty array at the end
+        } else {
+            // All ancestors exist - add parent metadata to DDL
             auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
-            if (parent_table_info == nullptr) {
-                LOG_ERROR("Parent table not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
-            } else {
-                ddl["parent_table_name"] = parent_table_info->name;
-                auto namespace_name = _get_namespace_info(request.db_id(), parent_table_info->namespace_id, xid);
-                if (namespace_name == nullptr) {
-                    LOG_ERROR("Parent namespace not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
-                }
-                ddl["parent_namespace_name"] = namespace_name->name;
-            }
+            DCHECK(parent_table_info != nullptr);  // Should exist since chain is complete
+
+            ddl["parent_table_id"] = parent_table_id.value();
+            ddl["parent_table_name"] = parent_table_info->name;
+
+            auto parent_ns = _get_namespace_info(request.db_id(), parent_table_info->namespace_id, xid);
+            ddl["parent_namespace_name"] = parent_ns->name;
         }
     }
 
@@ -1688,7 +1901,37 @@ Server::_create_table(const proto::TableRequest& request)
                   ranges.size());
     }
 
-    return ddl;
+    // Check if we should defer DDL generation due to incomplete parent chain
+    if (!has_complete_parent_chain) {
+        // Return empty array - system tables updated but no DDL generated
+        return nlohmann::json::array();
+    }
+
+    // Always return an array for consistency
+    std::vector<nlohmann::json> ddl_array;
+    ddl_array.push_back(ddl);  // Parent DDL always first
+
+    // Check if this table is a partitioned parent - generate DDL for entire subtree
+    if (partition_key.has_value()) {
+        // This is a parent table - recursively generate DDL for all descendants
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "Table {} is a partitioned parent - checking for child subtree",
+                  request.table().id());
+
+        _generate_child_tree_ddls(request.db_id(),
+                                 request.table().id(),
+                                 xid,
+                                 ddl_array,
+                                 0);  // Start at depth 0
+
+        if (ddl_array.size() > 1) {
+            LOG_INFO("Generated DDL for parent table {} and {} descendants",
+                     request.table().id(), ddl_array.size() - 1);
+        }
+    }
+
+    // ALWAYS return a JSON array (even for single table)
+    return nlohmann::json(ddl_array);
 }
 
 nlohmann::json

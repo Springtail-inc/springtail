@@ -1069,7 +1069,9 @@ namespace springtail::pg_fdw {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Original DDLS: {}", ddls.dump(4));
 
                     // Sort the DDLs based on their hierarchy
-                    auto sorted_ddls = sort_ddls_by_hierarchy(ddls);
+                    // NOTE: Sorting disabled - DDLs now arrive pre-sorted from sys_tbl_mgr
+                    // auto sorted_ddls = sort_ddls_by_hierarchy(ddls);
+                    auto sorted_ddls = ddls;
 
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Sorted DDLS: {}", sorted_ddls.dump(4));
 

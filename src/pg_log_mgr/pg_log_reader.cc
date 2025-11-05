@@ -727,17 +727,43 @@ namespace springtail::pg_log_mgr {
                 PgMsgNamespace namespace_msg{table_msg.lsn, table_msg.namespace_id, table_msg.xid, table_msg.namespace_name};
 
                 // make sure that the namespace is created
-                std::string &&ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
-                nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+                std::string &&ns_ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
+                nlohmann::json ns_action = nlohmann::json::parse(ns_ddl_stmt).at("action");
 
-                if (action.get<std::string>() != "no_change") {
+                if (ns_action.get<std::string>() != "no_change") {
                     LOG_INFO("Table namespace created: {} {} {}", table_msg.table, table_msg.namespace_name, table_msg.namespace_id);
-                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ns_ddl_stmt);
                 }
 
-                ddl_stmt = server->create_table(_db, xidlsn, table_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
-                _exists_cache->insert(_db, table_msg.oid, true);
+                // Create table - ALWAYS returns JSON array
+                std::string ddl_stmt = server->create_table(_db, xidlsn, table_msg);
+                nlohmann::json ddl_array = nlohmann::json::parse(ddl_stmt);
+
+                DCHECK(ddl_array.is_array());  // Always an array now
+
+                if (ddl_array.empty()) {
+                    // Empty array - parent chain incomplete, DDL deferred
+                    LOG_INFO("DDL deferred for child table {} - parent chain incomplete",
+                             table_msg.oid);
+                    // System tables updated but no FDW DDL generated
+
+                } else {
+                    // Non-empty array - process all DDLs in order
+                    LOG_INFO("Processing {} DDL statement(s) for table {} and descendants",
+                             ddl_array.size(), table_msg.oid);
+
+                    for (const auto& ddl_item : ddl_array) {
+                        std::string individual_ddl = nlohmann::to_string(ddl_item);
+                        RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, individual_ddl);
+
+                        // Update existence cache for each table
+                        uint32_t tid = ddl_item["tid"].get<uint32_t>();
+                        _exists_cache->insert(_db, tid, true);
+
+                        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                                  "Added DDL for table {} to FDW queue", tid);
+                    }
+                }
                 break;
             }
         case PgMsgEnum::ALTER_TABLE:
