@@ -61,3 +61,8 @@ target_link_libraries(springtail_extn_parser
     PRIVATE dl
     PRIVATE absl::flat_hash_map
 )
+
+install(TARGETS
+    springtail_pgext
+    LIBRARY DESTINATION shared-lib
+)

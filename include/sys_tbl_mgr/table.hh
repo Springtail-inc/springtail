@@ -2,11 +2,13 @@
 
 #include <common/constants.hh>
 #include <common/circular_buffer.hh>
+#include <algorithm>
 #include <memory>
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
 
+#include <thread>
 #include <variant>
 
 namespace springtail {
@@ -727,8 +729,9 @@ namespace indexer_helpers {
         /**
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
          * system tables.
+         * @param call_sync If true, will call sync_data_and_indexes() before returning.
          */
-        TableMetadata finalize();
+        TableMetadata finalize(bool call_sync);
 
         /**
          * Returns the schema of the table.
@@ -799,6 +802,12 @@ namespace indexer_helpers {
         TableStats get_stats() const {
             return _stats;
         }
+
+        /** Commit the data and indexes to disk. */ 
+        void sync_data_and_indexes();
+
+        /** Get the list of table data and index files. */
+        std::vector<std::filesystem::path> get_table_files() const;
 
         /**
          * @brief Get next internal row ID to be used for the row in the mutation

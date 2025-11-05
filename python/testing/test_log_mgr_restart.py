@@ -81,7 +81,7 @@ def kill_core_daemons(pid_path):
     """Send SIGKILL to the core daemons."""
     pids = []
     for fname in os.listdir(pid_path):
-        if fname in ['pg_log_mgr.pid']:
+        if fname in ['pg_log_mgr_daemon.pid']:
             with open(os.path.join(pid_path, fname), 'r') as f:
                 pids.append(int(f.read().strip()))
     if len(pids) == len(CORE_DAEMONS):

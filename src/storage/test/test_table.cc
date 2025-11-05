@@ -66,7 +66,7 @@ namespace {
             server->create_namespace(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), ns_msg);
 
             auto xid_server = xid_mgr::XidMgrServer::get_instance();
-            xid_server->commit_xid(1, 1, target_xid, false);
+            xid_server->commit_xid(1, 1, target_xid, false, 0);
         }
 
         static void TearDownTestSuite() {
@@ -137,7 +137,7 @@ namespace {
 
             server->create_table(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), tbl_msg);
 
-            server->finalize(_db_id, target_xid);
+            server->finalize(_db_id, target_xid, true);
         }
 
         // secondary keys
@@ -275,9 +275,9 @@ namespace {
         auto mtable = _create_mtable(1000, target_xid, metadata.roots);
 
         // finalize the empty table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table
         access_xid = target_xid;
@@ -313,9 +313,9 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table
         access_xid = target_xid;
@@ -418,9 +418,9 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table
         access_xid = target_xid;
@@ -485,9 +485,9 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table for lookup
         access_xid = target_xid;
@@ -526,9 +526,9 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table
         access_xid = target_xid;
@@ -605,9 +605,9 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table
         access_xid = target_xid;
@@ -689,9 +689,9 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table
         access_xid = target_xid;
@@ -778,9 +778,9 @@ namespace {
         }
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table
         access_xid = target_xid;
@@ -856,9 +856,9 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table and identify extents to be mutated
         access_xid = target_xid;
@@ -895,9 +895,9 @@ namespace {
         // finalize and verify the table
         tester.set_verify([this, mtable, target_xid, server]() {
             // create an access table
-            TableMetadata metadata = mtable->finalize();
+            TableMetadata metadata = mtable->finalize(true);
             sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-            server->commit_xid(1, 1, target_xid, false);
+            server->commit_xid(1, 1, target_xid, false, 0);
 
             auto access_xid = target_xid;
             auto table = _create_table(1004, access_xid, metadata.roots);
@@ -959,9 +959,9 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table
         access_xid = target_xid;
@@ -1155,9 +1155,9 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table after all operations
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false, 0);
 
         // create an access table to verify the final state
         access_xid = target_xid;
@@ -1211,9 +1211,9 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table after create
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, true);
+        server->commit_xid(1, 1, target_xid, true, 0);
 
         // create an access table and identify extents to be mutated
         access_xid = target_xid;
@@ -1247,15 +1247,15 @@ namespace {
         }
 
         // finalize the table after update
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, true);
+        server->commit_xid(1, 1, target_xid, true, 0);
 
         // repopulate with new data
         //_populate_table(mtable);
 
         ++target_xid;
-        server->commit_xid(1, 1, target_xid, true);
+        server->commit_xid(1, 1, target_xid, true, 0);
 
         auto table_dir = table_helpers::get_table_dir(_base_dir, 1, table_id, 1);
         auto table_file = table_dir / fmt::format(constant::DATA_FILE);
@@ -1290,10 +1290,9 @@ namespace {
         _populate_table(mtable);
 
         // finalize the table
-        metadata = mtable->finalize();
+        metadata = mtable->finalize(true);
         sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        server->commit_xid(1, 1, target_xid, false);
-
+        server->commit_xid(1, 1, target_xid, false, 0);
         // create an access table
         access_xid = target_xid;
         auto table = _create_table(1008, access_xid, metadata.roots);
