@@ -1022,8 +1022,54 @@ namespace indexer_helpers {
         }
     }
 
+    std::vector<std::filesystem::path>
+    MutableTable::get_table_files() const
+    {
+        std::vector<std::filesystem::path> r;
+        r.emplace_back(_data_file);
+        r.emplace_back(_primary_index->get_file_path());
+        for (auto &secondary : _secondary_indexes) {
+            r.emplace_back(secondary.second.first->get_file_path());
+        }
+
+        if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
+            r.emplace_back(_table_dir / constant::ROOTS_FILE);
+        }
+
+        return r;
+    }
+
+    void
+    MutableTable::sync_data_and_indexes()
+    {
+        // sync the data file
+        auto data_handle = IOMgr::get_instance()->open(_data_file,
+                                                       IOMgr::IO_MODE::APPEND, true);
+
+        data_handle->sync();
+
+        // sync the indexes
+        _primary_index->sync();
+        for (auto &secondary : _secondary_indexes) {
+            secondary.second.first->sync();
+        }
+
+        if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
+            // sync the roots file for sysntem tables
+            auto root_handle = IOMgr::get_instance()->open(_table_dir / constant::ROOTS_FILE,
+                                                           IOMgr::IO_MODE::APPEND, true);
+            root_handle->sync();
+
+            // also fsync() the directory to ensure the symlink+rename are persisted
+            int fd = ::open(_table_dir.c_str(), O_RDONLY | O_DIRECTORY);
+            CHECK(fd != -1) << "Failed to open directory " << _table_dir << ", error: " << strerror(errno);
+            ::fsync(fd);
+            ::close(fd);
+        }
+    }
+
     TableMetadata
-    MutableTable::finalize()
+    MutableTable::finalize(bool call_sync)
     {
         LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Finalize {} {}", _id, _target_xid);
 
@@ -1045,7 +1091,7 @@ namespace indexer_helpers {
 
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
-        metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
+        metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize(false)});
 
         // Flush the look aside index if available
         if (_look_aside_index) {
@@ -1054,7 +1100,7 @@ namespace indexer_helpers {
 
         // now flush the indexes, capturing the roots
         for (auto &secondary : _secondary_indexes) {
-            metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
+            metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize(false));
         }
 
         metadata.stats = _stats;
@@ -1079,16 +1125,19 @@ namespace indexer_helpers {
             auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
             auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
                                                            IOMgr::IO_MODE::APPEND, true);
-
             // flush and wait for completion
             extent->async_flush(root_handle).wait();
-            root_handle->sync();
 
             // swap the symlink
             std::filesystem::create_symlink(_table_dir / filename,
                                             _table_dir / constant::ROOTS_TMP_FILE);
             std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
                                     _table_dir / constant::ROOTS_FILE);
+        }
+
+        if (call_sync) {
+            // sync the data and indexes synchronously
+            sync_data_and_indexes();
         }
 
         return metadata;

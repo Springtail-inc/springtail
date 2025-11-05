@@ -751,7 +751,7 @@ namespace springtail
         }
 
         // flush the table data to disk
-        auto &&metadata = table->finalize();
+        auto &&metadata = table->finalize(true);
 
         // Set roots request
         auto* roots_req = copy_info->mutable_roots_req();

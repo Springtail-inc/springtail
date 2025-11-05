@@ -121,9 +121,15 @@ public:
 
     /**
      * @brief Finalize API cal
+     * @param call_sync If false, sync() must be called to persist system tables to disk.
      */
     void
-    finalize(uint64_t db_id, uint64_t xid);
+    finalize(uint64_t db_id, uint64_t xid, bool call_sync);
+
+    /**
+     * @brief Sync system tables
+     */
+    void sync(uint64_t db_id, uint64_t xid);
 
     /**
      * @brief Revert API cal

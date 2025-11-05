@@ -55,7 +55,7 @@ namespace springtail::test::ddl_helpers {
 
         sys_tbl_mgr::Server::get_instance()->drop_index(db_id, xid_lsn, msg);
 
-        sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid);
+        sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid, true);
     }
 
     std::shared_ptr<Tuple>
