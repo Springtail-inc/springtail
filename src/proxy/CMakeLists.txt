@@ -4,6 +4,7 @@ find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
+find_package(absl REQUIRED)
 
 # source files
 set(PROXY_SOURCES
@@ -31,6 +32,8 @@ target_include_directories(springtail_proxy
 
 target_link_libraries(springtail_proxy
     PUBLIC springtail_common
+    PUBLIC absl::check
+    PUBLIC absl::log
     PUBLIC springtail_pg
     PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
     PRIVATE nlohmann_json::nlohmann_json

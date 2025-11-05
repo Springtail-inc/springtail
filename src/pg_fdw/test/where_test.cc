@@ -84,7 +84,7 @@ namespace {
                 std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::READY);
             access_xid++;
             target_xid++;
-            sys_tbl_mgr::Server::get_instance()->finalize(_db_id, access_xid);
+            sys_tbl_mgr::Server::get_instance()->finalize(_db_id, access_xid, true);
 
 
             // create a mutable table
@@ -94,7 +94,7 @@ namespace {
             populate_table(mtable, _data);
 
             // finalize the empty table
-            auto &&metadata = mtable->finalize();
+            auto &&metadata = mtable->finalize(true);
             sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, _tid, target_xid, metadata);
 
             _table_xid = target_xid+1;

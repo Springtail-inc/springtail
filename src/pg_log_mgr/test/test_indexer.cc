@@ -115,7 +115,7 @@ namespace {
             populate_table(mtable, _data, is_update);
 
             // finalize the table and update roots
-            auto &&metadata = mtable->finalize();
+            auto &&metadata = mtable->finalize(true);
             sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
         }
 
@@ -135,7 +135,7 @@ namespace {
             if (process_requests_in_indexer) {
                 _indexer->process_requests(_db_id, index_xid, index_requests);
             }
-            sys_tbl_mgr::Server::get_instance()->finalize(_db_id, index_xid);
+            sys_tbl_mgr::Server::get_instance()->finalize(_db_id, index_xid, true);
         }
 
         void _process_index_and_validate(uint64_t index_id, uint64_t index_xid, uint64_t reconcile_xid) {
@@ -352,7 +352,7 @@ namespace {
 
         Vacuumer::get_instance()->commit_expired_extents(_db_id, constant::LATEST_XID);
 
-        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, next_data_xid, true);
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, next_data_xid, true, 0);
 
         // Get the blocks count pre-vacuum
         auto index_file = table_dir.value() / fmt::format(constant::INDEX_FILE, index_id);
