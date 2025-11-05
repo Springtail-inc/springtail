@@ -22,27 +22,27 @@ namespace springtail {
         ExtensionContext context = {};
     };
 
-    // Gist proc numbers
-    #define GIST_CONSISTENT_PROC			1
-    #define GIST_UNION_PROC					2
-    #define GIST_COMPRESS_PROC				3
-    #define GIST_DECOMPRESS_PROC			4
-    #define GIST_PENALTY_PROC				5
-    #define GIST_PICKSPLIT_PROC				6
-    #define GIST_EQUAL_PROC					7
-    #define GIST_DISTANCE_PROC				8
-    #define GIST_FETCH_PROC					9
-    #define GIST_OPTIONS_PROC				10
-    #define GIST_SORTSUPPORT_PROC			11
+    // GIST Proc
+    constexpr int GIST_CONSISTENT = 1;
+    constexpr int GIST_UNION = 2;
+    constexpr int GIST_COMPRESS = 3;
+    constexpr int GIST_DECOMPRESS = 4;
+    constexpr int GIST_PENALTY = 5;
+    constexpr int GIST_PICKSPLIT = 6;
+    constexpr int GIST_EQUAL = 7;
+    constexpr int GIST_DISTANCE = 8;
+    constexpr int GIST_FETCH = 9;
+    constexpr int GIST_OPTIONS = 10;
+    constexpr int GIST_SORTSUPPORT = 11;
 
-    // GIN proc numbers
-    #define GIN_COMPARE_PROC                1
-    #define GIN_EXTRACTVALUE_PROC           2
-    #define GIN_EXTRACTQUERY_PROC           3
-    #define GIN_CONSISTENT_PROC             4
-    #define GIN_COMPARE_PARTIAL_PROC        5
-    #define GIN_TRICONSISTENT_PROC          6
-    #define GIN_OPTIONS_PROC                7
+    // GIN Proc
+    constexpr int GIN_COMPARE = 1;
+    constexpr int GIN_EXTRACTVALUE = 2;
+    constexpr int GIN_EXTRACTQUERY = 3;
+    constexpr int GIN_CONSISTENT = 4;
+    constexpr int GIN_COMPARE_PARTIAL = 5;
+    constexpr int GIN_TRICONSISTENT = 6;
+    constexpr int GIN_OPTIONS = 7;
 }
 
 namespace springtail::constant {

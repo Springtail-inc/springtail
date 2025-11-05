@@ -22,6 +22,16 @@ struct PgType {
     std::string typsend;
 };
 
+/**
+ * Struct containing the opclass method details
+ * input_type_oid: Oid of the input type needed to convert data to datum
+ * input_type: Name of the input type
+ * key_type_oid: Oid of the key type needed to convert data to datum
+ * key_type: Name of the key type
+ * support_number: Support number of the method ( defined in constants.hh )
+ * function_name: Name of the function ( references pg_proc -> proname )
+ * function_ptr: Function pointer Pointer to the function
+ */
 struct PgOpsClassMethod {
     uint32_t input_type_oid;
     std::string input_type;
@@ -32,6 +42,14 @@ struct PgOpsClassMethod {
     PGFunction function_ptr = nullptr;
 };
 
+/**
+ * Struct containing the opclass details
+ * oid: Oid of the opclass ( references pg_opclass -> oid )
+ * name: Name of the opclass ( references pg_opclass -> opcname )
+ * schema: Schema of the opclass ( references pg_namespace -> nspname )
+ * access_method: Access method of the opclass ( references pg_am -> amname ) ( GIN/GIST for ex )
+ * family: Family of the opclass ( references pg_opfamily -> opfname)
+ */
 struct PgOpsClass {
     uint32_t oid;
     std::string name;
