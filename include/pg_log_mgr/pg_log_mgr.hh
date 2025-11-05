@@ -53,6 +53,9 @@ namespace springtail::pg_log_mgr {
         /** minimum size for log rollover */
         static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
 
+        /** fsync loop interval in ms */
+        static constexpr int FSYNC_LOOP_INTERVAL_MS = 500;
+
         /** max reconnect count within time period */
         static constexpr int MAX_RECONNECT_COUNT = 5;
         /** reconnect time period in seconds */
