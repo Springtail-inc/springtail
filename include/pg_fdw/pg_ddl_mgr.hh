@@ -23,6 +23,8 @@ namespace springtail::pg_fdw {
         /** Sync thread check interval in seconds */
         static constexpr int SYNC_INTERVAL_SECONDS = 15;
 
+        static constexpr char DB_STATE_UNKNOWN[] = "unknown";
+
 
         /**
          * Start the main thread
@@ -89,7 +91,8 @@ namespace springtail::pg_fdw {
         struct DBData {
             std::map<uint64_t, nlohmann::json> pending_ddls;    ///< map of xid to pending ddl
             std::shared_mutex db_mutex;                         ///< mutex for changes to this data structure
-            std::string state{"unknown"};                       ///< current database state
+            std::string db_name{};                              ///< database name
+            std::string state{DB_STATE_UNKNOWN};                ///< current database state
             uint64_t latest_xid{constant::INVALID_XID};         ///< latest xid
 
             // default constructor
@@ -299,15 +302,17 @@ namespace springtail::pg_fdw {
         /**
          * @brief Function for adding a new replicated database
          * @param db_id - database id
+         * @param db_name - database name
          */
-        void _add_replicated_database(uint64_t db_id);
+        void _add_replicated_database(uint64_t db_id, const std::string &db_name);
 
 
         /**
          * @brief Function for removing an existing replicated database
          * @param db_id - databese id
+         * @param db_name - database name
          */
-        void _remove_replicated_database(uint64_t db_id);
+        void _remove_replicated_database(uint64_t db_id, const std::string &db_name);
 
 
         /**
