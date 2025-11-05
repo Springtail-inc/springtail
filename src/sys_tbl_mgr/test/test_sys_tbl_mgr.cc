@@ -115,7 +115,7 @@ namespace {
         auto xid = _next_xid();
 
         // finalize
-        _server->finalize(_db, xid.xid);
+        _server->finalize(_db, xid.xid, true);
     }
 
     void SysTblMgr_Test::_set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
@@ -874,7 +874,7 @@ namespace {
 
         // Commit the XID so that XidMgrServer has the correct last_committed_xid
         // This ensures _get_vacuum_cutoff_xid() returns the expected value
-        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db, 1, cutoff_xid, false);
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db, 1, cutoff_xid, false, 0);
 
         // Trigger vacuum
         Vacuumer::get_instance()->set_global_vacuum_threshold(10);
