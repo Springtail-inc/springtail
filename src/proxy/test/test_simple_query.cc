@@ -139,6 +139,37 @@ protected:
             << "Child index out of bounds";
 
         const auto& child_statement = parent_query_statement->children[child_index];
+
+        verify_statement(child_statement, expected_child_type,
+                         expected_child_read_safe, expected_child_name, child_index);
+    }
+
+    /**
+     * @brief Helper to verify set_config statement properties
+     */
+    void verify_set_config_properties(const QueryStmtPtr& parent_query_statement,
+                                         size_t child_index,
+                                         QueryStmt::Type expected_child_type,
+                                         bool expected_child_read_safe,
+                                         const std::string& expected_child_name = "") {
+        ASSERT_LT(child_index, parent_query_statement->set_config_calls.size())
+            << "Set config index out of bounds";
+
+        const auto& child_statement = parent_query_statement->set_config_calls[child_index];
+
+        verify_statement(child_statement, expected_child_type,
+                         expected_child_read_safe, expected_child_name, child_index);
+    }
+
+    /**
+     * @brief Helper to verify individual statement properties
+     */
+    void verify_statement(const QueryStmtPtr child_statement,
+                          QueryStmt::Type expected_child_type,
+                          bool expected_child_read_safe,
+                          const std::string& expected_child_name = "",
+                          size_t child_index = 0)
+    {
         ASSERT_NE(child_statement, nullptr);
 
         EXPECT_EQ(child_statement->type, expected_child_type)
@@ -686,7 +717,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
             test_database_id, test_buffer, select_safe_session_config_query);
 
         verify_query_statement_properties(safe_session_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_child_statement_properties(safe_session_config_result, 0, QueryStmt::SET, false, "work_mem");
+        verify_set_config_properties(safe_session_config_result->children[0], 0, QueryStmt::SET, false, "work_mem");
 
         log_query_statement_details(safe_session_config_result, "SELECT set_config() safe session variable");
     }
@@ -701,7 +732,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
             test_database_id, test_buffer, select_unsafe_session_config_query);
 
         verify_query_statement_properties(unsafe_session_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_child_statement_properties(unsafe_session_config_result, 0, QueryStmt::SET, false, "shared_preload_libraries");
+        verify_set_config_properties(unsafe_session_config_result->children[0], 0, QueryStmt::SET, false, "shared_preload_libraries");
 
         log_query_statement_details(unsafe_session_config_result, "SELECT set_config() unsafe session variable");
     }
@@ -716,7 +747,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
             test_database_id, test_buffer, select_user_defined_session_config_query);
 
         verify_query_statement_properties(user_defined_session_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(user_defined_session_config_result, 0, QueryStmt::SET, true, "myapp.cache_size");
+        verify_set_config_properties(user_defined_session_config_result->children[0], 0, QueryStmt::SET, true, "myapp.cache_size");
 
         log_query_statement_details(user_defined_session_config_result, "SELECT set_config() user-defined session variable");
     }
@@ -731,7 +762,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
             test_database_id, test_buffer, select_safe_local_config_query);
 
         verify_query_statement_properties(safe_local_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(safe_local_config_result, 0, QueryStmt::SET_LOCAL, true, "timezone");
+        verify_set_config_properties(safe_local_config_result->children[0], 0, QueryStmt::SET_LOCAL, true, "timezone");
 
         log_query_statement_details(safe_local_config_result, "SELECT set_config() safe local variable");
     }
@@ -746,7 +777,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
             test_database_id, test_buffer, select_unsafe_local_config_query);
 
         verify_query_statement_properties(unsafe_local_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_child_statement_properties(unsafe_local_config_result, 0, QueryStmt::SET_LOCAL, false);
+        verify_set_config_properties(unsafe_local_config_result->children[0], 0, QueryStmt::SET_LOCAL, false, "max_connections");
 
         log_query_statement_details(unsafe_local_config_result, "SELECT set_config() unsafe local variable");
     }
@@ -761,11 +792,11 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
             test_database_id, test_buffer, select_user_defined_local_config_query);
 
         verify_query_statement_properties(user_defined_local_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(user_defined_local_config_result, 0, QueryStmt::SET_LOCAL, true, "mycompany.debug_level");
+        verify_set_config_properties(user_defined_local_config_result->children[0], 0, QueryStmt::SET_LOCAL, true, "mycompany.debug_level");
 
         log_query_statement_details(user_defined_local_config_result, "SELECT set_config() user-defined local variable");
     }
-/* FIX multi selects with set_config calls
+
     {
         SCOPED_TRACE("Testing SELECT with multiple safe set_config() function calls");
 
@@ -775,12 +806,13 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr multiple_safe_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_multiple_safe_config_query);
 
-        verify_query_statement_properties(multiple_safe_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(multiple_safe_config_result, 0, QueryStmt::SET, true, "work_mem");
+        verify_query_statement_properties(multiple_safe_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
+        verify_set_config_properties(multiple_safe_config_result->children[0], 0, QueryStmt::SET, false, "work_mem");
+        verify_set_config_properties(multiple_safe_config_result->children[0], 1, QueryStmt::SET, true, "statement_timeout");
 
         log_query_statement_details(multiple_safe_config_result, "SELECT multiple safe set_config() calls");
     }
-*/
+
     {
         SCOPED_TRACE("Testing SELECT set_config() with deep namespace user-defined variable");
 
@@ -791,7 +823,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
             test_database_id, test_buffer, select_deep_namespace_config_query);
 
         verify_query_statement_properties(deep_namespace_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(deep_namespace_config_result, 0, QueryStmt::SET, true, "myapp.module.subsystem.setting");
+        verify_set_config_properties(deep_namespace_config_result->children[0], 0, QueryStmt::SET, true, "myapp.module.subsystem.setting");
 
         log_query_statement_details(deep_namespace_config_result, "SELECT set_config() deep namespace variable");
     }
@@ -821,7 +853,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
             test_database_id, test_buffer, select_case_sensitive_config_query);
 
         verify_query_statement_properties(case_sensitive_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(case_sensitive_config_result, 0, QueryStmt::SET, true, "dateSTYLE");
+        verify_set_config_properties(case_sensitive_config_result->children[0], 0, QueryStmt::SET, true, "dateSTYLE");
 
         log_query_statement_details(case_sensitive_config_result, "SELECT set_config() case-sensitive variable");
     }

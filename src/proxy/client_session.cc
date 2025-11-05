@@ -1255,6 +1255,20 @@ namespace springtail::pg_proxy {
             auto p_query = query.substr(context->stmt_location, context->stmt_length);
             QueryStmtPtr stmt = std::make_shared<QueryStmt>(stmt_type, p_query.data(), context->is_read_safe, context->name.data());
 
+            // construct a set of set_config SELECT calls from set_config functions
+            if (context->set_config_functions.size() > 0) {
+                for (const auto &set_func : context->set_config_functions) {
+                    // construct set_config SELECT statement and add it to the list of calls
+                    QueryStmtPtr set_stmt = std::make_shared<QueryStmt>((set_func->is_local ? QueryStmt::SET_LOCAL : QueryStmt::SET),
+                        // XXX might need to escape these, but not sure, might come escaped already
+                        std::format("SELECT set_config('{}', '{}', {})",
+                                    set_func->name, set_func->value, (set_func->is_local ? "true" : "false")),
+                        set_func->is_read_safe, set_func->name);
+
+                    stmt->set_config_calls.push_back(set_stmt);
+                }
+            }
+
             // add to parent
             qs->children.push_back(stmt);
 

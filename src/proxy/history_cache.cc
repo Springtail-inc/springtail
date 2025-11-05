@@ -338,7 +338,12 @@ namespace pg_proxy {
         DCHECK_GT(stmt->children.size(), 0);
         DCHECK_LE(completed, stmt->children.size());
         for (int i = 0; i < completed; i++) {
-            _commit_single_stmt(stmt->children[i]);
+            auto qs = stmt->children[i];
+            // commit any set_config function calls SELECT stmts
+            for (auto &set_config_stmt : qs->set_config_calls) {
+                _commit_single_stmt(set_config_stmt);
+            }
+            _commit_single_stmt(qs);
         }
 
         if (completed != stmt->children.size()) {
@@ -432,6 +437,9 @@ namespace pg_proxy {
                 // clear session history
                 _transaction_history.clear();
                 break;
+            case QueryStmt::ANONYMOUS:
+                // anonymous statements do not affect cache
+                return;
             default:
                 break;
         }

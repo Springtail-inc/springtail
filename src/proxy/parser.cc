@@ -73,6 +73,12 @@ namespace springtail::pg_proxy {
         for (auto &table : context.tables) {
             LOG_INFO("Table: schema={}, table={}", table.first, table.second);
         }
+
+        for (auto &set_config_info : context.set_config_functions) {
+            LOG_INFO("SetConfig: name={}, value={}, is_local={}, is_read_safe={}",
+                set_config_info->name, set_config_info->value,
+                set_config_info->is_local, set_config_info->is_read_safe);
+        }
     }
 
     void
@@ -128,10 +134,30 @@ namespace springtail::pg_proxy {
     bool
     Parser::_is_query_readonly(const StmtContext &context, VerifyTableFn verify_table_fn)
     {
+        assert(context.type != StmtContext::INVALID);
+
+        // NOTE: do this first as we need to set the flag within the set_config info struct
+        // iterate through the set_config functions
+        bool set_config_read_safe = true;
+        for (auto &set_config_info : context.set_config_functions) {
+            // setting variables is ok only if in the safe list or user defined (xxx.yyy)
+            if (!proxy_safe_variables.contains(common::to_lower(set_config_info->name)) &&
+                set_config_info->name.find('.') == std::string::npos) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Found unsafe set_config variable {}:{} in query", set_config_info->name, common::to_lower(set_config_info->name));
+                    set_config_info->is_read_safe = false;
+                    set_config_read_safe = false;
+                    // don't return yet, we want to mark all set_config info
+            } else {
+                set_config_info->is_read_safe = true;
+            }
+        }
+
         // debugging
         dump_context(context);
 
-        assert(context.type != StmtContext::INVALID);
+        if (!set_config_read_safe) {
+            return false;
+        }
 
         // check conditions or clauses that indicate updates/writes
         if (_replica_unsafe_stmts.contains(context.type) || context.has_error ||
@@ -158,7 +184,7 @@ namespace springtail::pg_proxy {
             // setting variables is ok only if in the safe list or user defined (xxx.yyy)
             if (!proxy_safe_variables.contains(common::to_lower(context.name)) &&
                 context.name.find('.') == std::string::npos) {
-                    LOG_WARN("Found unsafe variable {}:{} in query", context.name, common::to_lower(context.name));
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Found unsafe variable {}:{} in query", context.name, common::to_lower(context.name));
                     return false;
             }
         }
@@ -239,40 +265,60 @@ namespace springtail::pg_proxy {
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Detected set_config function call");
 
-        // Extract arguments to check if this is a session variable (3rd param = false)
+        // Validate we have at least 3 arguments
         if (func_call->args == nullptr || list_length(func_call->args) < 3) {
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
-                        "set_config function call with insufficient arguments");
-            stmt->has_unsupported_query = true;
+            LOG_WARN("set_config function call with insufficient arguments");
+            stmt->has_error = true;
             return;
         }
 
-        // Mark statement as a variable set
-        stmt->type = StmtContext::VAR_SET_STMT;
-
-        // Get the third argument (is_local parameter)
-        Node *third_arg = (Node*)list_nth(func_call->args, 2);
-
-        if (nodeTag(third_arg) == T_A_Const) {
-            A_Const *is_local_const = (A_Const*)third_arg;
-            if (nodeTag(&is_local_const->val) == T_Boolean) {
-                // If third parameter is false, it's a session variable
-                stmt->has_is_local = is_local_const->val.boolval.boolval;
-            }
-        }
+        auto set_config_info = std::make_shared<StmtContext::SetConfigInfo>();
 
         // Extract key (argument 1)
         Node *first_arg = (Node*)list_nth(func_call->args, 0);
         if (nodeTag(first_arg) == T_A_Const) {
             A_Const *key_const = (A_Const*)first_arg;
             if (nodeTag(&key_const->val) == T_String) {
-                _set_string(key_const->val.sval.sval, stmt->name);
+                _set_string(key_const->val.sval.sval, set_config_info->name);
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
                             "set_config session variable: key={}", stmt->name);
             }
         } else {
             LOG_WARN("set_config function first argument is not a constant");
+            stmt->has_error = true;
+            return;
         }
+
+        // Extract value (argument 2)
+        Node *second_arg = (Node*)list_nth(func_call->args, 1);
+        if (nodeTag(second_arg) == T_A_Const) {
+            A_Const *value_const = (A_Const*)second_arg;
+            if (nodeTag(&value_const->val) == T_String) {
+                _set_string(value_const->val.sval.sval, set_config_info->value);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                            "set_config session variable: value={}", set_config_info->value);
+            }
+        } else {
+            LOG_WARN("set_config function second argument is not a constant");
+            stmt->has_error = true;
+            return;
+        }
+
+        // Get the third argument (is_local parameter)
+        Node *third_arg = (Node*)list_nth(func_call->args, 2);
+        if (nodeTag(third_arg) == T_A_Const) {
+            A_Const *is_local_const = (A_Const*)third_arg;
+            if (nodeTag(&is_local_const->val) == T_Boolean) {
+                // If third parameter is false, it's a session variable
+                set_config_info->is_local = is_local_const->val.boolval.boolval;
+            }
+        } else {
+            LOG_WARN("set_config function third argument is not a constant");
+            stmt->has_error = true;
+            return;
+        }
+
+        stmt->set_config_functions.push_back(set_config_info);
     }
 
     /*

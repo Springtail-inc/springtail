@@ -46,7 +46,7 @@ static const std::vector<std::tuple<std::string, bool, std::string>> tests = {
     {"SAVEPOINT foo", true, "foo"},
     {"ROLLBACK TO SAVEPOINT foo", true, "foo"},
     {"RELEASE SAVEPOINT foo", true, "foo"},
-    {"SELECT set_config('search_path', 'myschema', false)", false, "search_path"},
+    {"SELECT set_config('search_path', 'myschema', false)", true, "search_path"},
 };
 
 // gtest function

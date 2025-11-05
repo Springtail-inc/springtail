@@ -11,8 +11,7 @@ extern "C" {
     struct FuncCall;
 };
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /**
      * @brief Parser for Postgres SQL queries; breaks a SQL query into individual statements
@@ -59,6 +58,15 @@ namespace pg_proxy {
                 RELEASE_SAVEPOINT_STMT
             } type = INVALID;
 
+            /** Struct to hold information about SELECT set_config(...) commands */
+            struct SetConfigInfo {
+                std::string name;        ///< name of the variable being set
+                std::string value;       ///< value being set
+                bool is_local=false;     ///< is it a LOCAL set_config
+                bool is_read_safe=false; ///< is it a read-safe set_config
+            };
+            using SetConfigInfoPtr = std::shared_ptr<SetConfigInfo>;
+
             // clauses
             bool has_select_query=false;      ///< has a select query embedded (e.g., a PREPARE with select)
             bool has_unsupported_query=false; ///< has an unsupported query embedded
@@ -77,6 +85,9 @@ namespace pg_proxy {
 
             /** set of functions */
             std::set<std::string> functions;
+
+            /** list of set_config function statements */
+            std::vector<SetConfigInfoPtr> set_config_functions;
 
             /** set of <schema, tablename> pairs */
             std::set<std::pair<std::string, std::string>> tables;
@@ -141,5 +152,4 @@ namespace pg_proxy {
 
     };
     using ParserPtr = std::shared_ptr<Parser>;
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

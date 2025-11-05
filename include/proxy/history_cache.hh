@@ -10,8 +10,7 @@
 
 #include <proxy/buffer_pool.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /**
      * @brief Encapsulates a query statement, this may be a full packet or a portion of a simple query string
@@ -125,6 +124,7 @@ namespace pg_proxy {
         bool         is_read_safe;   ///< is associated query read-only
         std::shared_ptr<QueryStmt> dependency;  ///< dependent statement (e.g., bind depends on prepare)
         std::vector<std::shared_ptr<QueryStmt>> children; ///< children statements (e.g., of a simple query)
+        std::vector<std::shared_ptr<QueryStmt>> set_config_calls; ///< set_config function calls
     };
     using QueryStmtPtr = std::shared_ptr<QueryStmt>;
 
@@ -395,5 +395,4 @@ namespace pg_proxy {
         }
     };
 
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy
