@@ -102,7 +102,7 @@ namespace springtail {
         }
 
         // Create schema with internal row ID field
-        auto schema_with_row_id = schema->create_schema(schema->column_order(), {}, schema->get_sort_keys());
+        auto schema_with_row_id = schema->create_schema(schema->column_order(), {}, schema->get_sort_keys(), extension_callback);
 
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
