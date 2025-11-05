@@ -36,6 +36,19 @@ PgExtnRegistry::add_operator(const std::string& extension, uint32_t oid, const s
     _proc_oid_to_name.try_emplace(oid, proc_name);
 }
 
+void
+PgExtnRegistry::add_opclass(const std::string& extension, PgOpsClass opclass, PgOpsClassMethod method)
+{
+    auto library = _library_map.at(extension);
+
+    // Load the opclass method
+    auto extn_function = _load_extn_function(library, method.function_name);
+    method.function_ptr = extn_function;
+
+    // Update the name map
+    _opclass_function_map[opclass.name][method.support_number] = method;
+}
+
 PGFunction
 PgExtnRegistry::get_operator_func_by_oid(uint32_t oid) const
 {
@@ -104,6 +117,48 @@ PgExtnRegistry::init_libraries(uint64_t db_id,
     DCHECK(library);
 
     _library_map.try_emplace(extension, library);
+}
+
+PgOpsClassMethod
+PgExtnRegistry::get_opclass_method_by_method_name(const std::string& opclass_name, int support_number) const
+{
+    // Find the opclass by name
+    auto opclass_it = _opclass_function_map.find(opclass_name);
+    if (opclass_it == _opclass_function_map.end()) {
+        LOG_ERROR("Failed to find opclass by opclass name: {}", opclass_name);
+        return PgOpsClassMethod();
+    }
+
+    // Find the method by support number
+    auto method_it = opclass_it->second.find(support_number);
+    if (method_it == opclass_it->second.end()) {
+        LOG_ERROR("Failed to find opclass method by opclass name: {} and support number: {}", opclass_name, support_number);
+        return PgOpsClassMethod();
+    }
+
+    // Check if the function pointer is valid
+    if (method_it->second.function_ptr == nullptr) {
+        LOG_ERROR("Failed to find opclass method function by opclass name: {} and support number: {}", opclass_name, support_number);
+        return PgOpsClassMethod();
+    }
+
+    // Return the method
+    return method_it->second;
+}
+
+PGFunction
+PgExtnRegistry::get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name, int support_number) const
+{
+    auto method = get_opclass_method_by_method_name(opclass_name, support_number);
+
+    // Check if the function pointer is valid
+    if (method.function_ptr == nullptr) {
+        LOG_ERROR("Failed to find opclass method function by opclass name: {} and support number: {}", opclass_name, support_number);
+        return nullptr;
+    }
+
+    // Return the function pointer
+    return method.function_ptr;
 }
 
 bool

@@ -287,6 +287,11 @@ namespace springtail
         */
        static void _load_extn_operators(uint64_t db_id, const std::string& extension);
 
+       /**
+        * @brief Load pg extension opclasses
+        */
+       static void _load_extn_opclasses(uint64_t db_id, const std::string& extension);
+
         /**
          * @brief Get namespaces, returns a pair of namespace name and oid
          * @param db_id database id
