@@ -1652,7 +1652,6 @@ namespace springtail::pg_fdw {
     float
     PgFdwMgr::_get_enum_id_from_pg(const PgFdwState *state,
                                    int32_t springtail_oid,
-                                   Oid pg_oid,
                                    Oid label_oid)
     {
         // retrieve the type's entry from the pg_enum table
@@ -2178,7 +2177,7 @@ namespace springtail::pg_fdw {
 
                         // do reverse mapping lookup to get the enum idx from springtail
                         float enum_id =
-                            _get_enum_id_from_pg(state, column.pg_type, qual->base.typeoid, oid);
+                            _get_enum_id_from_pg(state, column.pg_type, oid);
                         fields->at(idx) = std::make_shared<ConstTypeField<float>>(enum_id);
                     }
                     break;

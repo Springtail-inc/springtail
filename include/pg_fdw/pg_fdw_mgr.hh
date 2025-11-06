@@ -326,7 +326,6 @@ namespace springtail::pg_fdw {
         /** Helper to convert a postgres enum type to springtail enum id (index/sortorder) */
         float _get_enum_id_from_pg(const PgFdwState *state,
                                    int32_t springtail_oid,
-                                   Oid pg_oid,
                                    Oid label_oid);
 
         /** Helper to convert a postgres extension data type to springtail extension data id (index/sortorder) */

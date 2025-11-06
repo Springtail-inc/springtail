@@ -178,7 +178,10 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
         auto type_ids = _usertype_cache->get_db_objects(db);
         for (auto tid: type_ids) {
             XidLsn x{xid};
-            client->get_usertype(db, tid, x);
+            auto ut = client->get_usertype(db, tid, x);
+            if (!ut || !ut->exists) {
+                _usertype_cache->mark_dropped(db, tid, xid);
+            }
             if (st.stop_requested()) {
                 break;
             }
