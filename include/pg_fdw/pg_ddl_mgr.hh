@@ -98,7 +98,7 @@ namespace springtail::pg_fdw {
                                                                 ///< latest xid
 
             // default constructor
-            DBData() = default;
+            explicit DBData(const std::string &name) : db_name(name) {}
 
             // remove copy and move cononstructors and operators
             DBData(const DBData&) = delete;

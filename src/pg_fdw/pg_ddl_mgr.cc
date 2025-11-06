@@ -146,7 +146,10 @@ namespace springtail::pg_fdw {
                 // extract the node
                 std::shared_lock lock(_db_mutex);
                 auto it = _db_data.find(db_id);
-                DCHECK(it != _db_data.end());
+                if (it == _db_data.end()) {
+                    DCHECK(false);
+                    return;
+                }
                 DBData &db_item = it->second;
 
                 std::shared_lock db_lock(db_item.db_mutex);
@@ -211,11 +214,14 @@ namespace springtail::pg_fdw {
         _register_db_state_watcher(db_id);
 
         std::unique_lock lock(_db_mutex);
-        auto [it, inserted] = _db_data.try_emplace(db_id);
-        DCHECK(inserted) << "Database " << db_id << " is already known";
+        auto [it, inserted] = _db_data.try_emplace(db_id, Properties::get_db_name(db_id));
+        if (!inserted) {
+            DCHECK(false) << "Database " << db_id << " is already known";
+            return;
+        }
+
         // only _db_mutex lock is needed to access database name
         DBData &db_item = it->second;
-        db_item.db_name = Properties::get_db_name(db_id);
 
         std::shared_lock db_lock(db_item.db_mutex);
         lock.unlock();
@@ -275,7 +281,6 @@ namespace springtail::pg_fdw {
                         return;
                     }
 
-                    // this lock is to prevent database being removed while we are applying changes
                     // apply the DDL statements
                     bool status = _update_schemas(db_id, db_item.db_name, xid_map);
                     if (!status) {
@@ -1295,10 +1300,10 @@ namespace springtail::pg_fdw {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, current_xid, schema_xid);
                     } else {
+                        std::unique_lock ddl_lock(db_item.pending_ddls_mutex);
                         if (db_item.state != redis::db_state_change::DB_STATE_RUNNING) {
                             LOG_INFO("New schema XID will be stored till database is in 'running' state: db_id={}, current={}, new={}",
                                     db_id, current_xid, schema_xid);
-                            std::unique_lock ddl_lock(db_item.pending_ddls_mutex);
                             db_item.pending_ddls[schema_xid] = sorted_ddls;
                         } else {
                             LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
@@ -2029,11 +2034,12 @@ namespace springtail::pg_fdw {
             Properties::get_instance()->set_fdw_db_ids(_fdw_id, _active_dbs);
         }
 
+        // queue up pending DDLs
+        std::unique_lock ddl_lock(db_item.pending_ddls_mutex);
+
         // set new state
         db_item.state = new_state;
 
-        // queue up pending DDLs
-        std::unique_lock ddl_lock(db_item.pending_ddls_mutex);
         if (!db_item.pending_ddls.empty()) {
 
             auto &ddl_map = db_item.pending_ddls;
