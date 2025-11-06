@@ -175,6 +175,11 @@ namespace springtail::pg_proxy {
         /**
          * @brief Compact the current history cache; updates _history
          * @param replay_idx index that sessions have replayed up to
+         * This parameter is used to determine which entries can safely be removed.
+         * Entries with an index less than or equal to replay_idx have already been
+         * replayed by the session, so redundant entries can be removed. Some removal entries
+         * with an index greater than replay_idx must be retained to ensure correct
+         * behavior for future replays.
          */
         void compact(uint64_t replay_idx) {
             _history = HistoryCache::compact(replay_idx, _history);
