@@ -7,6 +7,8 @@
 
 #include <pg_repl/libpq_connection.hh>
 
+#include <redis/db_state_change.hh>
+
 namespace springtail::pg_fdw {
     /**
      * @brief DDL Mgr, applies changes from Redis queue
@@ -22,9 +24,6 @@ namespace springtail::pg_fdw {
         static constexpr int MAX_THREAD_POOL_SIZE = 4;
         /** Sync thread check interval in seconds */
         static constexpr int SYNC_INTERVAL_SECONDS = 15;
-
-        static constexpr char DB_STATE_UNKNOWN[] = "unknown";
-
 
         /**
          * Start the main thread
@@ -85,15 +84,18 @@ namespace springtail::pg_fdw {
         uint64_t _db_instance_id;                  ///< database instance id
         int _port;                                 ///< port
 
-        std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map
+        std::shared_mutex _active_db_mutex;        ///< shared mutex for read/write access to _active_dbs
         std::set<uint64_t> _active_dbs;            ///< collection of active database ids for FDW
 
         struct DBData {
+            std::mutex pending_ddls_mutex;                      ///< mutex for applying changes to pending_ddls
             std::map<uint64_t, nlohmann::json> pending_ddls;    ///< map of xid to pending ddl
             std::shared_mutex db_mutex;                         ///< mutex for changes to this data structure
             std::string db_name{};                              ///< database name
-            std::string state{DB_STATE_UNKNOWN};                ///< current database state
-            uint64_t latest_xid{constant::INVALID_XID};         ///< latest xid
+            std::atomic<redis::db_state_change::DBState> state{redis::db_state_change::DB_STATE_UNKNOWN};
+                                                                ///< database state
+            std::atomic<uint64_t> latest_xid{constant::INVALID_XID};
+                                                                ///< latest xid
 
             // default constructor
             DBData() = default;
@@ -106,6 +108,7 @@ namespace springtail::pg_fdw {
         };
 
         std::map<uint64_t, DBData> _db_data;        ///< map of database id to DBData
+        std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_data
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
 
@@ -203,7 +206,7 @@ namespace springtail::pg_fdw {
          * @param ddls A JSON array of DDL statements to apply.
          * @return Status of the operation. True if successful, false otherwise.
          */
-        bool _update_schemas(uint64_t db_id,
+        bool _update_schemas(uint64_t db_id, const std::string &db_name,
                              const std::map<uint64_t, nlohmann::json> &xid_map);
 
         /** Helper to execute ddl statements for this db */
@@ -267,9 +270,10 @@ namespace springtail::pg_fdw {
          * @brief Function for creating a replicated database schemas
          * @param db_id - database id
          * @param db_name - database name
+         * @return latest databse xid
          */
-        void _create_schemas(const uint64_t db_id,
-                             const std::string &db_name);
+        uint64_t _create_schemas(const uint64_t db_id,
+                                 const std::string &db_name);
 
         /**
          * @brief Function for initializing RLS policies for the tables
@@ -302,18 +306,17 @@ namespace springtail::pg_fdw {
         /**
          * @brief Function for adding a new replicated database
          * @param db_id - database id
-         * @param db_name - database name
+         * @param db_item - database storage item
          */
-        void _add_replicated_database(uint64_t db_id, const std::string &db_name);
+        void _add_replicated_database(uint64_t db_id, DBData &db_item, redis::db_state_change::DBState new_state);
 
 
         /**
          * @brief Function for removing an existing replicated database
          * @param db_id - databese id
-         * @param db_name - database name
+         * @param db_item - database storage
          */
-        void _remove_replicated_database(uint64_t db_id, const std::string &db_name);
-
+        void _remove_replicated_database(uint64_t db_id, DBData &db_item, redis::db_state_change::DBState new_state);
 
         /**
          * @brief Function for executing a SQL command within a savepoint
@@ -380,7 +383,7 @@ namespace springtail::pg_fdw {
          * @param db_id - database id
          * @param state - new database state
          */
-        void _on_change_database_state(uint64_t db_id, const std::string &state);
+        void _on_change_database_state(uint64_t db_id, DBData &db_item, redis::db_state_change::DBState state);
 
         /**
          * @brief Add previously unknown database
@@ -395,14 +398,6 @@ namespace springtail::pg_fdw {
          * @param db_id - database id
          */
         void _remove_database(uint64_t db_id);
-
-        /**
-         * @brief Set latest applied XID for the given database
-         *
-         * @param db_id - database id
-         * @param latest_xid - latest xid
-         */
-        void _set_latest_xid(uint64_t db_id, uint64_t latest_xid);
 
         /**
          * @brief Queue request for the thread manager
