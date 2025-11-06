@@ -645,6 +645,14 @@ namespace springtail::pg_fdw {
                 sys_tbl_mgr::Client::get_instance()->use_schema_cache(_schema_shm_cache);
             }
         }
+
+        if (!_usertype_shm_cache || !_usertype_shm_cache->is_alive()) {
+            _usertype_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
+            if (_usertype_shm_cache) {
+                // start using the new cache
+                sys_tbl_mgr::Client::get_instance()->use_usertype_cache(_usertype_shm_cache);
+            }
+        }
     }
 
     List*

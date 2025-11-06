@@ -61,6 +61,11 @@ void Client::use_schema_cache(std::shared_ptr<ShmCache> c)
     _schema_shm_cache.store(std::move(c));
 }
 
+void Client::use_usertype_cache(std::shared_ptr<ShmCache> c)
+{
+    _usertype_shm_cache.store(std::move(c));
+}
+
 TableMetadataPtr
 Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
 {
@@ -219,6 +224,26 @@ Client::invalidate_db(uint64_t db_id, const XidLsn &xid)
 std::shared_ptr<UserType>
 Client::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
 {
+    // First check the shared memory cache
+    auto shm_cache = _usertype_shm_cache.load();
+    if (shm_cache) {
+        auto msg = shm_cache->find(db_id, type_id, xid);
+        if (msg) {
+            proto::GetUserTypeResponse response;
+            bool parsed = response.ParseFromString(msg.value());
+            if (parsed) {
+                auto user_type = std::make_shared<UserType>(response.type_id(),
+                                                            response.namespace_id(),
+                                                            response.type(),
+                                                            response.name(),
+                                                            response.value_json(),
+                                                            response.exists());
+                return user_type;
+            }
+        }
+    }
+
+    // Cache miss or no cache - fetch from server
     proto::GetUserTypeRequest request;
     request.set_db_id(db_id);
     request.set_type_id(type_id);
@@ -230,6 +255,12 @@ Client::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
                            [this, &request, &response](grpc::ClientContext *context) {
                                return _stub->GetUserType(context, request, &response);
                            });
+
+    // Insert into cache if cache is available
+    if (shm_cache) {
+        auto msg = response.SerializeAsString();
+        shm_cache->insert(db_id, type_id, xid, msg);
+    }
 
     auto user_type = std::make_shared<UserType>(response.type_id(),
                                                 response.namespace_id(),
