@@ -15,7 +15,9 @@ void
 PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size_t worker_count)
 {
     _roots_cache_size = roots_cache_size;
+    CHECK(_roots_cache_size);
     _schema_cache_size = schema_cache_size;
+    CHECK(_schema_cache_size);
     _worker_count = worker_count;
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "creating {}, {}, {}", _roots_cache_size, _schema_cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
