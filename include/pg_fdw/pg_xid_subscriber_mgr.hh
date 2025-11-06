@@ -26,7 +26,12 @@ namespace springtail::pg_fdw {
         using TableId = uint64_t;
         using Xid = uint64_t;
 
-        void init(size_t cache_size, size_t worker_count);
+        /** Initialize the PgXidSubscriberMgr.
+         * @param roots_cache_size The size of the cache for table roots.
+         * @param schema_cache_size The size of the cache for table schemas.
+         * @param worker_count The number of worker threads to populate the cache.
+         */
+        void init(size_t roots_cache_size, size_t schema_cache_size, size_t worker_count);
 
         static void start();
 
@@ -34,7 +39,8 @@ namespace springtail::pg_fdw {
         PgXidSubscriberMgr() : Singleton<PgXidSubscriberMgr>(ServiceId::PgXidSubscriberMgrId) {}
         ~PgXidSubscriberMgr();
 
-        size_t _cache_size;
+        size_t _roots_cache_size;
+        size_t _schema_cache_size;
         size_t _worker_count = 4;
 
         std::shared_ptr<sys_tbl_mgr::ShmCache> _cache;
