@@ -39,14 +39,14 @@ PgXidSubscriberMgr::task(std::stop_token st)
 
     // remove old cache if any and create a new one
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_ROOTS);
-    _cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _roots_cache_size);
+    _roots_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _roots_cache_size);
 
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
     _schema_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_SCHEMAS, _schema_cache_size);
 
     auto client = sys_tbl_mgr::Client::get_instance();
     // Client should cache get_roots() responses now
-    client->use_roots_cache(_cache);
+    client->use_roots_cache(_roots_cache);
     client->use_schema_cache(_schema_cache);
 
     // Flag indicating the connection status of XidMgrSubscriber
@@ -59,7 +59,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         // and return immediately. A worker calls get_roots() and get_schema() that will
         // attempt to populate the caches.
         LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {}", db, xid);
-        _cache->update_committed_xid(db, xid);
+        _roots_cache->update_committed_xid(db, xid);
         _schema_cache->update_committed_xid(db, xid);
         _enqueue_populate_job(db, xid);
     };
@@ -102,7 +102,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
             subscriber->start();
         }
         std::this_thread::sleep_for(loop_time_period);
-        _cache->keep_alive();
+        _roots_cache->keep_alive();
         _schema_cache->keep_alive();
     }
     subscriber.reset();
@@ -111,7 +111,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     client = sys_tbl_mgr::Client::get_instance();
     client->use_roots_cache({});
     client->use_schema_cache({});
-    _cache.reset();
+    _roots_cache.reset();
     _schema_cache.reset();
 }
 
@@ -141,7 +141,7 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
             _populate_queue.pop();
         }
         auto [db, xid] = item;
-        auto table_ids = _cache->get_db_tables(db);
+        auto table_ids = _roots_cache->get_db_tables(db);
         for (auto tid: table_ids) {
             XidLsn x{xid};
 
@@ -151,11 +151,11 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
                 // the above call to get_db_tables()
                 // won't return it. So exists() should be called
                 // only once after the table is dropped.
-                _cache->mark_dropped(db, tid, xid);
+                _roots_cache->mark_dropped(db, tid, xid);
                 _schema_cache->mark_dropped(db, tid, x);
                 continue;
             }
-            // the client will cache data in _cache and _schema_cache
+            // the client will cache data in _roots_cache and _schema_cache
             client->get_roots(db, tid, xid);
             client->get_schema(db, tid, x);
             if (st.stop_requested()) {

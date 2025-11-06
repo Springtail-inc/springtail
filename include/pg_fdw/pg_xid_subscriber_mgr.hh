@@ -43,7 +43,7 @@ namespace springtail::pg_fdw {
         size_t _schema_cache_size;
         size_t _worker_count = 4;
 
-        std::shared_ptr<sys_tbl_mgr::ShmCache> _cache;
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache;
         std::shared_ptr<sys_tbl_mgr::ShmCache> _schema_cache;
 
         std::condition_variable_any _cv;
