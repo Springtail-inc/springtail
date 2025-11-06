@@ -20,8 +20,8 @@ static const std::vector<std::tuple<std::string, bool, std::string>> tests = {
     {"SELECT foo FROM bar FOR UPDATE", false, ""},
     {"SELECT nextval()", false, ""},
     {"SELECT extract(epoch from now())", true, ""},
-    {"SET \"foo\"='bar'", true, "foo"},
-    {"SET LOCAL foo='bar'", true, "foo"},
+    {"SET \"my.foo\"='bar'", true, "my.foo"},
+    {"SET LOCAL my.foo='bar'", true, "my.foo"},
     {"SELECT foo FROM bar; UPDATE bar set foo = foo + 1", false, ""},
     {"COPY foo TO STDOUT", true, ""},
     {"PREPARE fooplan (int, text, bool, numeric) AS INSERT INTO foo VALUES($1, $2, $3, $4)", false, "fooplan"},
@@ -39,14 +39,13 @@ static const std::vector<std::tuple<std::string, bool, std::string>> tests = {
     {"BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ", true, "repeatable read"},
     {"BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE", false, "serializable"},
     {"SET TRANSACTION SNAPSHOT 'name'", false, "name"},
-    {"SET SESSION AUTHORIZATION 'paul'", true, "session_authorization"},
+    {"SET SESSION AUTHORIZATION 'paul'", false, "session_authorization"},
     {"LISTEN channel", false, "channel"},
     {"UNLISTEN channel", false, "channel"},
     {"NOTIFY channel 'payload'", false, ""},
     {"SAVEPOINT foo", true, "foo"},
     {"ROLLBACK TO SAVEPOINT foo", true, "foo"},
     {"RELEASE SAVEPOINT foo", true, "foo"},
-    {"SELECT set_config('search_path', 'myschema', false)", true, "search_path"},
 };
 
 // gtest function

@@ -34,7 +34,6 @@ target_link_libraries(springtail_proxy
     PUBLIC springtail_common
     PUBLIC absl::check
     PUBLIC absl::log
-    PUBLIC springtail_pg
     PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt

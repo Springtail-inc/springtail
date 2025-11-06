@@ -332,6 +332,15 @@ namespace springtail::pg_proxy {
             _session_replay_map.erase(session_id);
         }
 
+        /**
+         * @brief Set the session replay idx object; for testing
+         * @param session_id The session id
+         * @param idx The replay index
+         */
+        void set_session_replay_idx(uint64_t session_id, uint64_t idx) {
+            _session_replay_map[session_id] = idx;
+        }
+
     private:
         HistoryCache _session_history;     ///< session history cache
         HistoryCache _transaction_history; ///< transaction history cache

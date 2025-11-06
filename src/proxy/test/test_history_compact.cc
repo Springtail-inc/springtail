@@ -26,7 +26,8 @@ protected:
      */
     QueryStmtPtr create_test_statement(QueryStmt::Type statement_type,
                                      const std::string& statement_name = "",
-                                     const std::string& query_text = "") {
+                                     const std::string& query_text = "")
+    {
         std::string final_query_text = query_text.empty() ?
             "DEFAULT QUERY FOR " + std::to_string(static_cast<int>(statement_type)) : query_text;
 
@@ -51,7 +52,8 @@ protected:
     void add_statement_to_expected_history(uint64_t history_index,
                                          QueryStmt::Type statement_type,
                                          const std::string& statement_name = "",
-                                         const std::string& query_text = "") {
+                                         const std::string& query_text = "")
+    {
         QueryStmtPtr expected_statement = create_test_statement(statement_type, statement_name, query_text);
         expected_compacted_history[history_index] = expected_statement;
     }
@@ -59,7 +61,8 @@ protected:
     /**
      * @brief Verify that the actual compacted history matches the expected history exactly
      */
-    void verify_exact_compacted_history(const std::map<uint64_t, QueryStmtPtr>& actual_compacted_history) {
+    void verify_exact_compacted_history(const std::map<uint64_t, QueryStmtPtr>& actual_compacted_history)
+    {
         EXPECT_EQ(actual_compacted_history.size(), expected_compacted_history.size())
             << "Compacted history size mismatch: expected " << expected_compacted_history.size()
             << ", got " << actual_compacted_history.size();
@@ -104,7 +107,8 @@ protected:
     /**
      * @brief Helper to dump history contents for debugging test failures
      */
-    void dump_history_comparison_for_debugging(const std::map<uint64_t, QueryStmtPtr>& actual_compacted_history) {
+    void dump_history_comparison_for_debugging(const std::map<uint64_t, QueryStmtPtr>& actual_compacted_history)
+    {
         LOG_INFO("=== Original History ({} entries) ===", original_history_entries.size());
         for (const auto& [history_index, statement_ptr] : original_history_entries) {
             LOG_INFO("  [{}] type={}, name='{}', query='{}'",
@@ -138,7 +142,8 @@ protected:
 /**
  * @brief Test compaction of SET statements below replay index
  */
-TEST_F(HistoryCacheCompactTest, CompactSetStatementsBelowReplayIndex) {
+TEST_F(HistoryCacheCompactTest, CompactSetStatementsBelowReplayIndex)
+{
     // Add multiple SET statements for the same variable below replay index
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'");  // Index 1
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'");  // Index 2
@@ -158,7 +163,8 @@ TEST_F(HistoryCacheCompactTest, CompactSetStatementsBelowReplayIndex) {
 /**
  * @brief Test that SET statements above replay index are preserved exactly
  */
-TEST_F(HistoryCacheCompactTest, PreserveSetStatementsAboveReplayIndex) {
+TEST_F(HistoryCacheCompactTest, PreserveSetStatementsAboveReplayIndex)
+{
     // Add SET statements both below and above replay index
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'");    // Index 1
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'");    // Index 2
@@ -181,7 +187,8 @@ TEST_F(HistoryCacheCompactTest, PreserveSetStatementsAboveReplayIndex) {
 /**
  * @brief Test compaction of PREPARE and DEALLOCATE statements
  */
-TEST_F(HistoryCacheCompactTest, CompactPrepareAndDeallocateStatements) {
+TEST_F(HistoryCacheCompactTest, CompactPrepareAndDeallocateStatements)
+{
     // Add PREPARE statements
     add_statement_to_original_history(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT 1");  // Index 1
     uint64_t stmt2_prepare_index = add_statement_to_original_history(QueryStmt::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT 2");  // Index 2
@@ -204,7 +211,8 @@ TEST_F(HistoryCacheCompactTest, CompactPrepareAndDeallocateStatements) {
 /**
  * @brief Test that DEALLOCATE above replay index preserves both statements
  */
-TEST_F(HistoryCacheCompactTest, PreserveDeallocateAboveReplayIndex) {
+TEST_F(HistoryCacheCompactTest, PreserveDeallocateAboveReplayIndex)
+{
     // Add PREPARE statement below replay index
     uint64_t stmt1_prepare_index = add_statement_to_original_history(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT 1");  // Index 1
 
@@ -226,7 +234,8 @@ TEST_F(HistoryCacheCompactTest, PreserveDeallocateAboveReplayIndex) {
 /**
  * @brief Test RESET statement compaction behavior
  */
-TEST_F(HistoryCacheCompactTest, CompactResetStatements) {
+TEST_F(HistoryCacheCompactTest, CompactResetStatements)
+{
     // Add SET statements
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'");  // Index 1
     uint64_t timezone_set_index = add_statement_to_original_history(QueryStmt::SET, "timezone", "SET timezone = 'UTC'");  // Index 2
@@ -249,19 +258,20 @@ TEST_F(HistoryCacheCompactTest, CompactResetStatements) {
 /**
  * @brief Test RESET ALL statement compaction behavior
  */
-TEST_F(HistoryCacheCompactTest, CompactResetAllStatements) {
+TEST_F(HistoryCacheCompactTest, CompactResetAllStatements)
+{
     // Add multiple SET statements
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'");  // Index 1
     add_statement_to_original_history(QueryStmt::SET, "timezone", "SET timezone = 'UTC'");   // Index 2
     add_statement_to_original_history(QueryStmt::SET, "log_level", "SET log_level = 'DEBUG'"); // Index 3
 
     // Add RESET ALL below replay index
-    uint64_t reset_all_index = add_statement_to_original_history(QueryStmt::RESET, "", "RESET ALL");  // Index 4
+    uint64_t reset_all_index = add_statement_to_original_history(QueryStmt::RESET_ALL, "", "RESET ALL");  // Index 4
 
     uint64_t replay_index = 10; // All statements are below replay index
 
     // Expected: All SET statements should be removed by RESET ALL, only RESET ALL should remain
-    add_statement_to_expected_history(reset_all_index, QueryStmt::RESET, "", "RESET ALL");
+    add_statement_to_expected_history(reset_all_index, QueryStmt::RESET_ALL, "", "RESET ALL");
 
     auto actual_compacted_history = HistoryCache::compact(replay_index, original_history_entries);
 
@@ -272,7 +282,8 @@ TEST_F(HistoryCacheCompactTest, CompactResetAllStatements) {
 /**
  * @brief Test DEALLOCATE_ALL statement compaction behavior
  */
-TEST_F(HistoryCacheCompactTest, CompactDeallocateAllStatements) {
+TEST_F(HistoryCacheCompactTest, CompactDeallocateAllStatements)
+{
     // Add multiple PREPARE statements
     add_statement_to_original_history(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT 1");  // Index 1
     add_statement_to_original_history(QueryStmt::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT 2");  // Index 2
@@ -295,7 +306,8 @@ TEST_F(HistoryCacheCompactTest, CompactDeallocateAllStatements) {
 /**
  * @brief Test DISCARD_ALL statement compaction behavior
  */
-TEST_F(HistoryCacheCompactTest, CompactDiscardAllStatements) {
+TEST_F(HistoryCacheCompactTest, CompactDiscardAllStatements)
+{
     // Add various statements
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'");  // Index 1
     add_statement_to_original_history(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT 1");  // Index 2
@@ -319,7 +331,8 @@ TEST_F(HistoryCacheCompactTest, CompactDiscardAllStatements) {
 /**
  * @brief Test cursor/portal compaction behavior
  */
-TEST_F(HistoryCacheCompactTest, CompactCursorStatements) {
+TEST_F(HistoryCacheCompactTest, CompactCursorStatements)
+{
     // Add cursor declarations
     add_statement_to_original_history(QueryStmt::DECLARE_HOLD, "cursor1", "DECLARE cursor1 CURSOR WITH HOLD FOR SELECT 1");  // Index 1
     add_statement_to_original_history(QueryStmt::FETCH, "cursor1", "FETCH 10 FROM cursor1");  // Index 2
@@ -342,7 +355,8 @@ TEST_F(HistoryCacheCompactTest, CompactCursorStatements) {
 /**
  * @brief Test complex mixed scenario with statements above and below replay index
  */
-TEST_F(HistoryCacheCompactTest, ComplexMixedScenario) {
+TEST_F(HistoryCacheCompactTest, ComplexMixedScenario)
+{
     // Statements below replay index (should be compacted)
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'");      // Index 1
     uint64_t work_mem_final_index = add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'");      // Index 2
@@ -374,7 +388,8 @@ TEST_F(HistoryCacheCompactTest, ComplexMixedScenario) {
 /**
  * @brief Test empty history compaction
  */
-TEST_F(HistoryCacheCompactTest, CompactEmptyHistory) {
+TEST_F(HistoryCacheCompactTest, CompactEmptyHistory)
+{
     uint64_t replay_index = 5;
 
     // Expected: Empty history should remain empty
@@ -389,7 +404,8 @@ TEST_F(HistoryCacheCompactTest, CompactEmptyHistory) {
 /**
  * @brief Test compaction with replay index of zero
  */
-TEST_F(HistoryCacheCompactTest, CompactWithZeroReplayIndex) {
+TEST_F(HistoryCacheCompactTest, CompactWithZeroReplayIndex)
+{
     add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'");  // Index 1
     uint64_t stmt1_prepare_index = add_statement_to_original_history(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT 1");  // Index 2
     uint64_t work_mem_set_index = add_statement_to_original_history(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'");  // Index 3

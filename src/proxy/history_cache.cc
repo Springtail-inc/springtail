@@ -230,17 +230,19 @@ namespace pg_proxy {
         // find the savepoint in the transaction history
         auto rend = _transaction_history._history.rend();
         for (auto it = _transaction_history._history.rbegin(); it != rend; ++it) {
-            if (it->second->type == QueryStmt::DEALLOCATE || it->second->type == QueryStmt::DEALLOCATE_ALL) {
-                // add to session history; however these are in reverse order
+            if (it->second->type == QueryStmt::DEALLOCATE ||
+                it->second->type == QueryStmt::DEALLOCATE_ALL ||
+                it->second->type == QueryStmt::PREPARE) {
+                // want to keep these in the transaction history
                 rollback_list.push_front(it->second);
             }
             if (it->second->type == QueryStmt::SAVEPOINT && it->second->name == name) {
                 // remove all statements after this savepoint (using reverse iterator)
                 _transaction_history._history.erase(std::next(it).base(), _transaction_history._history.end());
 
-                // add to session history from rollback list
+                // add back to transaction history from rollback list
                 for (auto rit = rollback_list.begin(); rit != rollback_list.end(); ++rit) {
-                    _session_history.add(*rit);
+                    _transaction_history.add(*rit);
                 }
             }
         }
@@ -352,7 +354,7 @@ namespace pg_proxy {
         }
 
         // simple query removes unamed prepared statement from cache
-        _session_history._clear_by_type(QueryStmt::PREPARE, {}, false);
+        _transaction_history._clear_by_type(QueryStmt::PREPARE, {}, false);
     }
 
     void
@@ -363,21 +365,10 @@ namespace pg_proxy {
 
         switch (entry->type) {
             case QueryStmt::PREPARE:
-                // prepared statements don't get rolled back
-
+                // named prepared statements don't get rolled back
                 // technically, an unnamed prepared statement is valid until the next
                 // unnamed prepare / PARSE message or simple query
-                // we clear unamed prepared statements at the end of a simple query
-
-                if (!entry->name.empty()) {
-                    // add to session level prepared stmt cache
-                    // no need to add to transaction history,
-                    // as soon as they succeed they are visible; rollbacks don't affect them
-                    _session_history.add(entry);
-                    return;
-                }
-
-                // unamed prepared statements are added to the transaction history
+                _transaction_history._clear_by_type(QueryStmt::PREPARE, entry->name, false);
                 break;
             case QueryStmt::DEALLOCATE:
                 // remove prepared statements
@@ -415,6 +406,8 @@ namespace pg_proxy {
                 // safe to ignore
                 return;
             case QueryStmt::SYNC:
+                // removes unnamed prepared statements
+                _transaction_history._clear_by_type(QueryStmt::PREPARE, {}, false);
                 // ignore for now, will be handled in sync_transaction()
                 return;
             case QueryStmt::COMMIT:
@@ -422,7 +415,6 @@ namespace pg_proxy {
                 _commit_transaction();
                 return;
             case QueryStmt::ROLLBACK:
-                // clear transaction history, rollback anything not committed
                 _rollback_transaction();
                 return;
             case QueryStmt::RELEASE_SAVEPOINT:
@@ -451,16 +443,31 @@ namespace pg_proxy {
     void
     StatementCache::_rollback_transaction()
     {
+        bool session_history_modified = false;
+
         // go through and move any prepared / deallocates to the session history
         for (auto it = _transaction_history._history.begin(); it != _transaction_history._history.end(); ++it) {
             QueryStmtPtr entry = it->second;
             if (entry->type == QueryStmt::PREPARE ||
                 entry->type == QueryStmt::DEALLOCATE) {
-                // add to session history
+                // add to session history only if named
+                if (!entry->name.empty()) {
+                    _session_history.add(entry);
+                    session_history_modified = true;
+                }
+            }
+            if (entry->type == QueryStmt::DEALLOCATE_ALL) {
+                // clear all prepared statements from session history
                 _session_history.add(entry);
+                session_history_modified = true;
             }
         }
         _transaction_history.clear();
+
+        if (session_history_modified) {
+            // compact session history if modified
+            _session_history.compact(_get_replay_idx());
+        }
     }
 
     void
@@ -476,11 +483,17 @@ namespace pg_proxy {
                 case QueryStmt::SET_LOCAL:
                 case QueryStmt::BEGIN:
                 case QueryStmt::COMMIT:
-                case QueryStmt::PREPARE: // prepares are directly added to session history; unnamed prepares do not survive transaction
                 case QueryStmt::SAVEPOINT:
                 case QueryStmt::ANONYMOUS:
                 case QueryStmt::DECLARE: // only declare hold is across transactions
                     continue;
+
+                case QueryStmt::PREPARE:
+                    // unnamed prepares do not survive transaction
+                    if (it->second->name.empty()) {
+                        continue;
+                    }
+                    break;
 
                     // shouldn't see these, should be handled in commit_statement()
                 case QueryStmt::ROLLBACK:
@@ -515,11 +528,11 @@ namespace pg_proxy {
                     // compacting state from other removal statements is handled in compact()
                     break;
             }
-
             _session_history.add(it->second);
-            _session_history.compact(_get_replay_idx());
         }
+
         _transaction_history.clear();
+        _session_history.compact(_get_replay_idx());
     }
 } // namespace pg_proxy
 } // namespace springtail
