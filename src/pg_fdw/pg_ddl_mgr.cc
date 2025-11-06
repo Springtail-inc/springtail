@@ -1,4 +1,3 @@
-#include <redis/db_state_change.hh>
 #include <redis/redis_ddl.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
@@ -22,9 +21,6 @@ namespace springtail::pg_fdw {
     /** Get a list of all non-system schema names */
     static constexpr char DROP_DATABASE[] =
         "DROP DATABASE IF EXISTS {} WITH (FORCE)";
-
-    static constexpr char VERIFY_DB_EXISTS[] =
-        "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
     static constexpr char SYSTEM_TYPES[] =
         "SELECT oid, typname, typcategory "
@@ -116,14 +112,206 @@ namespace springtail::pg_fdw {
         : Singleton<PgDDLMgr>(ServiceId::PgDDLMgrId),
           _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
-        // initialize the cache watcher
-        _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
+        // initialize the cache watcher for db list changes
+        _cache_watcher_dbs = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string& path, const nlohmann::json& new_value) {
+                LOG_INFO("Received database ids change notification; path: {}, new_value: {}", path, new_value.dump());
+                DCHECK(path == Properties::DATABASE_IDS_PATH);
                 _on_database_ids_changed(path, new_value);
             }
         );
+
+        // initialize the cache watcher for db state changes
+        _cache_watcher_db_state = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string& path, const nlohmann::json& new_value) {
+                LOG_INFO("Received database state change notification; path: {}, new_value: {}", path, new_value.dump());
+                std::string prefix(Properties::DATABASE_STATE_PATH);
+                prefix += "/";
+                DCHECK(path.starts_with(prefix));
+                uint64_t db_id = 0;
+                auto result = std::from_chars(path.data() + prefix.size(), path.data() + path.size(), db_id);
+                if (result.ec != std::errc{}) {
+                    LOG_ERROR("Failed to parse path '{}' to extract database_id; error: {}",
+                            path, std::make_error_code(result.ec).message());
+                    return;
+                }
+
+                redis::db_state_change::DBState state = redis::db_state_change::DB_STATE_UNKNOWN;
+                if (new_value.is_string()) {
+                    state = redis::db_state_change::db_state_map[new_value.get<std::string>()];
+                } else if (!new_value.is_null()) {
+                    LOG_ERROR("Failed to get state value from json: {}", new_value.dump(4));
+                    return;
+                }
+
+                // extract the node
+                std::shared_lock lock(_db_mutex);
+                auto it = _db_data.find(db_id);
+                if (it == _db_data.end()) {
+                    DCHECK(false);
+                    return;
+                }
+                DBData &db_item = it->second;
+
+                std::shared_lock db_lock(db_item.db_mutex);
+                lock.unlock();
+
+                _on_change_database_state(db_id, db_item, state);
+            }
+        );
+
         PgXidCollector::get_instance()->start_thread();
     }
+
+    void PgDDLMgr::_add_cache_watcher(const std::string &path, RedisCache::RedisChangeWatcherPtr watcher)
+    {
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(path, watcher);
+    }
+
+    void PgDDLMgr::_remove_cache_watcher(const std::string &path, RedisCache::RedisChangeWatcherPtr watcher)
+    {
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->remove_callback(path, watcher);
+    }
+
+    void PgDDLMgr::_register_db_state_watcher(uint64_t db_id)
+    {
+        std::string path = fmt::format("{}/{}", Properties::DATABASE_STATE_PATH, db_id);
+        _add_cache_watcher(path, _cache_watcher_db_state);
+    }
+
+    void PgDDLMgr::_deregister_db_state_watcher(uint64_t db_id)
+    {
+        std::string path = fmt::format("{}/{}", Properties::DATABASE_STATE_PATH, db_id);
+        _remove_cache_watcher(path, _cache_watcher_db_state);
+    }
+
+    void PgDDLMgr::_on_change_database_state(uint64_t db_id, DBData &db_item, redis::db_state_change::DBState state)
+    {
+        LOG_INFO("Processing database {} state change to state '{}'", db_id, redis::db_state_change::db_state_to_name[state]);
+
+        redis::db_state_change::DBState old_state = db_item.state;
+        if (state == old_state) {
+            LOG_WARN("No state change");
+            return;
+        }
+
+        // state transition to running state
+        if (state == redis::db_state_change::DB_STATE_RUNNING) {
+            // On change to running state, add database and process pending DDLs
+            _add_replicated_database(db_id, db_item, state);
+
+        // state transition from running state
+        } else if (old_state == redis::db_state_change::DB_STATE_RUNNING) {
+            _remove_replicated_database(db_id, db_item, state);
+        } else {
+            db_item.state = state;
+        }
+    }
+
+    void PgDDLMgr::_add_database(uint64_t db_id)
+    {
+        _register_db_state_watcher(db_id);
+
+        std::unique_lock lock(_db_mutex);
+        auto [it, inserted] = _db_data.try_emplace(db_id, Properties::get_db_name(db_id));
+        if (!inserted) {
+            DCHECK(false) << "Database " << db_id << " is already known";
+            return;
+        }
+
+        // only _db_mutex lock is needed to access database name
+        DBData &db_item = it->second;
+
+        std::shared_lock db_lock(db_item.db_mutex);
+        lock.unlock();
+
+        // transition to the current state
+        redis::db_state_change::DBState state = redis::db_state_change::get_db_state(db_id);
+        if (state == redis::db_state_change::DB_STATE_RUNNING) {
+            _add_replicated_database(db_id, db_item, state);
+        } else {
+            db_item.state = state;
+        }
+    }
+
+    void PgDDLMgr::_remove_database(uint64_t db_id)
+    {
+        _deregister_db_state_watcher(db_id);
+
+        // extract the node
+        std::unique_lock lock(_db_mutex);
+        auto db_node = _db_data.extract(db_id);
+        DCHECK(db_node) << "Database" << db_id << " is not found";
+        DBData &db_item = db_node.mapped();
+
+        std::unique_lock db_lock(db_item.db_mutex);
+        lock.unlock();
+
+        // transition to unknown state will remove database from FDW
+        if (db_item.state == redis::db_state_change::DB_STATE_RUNNING) {
+            _remove_replicated_database(db_id, db_item, redis::db_state_change::DB_STATE_UNKNOWN);
+        }
+    }
+
+    void PgDDLMgr::_queue_request(uint64_t db_id, const std::map<uint64_t, nlohmann::json> &xid_map)
+    {
+        _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
+            db_id, [this, db_id, xid_map]() {
+                try {
+                    uint64_t schema_xid = xid_map.rbegin()->first;
+                    auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+
+                    LOG_DEBUG(
+                        LOG_FDW, LOG_LEVEL_DEBUG1, "Updating redis ddl @ through schema XID: {}, db_id: {}",
+                        schema_xid, db_id);
+
+                    // lock db_item so that database does not get removed while we are working on it
+                    std::shared_lock lock(_db_mutex);
+                    auto it = _db_data.find(db_id);
+                    if (it == _db_data.end()) {
+                        return;
+                    }
+                    auto &db_item = it->second;
+
+                    std::shared_lock db_lock(db_item.db_mutex);
+                    lock.unlock();
+
+                    if (db_item.state != redis::db_state_change::DB_STATE_RUNNING) {
+                        return;
+                    }
+
+                    // apply the DDL statements
+                    bool status = _update_schemas(db_id, db_item.db_name, xid_map);
+                    if (!status) {
+                        // error occurred, abort the DDL
+                        LOG_ERROR("Failed to apply DDL statements");
+                        RedisDDL::get_instance()->abort_fdw(_fdw_id);
+                        DCHECK(false);
+                        return;
+                    }
+
+                    // success, update schema XID if applied, otherwise they may be
+                    // queued
+                    RedisDDL::get_instance()->update_schema_xid(_fdw_id, db_id, schema_xid);
+                    db_item.latest_xid = schema_xid;
+
+                } catch (Error &e) {
+                    LOG_ERROR("Springtail exception in ddl manager task: {}", e.what());
+                    DCHECK(false);  // assert in debug
+                    e.log_backtrace();
+                } catch (std::exception &e) {
+                    LOG_ERROR("Caught std::exception in ddl mgr task: {}", e.what());
+                    DCHECK(false);  // assert in debug
+                } catch (...) {
+                    // handle exception
+                    LOG_ERROR("Exception in thread manager task");
+                    DCHECK(false);  // assert in debug
+                }
+            }));
+    }
+
 
     void PgDDLMgr::_on_database_ids_changed(const std::string &path,
                                             const nlohmann::json &new_value)
@@ -132,9 +320,9 @@ namespace springtail::pg_fdw {
         CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
 
         // get a vector of old database ids from _log_mgrs
-        std::shared_lock lock(_db_name_mutex);
-        auto keys = std::views::keys(_db_name_map);
-        lock.unlock();
+        std::shared_lock read_lock(_db_mutex);
+        auto keys = std::views::keys(_db_data);
+        read_lock.unlock();
         std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
 
         // get a vector of new database ids from new_value
@@ -145,13 +333,12 @@ namespace springtail::pg_fdw {
 
         // everything in old_db_ids needs to be removed
         for (auto db_id: old_db_ids) {
-            LOG_INFO("Remove replicated database: {}", db_id);
-            _remove_replicated_database(db_id);
+            _remove_database(db_id);
         }
 
         // everything in new_db_ids needs to be added
         for (auto db_id: new_db_ids) {
-            _add_replicated_database(db_id);
+            _add_database(db_id);
         }
     }
 
@@ -161,15 +348,28 @@ namespace springtail::pg_fdw {
         // wake up sync thread in case it was sleeping
         _sync_shutdown_cv.notify_all();
 
-        // cleanup redis cache watcher
-        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
-        redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
-
-        // join with threads
+        // join ddl manager thread
         _pg_ddl_mgr_thread.join();
+
+        // join sync thread
         _sync_thread.join();
+
+        // cleanup redis cache watcher
+        _remove_cache_watcher(Properties::DATABASE_IDS_PATH, _cache_watcher_dbs);
+
+        // remove all individual watchers and clear out the data
+        // NOTE: databases are not getting removed
+        std::unique_lock lock(_db_mutex);
+        for (auto db_id: std::views::keys(_db_data)) {
+            _deregister_db_state_watcher(db_id);
+        }
+        _db_data.clear();
+        lock.unlock();
+
+        // shutdown xid collector
         PgXidCollector::shutdown();
 
+        // set FDW state to stopped
         Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_STOPPED);
     }
 
@@ -242,10 +442,7 @@ namespace springtail::pg_fdw {
         // add subscribers to pubsub threads
         _db_instance_id = Properties::get_db_instance_id();
 
-        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
-        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
-
-        int sync_interval_secs = Json::get_or(fdw_config, "sync_seconds", SYNC_INTERVAL_SECONDS);
+        _add_cache_watcher(Properties::DATABASE_IDS_PATH, _cache_watcher_dbs);
 
         _init_fdw();
 
@@ -253,6 +450,7 @@ namespace springtail::pg_fdw {
         _thread_manager->start();
 
         // create a new thread to run the policy and role sync
+        int sync_interval_secs = Json::get_or(fdw_config, "sync_seconds", SYNC_INTERVAL_SECONDS);
         _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this, sync_interval_secs);
         pthread_setname_np(_sync_thread.native_handle(), "DDLMgrSync");
         LOG_INFO("PgDDLMgr::init() done");
@@ -592,8 +790,24 @@ namespace springtail::pg_fdw {
                 auto conn = std::make_shared<LibPqConnection>();
 
                 // iterate through all databases and perform sync operations
-                auto databases = Properties::get_instance()->get_databases();
-                for (auto &[db_id, db_name] : databases) {
+                std::shared_lock lock(_active_db_mutex);
+                std::vector<uint64_t> running_db_ids(_active_dbs.begin(), _active_dbs.end());
+                lock.unlock();
+
+                for (auto db_id: running_db_ids) {
+                    std::shared_lock lock(_db_mutex);
+                    auto it = _db_data.find(db_id);
+                    if (it == _db_data.end()) {
+                        continue;
+                    }
+                    auto &db_item = it->second;
+                    const std::string &db_name = db_item.db_name;
+                    std::shared_lock db_lock(db_item.db_mutex);
+                    lock.unlock();
+
+                    if (db_item.state != redis::db_state_change::DB_STATE_RUNNING) {
+                        continue;
+                    }
                     std::vector<std::string> sql_commands;
 
                     // connect to the primary database
@@ -825,9 +1039,6 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_init_fdw()
     {
-        // get map of dbs id:name from redis
-        auto dbs = Properties::get_databases();
-
         // connect to the db to setup the replicated dbs, the fdw user and foreign servers
         LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
 
@@ -844,9 +1055,12 @@ namespace springtail::pg_fdw {
         conn->disconnect();
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Populated system defined types: {}", _type_cache.size());
 
+        // get map of dbs id:name from redis
+        auto dbs = Properties::get_databases();
+
         // go through each db and drop/create the database on the fdw
         for (const auto &[db_id, db_name] : dbs) {
-            _add_replicated_database(db_id, db_name, false);
+            _add_database(db_id);
         }
 
         // drop other roles that are not fdw or ddl mgr user
@@ -1060,7 +1274,6 @@ namespace springtail::pg_fdw {
                 }
 
                 // check if we should skip applying any of the DDLs based on already-applied XIDs
-                std::shared_lock db_lock(_db_mutex);
                 std::map<uint64_t, std::map<uint64_t, nlohmann::json>> db_map;
                 for (auto &entry : ddls_vec) {
                     uint64_t db_id = entry.at("db_id").get<uint64_t>();
@@ -1075,21 +1288,31 @@ namespace springtail::pg_fdw {
 
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Sorted DDLS: {}", sorted_ddls.dump(4));
 
-                    uint64_t current_xid = constant::INVALID_XID;
-                    if (_db_xid_map.contains(db_id)) {
-                        current_xid = _db_xid_map[db_id];
-                    }
+                    std::shared_lock lock(_db_mutex);
+                    auto it = _db_data.find(db_id);
+                    CHECK(it != _db_data.end()) << "Received DDL changes for unknown database";
+                    auto &db_item = it->second;
+
+                    std::shared_lock db_lock(db_item.db_mutex);
+                    lock.unlock();
+
+                    uint64_t current_xid = db_item.latest_xid;
                     if (current_xid >= schema_xid) {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, current_xid, schema_xid);
                     } else {
-                        LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
-                                  db_id, current_xid, schema_xid);
-                        db_map[db_id][schema_xid] = sorted_ddls;
+                        std::unique_lock ddl_lock(db_item.pending_ddls_mutex);
+                        if (db_item.state != redis::db_state_change::DB_STATE_RUNNING) {
+                            LOG_INFO("New schema XID will be stored till database is in 'running' state: db_id={}, current={}, new={}",
+                                    db_id, current_xid, schema_xid);
+                            db_item.pending_ddls[schema_xid] = sorted_ddls;
+                        } else {
+                            LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
+                                    db_id, current_xid, schema_xid);
+                            db_map[db_id][schema_xid] = sorted_ddls;
+                        }
                     }
                 }
-
-                db_lock.unlock();
 
                 if (db_map.empty()) {
                     LOG_WARN("All schemas have already been applied");
@@ -1099,76 +1322,8 @@ namespace springtail::pg_fdw {
 
                 // queue each DBs DDL statements for processing
                 for (const auto &[db_id, xid_map] : db_map) {
-                    _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
-                        db_id, [this, db_id, xid_map]() {
-                            while (true) {
-                                std::shared_lock db_name_lock(_db_name_mutex);
-                                std::shared_lock db_xid_lock(_db_mutex);
-                                if (!_db_name_map.contains(db_id)) {
-                                    if (_db_xid_map.contains(db_id)) {
-                                        // warn and return
-                                        LOG_WARN("DDL changes for database {} won't be applied as database is being removed", db_id);
-                                        return;
-                                    } else {
-                                        db_xid_lock.unlock();
-                                        db_name_lock.unlock();
-                                        try {
-                                            std::string db_state = Properties::get_db_state(db_id);
-                                            if (db_state != redis::db_state_change::REDIS_STATE_INITIALIZE) {
-                                                return;
-                                            }
-                                        } catch (RedisNotFoundError &e) {
-                                            LOG_ERROR("Failed to find database state: {}", e.what());
-                                            return;
-                                        }
-                                        // sleep and continue
-                                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                                        continue;
-                                    }
-                                }
-                                break;
-                            }
-                            try {
-                                uint64_t schema_xid = xid_map.rbegin()->first;
-                                auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
-
-                                LOG_DEBUG(
-                                    LOG_FDW, LOG_LEVEL_DEBUG1, "Updating redis ddl @ through schema XID: {}, db_id: {}",
-                                    schema_xid, db_id);
-
-                                // apply the DDL statements
-                                bool status = _update_schemas(db_id, xid_map);
-                                if (!status) {
-                                    // error occurred, abort the DDL
-                                    LOG_ERROR("Failed to apply DDL statements");
-                                    RedisDDL::get_instance()->abort_fdw(_fdw_id);
-                                    DCHECK(false);
-                                    return;
-                                }
-
-                                // success, update schema XID if applied, otherwise they may be
-                                // queued
-                                RedisDDL::get_instance()->update_schema_xid(_fdw_id, db_id, schema_xid);
-
-                                std::unique_lock db_lock_unique(_db_mutex);
-                                _db_xid_map[db_id] = schema_xid;
-                                db_lock_unique.unlock();
-
-                            } catch (Error &e) {
-                                LOG_ERROR("Springtail exception in ddl manager task: {}", e.what());
-                                DCHECK(false);  // assert in debug
-                                e.log_backtrace();
-                            } catch (std::exception &e) {
-                                LOG_ERROR("Caught std::exception in ddl mgr task: {}", e.what());
-                                DCHECK(false);  // assert in debug
-                            } catch (...) {
-                                // handle exception
-                                LOG_ERROR("Exception in thread manager task");
-                                DCHECK(false);  // assert in debug
-                            }
-                        }));
+                    _queue_request(db_id, xid_map);
                 }
-
             } catch (Error &e) {
                 LOG_ERROR("Springtail exception in DDL thread");
                 DCHECK(false); // assert in debug
@@ -1246,11 +1401,11 @@ namespace springtail::pg_fdw {
     }
 
     bool
-    PgDDLMgr::_update_schemas(uint64_t db_id,
+    PgDDLMgr::_update_schemas(uint64_t db_id, const std::string &db_name,
                               const std::map<uint64_t, nlohmann::json> &xid_map)
     {
         // get the database name for the db_id; XXX should see if we can swtich to OID
-        std::string db_name = Properties::get_db_name(db_id);
+
         LibPqConnectionPtr conn = _get_fdw_connection(db_id, db_name);
         std::vector<std::string> txn;
 
@@ -1677,7 +1832,7 @@ namespace springtail::pg_fdw {
         }
     }
 
-    void
+    uint64_t
     PgDDLMgr::_create_schemas(const uint64_t db_id,
                               const std::string &db_name)
     {
@@ -1792,15 +1947,11 @@ namespace springtail::pg_fdw {
 
         _release_fdw_connection(db_id, conn);
 
-        // set the schema xid in the map
-        std::unique_lock db_lock(_db_mutex);
-        _db_xid_map[db_id] = xid;
-        db_lock.unlock();
-
         // update redis with the schema xid
         RedisDDL::get_instance()->update_schema_xid(_fdw_id, db_id, xid);
         LOG_INFO("Schema initialization complete for db_id={}, db_name={}, xid={}",
                  db_id, db_name, xid);
+        return xid;
     }
 
     void
@@ -1861,91 +2012,73 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_add_replicated_database(uint64_t db_id,
-                                       const std::optional<std::string> &db_name_opt,
-                                       bool check_exists)
+    PgDDLMgr::_add_replicated_database(uint64_t db_id, DBData &db_item,redis::db_state_change::DBState new_state)
     {
+
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        nlohmann::json db_config = Properties::get_db_config(db_id);
 
-        std::string db_name;
-        if (!db_name_opt.has_value()) {
-            // if db_name is not provided, get it from the properties
-            nlohmann::json db_config = Properties::get_db_config(db_id);
-            db_name = db_config["name"];
-        } else {
-            db_name = db_name_opt.value();
-        }
-
-        LibPqConnectionPtr conn = nullptr;
-        if (check_exists) {
-            // check if the database already exists in the fdw
-            // flag is set if coming from redis callback for adding db
-            {
-                std::shared_lock shared_lock(_db_name_mutex);
-                if (_db_name_map.contains(db_id)) {
-                    LOG_INFO("Database {} already exists in the fdw", db_name);
-                    return;
-                }
-            }
-
-            // NOTE: I think it is no longer needed
-            // looks like it does not exist in database name map, so get a connection and really check
-            conn = _get_fdw_connection(std::nullopt, "template1");
-            std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
-            conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
-            if (conn->ntuples() > 0) {
-                // it really does exist return
-                conn->disconnect();
-                return;
-            }
-            conn->clear();
-        } else {
-            conn = _get_fdw_connection(std::nullopt, "template1");
-        }
+        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
 
         // drop/add database
-        _create_database(conn, db_id, db_name);
+        _create_database(conn, db_id, db_item.db_name);
         conn->disconnect();
 
         // create schemas
-        _create_schemas(db_id, db_name);
+        db_item.latest_xid = _create_schemas(db_id, db_item.db_name);
 
         {
-            std::unique_lock lock(_db_name_mutex);
-            _db_name_map.emplace(db_id, db_name);
+            std::unique_lock lock(_active_db_mutex);
+            DCHECK(!_active_dbs.contains(db_id));
+            _active_dbs.insert(db_id);
+
+            // update active db list in redis
+            Properties::get_instance()->set_fdw_db_ids(_fdw_id, _active_dbs);
+        }
+
+        // queue up pending DDLs
+        std::unique_lock ddl_lock(db_item.pending_ddls_mutex);
+
+        // set new state
+        db_item.state = new_state;
+
+        if (!db_item.pending_ddls.empty()) {
+
+            auto &ddl_map = db_item.pending_ddls;
+
+            // Find the first element with key > cutoff
+            ddl_map.erase(ddl_map.begin(), ddl_map.upper_bound(db_item.latest_xid));
+
+            // queue remaining requests
+            if (!ddl_map.empty()) {
+                _queue_request(db_id, ddl_map);
+                ddl_map.clear();
+            }
         }
     }
 
     void
-    PgDDLMgr::_remove_replicated_database(uint64_t db_id)
+    PgDDLMgr::_remove_replicated_database(uint64_t db_id, DBData &db_item, redis::db_state_change::DBState new_state)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
-        std::string db_name;
+
         {
-            std::unique_lock lock(_db_name_mutex);
-            auto it = _db_name_map.find(db_id);
-            if (it == _db_name_map.end()) {
-                return;
-            }
-            db_name = it->second;
-            _db_name_map.erase(it);
+            std::unique_lock lock(_active_db_mutex);
+            DCHECK(_active_dbs.contains(db_id));
+            _active_dbs.erase(db_id);
+
+            // update active db list in redis
+            Properties::get_instance()->set_fdw_db_ids(_fdw_id, _active_dbs);
         }
 
+        // cleanup ddls
         RedisDDL::get_instance()->clear_ddls(db_id);
 
         // drop database
         LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
-        std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
+        std::string prefixed_name = conn->escape_identifier(_db_prefix + db_item.db_name);
         std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
         conn->exec_no_throw(drop_db);
         conn->disconnect();
-
-        // remove it from internal storage
-        {
-            std::unique_lock unique_lock(_db_mutex);
-            _db_xid_map.erase(db_id);
-        }
 
         // remove connections from connection cache
         {
@@ -1969,6 +2102,8 @@ namespace springtail::pg_fdw {
             throw;
         }
 
+        // set new state
+        db_item.state = new_state;
     }
 
     std::string
