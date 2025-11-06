@@ -2057,11 +2057,10 @@ namespace springtail::pg_fdw {
         {
             std::unique_lock lock(_active_db_mutex);
             DCHECK(_active_dbs.contains(db_id));
+            _active_dbs.erase(db_id);
 
             // update active db list in redis
             Properties::get_instance()->set_fdw_db_ids(_fdw_id, _active_dbs);
-
-            _active_dbs.erase(db_id);
         }
 
         // cleanup ddls
