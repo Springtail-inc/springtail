@@ -104,7 +104,7 @@ namespace {
         get_least_loaded_instance()
         {
             std::shared_lock lock(_base_mutex);
-            return _get_least_loaded_instance();
+            return _get_least_loaded_instance([](const std::string &replica_id) { return true; });
         }
 
         /** override abstract method */
@@ -112,7 +112,7 @@ namespace {
         release_expired_sessions() override
         {
             std::unique_lock lock(_base_mutex);
-            for (auto instance: _active_instances) {
+            for (auto &instance: _active_instances) {
                 instance->release_expired_sessions();
             }
         }

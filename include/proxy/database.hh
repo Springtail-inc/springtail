@@ -591,7 +591,7 @@ namespace springtail::pg_proxy {
          * @brief Get least loaded instance from the _instances_sessions map
          * @return DatabaseInstancePtr or nullptr if no instances
          */
-        DatabaseInstancePtr _get_least_loaded_instance();
+        DatabaseInstancePtr _get_least_loaded_instance(const std::function<bool(const std::string &)>& check_func);
 
     protected:
         /** mutex for maps */
@@ -673,10 +673,34 @@ namespace springtail::pg_proxy {
             return DatabaseInstance::State::NONE;
         }
 
+        /**
+         * @brief Update the set of running database ids for the given replica.
+         *
+         * @param replica_id - replica id
+         * @param new_db_ids - new set of database ids
+         */
+        void update_fdw_db_ids(const std::string &replica_id, std::set<uint64_t> new_db_ids);
+
+        /**
+         * @brief Remove database for all replicas
+         *
+         * @param db_id - database id
+         */
+        void remove_database(uint64_t db_id) override;
+
+        /**
+         * @brief Get JSON representation of replica set; used by admin server
+         * @return nlohmann::json
+         */
+        nlohmann::json to_json() const override;
+
     protected:
         /** pool config used for each instance */
         DatabasePool::PoolConfig _pool_config;
-    };
+
+        std::map<std::string, std::set<uint64_t>>  _fdw_dbs; ///< map of FDW ids to the list of databases active on this FDW
+        mutable std::shared_mutex _fdw_mutex;                ///< mutex for access to _fdw_dbs
+};
     using DatabaseReplicaSetPtr = std::shared_ptr<DatabaseReplicaSet>;
 
     /**
@@ -911,9 +935,13 @@ namespace springtail::pg_proxy {
          * @brief Add replica database instance
          * @param replica_id - replica id (fdw id)
          */
-        void add_replica(const std::string &replica_id) {
-            _replica_set->add_replica(replica_id);
-        }
+        void add_replica(const std::string &replica_id);
+
+        /**
+         * @brief Remove replica database instance
+         * @param replica_id - replica id (fdw id)
+         */
+        void remove_replica(const std::string &replica_id);
 
         /**
          * @brief Get primary database set
@@ -990,6 +1018,12 @@ namespace springtail::pg_proxy {
             const std::string &schema,
             const std::string &table) const;
 
+        /**
+         * @brief Get JSON representation of database manager data
+         * @return nlohmann::json
+         */
+        nlohmann::json to_json() const;
+
     protected:
         /**
          * @brief Function called by Singleton base class to perform shutdown.
@@ -1013,6 +1047,7 @@ namespace springtail::pg_proxy {
         RedisCache::RedisChangeWatcherPtr _cache_watcher_db_ids;    ///< callback for redis cache db ids
         RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states; ///< callback for redis cache database replica state
         RedisCache::RedisChangeWatcherPtr _cache_watcher_fdws;      ///< callback for redis cache foreign data wrapper state
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_fdw_dbs;   ///< callback for redis cache FDW dbs
 
         PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database
 
@@ -1090,6 +1125,20 @@ namespace springtail::pg_proxy {
          * @param new_value - new value
          */
         void _redis_fdw_change_cb(const nlohmann::json &new_value);
+
+        /**
+         * @brief Register watcher for the given fdw id
+         *
+         * @param fdw_id - FDW id
+         */
+        void _register_fdw_dbs_cache_watcher(const std::string &fdw_id);
+
+        /**
+         * @brief Deregister watcher for the given fdw id
+         *
+         * @param fdw_id - FDW id
+         */
+        void _deregister_fdw_dbs_cache_watcher(const std::string &fdw_id);
     };
     using DatabaseMgrPtr = std::shared_ptr<DatabaseMgr>;
 
