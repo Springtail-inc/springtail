@@ -8,7 +8,7 @@
 
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/exception.hh>
-#include <pg_repl/libpq_connection.hh>
+#include <common/libpq_connection.hh>
 
 namespace springtail
 {

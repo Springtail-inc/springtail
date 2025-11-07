@@ -123,6 +123,10 @@ namespace springtail::pg_proxy {
          * @brief Reset the session, override base session (and call it)
          */
         void reset_session() override {
+            auto client_session = get_client_session();
+            if (client_session != nullptr) {
+                client_session->server_shutdown(shared_from_this());
+            }
             unpin_client_session();
             _defer_shadow_shutdown = false;
             _stmts.clear();

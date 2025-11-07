@@ -43,17 +43,12 @@ static const std::vector<std::string> tests = {
     "SAVEPOINT foo",
     "ROLLBACK TO SAVEPOINT foo",
     "RELEASE SAVEPOINT foo",
+    "SELECT set_config('search_path', '\"myschema\"', false), set_config('work_mem', '64MB', false)",
 };
 
 int main(void)
 {
-    // init_logging(LOG_ALL);
-    std::vector<std::unique_ptr<ServiceRunner>> service_runners;
-    service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
-    service_runners.emplace_back(std::make_unique<ExceptionRunner>());
-    service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, LOG_ALL));
-
-    springtail_init_custom(service_runners);
+    springtail_init(false, std::nullopt, LOG_PROXY);
 
     for (int i = 0; i < tests.size(); i++) {
         std::cout << "\nQuery: " << tests[i] << std::endl;
