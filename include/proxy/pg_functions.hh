@@ -14,7 +14,6 @@ namespace pg_proxy {
         "DROP",
         "REFRESH",
         "REINDEX",
-        "RESET",
         "REVOKE",
         "ALTER",
         "TRUNCATE",
@@ -29,7 +28,39 @@ namespace pg_proxy {
         "currval",
         "lastval",
         "current_setting",
-        "set_config"
+        // whitelist "set_config", and check it on a case by case basis
+    };
+
+    /**
+     * @brief Set of session variables that are safe to set on read-replica
+     * https://www.postgresql.org/docs/current/runtime-config-client.html
+     */
+    static const std::set<std::string> proxy_safe_variables = {
+        "application_name",
+        "bytea_output",
+        "client_encoding",
+        "client_min_messages",
+        "idle_in_transaction_session_timeout",
+        "idle_session_timeout",
+        "lock_timeout",
+        "log_statement",
+        "row_security",
+        "search_path",
+        "standard_conforming_strings",
+        "statement_timeout",
+        "transaction_timeout",
+        "xmlbinary",
+        "xmloption",
+        // Locale and formatting
+        "datestyle",
+        "intervalstyle",
+        "timezone",
+        "extra_float_digits",
+        "lc_messages",
+        "lc_monetary",
+        "lc_numeric",
+        "lc_time",
+        "timezone_abbreviations"
     };
 
     /* NOTE: removed lo_* functions for managing large objects,
@@ -1267,6 +1298,7 @@ namespace pg_proxy {
         "scale",
         "set_bit",
         "set_byte",
+        "set_config",
         "set_masklen",
         "setweight",
         "sha224",

@@ -4,15 +4,6 @@
 
 namespace springtail {
 
-    /** parent connection error */
-    class PgConnectionError : public Error {
-    public:
-        PgConnectionError() = default;
-        explicit PgConnectionError(const std::string &error)
-            : Error(error)
-        { }
-    };
-
     class PgUnrecoverableError : public Error{
     public:
         PgUnrecoverableError() = default;
@@ -24,18 +15,6 @@ namespace springtail {
     class PgReplicationSlotError : public PgUnrecoverableError {
         const char *what() const noexcept {
             return "Replication slot error";
-        }
-    };
-
-    class PgNotConnectedError : public PgConnectionError {
-        const char *what() const noexcept {
-            return "The connection is closed";
-        }
-    };
-
-    class PgAlreadyConnectedError : public PgConnectionError {
-        const char *what() const noexcept {
-            return "Already connected";
         }
     };
 
@@ -55,12 +34,6 @@ namespace springtail {
     class PgTableNotFoundError: public PgConnectionError {
         const char *what() const noexcept {
             return "Table not found";
-        }
-    };
-
-    class PgQueryError : public PgConnectionError {
-        const char *what() const noexcept {
-            return "An error occurred executing the query";
         }
     };
 
@@ -87,13 +60,6 @@ namespace springtail {
             return "Copy is done";
         }
     };
-
-    class PgNoResultError : public PgConnectionError {
-        const char *what() const noexcept {
-            return "No query result found";
-        }
-    };
-
 
     class PgMessageError : public Error {
     public:

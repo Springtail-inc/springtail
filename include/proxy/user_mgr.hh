@@ -11,7 +11,7 @@
 #include <common/logging.hh>
 #include <common/init.hh>
 
-#include <pg_repl/libpq_connection.hh>
+#include <common/libpq_connection.hh>
 
 #include <proxy/connection.hh>
 #include <proxy/auth/scram.hh>

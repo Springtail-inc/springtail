@@ -415,9 +415,9 @@ namespace springtail {
          */
         uint64_t _get_db_id(const std::string &db_name);
 
-        /**
-         * @brief Internal get fdw ids matching any of the given states
-         * @param states - vector of fdw states to match (empty vector returns all FDWs)
+         /**
+         * @brief Internal get fdw ids
+         * @param states - vector of states to filter fdw ids
          * @return std::vector<std::string>
          */
         std::vector<std::string> _get_fdw_ids(const std::vector<std::string> &states);
