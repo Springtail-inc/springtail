@@ -673,7 +673,7 @@ namespace springtail::pg_proxy {
          * @param replica_id - replica id
          * @param new_db_ids - new set of database ids
          */
-        void update_fdw_db_ids(const std::string &replica_id, std::set<uint64_t> new_db_ids);
+        virtual void update_fdw_db_ids(const std::string &replica_id, std::set<uint64_t> new_db_ids);
 
         /**
          * @brief Remove database for all replicas

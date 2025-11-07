@@ -129,7 +129,7 @@ namespace {
         }
 
         void
-        update_fdw_db_ids(const std::string &replica_id, std::set<uint64_t> new_db_ids)
+        update_fdw_db_ids(const std::string &replica_id, std::set<uint64_t> new_db_ids) override
         {
             std::unique_lock lock(_fdw_mutex);
             if (!_fdw_dbs.contains(replica_id)) {
