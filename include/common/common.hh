@@ -246,6 +246,15 @@ namespace springtail {
             return false;
         }
 
+        static inline
+        std::string to_lower(const std::string& str)
+        {
+            std::string lower_str;
+            lower_str.reserve(str.size());
+            std::transform(str.begin(), str.end(), std::back_inserter(lower_str), ::tolower);
+            return lower_str;
+        }
+
         static inline std::string
         trim(const std::string& str)
         {

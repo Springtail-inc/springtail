@@ -4,8 +4,7 @@
 #include <common/constants.hh>
 #include <common/multi_queue_thread_manager.hh>
 #include <common/object_cache.hh>
-
-#include <pg_repl/libpq_connection.hh>
+#include <common/libpq_connection.hh>
 
 #include <redis/db_state_change.hh>
 

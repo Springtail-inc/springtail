@@ -35,4 +35,37 @@ namespace springtail {
         }
     };
 
+    /** parent connection error */
+    class PgConnectionError : public Error {
+    public:
+        PgConnectionError() = default;
+        explicit PgConnectionError(const std::string &error)
+            : Error(error)
+        { }
+    };
+
+    class PgNotConnectedError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "The connection is closed";
+        }
+    };
+
+    class PgAlreadyConnectedError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "Already connected";
+        }
+    };
+
+    class PgQueryError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "An error occurred executing the query";
+        }
+    };
+
+    class PgNoResultError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "No query result found";
+        }
+    };
+
 } // namespace springtail
