@@ -1,5 +1,6 @@
 #include <map>
 
+#include <common/common.hh>
 #include <common/logging.hh>
 
 #include <proxy/parser.hh>
@@ -61,7 +62,9 @@ namespace springtail::pg_proxy {
     Parser::dump_context(const StmtContext &context)
     {
         LOG_INFO("Context: location={}, type={}, name={}, is_read_safe={}\n  has_select_query={}, has_unsupported_query={}, has_locking={}, has_into={}, has_declare_hold={}, has_error={}, has_is_local={}",
-            context.stmt_location, _stmt_names[(int8_t)context.type], context.name, context.is_read_safe, context.has_select_query, context.has_unsupported_query, context.has_locking, context.has_into, context.has_declare_hold, context.has_error, context.has_is_local);
+            context.stmt_location, _stmt_names[(int8_t)context.type], context.name, context.is_read_safe,
+            context.has_select_query, context.has_unsupported_query, context.has_locking, context.has_into,
+            context.has_declare_hold, context.has_error, context.has_is_local);
 
         for (auto &func : context.functions) {
             LOG_INFO("Function: {}", func);
@@ -69,6 +72,12 @@ namespace springtail::pg_proxy {
 
         for (auto &table : context.tables) {
             LOG_INFO("Table: schema={}, table={}", table.first, table.second);
+        }
+
+        for (auto &set_config_info : context.set_config_functions) {
+            LOG_INFO("SetConfig: name={}, value={}, is_local={}, is_read_safe={}",
+                set_config_info->name, set_config_info->value,
+                set_config_info->is_local, set_config_info->is_read_safe);
         }
     }
 
@@ -125,10 +134,30 @@ namespace springtail::pg_proxy {
     bool
     Parser::_is_query_readonly(const StmtContext &context, VerifyTableFn verify_table_fn)
     {
+        assert(context.type != StmtContext::INVALID);
+
+        // NOTE: do this first as we need to set the flag within the set_config info struct
+        // iterate through the set_config functions
+        bool set_config_read_safe = true;
+        for (auto &set_config_info : context.set_config_functions) {
+            // setting variables is ok only if in the safe list or user defined (xxx.yyy)
+            if (!proxy_safe_variables.contains(common::to_lower(set_config_info->name)) &&
+                set_config_info->name.find('.') == std::string::npos) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Found unsafe set_config variable {}:{} in query", set_config_info->name, common::to_lower(set_config_info->name));
+                    set_config_info->is_read_safe = false;
+                    set_config_read_safe = false;
+                    // don't return yet, we want to mark all set_config info
+            } else {
+                set_config_info->is_read_safe = true;
+            }
+        }
+
         // debugging
         dump_context(context);
 
-        assert(context.type != StmtContext::INVALID);
+        if (!set_config_read_safe) {
+            return false;
+        }
 
         // check conditions or clauses that indicate updates/writes
         if (_replica_unsafe_stmts.contains(context.type) || context.has_error ||
@@ -147,6 +176,16 @@ namespace springtail::pg_proxy {
         for (auto iter = context.tables.begin(); iter != context.tables.end(); iter++) {
             if (!_is_table_readonly_safe(*iter, verify_table_fn)) {
                 return false;
+            }
+        }
+
+        // check set statements
+        if (context.type == StmtContext::VAR_SET_STMT) {
+            // setting variables is ok only if in the safe list or user defined (xxx.yyy)
+            if (!proxy_safe_variables.contains(common::to_lower(context.name)) &&
+                context.name.find('.') == std::string::npos) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Found unsafe variable {}:{} in query", context.name, common::to_lower(context.name));
+                    return false;
             }
         }
 
@@ -219,6 +258,67 @@ namespace springtail::pg_proxy {
         raw_expression_tree_walker_impl((Node*)tree.tree, Parser::_node_walker, &context);
 
         pg_query_exit_memory_context(ctx);
+    }
+
+    void
+    Parser::_extract_set_config(FuncCall *func_call, StmtContextPtr stmt)
+    {
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Detected set_config function call");
+
+        // Validate we have at least 3 arguments
+        if (func_call->args == nullptr || list_length(func_call->args) < 3) {
+            LOG_WARN("set_config function call with insufficient arguments");
+            stmt->has_error = true;
+            return;
+        }
+
+        auto set_config_info = std::make_shared<StmtContext::SetConfigInfo>();
+
+        // Extract key (argument 1)
+        Node *first_arg = (Node*)list_nth(func_call->args, 0);
+        if (nodeTag(first_arg) == T_A_Const) {
+            A_Const *key_const = (A_Const*)first_arg;
+            if (nodeTag(&key_const->val) == T_String) {
+                _set_string(key_const->val.sval.sval, set_config_info->name);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                            "set_config session variable: key={}", stmt->name);
+            }
+        } else {
+            LOG_WARN("set_config function first argument is not a constant");
+            stmt->has_error = true;
+            return;
+        }
+
+        // Extract value (argument 2)
+        Node *second_arg = (Node*)list_nth(func_call->args, 1);
+        if (nodeTag(second_arg) == T_A_Const) {
+            A_Const *value_const = (A_Const*)second_arg;
+            if (nodeTag(&value_const->val) == T_String) {
+                _set_string(value_const->val.sval.sval, set_config_info->value);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                            "set_config session variable: value={}", set_config_info->value);
+            }
+        } else {
+            LOG_WARN("set_config function second argument is not a constant");
+            stmt->has_error = true;
+            return;
+        }
+
+        // Get the third argument (is_local parameter)
+        Node *third_arg = (Node*)list_nth(func_call->args, 2);
+        if (nodeTag(third_arg) == T_A_Const) {
+            A_Const *is_local_const = (A_Const*)third_arg;
+            if (nodeTag(&is_local_const->val) == T_Boolean) {
+                // If third parameter is false, it's a session variable
+                set_config_info->is_local = is_local_const->val.boolval.boolval;
+            }
+        } else {
+            LOG_WARN("set_config function third argument is not a constant");
+            stmt->has_error = true;
+            return;
+        }
+
+        stmt->set_config_functions.push_back(set_config_info);
     }
 
     /*
@@ -499,14 +599,25 @@ namespace springtail::pg_proxy {
             context->has_locking = true;
             return false;
 
-        case T_FuncCall:
+        case T_FuncCall: {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Parser node: funccall");
+            FuncCall *func_call = (FuncCall *)node;
             parse_context->in_funccall = true;
-            raw_expression_tree_walker_impl((Node*)(((FuncCall *)node)->funcname), _node_walker, ctx);
+
+            // Walk the funcname list to build the function name
+            raw_expression_tree_walker_impl((Node*)(func_call->funcname), _node_walker, ctx);
             parse_context->in_funccall = false;
-            context->functions.insert(parse_context->func_name);
+
+            if (!parse_context->func_name.empty()) {
+                context->functions.insert(parse_context->func_name);
+                // Handle set_config function specifically
+                if (parse_context->func_name == "set_config") {
+                    _extract_set_config(func_call, context);
+                }
+            }
             parse_context->func_name = {};
             break;
+        }
 
         case T_String:
             if (parse_context->in_funccall) {
