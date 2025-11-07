@@ -608,9 +608,10 @@ namespace springtail {
             }
 
             // generate connection string
-            std::string conninfo = fmt::format("{}='{}' port={} dbname='{}' user='{}' \
-                password='{}' {}client_encoding={} \
-                options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3{}'",
+            std::string conninfo = fmt::format(
+                "{}='{}' port={} dbname='{}' user='{}' "
+                "password='{}' {}client_encoding={} "
+                "options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3{}'",
                 hosttype, host, db_port, name, user, pass,
                 (replication ? "replication=database ": ""), encoding, options_str);
 
@@ -620,9 +621,10 @@ namespace springtail {
             connection = PQconnectdb(conninfo.c_str());
             if (PQstatus(connection) != CONNECTION_OK) {
                 // mask out password for logs
-                std::string conninfo = fmt::format("{}='{}' port={} dbname='{}' user='{}' \
-                    password='****' {}client_encoding={} \
-                    options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3{}'",
+                std::string conninfo = fmt::format(
+                    "{}='{}' port={} dbname='{}' user='{}' "
+                    "password='****' {}client_encoding={} "
+                    "options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3{}'",
                     hosttype, host, db_port, name, user,
                     (replication ? "replication=database ": ""), encoding, options_str);
 
@@ -745,13 +747,13 @@ namespace springtail {
             timeout.tv_usec = 0;
 
             if (timeout_sec == -1) {
-                tv = NULL;
+                tv = nullptr;
             } else {
                 tv = &timeout;
             }
 
             // Wait until the socket is readable or timeout occurs
-            int result = select(sockfd + 1, &readfds, NULL, NULL, tv);
+            int result = select(sockfd + 1, &readfds, nullptr, nullptr, tv);
 
             if (result > 0 && FD_ISSET(sockfd, &readfds)) {
                 // Socket is readable
@@ -791,13 +793,13 @@ namespace springtail {
             timeout.tv_usec = 0;
 
             if (timeout_sec == -1) {
-                tv = NULL;
+                tv = nullptr;
             } else {
                 tv = &timeout;
             }
 
             // Wait until the socket is writable or timeout occurs
-            int result = select(sockfd + 1, NULL, &writefds, NULL, tv);
+            int result = select(sockfd + 1, nullptr, &writefds, nullptr, tv);
 
             if (result > 0 && FD_ISSET(sockfd, &writefds)) {
                 // Socket is writable
