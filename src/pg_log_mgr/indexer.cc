@@ -246,10 +246,21 @@ namespace springtail::committer {
         auto it = std::ranges::find_if(meta->roots,
                 [&](auto const& v) { return index_id == v.index_id; });
 
-        auto is_last_index = std::all_of(meta->roots.begin(), meta->roots.end(),
-                [&](auto const& r) {
-                return (r.index_id == constant::INDEX_PRIMARY || r.index_id == constant::INDEX_LOOK_ASIDE || r.index_id == index_id);
-                });
+        auto la_it = meta->roots.end();
+        bool is_last_index = true;
+
+        for (auto it = meta->roots.begin(); it != meta->roots.end(); ++it) {
+            if (it->index_id == constant::INDEX_LOOK_ASIDE) {
+                la_it = it;
+            }
+
+            if (!(it->index_id == constant::INDEX_PRIMARY ||
+                        it->index_id == constant::INDEX_LOOK_ASIDE ||
+                        it->index_id == index_id)) {
+                is_last_index = false;
+                break;
+            }
+        }
 
         // Erase roots if present, roots wont be there if index drop came in before processing build,
         // and in that case, proceed for making index DELETED
@@ -263,28 +274,20 @@ namespace springtail::committer {
             auto root = table->create_index_root(index_id, idx_cols, {PgExtnRegistry::get_instance()->comparator_func});
             if (it->extent_id != constant::UNKNOWN_EXTENT) {
                 root->init(it->extent_id);
-            } else {
-                root->init_empty();
+                root->truncate();
+                root->finalize();
             }
-            root->truncate();
-            root->finalize();
 
             // Truncate look-aside index if this is the last index in the table getting dropped
             if (is_last_index) {
-                auto la_it = std::ranges::find_if(meta->roots,
-                        [&](auto const& v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
-
                 LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Dropping look aside index as we are dropping final secondary index: {}", index_id);
 
                 auto look_aside_root = table->create_look_aside_root({PgExtnRegistry::get_instance()->comparator_func});
                 if (la_it->extent_id != constant::UNKNOWN_EXTENT) {
                     look_aside_root->init(la_it->extent_id);
-                } else {
-                    look_aside_root->init_empty();
+                    look_aside_root->truncate();
+                    look_aside_root->finalize();
                 }
-
-                look_aside_root->truncate();
-                look_aside_root->finalize();
             }
         }
 
