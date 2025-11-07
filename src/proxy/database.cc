@@ -340,10 +340,8 @@ namespace springtail::pg_proxy
     }
 
     DatabaseInstancePtr
-    DatabaseInstanceSet::_get_least_loaded_instance(const std::function<bool(const std::string &)>& check_func)
+    DatabaseReplicaSet::_get_least_loaded_instance(uint64_t db_id)
     {
-        std::shared_lock lock(_base_mutex);
-
         if (_active_instances.empty()) {
             return nullptr;
         }
@@ -353,8 +351,10 @@ namespace springtail::pg_proxy
         int min_active_sessions = INT_MAX;
         int min_total_sessions = INT_MAX;
 
+        std::shared_lock fdw_lock(_fdw_mutex);
         for (auto &it : _active_instances) {
-            if (!check_func(it->replica_id())) {
+            auto fdw_db_it = _fdw_dbs.find(it->replica_id());
+            if (fdw_db_it == _fdw_dbs.end() || !fdw_db_it->second.contains(db_id)) {
                 continue;
             }
             int num_active_sessions = it->active_session_count();
@@ -373,6 +373,8 @@ namespace springtail::pg_proxy
                 instance = it;
             }
         }
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Returning least loaded instance for db_id {} and replica '{}'",
+                db_id, instance->replica_id());
 
         return instance;
     }
@@ -457,7 +459,7 @@ namespace springtail::pg_proxy
         {
             std::unique_lock fdw_lock(_fdw_mutex);
             auto [it, inserted] = _fdw_dbs.try_emplace(replica_id, db_set);
-            CHECK(inserted);
+            DCHECK(inserted);
         }
 
         // create new instance; fetch config from properties (redis)
@@ -527,15 +529,7 @@ namespace springtail::pg_proxy
     {
         std::shared_lock lock(_base_mutex);
 
-        auto instance = _get_least_loaded_instance([this, db_id](const std::string &replica_id) -> bool
-        {
-            std::shared_lock fdw_lock(_fdw_mutex);
-            auto it = _fdw_dbs.find(replica_id);
-            if (it == _fdw_dbs.end()) {
-                return false;
-            }
-            return it->second.contains(db_id);
-        });
+        auto instance = _get_least_loaded_instance(db_id);
 
         if (instance == nullptr) {
             return nullptr;

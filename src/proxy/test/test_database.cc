@@ -43,8 +43,8 @@ namespace {
     class TestDatabaseInstance : public DatabaseInstance {
     public:
 
-        TestDatabaseInstance(Session::Type type, const std::string &hostname, const std::string &prefix, int port)
-            : DatabaseInstance({0, 0, 0}, type, hostname, port, prefix) {}
+        TestDatabaseInstance(Session::Type type, const std::string &hostname, const std::string &prefix, int port, const std::string &replica_id = "")
+            : DatabaseInstance({0, 0, 0}, type, hostname, port, prefix, replica_id) {}
 
         /** override allocate session (create a TestServerSession) to avoid creating a connection */
         ServerSessionPtr allocate_session(UserPtr user,
@@ -67,9 +67,9 @@ namespace {
 
 
     /** Mock database set derived class */
-    class TestableDatabaseSet : public DatabaseInstanceSet {
+    class TestableDatabaseSet : public DatabaseReplicaSet {
     public:
-        TestableDatabaseSet() : DatabaseInstanceSet() {}
+        TestableDatabaseSet() : DatabaseReplicaSet(DatabasePool::PoolConfig()) {}
 
         /** override abstract method */
         ServerSessionPtr allocate_session(UserPtr user,
@@ -101,10 +101,10 @@ namespace {
 
         /** make public for testing */
         DatabaseInstancePtr
-        get_least_loaded_instance()
+        get_least_loaded_instance(uint64_t db_id)
         {
             std::shared_lock lock(_base_mutex);
-            return _get_least_loaded_instance([](const std::string &replica_id) { return true; });
+            return _get_least_loaded_instance(db_id);
         }
 
         /** override abstract method */
@@ -126,6 +126,17 @@ namespace {
                 instance_sessions[instance] = instance->all_session_count();
             }
             return instance_sessions;
+        }
+
+        void
+        update_fdw_db_ids(const std::string &replica_id, std::set<uint64_t> new_db_ids)
+        {
+            std::unique_lock lock(_fdw_mutex);
+            if (!_fdw_dbs.contains(replica_id)) {
+                _fdw_dbs[replica_id] = {};
+            }
+            lock.unlock();
+            DatabaseReplicaSet::update_fdw_db_ids(replica_id, new_db_ids);
         }
     };
     using TestableDatabaseSetPtr = std::shared_ptr<TestableDatabaseSet>;
@@ -369,10 +380,13 @@ namespace {
         void SetUp() override
         {
             db_set = std::make_shared<TestableDatabaseSet>();
-            instance1 = std::make_shared<TestDatabaseInstance>(Session::Type::PRIMARY, "localhost", "", 5432);
-            instance2 = std::make_shared<TestDatabaseInstance>(Session::Type::PRIMARY, "localhost", "", 5433);
+            instance1 = std::make_shared<TestDatabaseInstance>(Session::Type::PRIMARY, "localhost", "", 5432, "fdw1");
+            instance2 = std::make_shared<TestDatabaseInstance>(Session::Type::PRIMARY, "localhost", "", 5433, "fdw2");
             db_set->add_instance(instance1);
             db_set->add_instance(instance2);
+
+            db_set->update_fdw_db_ids("fdw1", {1});
+            db_set->update_fdw_db_ids("fdw2", {1, 2});
         }
 
         TestableDatabaseSetPtr db_set;
@@ -461,8 +475,8 @@ namespace {
         EXPECT_EQ(instance1->all_session_count(), 1);
         EXPECT_EQ(instance2->all_session_count(), 2);
 
-        auto least_loaded_instance = db_set->get_least_loaded_instance();
-        EXPECT_EQ(least_loaded_instance, instance1);
+        auto least_loaded_instance = db_set->get_least_loaded_instance(2);
+        EXPECT_EQ(least_loaded_instance, instance2);
     }
 
 } // namespace

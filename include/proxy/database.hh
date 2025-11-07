@@ -587,12 +587,6 @@ namespace springtail::pg_proxy {
             DatabaseInstancePtr instance,
             const std::string &database);
 
-        /**
-         * @brief Get least loaded instance from the _instances_sessions map
-         * @return DatabaseInstancePtr or nullptr if no instances
-         */
-        DatabaseInstancePtr _get_least_loaded_instance(const std::function<bool(const std::string &)>& check_func);
-
     protected:
         /** mutex for maps */
         mutable std::shared_mutex _base_mutex;
@@ -695,6 +689,12 @@ namespace springtail::pg_proxy {
         nlohmann::json to_json() const override;
 
     protected:
+        /**
+         * @brief Get least loaded instance from the _instances_sessions map
+         * @return DatabaseInstancePtr or nullptr if no instances
+         */
+        DatabaseInstancePtr _get_least_loaded_instance(uint64_t db_id);
+
         /** pool config used for each instance */
         DatabasePool::PoolConfig _pool_config;
 
