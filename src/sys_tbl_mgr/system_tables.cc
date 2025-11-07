@@ -65,6 +65,7 @@ const std::vector<SchemaColumn> Indexes::Data::SCHEMA = {
     {"lsn", 4, SchemaType::UINT64, INT8OID, false, 3},
     {"position", 5, SchemaType::UINT32, INT4OID, false, 4},
     {"column_id", 6, SchemaType::UINT32, INT4OID, false},
+    {"opclass", 7, SchemaType::TEXT, TEXTOID, false}
 };
 
 const std::vector<SchemaColumn> Indexes::Primary::SCHEMA = {
@@ -124,7 +125,8 @@ const std::vector<SchemaColumn> IndexNames::Data::SCHEMA = {
     {"namespace_id", 5, SchemaType::UINT64, INT8OID, false},
     {"name", 6, SchemaType::TEXT, TEXTOID, false},
     {"state", 7, SchemaType::UINT8, INT8OID, false},
-    {"is_unique", 8, SchemaType::BOOLEAN, BOOLOID, false}};
+    {"is_unique", 8, SchemaType::BOOLEAN, BOOLOID, false},
+    {"index_type", 9, SchemaType::TEXT, TEXTOID, false}};
 
 const std::vector<SchemaColumn> IndexNames::Primary::SCHEMA = {
     {"table_id", 1, SchemaType::UINT64, INT8OID, false},

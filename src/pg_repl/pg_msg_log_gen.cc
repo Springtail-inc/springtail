@@ -235,6 +235,7 @@ namespace springtail {
         msg["table_oid"] = table_oid;
         msg["table_name"] = table_name;
         msg["identity"] = index;
+        msg["index_type"] = "btree";
 
         nlohmann::json columns_json;
 
@@ -243,6 +244,7 @@ namespace springtail {
             col["name"] = c.name;
             col["position"] = c.position;
             col["idx_position"] = c.idx_position;
+            col["opclass"] = c.opclass;
             columns_json.push_back(col);
         }
 
@@ -747,6 +749,7 @@ namespace springtail {
             col.name = c["name"];
             col.position = c["position"];
             col.idx_position = c["idx_position"];
+            col.opclass = c["opclass"];
             columns.push_back(col);
         }
         _log_gen.create_index(index, json["table_name"], json["table_oid"], columns);

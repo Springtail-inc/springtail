@@ -91,6 +91,12 @@ namespace springtail::constant {
      */
     static const std::string INTERNAL_ROW_ID = "__springtail_internal_row_id";
 
+    /**
+     * Different types of secondary indexes
+     */
+    static constexpr std::string_view INDEX_TYPE_GIN = "gin";
+    static constexpr std::string_view INDEX_TYPE_BTREE = "btree";
+
     /** The format of a raw data file name. */
     static constexpr std::string_view DATA_FILE = "raw";
 

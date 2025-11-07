@@ -190,7 +190,8 @@ public:
         static constexpr uint32_t LSN = 3;
         static constexpr uint32_t POSITION = 4;
         static constexpr uint32_t COLUMN_ID = 5;
-        static constexpr uint64_t INTERNAL_ROW_ID = 6;
+        static constexpr uint32_t OPCLASS = 6;
+        static constexpr uint64_t INTERNAL_ROW_ID = 7;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -200,15 +201,17 @@ public:
                                     uint64_t lsn,
                                     uint32_t position,
                                     uint32_t column_id,
+                                    std::string opclass,
                                     uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(7);
+            auto fields = std::make_shared<FieldArray>(8);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
             fields->at(POSITION) = std::make_shared<ConstTypeField<uint32_t>>(position);
             fields->at(COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(column_id);
+            fields->at(OPCLASS) = std::make_shared<ConstTypeField<std::string>>(opclass);
             fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return fields;
         }
@@ -384,7 +387,8 @@ public:
         static constexpr uint32_t NAME = 5;
         static constexpr uint32_t STATE = 6;
         static constexpr uint32_t IS_UNIQUE = 7;
-        static constexpr uint64_t INTERNAL_ROW_ID = 8;
+        static constexpr uint32_t INDEX_TYPE = 8;
+        static constexpr uint64_t INTERNAL_ROW_ID = 9;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -396,9 +400,10 @@ public:
                               uint64_t lsn,
                               State state,
                               bool is_unique,
+                              const std::string &index_type,
                               uint64_t internal_row_id)
         {
-            auto fields = std::make_shared<FieldArray>(9);
+            auto fields = std::make_shared<FieldArray>(10);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
@@ -408,6 +413,7 @@ public:
             fields->at(STATE) =
                 std::make_shared<ConstTypeField<uint8_t>>(static_cast<uint8_t>(state));
             fields->at(IS_UNIQUE) = std::make_shared<ConstTypeField<bool>>(is_unique);
+            fields->at(INDEX_TYPE) = std::make_shared<ConstTypeField<std::string>>(index_type);
             fields->at(INTERNAL_ROW_ID) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
