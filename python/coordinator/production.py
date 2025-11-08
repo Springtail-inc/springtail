@@ -226,10 +226,6 @@ class Production:
         lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.so')
         run_command('sudo', ['cp', os.path.join(sp_libdir, 'libspringtail_pg_fdw.so'), lib_dir])
 
-        # remove the pg_ext shared library for FDW
-        shared_lib_dir = os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)
-        run_command('sudo', ['rm', '-f', os.path.join(shared_lib_dir, 'libspringtail_pgext.so')])
-
         # Update the postgres configuration file
         # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
         self.logger.info("Updating postgres environment file")

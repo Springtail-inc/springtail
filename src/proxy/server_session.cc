@@ -1057,6 +1057,12 @@ namespace springtail::pg_proxy {
         // grab a shared pointer to self, to avoid losing the reference during cleanup
         ServerSessionPtr self = shared_from_this();
 
+        // notify client session of error
+        auto client = get_client_session();
+        if (client != nullptr) {
+            client->server_shutdown(self);
+        }
+
         // on error, the server shuts down the connection and releases the session
         ProxyServer::get_instance()->shutdown_session(self);
 

@@ -9,8 +9,8 @@
 
 #include <common/logging.hh>
 #include <common/constants.hh>
-#include <common/libpq_connection.hh>
 #include <pg_ext/fmgr.hh>
+#include <pg_repl/libpq_connection.hh>
 
 namespace springtail {
 // Minimal replication of pg_type ( Form_pg_type )

@@ -18,7 +18,7 @@ namespace springtail::pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection)
         : Session(connection),
-          _stmt_cache(),
+          _stmt_cache(STATEMENT_CACHE_SIZE),
           _shadow_mode(ProxyServer::get_instance()->mode() == ProxyServer::MODE::SHADOW),
           _primary_mode(ProxyServer::get_instance()->mode() == ProxyServer::MODE::PRIMARY)
     {
@@ -380,7 +380,6 @@ namespace springtail::pg_proxy {
         }
     }
 
-
     void
     ClientSession::server_auth_error(ServerSessionPtr session,
                                      uint64_t seq_id,
@@ -402,7 +401,6 @@ namespace springtail::pg_proxy {
         ProxyProtoError::encode_error(buffer, error_code, error_message, "FATAL");
         _send_buffer(buffer, seq_id);
     }
-
 
     void
     ClientSession::server_auth_done(ServerSessionPtr session,
@@ -432,14 +430,12 @@ namespace springtail::pg_proxy {
         _auth->send_auth_done(_gen_seq_id(), parameters);
     }
 
-
     void
     ClientSession::server_msg_response(SessionMsgPtr msg, bool success)
     {
         // update statement cache with msg completion
         _stmt_cache.commit_statement(msg->data(), msg->completed(), success);
     }
-
 
     void
     ClientSession::server_ready_msg(char xact_status)
@@ -465,15 +461,11 @@ namespace springtail::pg_proxy {
         _stmt_cache.sync_transaction(xact_status);
     }
 
-
     void
     ClientSession::server_shutdown(ServerSessionPtr session)
     {
-        // server session is shutting down; called from ServerSession::reset_session()
+        // server session is shutting down; called from ServerSession::shutdown_session()
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Server session shutting down", _id);
-
-        // should be removed by reset_session() first
-        _stmt_cache.remove_session(session->id());
 
         if (session->type() == Session::Type::PRIMARY) {
             // primary session is shutting down
@@ -811,12 +803,15 @@ namespace springtail::pg_proxy {
             _stmt_cache.clear_statement();
             _in_transaction = true; // implicit transaction
         }
-
         QueryStmtPtr qs = _stmt_cache.add(QueryStmt::DECLARE, buffer, prepared_stmt->is_read_safe, portal.data());
-        // qs->dependency = prepared_stmt;
+        qs->dependency = prepared_stmt;
 
         // create message with dependencies/provides
         SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_BIND, qs, seq_id);
+        if (!lookup_result.second) {
+            // add dependency if not in current transaction
+            msg->add_dependency(prepared_stmt);
+        }
 
         // queue message to server session
         _queue_msg(msg);
@@ -990,7 +985,7 @@ namespace springtail::pg_proxy {
         // if no server is available a new server session will be connected
         // and this message will be delayed until after the session is ready
         std::vector<QueryStmtPtr> dependencies;
-        QueryStmtPtr qs = parse_simple_query(_db_id, buffer, query);
+        QueryStmtPtr qs = _parse_simple_query(buffer, query, dependencies);
 
         // create message for server for query
         SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, qs, seq_id);
@@ -1146,7 +1141,7 @@ namespace springtail::pg_proxy {
     }
 
     QueryStmt::Type
-    ClientSession::_remap_parse_type(const Parser::StmtContextPtr context)
+    ClientSession::_remap_parse_type(const Parser::StmtContextPtr context) const
     {
         switch(context->type) {
             // statements explicitly tracked in session history
@@ -1174,9 +1169,6 @@ namespace springtail::pg_proxy {
                 }
 
             case Parser::StmtContext::Type::VAR_RESET_STMT:
-                if (context->name.empty()) {
-                    return QueryStmt::RESET_ALL;
-                }
                 return QueryStmt::RESET;
 
             case Parser::StmtContext::Type::FETCH_STMT:
@@ -1186,9 +1178,6 @@ namespace springtail::pg_proxy {
                 return QueryStmt::LISTEN;
 
             case Parser::StmtContext::Type::UNLISTEN_STMT:
-                if (context->name.empty()) {
-                    return QueryStmt::UNLISTEN_ALL;
-                }
                 return QueryStmt::UNLISTEN;
 
             case Parser::StmtContext::Type::SAVEPOINT_STMT:
@@ -1235,9 +1224,9 @@ namespace springtail::pg_proxy {
     }
 
     QueryStmtPtr
-    ClientSession::parse_simple_query(uint64_t db_id,
-                                      const BufferPtr buffer,
-                                      const std::string_view query)
+    ClientSession::_parse_simple_query(const BufferPtr buffer,
+                                       const std::string_view query,
+                                       std::vector<QueryStmtPtr> &dependencies)
     {
         // create query statement for simple query (parent)
         QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::Type::SIMPLE_QUERY, buffer, false);
@@ -1245,32 +1234,51 @@ namespace springtail::pg_proxy {
         // parse the query and determine if it is a read or write query
         bool is_read_safe = true;
         // first parse the query to determine the type of statement(s)
-        std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [db_id](const std::string &schema, const std::string &table) {
-            return DatabaseMgr::get_instance()->is_table_replicated(db_id, schema, table);
+        std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
+            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, schema, table);
         });
 
         // iterate through the parse contexts (one per query within multi-statement block)
         for (auto &context : parse_contexts) {
             QueryStmt::Type stmt_type = _remap_parse_type(context);
+            std::pair<QueryStmtPtr, bool> lookup_result = {nullptr, false};
+
+            switch(stmt_type) {
+                case QueryStmt::DEALLOCATE:
+                    // deallocate specific prepared statement
+                    // XXX optimize this in future, since it is silly to execute
+                    // a prepared statement to deallocate it, but deallocate will
+                    // fail if the prepared statement is not found
+                    lookup_result = _stmt_cache.lookup_prepared(context->name);
+                    break;
+
+                case QueryStmt::EXECUTE:
+                    lookup_result = _stmt_cache.lookup_prepared(context->name);
+                    break;
+
+                // those that have no affect on session history and no dependencies
+                default:
+                    stmt_type = QueryStmt::ANONYMOUS;
+                    break;
+            }
+
+
             auto p_query = query.substr(context->stmt_location, context->stmt_length);
             QueryStmtPtr stmt = std::make_shared<QueryStmt>(stmt_type, p_query.data(), context->is_read_safe, context->name.data());
 
-            // construct a set of set_config SELECT calls from set_config functions
-            if (context->set_config_functions.size() > 0) {
-                for (const auto &set_func : context->set_config_functions) {
-                    // construct set_config SELECT statement and add it to the list of calls
-                    QueryStmtPtr set_stmt = std::make_shared<QueryStmt>((set_func->is_local ? QueryStmt::SET_LOCAL : QueryStmt::SET),
-                        // XXX might need to escape these, but not sure, might come escaped already
-                        std::format("SELECT set_config('{}', '{}', {})",
-                                    set_func->name, set_func->value, (set_func->is_local ? "true" : "false")),
-                        set_func->is_read_safe, set_func->name);
-
-                    stmt->set_config_calls.push_back(set_stmt);
-                }
-            }
-
             // add to parent
             qs->children.push_back(stmt);
+
+            // if there is a dependency add it; only prepared stmts; only add if not in current transaction
+            if (lookup_result.first != nullptr) {
+                if (lookup_result.second == false) {
+                    dependencies.push_back(lookup_result.first);
+                }
+                // if dependency is not read safe, then this query is not read safe
+                if (!lookup_result.first->is_read_safe) {
+                    is_read_safe = false;
+                }
+            }
 
             // set readonly flag
             if (!context->is_read_safe) {

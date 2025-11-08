@@ -5,13 +5,13 @@
 #include <memory>
 
 extern "C" {
-    // from postgres include/nodes/nodes.h or parsenodes.h
+    // from postgres include/nodes/nodes.h
     // don't want to include the whole thing
     struct Node;
-    struct FuncCall;
 };
 
-namespace springtail::pg_proxy {
+namespace springtail {
+namespace pg_proxy {
 
     /**
      * @brief Parser for Postgres SQL queries; breaks a SQL query into individual statements
@@ -58,15 +58,6 @@ namespace springtail::pg_proxy {
                 RELEASE_SAVEPOINT_STMT
             } type = INVALID;
 
-            /** Struct to hold information about SELECT set_config(...) commands */
-            struct SetConfigInfo {
-                std::string name;        ///< name of the variable being set
-                std::string value;       ///< value being set
-                bool is_local=false;     ///< is it a LOCAL set_config
-                bool is_read_safe=false; ///< is it a read-safe set_config
-            };
-            using SetConfigInfoPtr = std::shared_ptr<SetConfigInfo>;
-
             // clauses
             bool has_select_query=false;      ///< has a select query embedded (e.g., a PREPARE with select)
             bool has_unsupported_query=false; ///< has an unsupported query embedded
@@ -85,9 +76,6 @@ namespace springtail::pg_proxy {
 
             /** set of functions */
             std::set<std::string> functions;
-
-            /** list of set_config function statements */
-            std::vector<SetConfigInfoPtr> set_config_functions;
 
             /** set of <schema, tablename> pairs */
             std::set<std::pair<std::string, std::string>> tables;
@@ -146,10 +134,7 @@ namespace springtail::pg_proxy {
 
         /** Convert from internal postgres string in node to a C++ string */
         static void _set_string(const char *str, std::string &dest);
-
-        /** Extract set_config function call info for SET variables */
-        static void _extract_set_config(struct FuncCall *func_call, StmtContextPtr context);
-
     };
     using ParserPtr = std::shared_ptr<Parser>;
-} // namespace springtail::pg_proxy
+} // namespace pg_proxy
+} // namespace springtail

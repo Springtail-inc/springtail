@@ -9,9 +9,9 @@
 
 #include <common/logging.hh>
 #include <common/constants.hh>
-#include <common/libpq_connection.hh>
 
 #include <pg_repl/pg_types.hh>
+#include <pg_repl/libpq_connection.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_repl_connection.hh>
 #include <pg_repl/exception.hh>

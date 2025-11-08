@@ -10,8 +10,8 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
-#include <common/libpq_connection.hh>
 #include <pg_repl/pg_table_validator.hh>
+#include <pg_repl/libpq_connection.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <storage/field.hh>
 #include <storage/xid.hh>

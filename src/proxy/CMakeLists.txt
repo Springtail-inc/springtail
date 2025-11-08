@@ -34,6 +34,7 @@ target_link_libraries(springtail_proxy
     PUBLIC springtail_common
     PUBLIC absl::check
     PUBLIC absl::log
+    PUBLIC springtail_pg
     PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt
@@ -88,24 +89,6 @@ springtail_unit_test(test_scram
 
 springtail_unit_test(test_replica_shutdown
   SOURCES test/test_replica_shutdown.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_proxy GTest::gtest_main
-)
-
-springtail_unit_test(test_statement_cache
-  SOURCES test/test_statement_cache.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_proxy GTest::gtest_main
-)
-
-springtail_unit_test(test_history_compact
-  SOURCES test/test_history_compact.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_proxy GTest::gtest_main
-)
-
-springtail_unit_test(test_simple_query
-  SOURCES test/test_simple_query.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_proxy GTest::gtest_main
 )

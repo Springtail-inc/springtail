@@ -58,10 +58,7 @@ namespace springtail {
         };
         using LibPqResultPtr = std::shared_ptr<LibPqResult>;
 
-        LibPqConnection() = default;
-
-        LibPqConnection(const LibPqConnection &) = delete; // prevent copying
-        LibPqConnection &operator=(const LibPqConnection &) = delete; // prevent assignment
+        LibPqConnection() {};
 
         ~LibPqConnection() {
             if (_connection != nullptr) {

@@ -11,7 +11,7 @@
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr_client.hh>
 
-#include <common/libpq_connection.hh>
+#include <pg_repl/libpq_connection.hh>
 
 namespace springtail::pg_fdw {
     /** Partition info */

@@ -139,16 +139,6 @@ namespace springtail::pg_proxy {
          */
         void queue_failover_notification();
 
-        /**
-         * @brief Parse a simple query and return type of server session that can handle it
-         * static, public for testing
-         * @param db_id database id
-         * @param buffer buffer holding original query
-         * @param query query to parse (multiple queries separated by ';')
-         * @return query statement that holds the parsed query stmts as children
-         */
-        static QueryStmtPtr parse_simple_query(uint64_t db_id, const BufferPtr buffer, const std::string_view query);
-
     private:
 
         /** map of pid amd cancel key pair to the corresponding ClientSession */
@@ -259,6 +249,22 @@ namespace springtail::pg_proxy {
         ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id, bool failover_session=false);
 
         /**
+         * @brief Parse a simple query and return type of server session that can handle it
+         * @param buffer buffer holding original query
+         * @param query query to parse (multiple queries separated by ';')
+         * @param dependencies vector of query statements that need to be fulfilled
+         * @return query statement that holds the parsed query stmts as children
+         */
+        QueryStmtPtr _parse_simple_query(const BufferPtr buffer, const std::string_view query, std::vector<QueryStmtPtr> &dependencies);
+
+        /**
+         * @brief Remap a parse type from the parser context to a QueryStmt::Type
+         * @param context parser context
+         * @return QueryStmt::Type remapped type
+         */
+        QueryStmt::Type _remap_parse_type(const Parser::StmtContextPtr context) const;
+
+        /**
          * @brief Select a server session based on type; tries to use
          * associated session or _primary, _replica before calling create.
          * @param type type of server session to select
@@ -277,13 +283,6 @@ namespace springtail::pg_proxy {
          * @return true if the switch was successful, false otherwise (requeue needed)
          */
         bool _switch_failover_replica();
-
-        /**
-         * @brief Remap a parse type from the parser context to a QueryStmt::Type
-         * @param context parser context
-         * @return QueryStmt::Type remapped type
-         */
-        static QueryStmt::Type _remap_parse_type(const Parser::StmtContextPtr context);
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
 } // namespace springtail::pg_proxy

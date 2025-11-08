@@ -42,15 +42,6 @@ namespace springtail::redis {
      */
     static constexpr char ADMIN_CONSOLE[] = "{}:admin_console";
 
-    /**
-     * Hash that contains a list of database ids available per FDW
-     * args: db_instance_id
-     * key: <fdw id>
-     * value: list of database ids that FDW supports
-     *
-     */
-    static constexpr char FDW_DB_LIST[] = "{}:fdw_dbs";
-
     //// Data DB (1) accessed via RedisClient::
 
     //// Postgres redis key prefixes.  Value defs in: pg_log_mgr/pg_redis_xact.hh

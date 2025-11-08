@@ -90,11 +90,6 @@ namespace pg_proxy {
             _data_size = 0;
         }
 
-        /** Rewind read/write offset to beginning of buffer, keeps size/capacity */
-        void rewind() {
-            _offset = 0;
-        }
-
         /** Capacity of buffer, not size of contents */
         int capacity() const {
             return _capacity;

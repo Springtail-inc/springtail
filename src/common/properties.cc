@@ -681,29 +681,4 @@ namespace springtail {
         nlohmann::json json_state = state;
         _cache->set_hash_value_in_redis(DATABASE_STATE_PATH, std::to_string(db_id), json_state);
     }
-
-    std::set<uint64_t>
-    Properties::get_fdw_db_ids(const std::string &fdw_id)
-    {
-        std::string path = fmt::format("fdw_dbs/{}", fdw_id);
-        nlohmann::json result = _cache->get_value(path);
-        CHECK(result.is_array());
-
-        std::set<uint64_t> db_ids;
-        for (const auto &item : result) {
-            db_ids.insert(item.get<uint64_t>());
-        }
-        return db_ids;
-    }
-
-    void
-    Properties::set_fdw_db_ids(const std::string &fdw_id, const std::set<uint64_t> &db_ids)
-    {
-        nlohmann::json json_db_ids = db_ids;
-        std::string key = fmt::format(redis::FDW_DB_LIST, _get_db_instance_id());
-
-        auto [db, client] = RedisMgr::get_instance()->create_client(true);
-        DCHECK(db == 0);
-        client->hset(key, fdw_id, json_db_ids.dump());
-    }
 }
