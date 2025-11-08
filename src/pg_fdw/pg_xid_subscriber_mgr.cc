@@ -50,7 +50,6 @@ PgXidSubscriberMgr::task(std::stop_token st)
 
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_USERTYPES);
     _usertype_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_USERTYPES, _usertype_cache_size);
-
     auto client = sys_tbl_mgr::Client::get_instance();
     // Client should cache get_roots() responses now
     client->use_roots_cache(_roots_cache);
@@ -155,7 +154,6 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
         auto [db, xid] = item;
 
         auto client = sys_tbl_mgr::Client::get_instance();
-
         auto table_ids = _roots_cache->get_db_objects(db);
         for (auto tid: table_ids) {
             XidLsn x{xid};
