@@ -6,12 +6,12 @@
 // springtail includes
 #include <common/init.hh>
 #include <common/logging.hh>
+#include <common/libpq_connection.hh>
 
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_repl_connection.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
-#include <pg_repl/libpq_connection.hh>
 
 using namespace springtail;
 

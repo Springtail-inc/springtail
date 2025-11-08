@@ -3,7 +3,7 @@
 #include <common/properties.hh>
 #include <common/json.hh>
 #include <common/aws.hh>
-#include <pg_repl/libpq_connection.hh>
+#include <common/libpq_connection.hh>
 #include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/auth/md5.h>
