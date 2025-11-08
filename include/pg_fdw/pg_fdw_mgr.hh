@@ -284,6 +284,7 @@ namespace springtail::pg_fdw {
 
         std::shared_mutex _rc_mutex;    ///< roots cache mutex
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _schema_shm_cache; ///< An IPC schema cache shared by pg_xid_subscriber_daemon
 
         LruObjectCache<int32_t, UserType> _user_type_cache; ///< cache of user types
 
