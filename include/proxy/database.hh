@@ -1018,8 +1018,6 @@ namespace springtail::pg_proxy {
             const std::string &schema,
             const std::string &table) const;
 
-<<<<<<< HEAD
-=======
         /**
          * @brief Get JSON representation of database manager data
          * @return nlohmann::json
@@ -1038,7 +1036,6 @@ namespace springtail::pg_proxy {
             _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_object->get_db_id(), db_object));
         }
 
->>>>>>> main
     protected:
         /**
          * @brief Function called by Singleton base class to perform shutdown.
