@@ -602,19 +602,22 @@ private:
                      std::optional<std::reference_wrapper<proto::IndexInfo>> dropped_index_info_ref = std::nullopt);
 
     /**
-     * Check if a table has a complete parent chain (all ancestors exist)
+     * Check if direct parent exists for a partition table with matching snapshot XID
      *
      * @param db_id Database ID
-     * @param table_id Table ID to check
+     * @param parent_table_id Parent table ID to check
      * @param xid XID for visibility
-     * @return true if all parents exist, false if any parent is missing
+     * @param child_snapshot_xid Child's snapshot XID (must match parent's to prevent attaching to old version)
+     * @return true if parent exists with matching snapshot XID, false otherwise
      */
-    bool _has_complete_parent_chain(uint64_t db_id,
-                                    uint64_t table_id,
-                                    const XidLsn& xid);
+    bool _has_parent(uint64_t db_id,
+                     uint64_t parent_table_id,
+                     const XidLsn& xid,
+                     uint64_t child_snapshot_xid);
 
     /**
      * Get direct children of a partitioned table (non-recursive)
+     * Checks _table_cache first, then scans disk for uncached entries
      *
      * @param db_id Database ID
      * @param parent_table_id Parent table ID
@@ -638,24 +641,46 @@ private:
                                                          const XidLsn& xid);
 
     /**
-     * Recursively generate DDL for entire partition subtree
+     * Generate ATTACH PARTITION DDL for a child partition
      *
      * @param db_id Database ID
-     * @param parent_table_id Root parent table ID
+     * @param child_info Child table info (already fetched to avoid redundant lookup)
+     * @param parent_table_id Parent table ID
      * @param xid XID for visibility
-     * @param ddl_array_out Output: appends child DDLs in depth-first order
-     * @param depth Current recursion depth (for safety limit)
+     * @return DDL JSON object for ATTACH PARTITION
      */
-    void _generate_child_tree_ddls(uint64_t db_id,
-                                   uint64_t parent_table_id,
-                                   const XidLsn& xid,
-                                   std::vector<nlohmann::json>& ddl_array_out,
-                                   int depth = 0);
+    nlohmann::json _generate_attach_partition_ddl(uint64_t db_id,
+                                                   const TableCacheRecordPtr& child_info,
+                                                   uint64_t parent_table_id,
+                                                   const XidLsn& xid);
+
+    /**
+     * Generate ATTACH PARTITION DDLs for all direct children (non-recursive)
+     * Only attaches children with matching snapshot XID to prevent attaching old versions
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Parent table ID
+     * @param xid XID for visibility
+     * @param parent_snapshot_xid Parent's snapshot XID (children must match)
+     * @param ddl_array_out Output: appends ATTACH PARTITION DDLs for direct children
+     */
+    void _generate_child_attach_ddls(uint64_t db_id,
+                                     uint64_t parent_table_id,
+                                     const XidLsn& xid,
+                                     uint64_t parent_snapshot_xid,
+                                     std::vector<nlohmann::json>& ddl_array_out);
 
     /**
      * Performs a create_table() assuming that the correct locks are already held.
      *
-     * @return JSON array: empty [] if parent chain incomplete, otherwise array of DDL objects
+     * Creates partition tables in two phases:
+     * 1. CREATE TABLE - always executed immediately
+     * 2. ATTACH PARTITION - deferred if direct parent doesn't exist yet
+     *
+     * When creating a partitioned parent, checks for waiting children and generates
+     * ATTACH PARTITION DDLs for them (Option B approach - cascades naturally).
+     *
+     * @return JSON array of DDL objects (CREATE + optional ATTACH + optional child ATTACHes)
      */
     nlohmann::json _create_table(const proto::TableRequest& request);
 

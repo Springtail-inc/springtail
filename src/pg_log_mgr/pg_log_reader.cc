@@ -741,28 +741,38 @@ namespace springtail::pg_log_mgr {
 
                 DCHECK(ddl_array.is_array());  // Always an array now
 
-                if (ddl_array.empty()) {
-                    // Empty array - parent chain incomplete, DDL deferred
-                    LOG_INFO("DDL deferred for child table {} - parent chain incomplete",
-                             table_msg.oid);
-                    // System tables updated but no FDW DDL generated
+                // Array structure: [CREATE TABLE, optional ATTACH PARTITION(s)...]
+                // Only the first entry (CREATE TABLE) has a tid that needs to be cached
+                DCHECK(!ddl_array.empty());  // Should always have at least CREATE TABLE
 
-                } else {
-                    // Non-empty array - process all DDLs in order
-                    LOG_INFO("Processing {} DDL statement(s) for table {} and descendants",
-                             ddl_array.size(), table_msg.oid);
+                // Process first entry (CREATE TABLE) and update exists cache
+                const auto& create_ddl = ddl_array[0];
+                DCHECK(create_ddl["action"].get<std::string>() == "create");
 
-                    for (const auto& ddl_item : ddl_array) {
-                        std::string individual_ddl = nlohmann::to_string(ddl_item);
-                        RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, individual_ddl);
+                std::string create_ddl_str = nlohmann::to_string(create_ddl);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, create_ddl_str);
 
-                        // Update existence cache for each table
-                        uint32_t tid = ddl_item["tid"].get<uint32_t>();
-                        _exists_cache->insert(_db, tid, true);
+                uint32_t tid = create_ddl["tid"].get<uint32_t>();
+                _exists_cache->insert(_db, tid, true);
 
-                        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
-                                  "Added DDL for table {} to FDW queue", tid);
-                    }
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                          "Added CREATE TABLE DDL for table {} to FDW queue", tid);
+
+                // Process remaining entries (ATTACH PARTITION DDLs) - just add to RedisDDL
+                for (size_t i = 1; i < ddl_array.size(); i++) {
+                    const auto& attach_ddl = ddl_array[i];
+                    DCHECK(attach_ddl["action"].get<std::string>() == "attach_partition");
+
+                    std::string attach_ddl_str = nlohmann::to_string(attach_ddl);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, attach_ddl_str);
+
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                              "Added ATTACH PARTITION DDL to FDW queue");
+                }
+
+                if (ddl_array.size() > 1) {
+                    LOG_INFO("Processed CREATE TABLE for {} and {} ATTACH PARTITION DDL(s)",
+                             tid, ddl_array.size() - 1);
                 }
                 break;
             }
@@ -1296,7 +1306,7 @@ namespace springtail::pg_log_mgr {
 
                     // store the ddl mutations for the FDWs
                     auto ddl = nlohmann::json::parse(ddl_str);
-                    assert(ddl.is_array());
+                    CHECK(ddl.is_array());
                     ddls.insert(ddls.end(), ddl.begin(), ddl.end());
                     table_ids.emplace_back(static_cast<uint64_t>(entry->table_id));
                 }
