@@ -772,6 +772,18 @@ namespace indexer_helpers {
         MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {});
 
         /**
+         * Create a btree that can be used for look aside index.
+         */
+        MutableBTreePtr create_look_aside_root(const ExtensionCallback& extension_callback = {});
+
+        /**
+         * Returns the look aside index of the table.
+         */
+        MutableBTreePtr look_aside_index() const {
+            return _look_aside_index;
+        }
+
+        /**
          * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
          * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
          * @return A BTree object of the requested index.

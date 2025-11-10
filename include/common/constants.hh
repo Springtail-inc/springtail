@@ -21,6 +21,28 @@ namespace springtail {
         ComparatorFunc comparator_func = nullptr;
         ExtensionContext context = {};
     };
+
+    // GIST Proc
+    constexpr int GIST_CONSISTENT = 1;
+    constexpr int GIST_UNION = 2;
+    constexpr int GIST_COMPRESS = 3;
+    constexpr int GIST_DECOMPRESS = 4;
+    constexpr int GIST_PENALTY = 5;
+    constexpr int GIST_PICKSPLIT = 6;
+    constexpr int GIST_EQUAL = 7;
+    constexpr int GIST_DISTANCE = 8;
+    constexpr int GIST_FETCH = 9;
+    constexpr int GIST_OPTIONS = 10;
+    constexpr int GIST_SORTSUPPORT = 11;
+
+    // GIN Proc
+    constexpr int GIN_COMPARE = 1;
+    constexpr int GIN_EXTRACTVALUE = 2;
+    constexpr int GIN_EXTRACTQUERY = 3;
+    constexpr int GIN_CONSISTENT = 4;
+    constexpr int GIN_COMPARE_PARTIAL = 5;
+    constexpr int GIN_TRICONSISTENT = 6;
+    constexpr int GIN_OPTIONS = 7;
 }
 
 namespace springtail::constant {
