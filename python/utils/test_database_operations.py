@@ -53,7 +53,7 @@ class DatabaseTester():
 
         self.logger = logging.getLogger('springtail')
         self.pp_buffer = io.StringIO()
-        self.pretty_printer = pprint.PrettyPrinter(4, 160, 1, self.pp_buffer, compact=True, underscore_numbers=True)
+        self.pretty_printer = pprint.PrettyPrinter(4, 120, None, self.pp_buffer, compact=True, underscore_numbers=True)
         self.config_redis = self.props.get_config_redis()
         self.instance_id = self.props.get_db_instance_id()
         self.preload_table_name = "test_preload"
@@ -120,6 +120,9 @@ class DatabaseTester():
         return (database_name in db_names)
 
     def _get_database_ip(self, conn: psycopg2.extensions.connection) -> str:
+        """
+        This method gets IP address of the host that database connection is connected to.
+        """
         result = execute_sql_select(conn, f"SELECT inet_server_addr()")
         ip = [row[0] for row in result][0]
         self.log_data(logging.INFO, "Found database server address ", ip)
@@ -263,10 +266,10 @@ class DatabaseTester():
     def _verify_table(self, table_name: str, no_fdw: bool = False) -> None:
         self.logger.info(f"Verifying table '{table_name}'")
         primary_data = self._get_test_data(self.primary_conn, table_name)
-        self.log_data(logging.INFO, "Primary data", primary_data)
+        self.log_data(logging.DEBUG, "Primary data", primary_data)
 
         proxy_data = self._get_test_data(self.proxy_conn, table_name)
-        self.log_data(logging.INFO, "Proxy data", primary_data)
+        self.log_data(logging.DEBUG, "Proxy data", primary_data)
         if primary_data != proxy_data:
             raise SystemExit(f"FAILURE: Primary and proxy data do not match")
 
@@ -276,7 +279,7 @@ class DatabaseTester():
 
         for fdw_id, fdw_conn in self.fdw_conn.items():
             fdw_data = self._get_test_data(fdw_conn, table_name)
-            self.log_data(logging.INFO, f"FDW ({fdw_id}) data", fdw_data)
+            self.log_data(logging.DEBUG, f"FDW ({fdw_id}) data", fdw_data)
             if primary_data != fdw_data:
                 raise SystemExit(f"FAILURE: Primary and fdw '{fdw_id}' data do not match")
 
