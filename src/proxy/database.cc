@@ -1,3 +1,5 @@
+#include <fmt/ranges.h>
+
 #include <common/json.hh>
 
 #include <proxy/database.hh>
@@ -338,10 +340,8 @@ namespace springtail::pg_proxy
     }
 
     DatabaseInstancePtr
-    DatabaseInstanceSet::_get_least_loaded_instance()
+    DatabaseReplicaSet::_get_least_loaded_instance(uint64_t db_id)
     {
-        std::shared_lock lock(_base_mutex);
-
         if (_active_instances.empty()) {
             return nullptr;
         }
@@ -351,7 +351,12 @@ namespace springtail::pg_proxy
         int min_active_sessions = INT_MAX;
         int min_total_sessions = INT_MAX;
 
+        std::shared_lock fdw_lock(_fdw_mutex);
         for (auto &it : _active_instances) {
+            auto fdw_db_it = _fdw_dbs.find(it->replica_id());
+            if (fdw_db_it == _fdw_dbs.end() || !fdw_db_it->second.contains(db_id)) {
+                continue;
+            }
             int num_active_sessions = it->active_session_count();
             int num_sessions = it->all_session_count();
 
@@ -368,6 +373,8 @@ namespace springtail::pg_proxy
                 instance = it;
             }
         }
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Returning least loaded instance for db_id {} and replica '{}'",
+                db_id, instance->replica_id());
 
         return instance;
     }
@@ -417,6 +424,11 @@ namespace springtail::pg_proxy
     void
     DatabaseReplicaSet::initiate_replica_shutdown(const std::string &replica_id)
     {
+        {
+            std::unique_lock fdw_lock(_fdw_mutex);
+            _fdw_dbs.erase(replica_id);
+        }
+
         DatabaseInstancePtr replica = nullptr;
 
         std::unique_lock lock(_base_mutex);
@@ -443,6 +455,13 @@ namespace springtail::pg_proxy
     void
     DatabaseReplicaSet::add_replica(const std::string &replica_id)
     {
+        auto db_set = Properties::get_instance()->get_fdw_db_ids(replica_id);
+        {
+            std::unique_lock fdw_lock(_fdw_mutex);
+            auto [it, inserted] = _fdw_dbs.try_emplace(replica_id, db_set);
+            DCHECK(inserted);
+        }
+
         // create new instance; fetch config from properties (redis)
         nlohmann::json fdw_config = Properties::get_fdw_config(replica_id);
         auto host = Json::get<std::string>(fdw_config, "host");
@@ -510,7 +529,8 @@ namespace springtail::pg_proxy
     {
         std::shared_lock lock(_base_mutex);
 
-        auto instance = _get_least_loaded_instance();
+        auto instance = _get_least_loaded_instance(db_id);
+
         if (instance == nullptr) {
             return nullptr;
         }
@@ -528,6 +548,63 @@ namespace springtail::pg_proxy
             }
         }
         return nullptr;
+    }
+
+    void
+    DatabaseReplicaSet::update_fdw_db_ids(const std::string &replica_id, std::set<uint64_t> new_db_ids)
+    {
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Changing database list for replica {} to : [{}]",
+                                                replica_id, fmt::join(new_db_ids, ", "));
+        std::unique_lock lock(_fdw_mutex);
+        auto it = _fdw_dbs.find(replica_id);
+        CHECK(it != _fdw_dbs.end());
+        it->second = new_db_ids;
+    }
+
+    void
+    DatabaseReplicaSet::remove_database(uint64_t db_id)
+    {
+        std::unique_lock fdw_lock(_fdw_mutex);
+        for (auto &[fdw_id, fdw_dbs]: _fdw_dbs) {
+            fdw_dbs.erase(db_id);
+        }
+        fdw_lock.unlock();
+        DatabaseInstanceSet::remove_database(db_id);
+    }
+
+    nlohmann::json
+    DatabaseReplicaSet::to_json() const
+    {
+        nlohmann::json replica_dbs;
+
+        {
+            std::shared_lock lock(_fdw_mutex);
+            for (const auto& [fdw_id, db_set] : _fdw_dbs) {
+                replica_dbs[fdw_id] = nlohmann::json::array();
+                for (auto db_id : db_set) {
+                    replica_dbs[fdw_id].push_back(db_id);
+                }
+            }
+        }
+
+        nlohmann::json active_replicas = nlohmann::json::array();
+        nlohmann::json shutdown_replicas = nlohmann::json::array();
+
+        {
+            std::shared_lock lock(_base_mutex);
+            std::ranges::for_each(_active_instances, [&active_replicas](auto& item) { active_replicas.push_back(item->replica_id()); });
+            std::ranges::for_each(_shutdown_pending_instances, [&shutdown_replicas](auto& item) { shutdown_replicas.push_back(item->replica_id()); });
+        }
+
+        nlohmann::json replica_data = DatabaseInstanceSet::to_json();
+
+        nlohmann::json response = nlohmann::json::object({
+            {"fdw replicated databases", replica_dbs},
+            {"active replicas", active_replicas},
+            {"shutdown pending replicas", shutdown_replicas},
+            {"replica data", replica_data}
+        });
+        return response;
     }
 
     /*********** Database Primary Set *************/
@@ -797,6 +874,27 @@ namespace springtail::pg_proxy
             }
         );
 
+        // redis cache watcher to handle changes to the list of databases active on FDW
+        _cache_watcher_fdw_dbs = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "FDW databases list changed: {}", new_value.dump(4));
+                CHECK(path.starts_with(Properties::FDW_DBS_PATH));
+
+                // extract FDW id from path
+                std::vector<std::string> path_parts;
+                common::split_string("/", path, path_parts);
+                DCHECK_EQ(path_parts.size(), 2);
+                std::string &fdw_id = path_parts[1];
+
+                CHECK(new_value.is_array());
+
+                // get a vector of new database ids from new_value
+                std::set<uint64_t> new_db_ids = new_value.get<std::set<uint64_t>>();
+
+                _replica_set->update_fdw_db_ids(fdw_id, new_db_ids);
+            }
+        );
+
         _init();
     }
 
@@ -886,8 +984,7 @@ namespace springtail::pg_proxy
 
             if (current_state == DatabaseInstance::State::ACTIVE &&
                 state == Properties::FDW_STATE_DRAINING) {
-                // initiate shutdown of the replica instance
-                _replica_set->initiate_replica_shutdown(replica_id);
+                remove_replica(replica_id);
                 continue;
             }
 
@@ -901,6 +998,41 @@ namespace springtail::pg_proxy
     }
 
     void
+    DatabaseMgr::add_replica(const std::string &replica_id)
+    {
+        _register_fdw_dbs_cache_watcher(replica_id);
+
+        _replica_set->add_replica(replica_id);
+    }
+
+    void
+    DatabaseMgr::remove_replica(const std::string &replica_id)
+    {
+        _deregister_fdw_dbs_cache_watcher(replica_id);
+
+        // initiate shutdown of the replica instance
+        _replica_set->initiate_replica_shutdown(replica_id);
+    }
+
+    void
+    DatabaseMgr::_register_fdw_dbs_cache_watcher(const std::string &fdw_id)
+    {
+        std::string path = fmt::format("{}/{}", Properties::FDW_DBS_PATH, fdw_id);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Registering for path: {}", path);
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(path, _cache_watcher_fdw_dbs);
+    }
+
+    void
+    DatabaseMgr::_deregister_fdw_dbs_cache_watcher(const std::string &fdw_id)
+    {
+        std::string path = fmt::format("{}/{}", Properties::FDW_DBS_PATH, fdw_id);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Deregistering for path: {}", path);
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->remove_callback(path, _cache_watcher_fdw_dbs);
+    }
+
+    void
     DatabaseMgr::_init()
     {
         // add primary
@@ -910,16 +1042,16 @@ namespace springtail::pg_proxy
         Properties::get_primary_db_config(host, port, user, password);
         set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(_pool_config, Session::Type::PRIMARY, host, port));
 
+        // add redis cache watchers
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher_db_ids);
+        redis_cache->add_callback(Properties::FDW_CONFIG_PATH, _cache_watcher_fdws);
+
         // iterate through fdws and add replicas
         std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
         for (const auto & fdw_id: fdw_id_list) {
             add_replica(fdw_id);
         }
-
-        // add redis cache watchers
-        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
-        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher_db_ids);
-        redis_cache->add_callback(Properties::FDW_CONFIG_PATH, _cache_watcher_fdws);
 
         _init_replicated_dbs();
 
@@ -984,23 +1116,20 @@ namespace springtail::pg_proxy
         std::map<uint64_t, std::string> db_list = Properties::get_databases();
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
 
-        std::unique_lock db_lock(_db_mutex);
+
         for (const auto& [db_id, db_name]: db_list) {
+            // get initial database state
+            auto db_state = redis::db_state_change::get_db_state(db_id);
+
             // create database object and insert it into the maps
             DatabasePtr db_object = std::make_shared<Database>(db_id, db_name);
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Added database (id, name): ({}, {})", db_id, db_name);
-            _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_name, db_object));
-            _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
+            db_object->set_state(db_state);
+            add_database(db_object);
 
             // subscribe to state change notifications per database
             redis_cache->add_callback(
                 std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(db_id),
                 _cache_watcher_db_states);
-
-            // initialize state
-            redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
-            db_object->set_state(db_state);
-
         }
     }
 
@@ -1029,10 +1158,7 @@ namespace springtail::pg_proxy
         db_object->set_state(db_state);
 
         // update replicated database maps
-        std::unique_lock db_lock(_db_mutex);
-        _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_name, db_object));
-        _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
-        db_lock.unlock();
+        add_database(db_object);
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Added database (id, name): ({}, {})", db_id, db_name);
 
@@ -1152,6 +1278,21 @@ namespace springtail::pg_proxy
         return (db_object->get_state() == redis::db_state_change::DB_STATE_RUNNING);
     }
 
+    nlohmann::json
+    DatabaseMgr::to_json() const
+    {
+        nlohmann::json repl_dbs = nlohmann::json::array();
+        {
+            std::shared_lock lock(_db_mutex);
+            std::ranges::for_each(_db_id_rep_dbs, [&repl_dbs](auto& p) { repl_dbs.push_back(p.first); });
+        }
+
+        nlohmann::json response = nlohmann::json::object({
+            {"replicated_databases", repl_dbs}
+        });
+        return response;
+    }
+
     void
     DatabaseMgr::_internal_shutdown()
     {
@@ -1167,6 +1308,13 @@ namespace springtail::pg_proxy
                 _cache_watcher_db_states);
         }
         lock.unlock();
+
+        redis_cache->remove_callback(Properties::FDW_CONFIG_PATH, _cache_watcher_fdws);
+
+        std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
+        for (const auto & fdw_id: fdw_id_list) {
+            remove_replica(fdw_id);
+        }
 
         _data_sub_thread.shutdown();
     }
