@@ -1174,11 +1174,11 @@ namespace springtail::pg_fdw {
                         if (db_item.state != redis::db_state_change::DB_STATE_RUNNING) {
                             LOG_INFO("New schema XID will be stored till database is in 'running' state: db_id={}, current={}, new={}",
                                     db_id, current_xid, schema_xid);
-                            db_item.pending_ddls[schema_xid] = sorted_ddls;
+                            db_item.pending_ddls[schema_xid] = ddls;
                         } else {
                             LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
                                     db_id, current_xid, schema_xid);
-                            db_map[db_id][schema_xid] = sorted_ddls;
+                            db_map[db_id][schema_xid] = ddls;
                         }
                     }
                 }
