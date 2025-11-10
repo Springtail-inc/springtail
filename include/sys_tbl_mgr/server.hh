@@ -629,18 +629,6 @@ private:
                                                 const XidLsn& xid);
 
     /**
-     * Generate DDL JSON from existing system table data
-     *
-     * @param db_id Database ID
-     * @param table_id Table ID
-     * @param xid XID for visibility
-     * @return DDL JSON object for CREATE TABLE
-     */
-    nlohmann::json _generate_create_ddl_from_sys_tables(uint64_t db_id,
-                                                         uint64_t table_id,
-                                                         const XidLsn& xid);
-
-    /**
      * Generate ATTACH PARTITION DDL for a child partition
      *
      * @param db_id Database ID

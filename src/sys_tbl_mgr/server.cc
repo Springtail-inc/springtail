@@ -1816,66 +1816,6 @@ Server::_generate_child_attach_ddls(uint64_t db_id,
 }
 
 nlohmann::json
-Server::_generate_create_ddl_from_sys_tables(uint64_t db_id,
-                                              uint64_t table_id,
-                                              const XidLsn& xid)
-{
-    auto table_info = _get_table_info(db_id, table_id, xid);
-    DCHECK(table_info != nullptr && table_info->exists);
-
-    nlohmann::json ddl;
-    ddl["action"] = "create";
-    ddl["tid"] = table_info->id;
-    ddl["xid"] = table_info->xid;
-    ddl["lsn"] = table_info->lsn;
-    ddl["table"] = table_info->name;
-    ddl["rls_enabled"] = table_info->rls_enabled;
-    ddl["rls_forced"] = table_info->rls_forced;
-
-    // Get namespace
-    auto ns_info = _get_namespace_info(db_id, table_info->namespace_id, xid);
-    ddl["schema"] = ns_info->name;
-
-    // Parent info (if this is a child)
-    if (table_info->parent_table_id.has_value()) {
-        auto parent_info = _get_table_info(db_id, table_info->parent_table_id.value(), xid);
-        if (parent_info) {
-            ddl["parent_table_id"] = table_info->parent_table_id.value();
-            ddl["parent_table_name"] = parent_info->name;
-
-            auto parent_ns = _get_namespace_info(db_id, parent_info->namespace_id, xid);
-            ddl["parent_namespace_name"] = parent_ns->name;
-        }
-    }
-
-    // Partition info
-    if (table_info->partition_key.has_value()) {
-        ddl["partition_key"] = table_info->partition_key.value();
-    }
-    if (table_info->partition_bound.has_value()) {
-        ddl["partition_bound"] = table_info->partition_bound.value();
-    }
-
-    // Get columns using existing _get_schema_info()
-    ddl["columns"] = nlohmann::json::array();
-    auto schema_info = _get_schema_info(db_id, table_id, xid, xid);
-    for (const auto& col : schema_info->columns()) {
-        nlohmann::json col_json;
-        col_json["name"] = col.name();
-        col_json["type"] = col.pg_type();
-        col_json["type_name"] = col.type_name();
-        col_json["type_namespace"] = col.type_namespace();
-        col_json["nullable"] = col.is_nullable();
-        if (col.has_default_value()) {
-            col_json["default"] = col.default_value();
-        }
-        ddl["columns"].push_back(col_json);
-    }
-
-    return ddl;
-}
-
-nlohmann::json
 Server::_create_table(const proto::TableRequest& request)
 {
     XidLsn xid(request.xid(), request.lsn());
