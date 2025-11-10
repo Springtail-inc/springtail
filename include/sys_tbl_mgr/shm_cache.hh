@@ -26,14 +26,17 @@ namespace ipc = boost::interprocess;
 
 // global cache names
 static constexpr char SHM_CACHE_ROOTS[] = "springtail.roots";
+static constexpr char SHM_CACHE_SCHEMAS[] = "springtail.schemas";
 
 /**
- * A generic interprocess cache. The cache is intended for caching serialized 
- * table metadata. The metadata strings are keyed by the database ID, 
- * table ID and XID.
+ * A generic interprocess cache. The cache is intended for caching serialized
+ * table metadata. The metadata strings are keyed by the database ID,
+ * table ID and XID/LSN.
  */
 class ShmCache 
 {
+    using Xid = uint64_t;
+
     // Traits for the MsgCache
     struct Traits {
         template <typename T>
@@ -94,35 +97,73 @@ public:
         return _msg_cache.size();
     }
 
-    /** 
-     * Mark the table as dropped. 
+    /**
+     * Mark the table as dropped.
+     * @param db The DB ID.
+     * @param tid The table ID.
+     * @param xid The XID/LSN.
+     */
+    bool mark_dropped(DbId db, TableId tid, XidLsn xid)
+    {
+        return _msg_cache.insert(db, tid, xid, "", true);
+    }
+
+    /**
+     * Mark the table as dropped (overload for Xid only).
      * @param db The DB ID.
      * @param tid The table ID.
      * @param xid The XID.
      */
-    bool mark_dropped(DbId db, TableId tid, Xid xid) 
+    bool mark_dropped(DbId db, TableId tid, Xid xid)
     {
-        return _msg_cache.insert(db, tid, xid, "", true); 
+        return mark_dropped(db, tid, XidLsn{xid, 0});
     }
 
-    /** 
+    /**
      * Cache the string message.
      * @param db The DB ID.
      * @param tid The table ID.
-     * @param xid The XID.
+     * @param xid The XID/LSN.
      * @param msg The message to cache. Usually it's a serialized proto message.
-     * @return true if the element has been actually inserted 
+     * @return true if the element has been actually inserted
      *         and false if it was already in the cache.
      */
     bool
-    insert(DbId db, TableId tid, Xid xid, std::string_view msg)
+    insert(DbId db, TableId tid, const XidLsn& xid, std::string_view msg)
     {
         check_free_space_locked();
         return _msg_cache.insert(db, tid, xid, msg, false);
     }
 
-    /** 
+    /**
+     * Cache the string message (overload for Xid only).
+     * @param db The DB ID.
+     * @param tid The table ID.
+     * @param xid The XID.
+     * @param msg The message to cache. Usually it's a serialized proto message.
+     * @return true if the element has been actually inserted
+     *         and false if it was already in the cache.
+     */
+    bool
+    insert(DbId db, TableId tid, Xid xid, std::string_view msg)
+    {
+        return insert(db, tid, XidLsn{xid, 0}, msg);
+    }
+
+    /**
      * Get the cached string if present based on a key.
+     * @param db The DB ID.
+     * @param tid The table ID.
+     * @param xid The XID/LSN.
+     * @return The cached string.
+     */
+    std::optional<std::string> find(DbId db, TableId tid, const XidLsn& xid)
+    {
+        return _msg_cache.find(db, tid, xid);
+    }
+
+    /**
+     * Get the cached string if present based on a key (overload for Xid only).
      * @param db The DB ID.
      * @param tid The table ID.
      * @param xid The XID.
@@ -130,7 +171,7 @@ public:
      */
     std::optional<std::string> find(DbId db, TableId tid, Xid xid)
     {
-        return _msg_cache.find(db, tid, xid);
+        return find(db, tid, XidLsn{xid, 0});
     }
 
     /**

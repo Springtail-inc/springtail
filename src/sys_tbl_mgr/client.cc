@@ -56,6 +56,11 @@ void Client::use_roots_cache(std::shared_ptr<ShmCache> c)
     _roots_cache.store(std::move(c));
 }
 
+void Client::use_schema_cache(std::shared_ptr<ShmCache> c)
+{
+    _schema_shm_cache.store(std::move(c));
+}
+
 TableMetadataPtr
 Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
 {
@@ -102,7 +107,36 @@ Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
 std::shared_ptr<const SchemaMetadata>
 Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
 {
-    auto populate = [this](uint64_t db, uint64_t tid, const XidLsn &xid) {
+    // First check the shared memory cache
+    // note: if shared memory cache is used, in-process cache is bypassed
+    auto shm_cache = _schema_shm_cache.load();
+    if (shm_cache) {
+        auto msg = shm_cache->find(db_id, table_id, xid);
+        if (msg) {
+            proto::GetSchemaResponse response;
+            bool parsed = response.ParseFromString(msg.value());
+            if (parsed) {
+                return RequestHelper::pack_metadata(response);
+            }
+        }
+        proto::GetSchemaRequest request;
+        request.set_db_id(db_id);
+        request.set_table_id(table_id);
+        request.set_xid(xid.xid);
+        request.set_lsn(xid.lsn);
+
+        proto::GetSchemaResponse response;
+        grpc_client::retry_rpc("SysTblMgr", "GetSchema",
+                               [this, &request, &response](grpc::ClientContext *context) {
+                                   return _stub->GetSchema(context, request, &response);
+                               });
+        auto response_str = response.SerializeAsString();
+        shm_cache->insert(db_id, table_id, xid, response_str);
+        return RequestHelper::pack_metadata(response);
+    }
+
+    // Use the in-process cache
+    auto populate = [this, shm_cache](uint64_t db, uint64_t tid, const XidLsn &xid) {
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "populate callback called for: db:tid {}:{}, xid:lsn {}:{}",
                 db, tid, xid.xid, xid.lsn);
         proto::GetSchemaRequest request;
@@ -120,7 +154,7 @@ Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
         return RequestHelper::pack_metadata(response);
     };
 
-    // Retrieve through the schema cache
+    // Retrieve through the in-process schema cache
     return _schema_cache->get(db_id, table_id, xid, populate);
 }
 
