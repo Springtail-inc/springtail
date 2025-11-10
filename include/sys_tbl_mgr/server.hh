@@ -668,6 +668,7 @@ private:
      * When creating a partitioned parent, checks for waiting children and generates
      * ATTACH PARTITION DDLs for them (Option B approach - cascades naturally).
      *
+     * @param request Table request containing table metadata, columns, partition info, and snapshot XID
      * @return JSON array of DDL objects (CREATE + optional ATTACH + optional child ATTACHes)
      */
     nlohmann::json _create_table(const proto::TableRequest& request);

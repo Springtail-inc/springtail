@@ -21,14 +21,14 @@ namespace springtail::pg_log_mgr {
             STALL          ///< Stall message for synchronization
         };
 
-        Type type;
-        uint64_t start_offset;
-        uint64_t end_offset;
-        std::filesystem::path path;
+        Type type;                              ///< Type of queue entry (FILE, MEMORY_BUFFER, or STALL)
+        uint64_t start_offset;                  ///< Starting offset in file (for FILE type)
+        uint64_t end_offset;                    ///< Ending offset in file (for FILE type) or buffer size (for MEMORY_BUFFER)
+        std::filesystem::path path;             ///< File path for this entry (needed for XID tracking even with MEMORY_BUFFER)
 
         // Memory buffer fields for zero-copy processing
-        std::shared_ptr<std::vector<char>> memory_buffer;
-        size_t buffer_size = 0;  ///< Size of buffer in bytes
+        std::shared_ptr<std::vector<char>> memory_buffer;  ///< Shared pointer to in-memory buffer (for MEMORY_BUFFER type)
+        size_t buffer_size = 0;                             ///< Size of buffer in bytes
 
         PgLogQueueEntry() = delete;
 
@@ -64,15 +64,29 @@ namespace springtail::pg_log_mgr {
     };
     using PgLogQueueEntryPtr = std::shared_ptr<PgLogQueueEntry>;
 
-    /** Queue class between log writer and log reader */
+    /**
+     * @brief Queue class between log writer and log reader with memory pressure management
+     *
+     * The queue uses high and low watermarks to manage memory pressure from in-memory buffers:
+     * - When memory usage exceeds the high watermark, the writer should switch from pushing
+     *   memory buffers (MEMORY_BUFFER entries) to pushing file references (FILE entries).
+     * - The writer continues using file references until memory usage drops below the low
+     *   watermark, at which point it can resume pushing memory buffers for zero-copy processing.
+     * - This hysteresis prevents thrashing between modes when memory usage hovers near a threshold.
+     */
     class PgLogQueue : public ConcurrentQueue<PgLogQueueEntry> {
     public:
         // Default memory pressure watermarks (in bytes)
         static constexpr size_t DEFAULT_MEMORY_HIGH_WATERMARK = 128 * 1024 * 1024;  // 128 MB
         static constexpr size_t DEFAULT_MEMORY_LOW_WATERMARK = 64 * 1024 * 1024;    // 64 MB
 
-        PgLogQueue(size_t memory_high_watermark = DEFAULT_MEMORY_HIGH_WATERMARK,
-                   size_t memory_low_watermark = DEFAULT_MEMORY_LOW_WATERMARK)
+        /**
+         * @brief Construct a PgLogQueue with specified memory watermarks
+         * @param memory_high_watermark High watermark in bytes (writer switches to file mode when exceeded)
+         * @param memory_low_watermark Low watermark in bytes (writer switches back to buffer mode when below)
+         */
+        explicit PgLogQueue(size_t memory_high_watermark = DEFAULT_MEMORY_HIGH_WATERMARK,
+                            size_t memory_low_watermark = DEFAULT_MEMORY_LOW_WATERMARK)
             : _memory_high_watermark(memory_high_watermark),
               _memory_low_watermark(memory_low_watermark)
         {}
