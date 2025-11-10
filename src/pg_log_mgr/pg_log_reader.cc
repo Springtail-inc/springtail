@@ -727,17 +727,53 @@ namespace springtail::pg_log_mgr {
                 PgMsgNamespace namespace_msg{table_msg.lsn, table_msg.namespace_id, table_msg.xid, table_msg.namespace_name};
 
                 // make sure that the namespace is created
-                std::string &&ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
-                nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+                std::string &&ns_ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
+                nlohmann::json ns_action = nlohmann::json::parse(ns_ddl_stmt).at("action");
 
-                if (action.get<std::string>() != "no_change") {
+                if (ns_action.get<std::string>() != "no_change") {
                     LOG_INFO("Table namespace created: {} {} {}", table_msg.table, table_msg.namespace_name, table_msg.namespace_id);
-                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ns_ddl_stmt);
                 }
 
-                ddl_stmt = server->create_table(_db, xidlsn, table_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
-                _exists_cache->insert(_db, table_msg.oid, true);
+                // Create table - ALWAYS returns JSON array
+                std::string ddl_stmt = server->create_table(_db, xidlsn, table_msg);
+                nlohmann::json ddl_array = nlohmann::json::parse(ddl_stmt);
+
+                DCHECK(ddl_array.is_array());  // Always an array now
+
+                // Array structure: [CREATE TABLE, optional ATTACH PARTITION(s)...]
+                // Only the first entry (CREATE TABLE) has a tid that needs to be cached
+                DCHECK(!ddl_array.empty());  // Should always have at least CREATE TABLE
+
+                // Process first entry (CREATE TABLE) and update exists cache
+                const auto& create_ddl = ddl_array[0];
+                DCHECK(create_ddl["action"].get<std::string>() == "create");
+
+                std::string create_ddl_str = nlohmann::to_string(create_ddl);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, create_ddl_str);
+
+                uint32_t tid = create_ddl["tid"].get<uint32_t>();
+                _exists_cache->insert(_db, tid, true);
+
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                          "Added CREATE TABLE DDL for table {} to FDW queue", tid);
+
+                // Process remaining entries (ATTACH PARTITION DDLs) - just add to RedisDDL
+                for (size_t i = 1; i < ddl_array.size(); i++) {
+                    const auto& attach_ddl = ddl_array[i];
+                    DCHECK(attach_ddl["action"].get<std::string>() == "attach_partition");
+
+                    std::string attach_ddl_str = nlohmann::to_string(attach_ddl);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, attach_ddl_str);
+
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                              "Added ATTACH PARTITION DDL to FDW queue");
+                }
+
+                if (ddl_array.size() > 1) {
+                    LOG_INFO("Processed CREATE TABLE for {} and {} ATTACH PARTITION DDL(s)",
+                             tid, ddl_array.size() - 1);
+                }
                 break;
             }
         case PgMsgEnum::ALTER_TABLE:
@@ -921,8 +957,20 @@ namespace springtail::pg_log_mgr {
                              uint64_t timestamp,
                              const PgLogQueueEntryPtr& entry)
     {
-        // init stream reader
-        _reader.set_file(path, entry->start_offset);
+        // init stream reader based on entry type
+        if (entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER) {
+            // zero-copy path: read directly from memory buffer
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                      "Reading from memory buffer: size={}, path={}",
+                      entry->buffer_size, path);
+            _reader.set_buffer(entry->memory_buffer);
+        } else {
+            // traditional path: read from file
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                      "Reading from file: path={}, start_offset={}, end_offset={}",
+                      path, entry->start_offset, entry->end_offset);
+            _reader.set_file(path, entry->start_offset);
+        }
 
         static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
@@ -947,10 +995,19 @@ namespace springtail::pg_log_mgr {
             PgMsgPtr msg = _reader.read_message(filter, eos);
 
             if (msg != nullptr) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                          "Read message: msg_type={}, offset={}, eos={}, entry_type={}",
+                          static_cast<int>(msg->msg_type), _reader.offset(), eos,
+                          entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER ? "MEMORY" : "FILE");
                 msg->pg_log_timestamp = timestamp;
 
                 // process the message
                 this->enqueue_msg(msg);
+            } else {
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                          "Read null message: offset={}, eos={}, entry_type={}",
+                          _reader.offset(), eos,
+                          entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER ? "MEMORY" : "FILE");
             }
         }
     }
@@ -1249,7 +1306,7 @@ namespace springtail::pg_log_mgr {
 
                     // store the ddl mutations for the FDWs
                     auto ddl = nlohmann::json::parse(ddl_str);
-                    assert(ddl.is_array());
+                    CHECK(ddl.is_array());
                     ddls.insert(ddls.end(), ddl.begin(), ddl.end());
                     table_ids.emplace_back(static_cast<uint64_t>(entry->table_id));
                 }

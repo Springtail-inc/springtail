@@ -766,6 +766,9 @@ namespace springtail
         stats->set_end_offset(metadata.stats.end_offset);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
+        // Also set snapshot_xid in table_req so it gets passed to _create_table()
+        table_req->set_snapshot_xid(metadata.snapshot_xid);
+
         copy_info->set_is_table_dropped(_is_table_dropped(_schema.schema_oid, table_oid));
         LOG_INFO("Copied table {}.{} with oid {} and schema oid {} and xid {}",
                  _schema.schema_name, _schema.table_name, table_oid, _schema.schema_oid, xid.xid);

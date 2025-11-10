@@ -87,6 +87,12 @@ namespace springtail {
                       uint64_t start_offset=0);
 
         /**
+         * @brief Set memory buffer for reading messages from memory instead of disk
+         * @param buffer shared pointer to message data buffer
+         */
+        void set_buffer(std::shared_ptr<std::vector<char>> buffer);
+
+        /**
          * @brief Read next message from stream
          * @param filter optional filter to apply to message types; decodes messages in filter
          * @param eos output | end of stream; true if no more messages
@@ -121,7 +127,9 @@ namespace springtail {
          */
         bool end_of_stream() const
         {
-            if (_stream.eof()) {
+            if (_using_memory_buffer) {
+                return _current_offset >= _memory_buffer->size();
+            } else if (_stream.eof()) {
                 return true;
             }
             return false;
@@ -236,13 +244,16 @@ namespace springtail {
         uint64_t _message_offset = 0;   ///< offset of the message we just read
         uint64_t _current_offset;       ///< current file offset
 
+        // Memory buffer support for zero-copy reading
+        std::shared_ptr<std::vector<char>> _memory_buffer;  ///< In-memory buffer for zero-copy reads
+        bool _using_memory_buffer = false;  ///< True if reading from memory buffer instead of file
+
         uint64_t _xlog_msg_end_offset = 0; ///< ending offset of the xlog message in the file
 
         PgMsgStreamHeader _header;      ///< header of the current xlog data message
 
         int _proto_version;             ///< protocol version of message block (from header)
 
-        bool _read_hdr = false;         ///< true if header needs to be read (set when opening a new file)
         bool _streaming = false;        ///< true if streaming mode (between stream_start and stream_stop)
 
 
@@ -286,6 +297,12 @@ namespace springtail {
 
         /** Read stream at current offset, return uint32_t */
         uint32_t _recvint32() {
+            if (_using_memory_buffer) {
+                DCHECK_LE(_current_offset + 4, _memory_buffer->size()) << "Read past end of buffer";
+                uint32_t res = recvint32(_memory_buffer->data() + _current_offset);
+                _current_offset += 4;
+                return res;
+            }
             uint32_t res = recvint32(_stream);
             _check_fail();
             _current_offset += 4;
@@ -294,6 +311,12 @@ namespace springtail {
 
         /** Read stream at current offset, return uint64_t */
         uint64_t _recvint64() {
+            if (_using_memory_buffer) {
+                DCHECK_LE(_current_offset + 8, _memory_buffer->size()) << "Read past end of buffer";
+                uint64_t res = recvint64(_memory_buffer->data() + _current_offset);
+                _current_offset += 8;
+                return res;
+            }
             uint64_t res = recvint64(_stream);
             _check_fail();
             _current_offset += 8;
@@ -302,6 +325,12 @@ namespace springtail {
 
         /** Read stream at current offset, return uint16_t */
         uint16_t _recvint16() {
+            if (_using_memory_buffer) {
+                DCHECK_LE(_current_offset + 2, _memory_buffer->size()) << "Read past end of buffer";
+                uint16_t res = recvint16(_memory_buffer->data() + _current_offset);
+                _current_offset += 2;
+                return res;
+            }
             uint16_t res = recvint16(_stream);
             _check_fail();
             _current_offset += 2;
@@ -310,6 +339,12 @@ namespace springtail {
 
         /** Read stream at current offset, return uint8_t */
         uint8_t _recvint8() {
+            if (_using_memory_buffer) {
+                DCHECK_LT(_current_offset, _memory_buffer->size()) << "Read past end of buffer";
+                uint8_t res = recvint8(_memory_buffer->data() + _current_offset);
+                _current_offset++;
+                return res;
+            }
             uint8_t res = recvint8(_stream);
             _check_fail();
             _current_offset++;
@@ -318,6 +353,13 @@ namespace springtail {
 
         /** Read stream at current offset and copy data into buffer; return false if eof hit, true otherwise */
         bool _read_buffer(char *buffer, int size) {
+            if (_using_memory_buffer) {
+                DCHECK_LE(_current_offset + size, _memory_buffer->size()) << "Read past end of buffer";
+                std::memcpy(buffer, _memory_buffer->data() + _current_offset, size);
+                _current_offset += size;
+                return true;
+            }
+
             // make sure we don't read past the end of the xlog message
             DCHECK_LE(size + _current_offset, _xlog_msg_end_offset);
 
