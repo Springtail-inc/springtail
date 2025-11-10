@@ -691,14 +691,14 @@ namespace springtail
         }
 
         ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
-        auto schema = std::make_shared<ExtentSchema>(_schema.columns, extension_callback);
+        auto schema = std::make_shared<ExtentSchema>(_schema.columns, extension_callback, false, false);
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
-                                                                  schema, _schema.secondary_keys);
+                                                                  schema, _schema.secondary_keys, extension_callback);
 
         // mark the copy as inflight and record the snapshot details
         // note: we create a version of the schema that may contain undefined data so that we can
         //       correctly record updates with unchanged data from the replication stream
-        auto update_schema = std::make_shared<ExtentSchema>(_schema.columns, extension_callback, true);
+        auto update_schema = std::make_shared<ExtentSchema>(_schema.columns, extension_callback, true, false);
         pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
                                                                snapshot_details, update_schema);
 
@@ -738,6 +738,10 @@ namespace springtail
                     break; // saw footer, finished with the COPY
                 }
 
+                // Append internal_row_id
+                fields->push_back(std::make_shared<ConstTypeField<uint64_t>>(
+                            table->get_next_internal_row_id()));
+
                 // construct a tuple from the row
                 auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
 
@@ -761,9 +765,19 @@ namespace springtail
             root_info->set_extent_id(extent);
         }
 
+        if (_schema.secondary_keys.empty()) {
+            // Add look aside index entry for this snapshot
+            // as there is no secondary index, otherwise it will be
+            // present in the metadata roots
+            auto* root_info = roots_req->add_roots();
+            root_info->set_index_id(constant::INDEX_LOOK_ASIDE);
+            root_info->set_extent_id(constant::UNKNOWN_EXTENT);
+        }
+
         auto* stats = roots_req->mutable_stats();
         stats->set_row_count(metadata.stats.row_count);
         stats->set_end_offset(metadata.stats.end_offset);
+        stats->set_last_internal_row_id(metadata.stats.last_internal_row_id);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
         // Also set snapshot_xid in table_req so it gets passed to _create_table()
@@ -940,7 +954,8 @@ namespace springtail
 
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Converting extension type '{}' into EXTENSION", pg_type);
                 std::vector<char> data(tmp.begin(), tmp.end());
-                fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data, true));
+                ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+                fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data, true, extension_callback, pg_type));
                 pos += length;
                 break;
             }
@@ -1436,6 +1451,53 @@ namespace springtail
     }
 
     void
+    PgCopyTable::_load_extn_opclasses(uint64_t db_id, const std::string& extension)
+    {
+        auto extn_registry = PgExtnRegistry::get_instance();
+        PgCopyTable copy_table;
+
+        // connect to the database
+        copy_table.connect(db_id);
+
+        copy_table._connection.exec(fmt::format(PgExtnRegistry::OPCLASS_QUERY, extension));
+
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            std::string extname = copy_table._connection.get_string(i, 0);
+            std::string access_method = copy_table._connection.get_string(i, 1);
+            uint32_t opclass_oid = copy_table._connection.get_int32(i, 2);
+            std::string opclass_name = copy_table._connection.get_string(i, 3);
+            std::string opfamily_name = copy_table._connection.get_string(i, 4);
+            std::string opclass_schema = copy_table._connection.get_string(i, 5);
+            uint32_t input_type_oid = copy_table._connection.get_int32(i, 6);
+            std::string input_type = copy_table._connection.get_string(i, 7);
+            uint32_t key_type_oid = copy_table._connection.get_int32(i, 8);
+            std::string key_type = copy_table._connection.get_string(i, 9);
+            uint32_t support_number = copy_table._connection.get_int32(i, 10);
+            std::string support_function_name = copy_table._connection.get_string(i, 11);
+
+            PgOpsClass opclass;
+            opclass.oid = opclass_oid;
+            opclass.name = opclass_name;
+            opclass.schema = opclass_schema;
+            opclass.access_method = access_method;
+            opclass.family = opfamily_name;
+
+            PgOpsClassMethod method;
+            method.function_name = support_function_name;
+            method.input_type_oid = input_type_oid;
+            method.input_type = input_type;
+            method.key_type_oid = key_type_oid;
+            method.key_type = key_type;
+            method.support_number = support_number;
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding function: {} for opclass: {} for {}, extension: {}", support_function_name, opclass_name, access_method, extension);
+            extn_registry->add_opclass(extension, opclass, method);
+        }
+
+        copy_table.disconnect();
+    }
+
+    void
     PgCopyTable::init_pg_extn_registry(uint64_t db_id, uint64_t xid)
     {
         nlohmann::json extension_config_json = Properties::get(Properties::EXTENSION_CONFIG);
@@ -1463,6 +1525,7 @@ namespace springtail
             PgExtnRegistry::get_instance()->init_libraries(db_id, extension_name, extension_lib_path);
             _load_extn_types(db_id, extension_name);
             _load_extn_operators(db_id, extension_name);
+            _load_extn_opclasses(db_id, extension_name);
         }
     }
 

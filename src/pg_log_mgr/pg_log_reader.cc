@@ -161,6 +161,7 @@ namespace springtail::pg_log_mgr {
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
+        row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
 
         // reset fields; forces a resync of fields during add_mutation()
         fields = nullptr;
@@ -264,7 +265,7 @@ namespace springtail::pg_log_mgr {
             if (entry.schema == nullptr) {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, {PgExtnRegistry::get_instance()->comparator_func}, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, {PgExtnRegistry::get_instance()->comparator_func}, true, false);
                 }
                 entry.update_schema();
             }
@@ -293,6 +294,7 @@ namespace springtail::pg_log_mgr {
         }
         entry.op_f->set_uint8(&row, T);
         entry.lsn_f->set_uint64(&row, _lsn++);
+        entry.row_id_f->set_uint64(&row, 0);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
@@ -352,7 +354,7 @@ namespace springtail::pg_log_mgr {
                 XidLsn current(current_xid);
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, {PgExtnRegistry::get_instance()->comparator_func}, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, {PgExtnRegistry::get_instance()->comparator_func}, true, false);
                 }
                 entry.update_schema();
             }
@@ -365,6 +367,7 @@ namespace springtail::pg_log_mgr {
             auto &&row = entry.extent->append();
             entry.op_f->set_uint8(&row, PgMsgEnum::TRUNCATE);
             entry.lsn_f->set_uint64(&row, _lsn++);
+            entry.row_id_f->set_uint64(&row, 0);
         }
     }
 
@@ -575,7 +578,7 @@ namespace springtail::pg_log_mgr {
             }
 
             ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
-            entry.table_schema = std::make_shared<ExtentSchema>(columns, extension_callback, true);
+            entry.table_schema = std::make_shared<ExtentSchema>(columns, extension_callback, true, false);
             entry.update_schema();
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set

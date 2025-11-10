@@ -56,7 +56,7 @@ namespace springtail {
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
                           const XidLsn &xid, const ExtensionCallback &extension_callback = {},
-                          bool allow_undefined = false) = 0;
+                          bool allow_undefined = false, bool include_internal_row_id = true) = 0;
 
         /**
          * @brief Get the base path for the tables storage location

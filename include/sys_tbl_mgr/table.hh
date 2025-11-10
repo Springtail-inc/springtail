@@ -13,6 +13,11 @@
 
 namespace springtail {
 
+    /**
+     * Alias to a map holding secondary indexes :: index_id => (root, index_cols)
+     */
+    using SecondaryIndexesCache = std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>>;
+
 namespace table_helpers {
 
 /** Constructs the full directory path for a table given the parameters. */
@@ -32,7 +37,7 @@ namespace indexer_helpers {
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Remove secondary-index entries for every row in an extent.
@@ -44,7 +49,7 @@ namespace indexer_helpers {
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void invalidate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Insert secondary-index entries for every row in a page.
@@ -56,7 +61,7 @@ namespace indexer_helpers {
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Insert secondary-index entries for every row in an extent.
@@ -68,7 +73,7 @@ namespace indexer_helpers {
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void populate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 } // namespace indexer_helpers
 
     /**
@@ -79,6 +84,7 @@ namespace indexer_helpers {
     struct TableStats {
         uint64_t row_count = 0;
         uint64_t end_offset = 0;
+        uint64_t last_internal_row_id = 0;
     };
 
     /**
@@ -213,22 +219,9 @@ namespace indexer_helpers {
 
             FieldPtr _extent_id_f;
             FieldPtr _row_id_f;
+            FieldPtr _internal_row_id_f;
+            FieldArrayPtr _look_aside_key_fields;
 
-            struct PageMapItem {
-                StorageCache::SafePagePtr page;
-                StorageCache::Page::Iterator it_begin;
-            };
-            std::unordered_map<uint64_t, PageMapItem> _page_map;
-            uint64_t _cache_size;
-            // This it to keep a list of extent ids that are in
-            // _page_map. The list is used for evicting items from the
-            // page map. We assume that secondary indexes jump
-            // around extent ids somewhat randomly. There is no need to
-            // pay for something like maintaining LRU.
-            CircularBuffer<uint64_t> _eid_buffer;
-
-            uint64_t _extent_id = 0;
-            StorageCache::Page::Iterator _page_i_begin;
             StorageCache::Page::Iterator _page_i;
 
             void update_page();
@@ -553,6 +546,20 @@ namespace indexer_helpers {
             return _schema;
         }
 
+        /**
+         * Returns the look aside schema of the table.
+         */
+        ExtentSchemaPtr look_aside_schema() const {
+            return _look_aside_schema;
+        }
+
+        /**
+         * Returns the look aside index of the table.
+         */
+        BTreePtr look_aside_index() const {
+            return _look_aside_index;
+        }
+
         std::filesystem::path get_dir_path() const
         {
             return _table_dir;
@@ -607,12 +614,16 @@ namespace indexer_helpers {
         std::filesystem::path _table_dir; ///< The directory holding the table data.
         std::vector<std::string> _primary_key; ///< The primary index key columns.
         ExtentSchemaPtr _schema; ///< The schema of the data extents for this table.
+        ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index for this table.
 
         FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
         FieldPtr _primary_extent_id_f; ///< The field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
         BTreePtr _primary_index;
+
+        /** Look aside index **/
+        BTreePtr _look_aside_index;
 
 
         /** A map of secondary indexes
@@ -640,15 +651,16 @@ namespace indexer_helpers {
          * Mutable table constructor.
          */
         MutableTable(uint64_t db_id,
-            uint64_t table_id,
-            uint64_t access_xid,
-            uint64_t target_xid,
-            const std::filesystem::path &table_base,
-            const std::vector<std::string> &primary_key,
-            const std::vector<Index> &secondary,
-            const TableMetadata &metadata,
-            ExtentSchemaPtr schema,
-            const ExtensionCallback &extension_callback = {});
+                     uint64_t table_id,
+                     uint64_t access_xid,
+                     uint64_t target_xid,
+                     const std::filesystem::path &table_base,
+                     const std::vector<std::string> &primary_key,
+                     const std::vector<Index> &secondary,
+                     const TableMetadata &metadata,
+                     ExtentSchemaPtr schema,
+                     ExtentSchemaPtr schema_without_row_id = nullptr,
+                     const ExtensionCallback &extension_callback = {});
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -760,6 +772,18 @@ namespace indexer_helpers {
         MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {});
 
         /**
+         * Create a btree that can be used for look aside index.
+         */
+        MutableBTreePtr create_look_aside_root(const ExtensionCallback& extension_callback = {});
+
+        /**
+         * Returns the look aside index of the table.
+         */
+        MutableBTreePtr look_aside_index() const {
+            return _look_aside_index;
+        }
+
+        /**
          * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
          * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
          * @return A BTree object of the requested index.
@@ -786,6 +810,13 @@ namespace indexer_helpers {
         std::vector<std::filesystem::path> get_table_files() const;
 
         /**
+         * @brief Get next internal row ID to be used for the row in the mutation
+         */
+        uint64_t get_next_internal_row_id() {
+            return ++_internal_row_id;
+        }
+
+        /**
          * Initialize cached write cache schema and fields for committer performance.
          * Uses the table's existing _schema to build write cache schema with op/lsn columns.
          * Must be called before processing extents from write cache.
@@ -800,6 +831,9 @@ namespace indexer_helpers {
 
         /** Returns the cached data fields, or nullptr if not initialized */
         FieldArrayPtr wc_fields() const { return _wc_fields; }
+
+        /** Returns the cached data fields without internal_row_id */
+        FieldArrayPtr actual_table_fields() const { return _actual_table_fields; }
 
         /** Returns the cached key fields, or nullptr if not initialized */
         FieldArrayPtr wc_key_fields() const { return _wc_key_fields; }
@@ -915,6 +949,22 @@ namespace indexer_helpers {
          */
         uint64_t _get_extent_id(TuplePtr search_key);
 
+        /**
+         * Helper to find the secondary indexes that will be affected by the update
+         */
+        std::vector<uint64_t> _find_updated_secondary_indexes(Extent::Row existing_row, TuplePtr value);
+
+    private:
+        enum class MutationType { INSERT, APPEND, UPDATE, UPSERT, REMOVE, REMOVE_BY_SCAN };
+
+        /**
+         * Helper method to wrap callback and invoke cache mutation methods
+         * @param page   StorageCache Page in which value will be mutated
+         * @param value  TuplePtr to be mutated
+         */
+        template <MutationType m_type>
+        auto _mutation_wrapper(StorageCache::SafePagePtr &page, TuplePtr value);
+
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
@@ -922,6 +972,13 @@ namespace indexer_helpers {
         uint64_t _access_xid; ///< The access XID for this set of mutations.
         uint64_t _target_xid; ///< The final target XID for this set of mutations.
         uint64_t _snapshot_xid{0}; ///< The XID of the snapshot that this version of the table started from.
+
+        /**
+         * Internal row ID for each of the row in the table, used in generating
+         * look-aside index for secondary indexes
+         */
+        std::atomic<uint64_t> _internal_row_id{1};
+
         std::filesystem::path _table_dir; ///< The directory containing the table data.
         std::filesystem::path _data_file; ///< The file containing the table data extents.
 
@@ -933,17 +990,27 @@ namespace indexer_helpers {
         /** The primary index of the table. */
         MutableBTreePtr _primary_index; ///< The mutable primary index btree.
 
+        /**
+         * Look aside index for the secondary indexes
+         */
+        MutableBTreePtr _look_aside_index; ///< The mutable look-aside index btree.
+
         /** A map of secondary indexes
          * first is the index id
          * second.first is btree
          * second.second are the index columns
          */
-        std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The mutable secondary index btrees.
+        SecondaryIndexesCache _secondary_indexes; ///< The mutable secondary index btrees.
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
+        ExtentSchemaPtr _schema_without_row_id; ///< The schema of the data extents of
+                                                ///the table without internal row id.
+        ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index.
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
         MutableFieldPtr _roots_index_id_f; ///< The field accessor for the tree roots index ids stored within each row of the "roots" file.
+        MutableFieldPtr _roots_last_internal_row_id_f; ///< The field accessor for the last_internal_row_id
+                                                       ///stored within each row of the "roots" file
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats{}; ///< The stats for the table.
@@ -954,6 +1021,7 @@ namespace indexer_helpers {
         ExtentSchemaPtr _wc_schema;           ///< Pre-computed write cache schema with op/lsn columns
         FieldPtr _wc_op_field;                ///< Field accessor for __springtail_op
         FieldArrayPtr _wc_fields;             ///< Field accessors for all data columns
+        FieldArrayPtr _actual_table_fields;   ///< Field accessors for all data columns without internal_row_id
         FieldArrayPtr _wc_key_fields;         ///< Field accessors for primary key columns
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;

@@ -260,6 +260,13 @@ private:
     TableCacheRecordPtr _get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid);
 
     /**
+     * @brief Enum for different types of indexes
+     */
+    enum IndexType {
+        PRIMARY, SECONDARY, LOOKASIDE
+    };
+
+    /**
      * Stores the TableCacheRecord, performing a write-through in the cache and the system tables.
      * We don't finalize the system tables so they may remain dirty in the StorageCache.  Nothing
      * from the cache is not evicted until _clear_table_info() is called.
@@ -356,6 +363,21 @@ private:
                             const std::string& schema,
                             const std::string& table_name,
                             const XidLsn& xid);
+
+    /**
+     * Set look-aside index information according to the current state
+     * of the table.
+     * @param db_id The database ID.
+     * @param table_id The table that the schema is for.
+     * @param schema The table schema.
+     * @param table_name The table name.
+     */
+    void _set_lookaside_index(uint64_t db_id,
+                              uint64_t namespace_id,
+                              uint64_t table_id,
+                              const std::string& schema,
+                              const std::string& table_name,
+                              const XidLsn& xid);
 
     /**
      * Clears the cache of schema data.  Called by finalize() once the system tables are
@@ -698,11 +720,11 @@ private:
      * @param index_info       proto::IndexInfo containing the index details
      * @param xid              XidLsn entry at which index is mutated
      * @param keys             Index keys
-     * @param is_primary_index Indicates if its primary or secondary index
+     * @param index_type       Identifies the type of the index (ENUM: IndexType)
      * @return bool indicating the upsert is successful or not
      */
     bool _upsert_index_name(uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
-            const std::map<uint32_t, uint32_t>& keys, bool is_primary_index=false);
+            const std::map<uint32_t, uint32_t>& keys, IndexType index_type=IndexType::SECONDARY);
 
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
@@ -871,6 +893,7 @@ private:
      */
     struct TableStats {
         uint64_t row_count;
+        uint64_t last_internal_row_id;
     };
     std::unordered_map<uint64_t, ///< db_id
         // xid - map

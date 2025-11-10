@@ -703,6 +703,13 @@ namespace springtail {
                 _flush_callback = callback;
             }
 
+            /**
+             * Alias for pointer to a callback to be triggered as part of mutations
+             * @param Row              Extent row which is being mutated
+             * @param handler_context  Pointer to a context used by the caller
+             */
+            using MutationHandlerPtr = void(*)(const Extent::Row&, void* handler_context);
+
         public:
             // ACCESS
             // note: access is to a bi-directional iterator that dereferences to rows
@@ -938,36 +945,79 @@ namespace springtail {
 
             /**
              * Inserts the provided tuple into the Page using the provided ExtentSchema.
+             * @param tuple                Tuple to be inserted
+             * @param schema               Schema for the tuple
+             * @param post_insert_handler  callback to trigger with the resulted row, post the insert
+             * @param handler_context      Context to be passed to the callback
              */
-            void insert(TuplePtr tuple, ExtentSchemaPtr schema);
+            void insert(TuplePtr tuple, ExtentSchemaPtr schema, MutationHandlerPtr post_insert_handler = nullptr, void* handler_context = nullptr);
 
             /**
              * Appends the provided tuple to the Page using the provided ExtentSchema.
+             * @param tuple                    Tuple to be appended
+             * @param schema                   Schema for the tuple
+             * @param post_append_handler      Callback to trigger with the resulted row,
+             *                                 post appending the tuple
+             * @param handler_context          Context to be passed to the callback
              */
-            void append(TuplePtr tuple, ExtentSchemaPtr schema);
+            void append(TuplePtr tuple, ExtentSchemaPtr schema, MutationHandlerPtr post_append_handler = nullptr, void* handler_context = nullptr);
 
             /**
              * Upserts the provided tuple to the Page using the provided ExtentSchema.
+             * @param tuple                    Tuple to be upserted
+             * @param schema                   Schema for the tuple
+             * @param pre_upsert_handler       Callback to trigger with the matched row,
+             *                                 before updating the tuple
+             * @param post_upsert_handler      Callback to trigger with the resulted row,
+             *                                 post updating/inserting the tuple
+             * @param handler_context          Context to be passed to the callback
              * @return True if the upsert() resulted in an insert()
              */
-            bool upsert(TuplePtr tuple, ExtentSchemaPtr schema);
+            bool upsert(TuplePtr tuple, ExtentSchemaPtr schema,
+                    MutationHandlerPtr pre_upsert_handler = nullptr,
+                    MutationHandlerPtr post_upsert_handler = nullptr,
+                    void* handler_context = nullptr);
 
             /**
              * Updates the row in the Page with a matching key as the provided tuple to fully match
              * the tuple, using the provided ExtentSchema.
+             * @param tuple                    Tuple to be updated
+             * @param schema                   Schema for the tuple
+             * @param pre_update_handler       Callback to trigger with the matched row,
+             *                                 before updating the tuple
+             * @param post_update_handler      Callback to trigger with the resulted row,
+             *                                 post updating the tuple
+             * @param handler_context          Context to be passed to the callback
              */
-            void update(TuplePtr tuple, ExtentSchemaPtr schema);
+            void update(TuplePtr tuple, ExtentSchemaPtr schema,
+                    MutationHandlerPtr pre_update_handler = nullptr,
+                    MutationHandlerPtr post_update_handler = nullptr,
+                    void* handler_context = nullptr);
 
             /**
              * Removes a row with the provided key from the Page using the provided ExtentSchema.
+             * @param tuple                    Tuple to be removed
+             * @param schema                   Schema for the tuple
+             * @param post_remove_handler      Callback to trigger with the matched row,
+             *                                 after removing the tuple
+             * @param handler_context          Context to be passed to the callback
              */
-            void remove(TuplePtr key, ExtentSchemaPtr schema);
+            void remove(TuplePtr key, ExtentSchemaPtr schema,
+                    MutationHandlerPtr post_remove_handler = nullptr,
+                    void* handler_context = nullptr);
 
             /**
              * Tries to remove a row by scanning the Page for the given value.
+             * @param tuple                    Tuple to be removed
+             * @param schema                   Schema for the tuple
+             * @param post_remove_handler      Callback to trigger with the matched row,
+             *                                 after removing the tuple only if found
+             * @param handler_context          Context to be passed to the callback
              * @return true if the row was found and removed, false otherwise.
              */
-            bool try_remove_by_scan(TuplePtr value, ExtentSchemaPtr schema);
+            bool try_remove_by_scan(TuplePtr value, ExtentSchemaPtr schema, 
+                    MutationHandlerPtr post_remove_handler = nullptr,
+                    void* handler_context = nullptr);
 
             /**
              * Converts the page to the provided target_schema.  It reads rows from the existing
@@ -1014,8 +1064,16 @@ namespace springtail {
 
             /**
              * Internal implementation of append.  Page must be locked when called.
+             * @param tuple                    Tuple to be appended
+             * @param schema                   Schema for the tuple
+             * @param post_append_handler      Callback to trigger with the resulted row,
+             *                                 post appending the tuple
+             * @param handler_context          Context to be passed to the callback
              */
-            void _append(TuplePtr tuple, ExtentSchemaPtr schema);
+            void _append(TuplePtr tuple, ExtentSchemaPtr schema,
+                    MutationHandlerPtr post_append_handler = nullptr,
+                    void* handler_context = nullptr);
+
 
             /**
              * Checks if the provided extent needs to be split and performs the split if needed.

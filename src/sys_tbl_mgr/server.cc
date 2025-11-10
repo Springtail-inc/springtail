@@ -711,6 +711,7 @@ Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
     auto *stats = request.mutable_stats();
     stats->set_row_count(metadata.stats.row_count);
     stats->set_end_offset(metadata.stats.end_offset);
+    stats->set_last_internal_row_id(metadata.stats.last_internal_row_id);
     request.set_snapshot_xid(metadata.snapshot_xid);
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got update_roots() -- db {}, table {}, xid {}",
@@ -928,6 +929,7 @@ Server::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
     }
     metadata->stats.row_count = response.stats().row_count();
     metadata->stats.end_offset = response.stats().end_offset();
+    metadata->stats.last_internal_row_id = response.stats().last_internal_row_id();
     metadata->snapshot_xid = response.snapshot_xid();
 
     return metadata;
@@ -1356,27 +1358,30 @@ Server::_upsert_index_name(uint64_t db_id,
                             const proto::IndexInfo& index_info,
                             const XidLsn& xid,
                             const std::map<uint32_t, uint32_t>& keys,
-                            bool is_primary_index)
+                            Server::IndexType index_type)
 {
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
 
     auto is_unique = index_info.is_unique();
-    if (is_primary_index) {
+    if (index_type == Server::IndexType::PRIMARY) {
         is_unique = true;
     }
 
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         index_info.namespace_id(), index_info.name(), index_info.table_id(), index_info.id(), xid.xid, xid.lsn,
-        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique);
+        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique, index_names_t->get_next_internal_row_id());
+
 
     // update the index state
     index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     // update columns with the state XID
-    if (is_primary_index) {
+    if (index_type == Server::IndexType::PRIMARY) {
         if(!keys.empty()) {
             _write_index(xid, db_id, index_info.table_id(), constant::INDEX_PRIMARY, keys);
         }
+    } else if (index_type == Server::IndexType::LOOKASIDE) {
+        _write_index(xid, db_id, index_info.table_id(), constant::INDEX_LOOK_ASIDE, keys);
     } else {
         _write_index(xid, db_id, index_info.table_id(), index_info.id(), keys);
     }
@@ -1502,6 +1507,12 @@ Server::_find_index(uint64_t db_id,
         if (id < index_id) {
             continue;
         }
+
+        // Skip look aside index entry only if we are not looking for it
+        if (id == constant::INDEX_LOOK_ASIDE && index_id != constant::INDEX_LOOK_ASIDE) {
+            continue;
+        }
+
         if (index_id != id) {
             LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No data found for index {} -- {}", db_id, index_id);
             break;
@@ -1877,6 +1888,9 @@ Server::_create_table(const proto::TableRequest& request)
     proto::RootInfo* ri = roots_info->add_roots();
     ri->set_index_id(constant::INDEX_PRIMARY);
     ri->set_extent_id(constant::UNKNOWN_EXTENT);
+    proto::RootInfo* la_ri = roots_info->add_roots();
+    la_ri->set_index_id(constant::INDEX_LOOK_ASIDE);
+    la_ri->set_extent_id(constant::UNKNOWN_EXTENT);
     roots_info->set_snapshot_xid(request.snapshot_xid());
 
     _set_roots_info(request.db_id(), request.table().id(), xid, roots_info);
@@ -2040,7 +2054,7 @@ Server::_drop_table(const proto::DropTableRequest& request, bool is_resync)
     _read_schema_indexes(index_info, request.db_id(), request.table_id(), xid);
 
     for (auto const& idx : index_info->indexes()) {
-        if (is_resync || idx.id() == constant::INDEX_PRIMARY) {
+        if (is_resync || idx.id() == constant::INDEX_PRIMARY || idx.id() == constant::INDEX_LOOK_ASIDE) {
             // If resync, all the indexes can be marked as dropped as new ones will be created while copying table
             _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::DELETED);
         } else {
@@ -2122,7 +2136,7 @@ Server::_mutate_namespace(
     // add the namespace to the namespace_names table
     auto table = _get_mutable_system_table(db_id, sys_tbl::NamespaceNames::ID);
     auto tuple =
-        sys_tbl::NamespaceNames::Data::tuple(ns_id, name.value_or(""), xid.xid, xid.lsn, exists);
+        sys_tbl::NamespaceNames::Data::tuple(ns_id, name.value_or(""), xid.xid, xid.lsn, exists, table->get_next_internal_row_id());
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
@@ -2318,7 +2332,7 @@ Server::_mutate_usertype(uint64_t db_id,
     // add the type to the user types table
     auto table = _get_mutable_system_table(db_id, sys_tbl::UserTypes::ID);
     auto tuple =
-        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists);
+        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists, table->get_next_internal_row_id());
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
@@ -2767,7 +2781,7 @@ Server::_set_table_info(uint64_t db_id, TableCacheRecordPtr table_info)
                                          table_info->xid, table_info->lsn, table_info->exists,
                                          table_info->parent_table_id, table_info->partition_key,
                                          table_info->partition_bound, table_info->rls_enabled,
-                                         table_info->rls_forced);
+                                         table_info->rls_forced, table_names_t->get_next_internal_row_id());
     table_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 }
 
@@ -2800,6 +2814,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // possibly cached stats
     uint64_t row_count = 0;
     uint64_t end_offset = 0;
+    uint64_t last_internal_row_id = 0;
     bool stats_found = false;
 
     // get cached roots
@@ -2828,6 +2843,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             }
             // we found a cached entry, update the stats
             row_count = xid_roots.second->stats().row_count();
+            last_internal_row_id = xid_roots.second->stats().last_internal_row_id();
             stats_found = true;
             if (index_id == constant::INDEX_PRIMARY) {
                 end_offset = xid_roots.second->stats().end_offset();
@@ -2946,6 +2962,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
                 auto tab_it = tables.find(table_id);
                 if (tab_it != tables.end()) {
                     row_count = tab_it->second.row_count;
+                    last_internal_row_id = tab_it->second.last_internal_row_id;
                     stats_found = true;
                 }
             }
@@ -2967,7 +2984,9 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         if (srow_i != stats_t->end() && table_id_f->get_uint64(&row) == table_id) {
             // retrieve the stats from the row
             auto row_count_f = stats_schema->get_field("row_count");
+            auto last_internal_row_id_f = stats_schema->get_field("last_internal_row_id");
             row_count = row_count_f->get_uint64(&row);
+            last_internal_row_id = last_internal_row_id_f->get_uint64(&row);
         } else {
             // no stats for this table?  seems like a potential error
             LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
@@ -2976,6 +2995,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     roots_info->mutable_stats()->set_row_count(row_count);
     roots_info->mutable_stats()->set_end_offset(end_offset);
+    roots_info->mutable_stats()->set_last_internal_row_id(last_internal_row_id);
     roots_info->set_snapshot_xid(snapshot_xid);
 
     return roots_info;
@@ -2997,7 +3017,9 @@ Server::_set_roots_info(uint64_t db_id,
     auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
     for (auto const& r : roots_info->roots()) {
         auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, r.index_id(), xid.xid,
-                                                      r.extent_id(), roots_info->snapshot_xid(), roots_info->stats().end_offset()) ;
+                                                      r.extent_id(), roots_info->snapshot_xid(),
+                                                      roots_info->stats().end_offset(),
+                                                      table_roots_t->get_next_internal_row_id());
         table_roots_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
@@ -3010,11 +3032,13 @@ Server::_set_roots_info(uint64_t db_id,
         last_xid = xid.xid; // record the last XID we updated the stats at
         auto& table_stats = tables[table_id];
         table_stats.row_count = roots_info->stats().row_count();
+        table_stats.last_internal_row_id = roots_info->stats().last_internal_row_id();
     }
 
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
     auto tuple =
-        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count());
+        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(),
+                roots_info->stats().last_internal_row_id(), table_stats_t->get_next_internal_row_id());
     table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
@@ -3733,7 +3757,7 @@ Server::_set_schema_info(uint64_t db_id,
             table_id, history.column().position(), history.xid(), history.lsn(), history.exists(),
             history.column().name(), history.column().type(),
             history.column().pg_type(),  // pg type oid
-            history.column().is_nullable(), value, history.update_type());
+            history.column().is_nullable(), value, history.update_type(), schemas_t->get_next_internal_row_id());
         schemas_t->upsert(tuple, constant::UNKNOWN_EXTENT);
     }
 }
@@ -3772,7 +3796,40 @@ Server::_set_primary_index(uint64_t db_id,
         primary_keys[c.pk_position()] = c.position();
     }
 
-    _upsert_index_name(db_id, index, xid, primary_keys, true);
+    _upsert_index_name(db_id, index, xid, primary_keys, IndexType::PRIMARY);
+
+    // Set also lookaside index for the table
+    _set_lookaside_index(db_id, namespace_id, table_id, namespace_name, table_name, xid);
+}
+
+void
+Server::_set_lookaside_index(uint64_t db_id,
+                             uint64_t namespace_id,
+                             uint64_t table_id,
+                             const std::string& namespace_name,
+                             const std::string& table_name,
+                             const XidLsn& xid)
+{
+    // pk_position, position
+    std::map<uint32_t, uint32_t> look_aside_keys;
+
+    proto::IndexInfo index;
+
+    index.set_id(constant::INDEX_LOOK_ASIDE);
+    index.set_name(table_name + ".lookaside_key");
+    index.set_is_unique(true);
+    index.set_namespace_name(namespace_name);
+    index.set_namespace_id(namespace_id);
+    index.set_table_id(table_id);
+    index.set_state(static_cast<uint8_t>(sys_tbl::IndexNames::State::READY));
+
+    proto::IndexColumn col;
+    col.set_position(0);
+    col.set_idx_position(0);
+    *index.add_columns() = col;
+    look_aside_keys[0] = 0;
+
+    _upsert_index_name(db_id, index, xid, look_aside_keys, IndexType::LOOKASIDE);
 }
 
 void
@@ -3842,13 +3899,17 @@ Server::_write_index(const XidLsn& xid,
     auto indexes_t = _get_mutable_system_table(db_id, sys_tbl::Indexes::ID);
     auto fields = sys_tbl::Indexes::Data::fields(tab_id, index_id, xid.xid, xid.lsn,
                                                  0,   // empty position; filled below
-                                                 0);  // empty column ID; filled below
+                                                 0,   // empty column ID; filled below
+                                                 0);  // empty internal row ID; filled below
 
     for (auto& [pos, col_id] : keys) {
         fields->at(sys_tbl::Indexes::Data::POSITION) =
             std::make_shared<ConstTypeField<uint32_t>>(pos);
         fields->at(sys_tbl::Indexes::Data::COLUMN_ID) =
             std::make_shared<ConstTypeField<uint32_t>>(col_id);
+
+        fields->at(sys_tbl::Indexes::Data::INTERNAL_ROW_ID) =
+            std::make_shared<ConstTypeField<uint64_t>>(indexes_t->get_next_internal_row_id());
 
         indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr),
                           constant::UNKNOWN_EXTENT);
