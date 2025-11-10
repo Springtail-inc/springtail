@@ -10,6 +10,7 @@
 #include <boost/multi_index/sequenced_index.hpp>
 #include <boost/multi_index/hashed_index.hpp>
 #include <absl/log/check.h>
+#include <storage/xid.hh>
 
 namespace springtail::sys_tbl_mgr {
 
@@ -19,7 +20,7 @@ namespace springtail::sys_tbl_mgr {
     using TableId = uint64_t;
     using Xid = uint64_t;
 
-    /** A cache for storing messages per (db, table, xid) key.
+    /** A cache for storing messages per (db, table, xid_lsn) key.
      * It uses LRU eviction policy.
      * The cache is thread-safe.
      * The cache doesn't own the containers used for caching.
@@ -42,10 +43,10 @@ namespace springtail::sys_tbl_mgr {
         /** Message stored in the cache **/
         struct Message
         {
-            explicit Message(const Value::allocator_type& al) 
+            explicit Message(const Value::allocator_type& al)
                 :msg{al}
             {}
-            Xid xid = 0;
+            XidLsn xid;
             Value msg;
             bool dropped = false;
         };
@@ -57,15 +58,15 @@ namespace springtail::sys_tbl_mgr {
         {
             DbId db;
             TableId tid;
-            Xid xid;
+            XidLsn xid;
             bool operator==(const LruKey& rhs) const = default;
         };
         struct LruHashFunc
         {
             size_t operator()(const LruKey& k) const
             {
-                using Tuple = std::tuple<DbId, TableId, Xid>;
-                Tuple t{k.db, k.tid, k.xid};
+                using Tuple = std::tuple<DbId, TableId, uint64_t, uint64_t>;
+                Tuple t{k.db, k.tid, k.xid.xid, k.xid.lsn};
                 return boost::hash<Tuple>{}(t);
             }
         };
@@ -112,17 +113,17 @@ namespace springtail::sys_tbl_mgr {
             _lru = lru;
         }
 
-        /** 
+        /**
          * Cache the string message.
          * @param db The DB ID.
          * @param tid The table ID.
-         * @param xid The XID.
+         * @param xid The XID/LSN pair.
          * @param msg The message to cache. Usually it's a serialized proto message.
          * @param drop_table Mark the table as dropped,
-         * @return true if the element has been actually inserted 
+         * @return true if the element has been actually inserted
          *         and false if it was already in the cache.
          */
-        bool insert(DbId db, TableId tid, Xid xid, std::string_view msg, bool drop_table)
+        bool insert(DbId db, TableId tid, const XidLsn& xid, std::string_view msg, bool drop_table)
         {
             Key k{db, tid};
 
@@ -197,14 +198,14 @@ namespace springtail::sys_tbl_mgr {
             return true;
         }
 
-        /** 
+        /**
          * Get the cached string if present based on a key.
          * @param db The DB ID.
          * @param tid The table ID.
-         * @param xid The XID.
+         * @param xid The XID/LSN pair.
          * @return The cached string.
          */
-        std::optional<std::string> find(DbId db, TableId tid, Xid xid)
+        std::optional<std::string> find(DbId db, TableId tid, const XidLsn& xid)
         {
             std::string ret;
             LruKey lk{db, tid, xid};

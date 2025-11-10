@@ -47,6 +47,11 @@ public:
      */
     void use_roots_cache(std::shared_ptr<ShmCache> c);
 
+    /**
+     * Provide the shared memory cache of schemas for this client to use.
+     */
+    void use_schema_cache(std::shared_ptr<ShmCache> c);
+
     void invalidate_by_index(uint64_t db, uint64_t index_id, const XidLsn &xid)
     {
         _schema_cache->invalidate_by_index(db, index_id, xid);
@@ -72,6 +77,7 @@ private:
     std::shared_ptr<grpc::Channel> _channel;
     std::unique_ptr<proto::SysTblMgr::Stub> _stub;
     std::atomic<std::shared_ptr<ShmCache>> _roots_cache;
+    std::atomic<std::shared_ptr<ShmCache>> _schema_shm_cache;
 };
 
 } // namespace springtail::sys_tbl_mgr

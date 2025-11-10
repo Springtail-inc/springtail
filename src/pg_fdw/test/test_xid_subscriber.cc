@@ -28,8 +28,9 @@ namespace {
     class XidSubscriber_Test : public testing::Test {
     protected:
         static void SetUpTestSuite() {
-            std::string overrides = std::format("sys_tbl_mgr.roots_shm_cache_size={};sys_tbl_mgr.rpc_config.server_worker_threads={}",
-                10*1024, 4);
+            std::string overrides = std::format(
+                "sys_tbl_mgr.roots_shm_cache_size={};sys_tbl_mgr.schema_shm_cache_size={};sys_tbl_mgr.rpc_config.server_worker_threads={}",
+                10*1024, 10*1024, 4);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
             springtail_init_test(LOG_ALL ^ LOG_STORAGE);
@@ -106,7 +107,7 @@ namespace {
         // wait for the new xid to be cached by the push
         // notification to PgXidsubscriber
         // Note: we make no direct calls to get_roots()
-        for (size_t i = 0; i != 100; ++i) {
+        for (size_t i = 0; i != 200; ++i) {
             auto r = cache->find(db, tid, _xid.xid);
             if (r) {
                 proto::GetRootsResponse response;

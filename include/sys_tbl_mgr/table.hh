@@ -1016,6 +1016,7 @@ namespace indexer_helpers {
         TableStats _stats{}; ///< The stats for the table.
 
         ExtensionCallback _extension_callback; ///< The extension callback for this table.
+
         // Cached write cache schema and fields for committer performance
         ExtentSchemaPtr _wc_schema;           ///< Pre-computed write cache schema with op/lsn columns
         FieldPtr _wc_op_field;                ///< Field accessor for __springtail_op

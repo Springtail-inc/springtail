@@ -624,7 +624,74 @@ private:
                      std::optional<std::reference_wrapper<proto::IndexInfo>> dropped_index_info_ref = std::nullopt);
 
     /**
+     * Check if direct parent exists for a partition table with matching snapshot XID
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Parent table ID to check
+     * @param xid XID for visibility
+     * @param child_snapshot_xid Child's snapshot XID (must match parent's to prevent attaching to old version)
+     * @return true if parent exists with matching snapshot XID, false otherwise
+     */
+    bool _has_parent(uint64_t db_id,
+                     uint64_t parent_table_id,
+                     const XidLsn& xid,
+                     uint64_t child_snapshot_xid);
+
+    /**
+     * Get direct children of a partitioned table (non-recursive)
+     * Checks _table_cache first, then scans disk for uncached entries
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Parent table ID
+     * @param xid XID for visibility
+     * @return Vector of child table IDs
+     */
+    std::vector<uint64_t> _get_direct_children(uint64_t db_id,
+                                                uint64_t parent_table_id,
+                                                const XidLsn& xid);
+
+    /**
+     * Generate ATTACH PARTITION DDL for a child partition
+     *
+     * @param db_id Database ID
+     * @param child_info Child table info (already fetched to avoid redundant lookup)
+     * @param parent_table_id Parent table ID
+     * @param xid XID for visibility
+     * @return DDL JSON object for ATTACH PARTITION
+     */
+    nlohmann::json _generate_attach_partition_ddl(uint64_t db_id,
+                                                   const TableCacheRecordPtr& child_info,
+                                                   uint64_t parent_table_id,
+                                                   const XidLsn& xid);
+
+    /**
+     * Generate ATTACH PARTITION DDLs for all direct children (non-recursive)
+     * Only attaches children with matching snapshot XID to prevent attaching old versions
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Parent table ID
+     * @param xid XID for visibility
+     * @param parent_snapshot_xid Parent's snapshot XID (children must match)
+     * @param ddl_array_out Output: appends ATTACH PARTITION DDLs for direct children
+     */
+    void _generate_child_attach_ddls(uint64_t db_id,
+                                     uint64_t parent_table_id,
+                                     const XidLsn& xid,
+                                     uint64_t parent_snapshot_xid,
+                                     std::vector<nlohmann::json>& ddl_array_out);
+
+    /**
      * Performs a create_table() assuming that the correct locks are already held.
+     *
+     * Creates partition tables in two phases:
+     * 1. CREATE TABLE - always executed immediately
+     * 2. ATTACH PARTITION - deferred if direct parent doesn't exist yet
+     *
+     * When creating a partitioned parent, checks for waiting children and generates
+     * ATTACH PARTITION DDLs for them (Option B approach - cascades naturally).
+     *
+     * @param request Table request containing table metadata, columns, partition info, and snapshot XID
+     * @return JSON array of DDL objects (CREATE + optional ATTACH + optional child ATTACHes)
      */
     nlohmann::json _create_table(const proto::TableRequest& request);
 
