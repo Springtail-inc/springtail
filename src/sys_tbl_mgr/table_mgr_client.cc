@@ -23,7 +23,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY && v.id != constant::INDEX_LOOK_ASIDE; });
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         return std::make_shared<UserClientTable>(db_id, table_id, xid, _table_base,
@@ -66,7 +66,8 @@ namespace springtail {
 
     std::shared_ptr<ExtentSchema>
     TableMgrClient::get_extent_schema(uint64_t db_id, uint64_t table_id,
-                                      const XidLsn &xid, const ExtensionCallback &extension_callback, bool allow_undefined)
+                                      const XidLsn &xid, const ExtensionCallback &extension_callback,
+                                      bool allow_undefined, bool include_internal_row_id)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
             return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, extension_callback, allow_undefined);
@@ -78,7 +79,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta->columns, extension_callback, allow_undefined);
+        return std::make_shared<ExtentSchema>(meta->columns, extension_callback, allow_undefined, include_internal_row_id);
     }
 
 } // namespace

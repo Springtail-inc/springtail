@@ -104,6 +104,7 @@ Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
     }
     metadata->stats.row_count = response.stats().row_count();
     metadata->stats.end_offset = response.stats().end_offset();
+    metadata->stats.last_internal_row_id = response.stats().last_internal_row_id();
     metadata->snapshot_xid = response.snapshot_xid();
 
     return metadata;

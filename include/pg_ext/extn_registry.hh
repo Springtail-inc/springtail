@@ -22,6 +22,42 @@ struct PgType {
     std::string typsend;
 };
 
+/**
+ * Struct containing the opclass method details
+ * input_type_oid: Oid of the input type needed to convert data to datum
+ * input_type: Name of the input type
+ * key_type_oid: Oid of the key type needed to convert data to datum
+ * key_type: Name of the key type
+ * support_number: Support number of the method ( defined in constants.hh )
+ * function_name: Name of the function ( references pg_proc -> proname )
+ * function_ptr: Function pointer Pointer to the function
+ */
+struct PgOpsClassMethod {
+    uint32_t input_type_oid;
+    std::string input_type;
+    uint32_t key_type_oid;
+    std::string key_type;
+    int support_number;
+    std::string function_name;
+    PGFunction function_ptr = nullptr;
+};
+
+/**
+ * Struct containing the opclass details
+ * oid: Oid of the opclass ( references pg_opclass -> oid )
+ * name: Name of the opclass ( references pg_opclass -> opcname )
+ * schema: Schema of the opclass ( references pg_namespace -> nspname )
+ * access_method: Access method of the opclass ( references pg_am -> amname ) ( GIN/GIST for ex )
+ * family: Family of the opclass ( references pg_opfamily -> opfname)
+ */
+struct PgOpsClass {
+    uint32_t oid;
+    std::string name;
+    std::string schema;
+    std::string access_method;
+    std::string family;
+};
+
 class PgExtnRegistry : public Singleton<PgExtnRegistry> {
     friend class Singleton<PgExtnRegistry>;
 
@@ -65,6 +101,35 @@ public:
         ") "
         "ORDER BY t.typname;";
 
+    static constexpr char OPCLASS_QUERY[] =
+        "SELECT"
+        "    ext.extname AS extension_name, "
+        "    am.amname AS access_method, "
+        "    opc.oid AS opclass_oid, "
+        "    opc.opcname AS opclass_name, "
+        "    opf.opfname AS opfamily_name, "
+        "    ns.nspname AS opclass_schema, "
+        "    opc.opcintype AS input_type_oid, "
+        "    opc.opcintype::regtype AS input_type, "
+        "    opc.opckeytype AS key_type_oid, "
+        "    opc.opckeytype::regtype AS key_type, "
+        "    ap.amprocnum AS support_number, "
+        "    p.proname AS support_function_name "
+        "FROM "
+        "    pg_opclass opc "
+        "    JOIN pg_namespace ns ON ns.oid = opc.opcnamespace "
+        "    JOIN pg_am am ON am.oid = opc.opcmethod "
+        "    LEFT JOIN pg_opfamily opf ON opf.oid = opc.opcfamily "
+        "    LEFT JOIN pg_amproc ap ON ap.amprocfamily = opf.oid "
+        "    LEFT JOIN pg_proc p ON p.oid = ap.amproc "
+        "    LEFT JOIN pg_depend d ON d.objid = opc.oid AND d.classid = 'pg_opclass'::regclass "
+        "    LEFT JOIN pg_extension ext ON ext.oid = d.refobjid "
+        "WHERE "
+        "    am.amname IN ('gin', 'gist') "
+        "    AND ext.extname = '{}' "
+        "ORDER BY"
+        "    opclass_name, support_number; ";
+
     /**
      * Initialize the libraries for the extension
      * @param db_id The database id
@@ -96,6 +161,13 @@ public:
      * @param oper_proc The operator proc
      */
     void add_operator(const std::string& extension, uint32_t oid, const std::string& oper_name, const std::string& oper_proc);
+    /**
+     * Add an operator class to the registry
+     * @param extension The extension name
+     * @param opclass The operator class
+     * @param method The operator class method
+     */
+    void add_opclass(const std::string& extension, PgOpsClass opclass, PgOpsClassMethod method);
 
     /**
      * Get the operator function by oid
@@ -121,6 +193,22 @@ public:
      * @return The type function
      */
     PGFunction get_type_func_by_type_name(const std::string& type_name) const;
+    /**
+     * Get the opclass method by opclass name and support number
+     * @param opclass_name The opclass name
+     * @param support_number The support number of the method ( defined constants.hh )
+     * @return The opclass method
+     */
+    PgOpsClassMethod get_opclass_method_by_method_name(const std::string& opclass_name,
+                                                       int support_number) const;
+    /**
+     * Get the opclass method function pointer by opclass name and support number
+     * @param opclass_name The opclass name
+     * @param support_number The support number of the method ( defined constants.hh )
+     * @return The opclass method function pointer
+     */
+    PGFunction get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name,
+                                                          int support_number) const;
 
     /**
      * Convert a datum to a string - Using the typeouput function of the extension type
@@ -166,6 +254,9 @@ private:
     std::unordered_map<std::string, PGFunction> _oper_name_to_func;
     std::unordered_map<std::string, PGFunction> _proc_name_to_func;
     std::unordered_map<std::string, PGFunction> _type_func_name_to_func;
+
+    // Map of opclass name to a map of support_number to function pointer
+    std::unordered_map<std::string, std::unordered_map<int, PgOpsClassMethod>> _opclass_function_map;
 
     std::unordered_map<std::string, void*> _library_map;
 };

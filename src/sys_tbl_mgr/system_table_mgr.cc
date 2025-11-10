@@ -40,7 +40,8 @@ SystemTableMgr::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &acce
 }
 
 std::shared_ptr<ExtentSchema>
-SystemTableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid, const ExtensionCallback &extension_callback, bool allow_undefined)
+SystemTableMgr::get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid,
+                                  const ExtensionCallback &extension_callback, bool allow_undefined, bool include_internal_row_id)
 {
     return _get_extent_schema(table_id);
 }

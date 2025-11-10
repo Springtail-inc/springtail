@@ -42,7 +42,7 @@ namespace springtail {
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
                           const XidLsn &xid, const ExtensionCallback &extension_callback = {},
-                          bool allow_undefined = false) override;
+                          bool allow_undefined = false, bool include_internal_row_id = true) override;
 
     protected:
         /**

@@ -260,6 +260,13 @@ private:
     TableCacheRecordPtr _get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid);
 
     /**
+     * @brief Enum for different types of indexes
+     */
+    enum IndexType {
+        PRIMARY, SECONDARY, LOOKASIDE
+    };
+
+    /**
      * Stores the TableCacheRecord, performing a write-through in the cache and the system tables.
      * We don't finalize the system tables so they may remain dirty in the StorageCache.  Nothing
      * from the cache is not evicted until _clear_table_info() is called.
@@ -356,6 +363,21 @@ private:
                             const std::string& schema,
                             const std::string& table_name,
                             const XidLsn& xid);
+
+    /**
+     * Set look-aside index information according to the current state
+     * of the table.
+     * @param db_id The database ID.
+     * @param table_id The table that the schema is for.
+     * @param schema The table schema.
+     * @param table_name The table name.
+     */
+    void _set_lookaside_index(uint64_t db_id,
+                              uint64_t namespace_id,
+                              uint64_t table_id,
+                              const std::string& schema,
+                              const std::string& table_name,
+                              const XidLsn& xid);
 
     /**
      * Clears the cache of schema data.  Called by finalize() once the system tables are
@@ -602,7 +624,74 @@ private:
                      std::optional<std::reference_wrapper<proto::IndexInfo>> dropped_index_info_ref = std::nullopt);
 
     /**
+     * Check if direct parent exists for a partition table with matching snapshot XID
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Parent table ID to check
+     * @param xid XID for visibility
+     * @param child_snapshot_xid Child's snapshot XID (must match parent's to prevent attaching to old version)
+     * @return true if parent exists with matching snapshot XID, false otherwise
+     */
+    bool _has_parent(uint64_t db_id,
+                     uint64_t parent_table_id,
+                     const XidLsn& xid,
+                     uint64_t child_snapshot_xid);
+
+    /**
+     * Get direct children of a partitioned table (non-recursive)
+     * Checks _table_cache first, then scans disk for uncached entries
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Parent table ID
+     * @param xid XID for visibility
+     * @return Vector of child table IDs
+     */
+    std::vector<uint64_t> _get_direct_children(uint64_t db_id,
+                                                uint64_t parent_table_id,
+                                                const XidLsn& xid);
+
+    /**
+     * Generate ATTACH PARTITION DDL for a child partition
+     *
+     * @param db_id Database ID
+     * @param child_info Child table info (already fetched to avoid redundant lookup)
+     * @param parent_table_id Parent table ID
+     * @param xid XID for visibility
+     * @return DDL JSON object for ATTACH PARTITION
+     */
+    nlohmann::json _generate_attach_partition_ddl(uint64_t db_id,
+                                                   const TableCacheRecordPtr& child_info,
+                                                   uint64_t parent_table_id,
+                                                   const XidLsn& xid);
+
+    /**
+     * Generate ATTACH PARTITION DDLs for all direct children (non-recursive)
+     * Only attaches children with matching snapshot XID to prevent attaching old versions
+     *
+     * @param db_id Database ID
+     * @param parent_table_id Parent table ID
+     * @param xid XID for visibility
+     * @param parent_snapshot_xid Parent's snapshot XID (children must match)
+     * @param ddl_array_out Output: appends ATTACH PARTITION DDLs for direct children
+     */
+    void _generate_child_attach_ddls(uint64_t db_id,
+                                     uint64_t parent_table_id,
+                                     const XidLsn& xid,
+                                     uint64_t parent_snapshot_xid,
+                                     std::vector<nlohmann::json>& ddl_array_out);
+
+    /**
      * Performs a create_table() assuming that the correct locks are already held.
+     *
+     * Creates partition tables in two phases:
+     * 1. CREATE TABLE - always executed immediately
+     * 2. ATTACH PARTITION - deferred if direct parent doesn't exist yet
+     *
+     * When creating a partitioned parent, checks for waiting children and generates
+     * ATTACH PARTITION DDLs for them (Option B approach - cascades naturally).
+     *
+     * @param request Table request containing table metadata, columns, partition info, and snapshot XID
+     * @return JSON array of DDL objects (CREATE + optional ATTACH + optional child ATTACHes)
      */
     nlohmann::json _create_table(const proto::TableRequest& request);
 
@@ -631,11 +720,11 @@ private:
      * @param index_info       proto::IndexInfo containing the index details
      * @param xid              XidLsn entry at which index is mutated
      * @param keys             Index keys
-     * @param is_primary_index Indicates if its primary or secondary index
+     * @param index_type       Identifies the type of the index (ENUM: IndexType)
      * @return bool indicating the upsert is successful or not
      */
     bool _upsert_index_name(uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
-            const std::map<uint32_t, uint32_t>& keys, bool is_primary_index=false);
+            const std::map<uint32_t, uint32_t>& keys, IndexType index_type=IndexType::SECONDARY);
 
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
@@ -804,6 +893,7 @@ private:
      */
     struct TableStats {
         uint64_t row_count;
+        uint64_t last_internal_row_id;
     };
     std::unordered_map<uint64_t, ///< db_id
         // xid - map

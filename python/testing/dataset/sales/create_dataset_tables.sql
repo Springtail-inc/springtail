@@ -18,3 +18,6 @@ CREATE TABLE IF NOT EXISTS sales (
     SalesDate TIMESTAMP,
     TransactionNumber TEXT
 );
+
+CREATE INDEX idx_product ON sales (ProductID);
+CREATE INDEX idx_customer ON sales (CustomerID);

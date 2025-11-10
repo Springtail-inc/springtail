@@ -711,6 +711,7 @@ Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
     auto *stats = request.mutable_stats();
     stats->set_row_count(metadata.stats.row_count);
     stats->set_end_offset(metadata.stats.end_offset);
+    stats->set_last_internal_row_id(metadata.stats.last_internal_row_id);
     request.set_snapshot_xid(metadata.snapshot_xid);
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got update_roots() -- db {}, table {}, xid {}",
@@ -928,6 +929,7 @@ Server::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
     }
     metadata->stats.row_count = response.stats().row_count();
     metadata->stats.end_offset = response.stats().end_offset();
+    metadata->stats.last_internal_row_id = response.stats().last_internal_row_id();
     metadata->snapshot_xid = response.snapshot_xid();
 
     return metadata;
@@ -1042,7 +1044,7 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
                         const proto::UpdateRootsRequest &roots_req)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got swap_sync_table()");
-    nlohmann::json ddls;
+    nlohmann::json ddls = nlohmann::json::array();  // Initialize to empty array
 
     // 1. acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
@@ -1095,9 +1097,28 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
                         create_req.table().id(), create_req.xid(), create_req.lsn());
 
     assert(create_req.lsn() == constant::RESYNC_CREATE_LSN);
-    auto&& create_ddl = this->_create_table(create_req);
-    create_ddl["is_resync"] = is_resync;
-    ddls.push_back(create_ddl);
+    auto&& create_ddl_array = this->_create_table(create_req);
+
+    DCHECK(create_ddl_array.is_array());  // Always an array now
+
+    if (create_ddl_array.empty()) {
+        // Empty array - parent chain incomplete, DDL deferred
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "DDL deferred during resync for table {} - parent chain incomplete",
+                  create_req.table().id());
+
+    } else {
+        // Non-empty array - mark first element (root parent) with is_resync flag
+        create_ddl_array[0]["is_resync"] = is_resync;
+
+        for (const auto& ddl_item : create_ddl_array) {
+            ddls.push_back(ddl_item);
+        }
+
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "Resync generated {} DDL statement(s) (parent + descendants)",
+                  create_ddl_array.size());
+    }
 
     for (const proto::IndexRequest& index : index_reqs) {
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Create index: {}:{} @ {}:{}", index.db_id(),
@@ -1337,27 +1358,30 @@ Server::_upsert_index_name(uint64_t db_id,
                             const proto::IndexInfo& index_info,
                             const XidLsn& xid,
                             const std::map<uint32_t, uint32_t>& keys,
-                            bool is_primary_index)
+                            Server::IndexType index_type)
 {
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
 
     auto is_unique = index_info.is_unique();
-    if (is_primary_index) {
+    if (index_type == Server::IndexType::PRIMARY) {
         is_unique = true;
     }
 
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         index_info.namespace_id(), index_info.name(), index_info.table_id(), index_info.id(), xid.xid, xid.lsn,
-        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique);
+        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique, index_names_t->get_next_internal_row_id());
+
 
     // update the index state
     index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     // update columns with the state XID
-    if (is_primary_index) {
+    if (index_type == Server::IndexType::PRIMARY) {
         if(!keys.empty()) {
             _write_index(xid, db_id, index_info.table_id(), constant::INDEX_PRIMARY, keys);
         }
+    } else if (index_type == Server::IndexType::LOOKASIDE) {
+        _write_index(xid, db_id, index_info.table_id(), constant::INDEX_LOOK_ASIDE, keys);
     } else {
         _write_index(xid, db_id, index_info.table_id(), index_info.id(), keys);
     }
@@ -1483,6 +1507,12 @@ Server::_find_index(uint64_t db_id,
         if (id < index_id) {
             continue;
         }
+
+        // Skip look aside index entry only if we are not looking for it
+        if (id == constant::INDEX_LOOK_ASIDE && index_id != constant::INDEX_LOOK_ASIDE) {
+            continue;
+        }
+
         if (index_id != id) {
             LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No data found for index {} -- {}", db_id, index_id);
             break;
@@ -1580,6 +1610,222 @@ Server::_drop_index(const XidLsn& xid,
     _upsert_index_name(db_id, index_info, xid, keys);
 }
 
+bool
+Server::_has_parent(uint64_t db_id,
+                    uint64_t parent_table_id,
+                    const XidLsn& xid,
+                    uint64_t child_snapshot_xid)
+{
+    auto table_info = _get_table_info(db_id, parent_table_id, xid);
+    if (!table_info || !table_info->exists) {
+        return false;
+    }
+
+    // For normal table creates (snapshot_xid == 0), parent just needs to exist
+    // For table resyncs (snapshot_xid != 0), parent must have matching snapshot XID
+    if (child_snapshot_xid == 0) {
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "Parent {} exists for normal table create (child snapshot_xid=0)",
+                  parent_table_id);
+        return true;
+    }
+
+    // Check that parent's snapshot XID matches child's snapshot XID
+    // This prevents attaching a newly resync'd child to an older version of the parent
+    auto parent_roots = _get_roots_info(db_id, parent_table_id, xid);
+    if (!parent_roots) {
+        return false;
+    }
+
+    uint64_t parent_snapshot_xid = parent_roots->snapshot_xid();
+    bool snapshot_xid_matches = (parent_snapshot_xid == child_snapshot_xid);
+
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+              "Checking parent {} snapshot XID for resync: parent={}, child={}, match={}",
+              parent_table_id, parent_snapshot_xid, child_snapshot_xid, snapshot_xid_matches);
+
+    return snapshot_xid_matches;
+}
+
+std::vector<uint64_t>
+Server::_get_direct_children(uint64_t db_id,
+                             uint64_t parent_table_id,
+                             const XidLsn& xid)
+{
+    std::vector<uint64_t> children;
+    std::unordered_set<uint64_t> tables_in_cache;
+
+    // First check _table_cache for uncommitted children
+    {
+        boost::unique_lock cache_lock(_mutex);
+        auto db_cache_iter = _table_cache.find(db_id);
+        if (db_cache_iter != _table_cache.end()) {
+            for (const auto& [table_id, xid_map] : db_cache_iter->second) {
+                // Get the latest version visible at our XID
+                auto info_iter = xid_map.lower_bound(xid);
+                if (info_iter != xid_map.end()) {
+                    // Found a visible version in cache - skip disk entries for this table
+                    tables_in_cache.insert(table_id);
+
+                    const auto& table_info = info_iter->second;
+
+                    // Check if this is a child of our parent and exists
+                    if (table_info->exists &&
+                        table_info->parent_table_id.has_value() &&
+                        table_info->parent_table_id.value() == parent_table_id) {
+                        children.push_back(table_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Now scan disk for children not in cache
+    auto table = _get_system_table(db_id, sys_tbl::TableNames::ID);
+    auto schema = table->extent_schema();
+    auto fields = schema->get_fields();
+
+    uint64_t current_table_id = 0;
+    std::optional<uint64_t> current_parent_id = std::nullopt;
+    bool current_exists = false;
+    bool found_any = false;
+
+    auto check_and_add = [&]() {
+        if (found_any && current_exists &&
+            current_parent_id.has_value() &&
+            current_parent_id.value() == parent_table_id &&
+            !tables_in_cache.contains(current_table_id)) {  // Skip if in cache
+            children.push_back(current_table_id);
+        }
+    };
+
+    // Full scan using begin() and end()
+    for (auto it = table->begin(); it != table->end(); ++it) {
+        auto& row = *it;
+
+        uint64_t row_table_id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+        uint64_t row_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
+        uint64_t row_lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
+
+        // If we've moved to a new table, check if the previous one was a child
+        if (found_any && row_table_id != current_table_id) {
+            check_and_add();
+            found_any = false;
+        }
+
+        // Skip rows that are newer than our XID/LSN
+        if (row_xid > xid.xid || (row_xid == xid.xid && row_lsn > xid.lsn)) {
+            continue;
+        }
+
+        // This is the latest visible version for this table_id
+        current_table_id = row_table_id;
+        current_exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+
+        if (!fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->is_null(&row)) {
+            current_parent_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+        } else {
+            current_parent_id = std::nullopt;
+        }
+
+        found_any = true;
+    }
+
+    // Don't forget to check the last table
+    check_and_add();
+
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+              "Found {} direct children for table {} (cache: {}, disk: {})",
+              children.size(), parent_table_id, tables_in_cache.size(),
+              children.size() - tables_in_cache.size());
+
+    return children;
+}
+
+nlohmann::json
+Server::_generate_attach_partition_ddl(uint64_t db_id,
+                                       const TableCacheRecordPtr& child_info,
+                                       uint64_t parent_table_id,
+                                       const XidLsn& xid)
+{
+    auto parent_info = _get_table_info(db_id, parent_table_id, xid);
+
+    DCHECK(child_info && child_info->exists);
+    DCHECK(parent_info && parent_info->exists);
+    DCHECK(child_info->partition_bound.has_value());
+
+    auto child_ns = _get_namespace_info(db_id, child_info->namespace_id, xid);
+    auto parent_ns = _get_namespace_info(db_id, parent_info->namespace_id, xid);
+
+    nlohmann::json ddl;
+    ddl["action"] = "attach_partition";
+    ddl["partition_schema"] = child_ns->name;
+    ddl["partition_name"] = child_info->name;
+    ddl["partition_bound"] = child_info->partition_bound.value();
+    ddl["schema"] = parent_ns->name;
+    ddl["table"] = parent_info->name;
+    ddl["xid"] = xid.xid;
+    ddl["lsn"] = xid.lsn;
+
+    return ddl;
+}
+
+void
+Server::_generate_child_attach_ddls(uint64_t db_id,
+                                    uint64_t parent_table_id,
+                                    const XidLsn& xid,
+                                    uint64_t parent_snapshot_xid,
+                                    std::vector<nlohmann::json>& ddl_array_out)
+{
+    // Find all children that have this table as their parent
+    auto children = _get_direct_children(db_id, parent_table_id, xid);
+
+    if (children.empty()) {
+        return;  // No waiting children
+    }
+
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+              "Found {} waiting children for table {}", children.size(), parent_table_id);
+
+    for (uint64_t child_id : children) {
+        auto child_info = _get_table_info(db_id, child_id, xid);
+        if (!child_info || !child_info->exists) {
+            continue;
+        }
+
+        // Only attach children with matching snapshot XID
+        // This prevents attaching old child versions to a newly resync'd parent
+        if (child_info->partition_bound.has_value()) {
+            auto child_roots = _get_roots_info(db_id, child_id, xid);
+            if (!child_roots) {
+                LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                          "Skipping child table {} - no roots info", child_id);
+                continue;
+            }
+
+            uint64_t child_snapshot_xid = child_roots->snapshot_xid();
+            if (child_snapshot_xid != parent_snapshot_xid) {
+                LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                          "Skipping child table {} - snapshot XID mismatch (parent={}, child={})",
+                          child_id, parent_snapshot_xid, child_snapshot_xid);
+                continue;
+            }
+
+            auto attach_ddl = _generate_attach_partition_ddl(
+                db_id,
+                child_info,
+                parent_table_id,
+                xid
+            );
+            ddl_array_out.push_back(attach_ddl);
+
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                      "Generated ATTACH DDL for child table {} (snapshot_xid={})",
+                      child_id, child_snapshot_xid);
+        }
+    }
+}
+
 nlohmann::json
 Server::_create_table(const proto::TableRequest& request)
 {
@@ -1602,24 +1848,15 @@ Server::_create_table(const proto::TableRequest& request)
     ddl["rls_forced"] = request.table().rls_forced();
     ddl["columns"] = nlohmann::json::array();
 
-    // partition info
+    // partition info - track for system tables and logic, but don't add to CREATE DDL
     std::optional<uint64_t> parent_table_id = std::nullopt;
+    bool has_parent = false;  // Track if direct parent exists
+
     if (request.table().has_parent_table_id() && request.table().parent_table_id() != constant::INVALID_TABLE) {
         parent_table_id = request.table().parent_table_id();
-        ddl["parent_table_id"] = parent_table_id.value();
-        if (parent_table_id.has_value()) {
-            auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
-            if (parent_table_info == nullptr) {
-                LOG_ERROR("Parent table not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
-            } else {
-                ddl["parent_table_name"] = parent_table_info->name;
-                auto namespace_name = _get_namespace_info(request.db_id(), parent_table_info->namespace_id, xid);
-                if (namespace_name == nullptr) {
-                    LOG_ERROR("Parent namespace not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
-                }
-                ddl["parent_namespace_name"] = namespace_name->name;
-            }
-        }
+        // Check if direct parent exists with matching snapshot XID
+        has_parent = _has_parent(request.db_id(), parent_table_id.value(), xid, request.snapshot_xid());
+        // Note: Don't add parent info to CREATE DDL - it goes in ATTACH PARTITION
     }
 
     // partition key -- this is a parent table; either root or intermediate
@@ -1629,11 +1866,12 @@ Server::_create_table(const proto::TableRequest& request)
         ddl["partition_key"] = partition_key.value();
     }
 
-    // this is a partitioned table, it is a leaf if partition_key is empty
+    // partition bound - track for system tables but don't add to CREATE DDL
+    // It will be part of ATTACH PARTITION instead
     std::optional<std::string> partition_bound = std::nullopt;
     if (request.table().has_partition_bound() && !request.table().partition_bound().empty()) {
         partition_bound = request.table().partition_bound();
-        ddl["partition_bound"] = partition_bound.value();
+        // Note: Don't add partition_bound to CREATE DDL - it goes in ATTACH PARTITION
     }
 
     // add table name
@@ -1650,6 +1888,9 @@ Server::_create_table(const proto::TableRequest& request)
     proto::RootInfo* ri = roots_info->add_roots();
     ri->set_index_id(constant::INDEX_PRIMARY);
     ri->set_extent_id(constant::UNKNOWN_EXTENT);
+    proto::RootInfo* la_ri = roots_info->add_roots();
+    la_ri->set_index_id(constant::INDEX_LOOK_ASIDE);
+    la_ri->set_extent_id(constant::UNKNOWN_EXTENT);
     roots_info->set_snapshot_xid(request.snapshot_xid());
 
     _set_roots_info(request.db_id(), request.table().id(), xid, roots_info);
@@ -1700,7 +1941,51 @@ Server::_create_table(const proto::TableRequest& request)
                   ranges.size());
     }
 
-    return ddl;
+    // Build DDL array - always include CREATE TABLE
+    std::vector<nlohmann::json> ddl_array;
+
+    // Step 1: Always generate CREATE TABLE DDL
+    // (partition_bound and parent info not added - they go in ATTACH PARTITION)
+    ddl_array.push_back(ddl);
+
+    // Step 2: If this is a child partition with an existing parent, generate ATTACH PARTITION DDL
+    if (partition_bound.has_value() && has_parent) {
+        auto child_info = _get_table_info(request.db_id(), request.table().id(), xid);
+        DCHECK(child_info != nullptr && child_info->exists);
+
+        auto attach_ddl = _generate_attach_partition_ddl(
+            request.db_id(),
+            child_info,
+            parent_table_id.value(),
+            xid
+        );
+        ddl_array.push_back(attach_ddl);
+
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "Generated ATTACH PARTITION for child table {}", request.table().id());
+    }
+
+    // Step 3: If this is a partitioned parent, check for waiting children and attach them
+    if (partition_key.has_value()) {
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
+                  "Table {} is a partitioned parent - checking for waiting children",
+                  request.table().id());
+
+        size_t before_count = ddl_array.size();
+        _generate_child_attach_ddls(request.db_id(),
+                                    request.table().id(),
+                                    xid,
+                                    request.snapshot_xid(),
+                                    ddl_array);
+
+        if (ddl_array.size() > before_count) {
+            LOG_INFO("Generated ATTACH DDLs for {} waiting children of parent table {}",
+                     ddl_array.size() - before_count, request.table().id());
+        }
+    }
+
+    // ALWAYS return a JSON array
+    return nlohmann::json(ddl_array);
 }
 
 nlohmann::json
@@ -1769,7 +2054,7 @@ Server::_drop_table(const proto::DropTableRequest& request, bool is_resync)
     _read_schema_indexes(index_info, request.db_id(), request.table_id(), xid);
 
     for (auto const& idx : index_info->indexes()) {
-        if (is_resync || idx.id() == constant::INDEX_PRIMARY) {
+        if (is_resync || idx.id() == constant::INDEX_PRIMARY || idx.id() == constant::INDEX_LOOK_ASIDE) {
             // If resync, all the indexes can be marked as dropped as new ones will be created while copying table
             _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::DELETED);
         } else {
@@ -1851,7 +2136,7 @@ Server::_mutate_namespace(
     // add the namespace to the namespace_names table
     auto table = _get_mutable_system_table(db_id, sys_tbl::NamespaceNames::ID);
     auto tuple =
-        sys_tbl::NamespaceNames::Data::tuple(ns_id, name.value_or(""), xid.xid, xid.lsn, exists);
+        sys_tbl::NamespaceNames::Data::tuple(ns_id, name.value_or(""), xid.xid, xid.lsn, exists, table->get_next_internal_row_id());
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
@@ -2047,7 +2332,7 @@ Server::_mutate_usertype(uint64_t db_id,
     // add the type to the user types table
     auto table = _get_mutable_system_table(db_id, sys_tbl::UserTypes::ID);
     auto tuple =
-        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists);
+        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists, table->get_next_internal_row_id());
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
@@ -2496,7 +2781,7 @@ Server::_set_table_info(uint64_t db_id, TableCacheRecordPtr table_info)
                                          table_info->xid, table_info->lsn, table_info->exists,
                                          table_info->parent_table_id, table_info->partition_key,
                                          table_info->partition_bound, table_info->rls_enabled,
-                                         table_info->rls_forced);
+                                         table_info->rls_forced, table_names_t->get_next_internal_row_id());
     table_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 }
 
@@ -2529,6 +2814,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // possibly cached stats
     uint64_t row_count = 0;
     uint64_t end_offset = 0;
+    uint64_t last_internal_row_id = 0;
     bool stats_found = false;
 
     // get cached roots
@@ -2557,6 +2843,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             }
             // we found a cached entry, update the stats
             row_count = xid_roots.second->stats().row_count();
+            last_internal_row_id = xid_roots.second->stats().last_internal_row_id();
             stats_found = true;
             if (index_id == constant::INDEX_PRIMARY) {
                 end_offset = xid_roots.second->stats().end_offset();
@@ -2675,6 +2962,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
                 auto tab_it = tables.find(table_id);
                 if (tab_it != tables.end()) {
                     row_count = tab_it->second.row_count;
+                    last_internal_row_id = tab_it->second.last_internal_row_id;
                     stats_found = true;
                 }
             }
@@ -2696,7 +2984,9 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         if (srow_i != stats_t->end() && table_id_f->get_uint64(&row) == table_id) {
             // retrieve the stats from the row
             auto row_count_f = stats_schema->get_field("row_count");
+            auto last_internal_row_id_f = stats_schema->get_field("last_internal_row_id");
             row_count = row_count_f->get_uint64(&row);
+            last_internal_row_id = last_internal_row_id_f->get_uint64(&row);
         } else {
             // no stats for this table?  seems like a potential error
             LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
@@ -2705,6 +2995,7 @@ Server::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     roots_info->mutable_stats()->set_row_count(row_count);
     roots_info->mutable_stats()->set_end_offset(end_offset);
+    roots_info->mutable_stats()->set_last_internal_row_id(last_internal_row_id);
     roots_info->set_snapshot_xid(snapshot_xid);
 
     return roots_info;
@@ -2726,7 +3017,9 @@ Server::_set_roots_info(uint64_t db_id,
     auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
     for (auto const& r : roots_info->roots()) {
         auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, r.index_id(), xid.xid,
-                                                      r.extent_id(), roots_info->snapshot_xid(), roots_info->stats().end_offset()) ;
+                                                      r.extent_id(), roots_info->snapshot_xid(),
+                                                      roots_info->stats().end_offset(),
+                                                      table_roots_t->get_next_internal_row_id());
         table_roots_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
@@ -2739,11 +3032,13 @@ Server::_set_roots_info(uint64_t db_id,
         last_xid = xid.xid; // record the last XID we updated the stats at
         auto& table_stats = tables[table_id];
         table_stats.row_count = roots_info->stats().row_count();
+        table_stats.last_internal_row_id = roots_info->stats().last_internal_row_id();
     }
 
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
     auto tuple =
-        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count());
+        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(),
+                roots_info->stats().last_internal_row_id(), table_stats_t->get_next_internal_row_id());
     table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
@@ -3462,7 +3757,7 @@ Server::_set_schema_info(uint64_t db_id,
             table_id, history.column().position(), history.xid(), history.lsn(), history.exists(),
             history.column().name(), history.column().type(),
             history.column().pg_type(),  // pg type oid
-            history.column().is_nullable(), value, history.update_type());
+            history.column().is_nullable(), value, history.update_type(), schemas_t->get_next_internal_row_id());
         schemas_t->upsert(tuple, constant::UNKNOWN_EXTENT);
     }
 }
@@ -3501,7 +3796,40 @@ Server::_set_primary_index(uint64_t db_id,
         primary_keys[c.pk_position()] = c.position();
     }
 
-    _upsert_index_name(db_id, index, xid, primary_keys, true);
+    _upsert_index_name(db_id, index, xid, primary_keys, IndexType::PRIMARY);
+
+    // Set also lookaside index for the table
+    _set_lookaside_index(db_id, namespace_id, table_id, namespace_name, table_name, xid);
+}
+
+void
+Server::_set_lookaside_index(uint64_t db_id,
+                             uint64_t namespace_id,
+                             uint64_t table_id,
+                             const std::string& namespace_name,
+                             const std::string& table_name,
+                             const XidLsn& xid)
+{
+    // pk_position, position
+    std::map<uint32_t, uint32_t> look_aside_keys;
+
+    proto::IndexInfo index;
+
+    index.set_id(constant::INDEX_LOOK_ASIDE);
+    index.set_name(table_name + ".lookaside_key");
+    index.set_is_unique(true);
+    index.set_namespace_name(namespace_name);
+    index.set_namespace_id(namespace_id);
+    index.set_table_id(table_id);
+    index.set_state(static_cast<uint8_t>(sys_tbl::IndexNames::State::READY));
+
+    proto::IndexColumn col;
+    col.set_position(0);
+    col.set_idx_position(0);
+    *index.add_columns() = col;
+    look_aside_keys[0] = 0;
+
+    _upsert_index_name(db_id, index, xid, look_aside_keys, IndexType::LOOKASIDE);
 }
 
 void
@@ -3571,13 +3899,17 @@ Server::_write_index(const XidLsn& xid,
     auto indexes_t = _get_mutable_system_table(db_id, sys_tbl::Indexes::ID);
     auto fields = sys_tbl::Indexes::Data::fields(tab_id, index_id, xid.xid, xid.lsn,
                                                  0,   // empty position; filled below
-                                                 0);  // empty column ID; filled below
+                                                 0,   // empty column ID; filled below
+                                                 0);  // empty internal row ID; filled below
 
     for (auto& [pos, col_id] : keys) {
         fields->at(sys_tbl::Indexes::Data::POSITION) =
             std::make_shared<ConstTypeField<uint32_t>>(pos);
         fields->at(sys_tbl::Indexes::Data::COLUMN_ID) =
             std::make_shared<ConstTypeField<uint32_t>>(col_id);
+
+        fields->at(sys_tbl::Indexes::Data::INTERNAL_ROW_ID) =
+            std::make_shared<ConstTypeField<uint64_t>>(indexes_t->get_next_internal_row_id());
 
         indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr),
                           constant::UNKNOWN_EXTENT);
