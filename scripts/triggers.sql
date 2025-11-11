@@ -175,10 +175,15 @@ BEGIN
     EXECUTE format('SELECT
             c.oid AS table_oid,
             c.relname AS table_name,
+            i.indexrelid AS index_oid,
             i.indisunique AS is_unique,
             i.indisprimary AS primary_idx,
-            i.indkey AS indkey
+            i.indkey AS indkey,
+            i.indclass AS indclass,
+            am.amname AS index_type          -- e.g. gin, btree, gist, brin
         FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+        JOIN pg_class ic ON ic.oid = i.indexrelid
+        JOIN pg_am am ON am.oid = ic.relam
         WHERE i.indexrelid = %s', obj_id) INTO ind_obj;
 
     IF ind_obj.primary_idx IS true THEN
@@ -186,20 +191,26 @@ BEGIN
     END IF;
 
     -- get index columns
-    SELECT json_agg(json_col)
+    SELECT json_agg(json_col ORDER BY ord)
+    INTO json_columns
     FROM (
-        SELECT json_build_object('name', pga.attname,
-            'position', pga.attnum,
-            'idx_position', array_position(ind_obj.indkey, pga.attnum)
-        ) AS json_col
-        FROM pg_attribute pga
-        WHERE
-            pga.attrelid=ind_obj.table_oid
-            AND pga.attisdropped IS FALSE
-            AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
-            AND attisdropped=false
-    ) AS obj_select
-    INTO json_columns;
+        SELECT
+            u.ord,
+            json_build_object(
+                'name', idx_att.attname,          -- index column name
+                'position', u.attnum,             -- table attnum (0 for expr)
+                'idx_position', u.ord,            -- index column order
+                'opclass', opc.opcname            -- operator class
+            ) AS json_col
+        FROM unnest(ind_obj.indkey, ind_obj.indclass)
+             WITH ORDINALITY AS u(attnum, opclass_oid, ord)
+        JOIN pg_attribute AS idx_att
+             ON idx_att.attrelid = ind_obj.index_oid
+            AND idx_att.attnum   = u.ord
+            AND idx_att.attisdropped IS FALSE
+        JOIN pg_opclass opc
+             ON opc.oid = u.opclass_oid
+    ) AS obj_select;
 
     -- build msg json object
     msg := json_build_object('xid', txid_current(),
@@ -211,6 +222,7 @@ BEGIN
         'table_oid', ind_obj.table_oid::bigint,
         'table_name', ind_obj.table_name,
         'is_unique', ind_obj.is_unique,
+        'index_type', ind_obj.index_type,
         'columns', json_columns);
 
     -- command_tag is CREATE INDEX
@@ -442,7 +454,8 @@ BEGIN
                     c.relname AS table_name,
                     i.indisunique AS is_unique,
                     i.indisprimary AS primary_idx,
-                    i.indkey AS indkey
+                    i.indkey AS indkey,
+                    i.indclass AS indclass
                 FROM pg_index i
                 JOIN pg_class c ON c.oid = i.indexrelid
                 JOIN pg_class ci ON ci.oid = i.indrelid

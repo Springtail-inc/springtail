@@ -28,7 +28,9 @@ namespace springtail::committer {
             LOG_INFO("Process index request {} for XID: {}@{}, table_id: {}", index_request.action(), db_id, xid, index_request.index().table_id());
             auto &action = index_request.action();
             if (action == "create_index") {
-                build({db_id, xid, index_request});
+                if (index_request.index().index_type() == constant::INDEX_TYPE_BTREE) {
+                    build({db_id, xid, index_request});
+                }
             } else if (action == "drop_index") {
                 drop(db_id, index_request.index().id(), xid);
             } else if (action == "abort_index") {

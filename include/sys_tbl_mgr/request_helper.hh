@@ -114,11 +114,13 @@ namespace springtail::sys_tbl_mgr {
             index->set_is_unique(msg.is_unique);
             index->set_table_name(msg.table_name);
             index->set_table_id(msg.table_oid);
+            index->set_index_type(msg.index_type);
             for (const auto &col : msg.columns) {
                 auto *column = index->add_columns();
                 column->set_position(col.position);
                 column->set_name(col.name);
                 column->set_idx_position(col.idx_position);
+                column->set_opclass(col.opclass);
             }
             return request;
         }

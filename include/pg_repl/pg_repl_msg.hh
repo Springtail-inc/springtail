@@ -220,6 +220,7 @@ namespace springtail
         std::string name;
         int position;        // position is maintained if column is renamed
         int idx_position;    // position in the index
+        std::string opclass; // operator class For GIN/GiST types
     };
 
     struct PgMsgIndex {
@@ -231,6 +232,7 @@ namespace springtail
         uint32_t table_oid;
         std::string table_name;
         std::string namespace_name;
+        std::string index_type;
         std::vector<PgMsgSchemaIndexColumn> columns;
     };
 

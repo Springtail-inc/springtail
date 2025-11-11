@@ -583,7 +583,8 @@ private:
                       uint64_t db_id,
                       uint64_t tab_id,
                       uint64_t index_id,
-                      const std::map<uint32_t, uint32_t>& keys);
+                      const std::map<uint32_t, uint32_t>& keys,
+                      const std::map<uint32_t, std::string>& op_classes);
 
     /**
      * Performs a create_index() assuming that the correct locks are already held.
@@ -724,7 +725,9 @@ private:
      * @return bool indicating the upsert is successful or not
      */
     bool _upsert_index_name(uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
-            const std::map<uint32_t, uint32_t>& keys, IndexType index_type=IndexType::SECONDARY);
+            const std::map<uint32_t, uint32_t>& keys,
+            const std::map<uint32_t, std::string>& op_classes,
+            IndexType index_type=IndexType::SECONDARY);
 
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
