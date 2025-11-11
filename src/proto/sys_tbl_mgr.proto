@@ -84,6 +84,7 @@ message UserTypeRequest {
 message TableStats {
   int64 row_count = 1;
   int64 end_offset = 2;
+  int64 last_internal_row_id = 3;
 }
 
 message RootInfo {

@@ -207,6 +207,8 @@ namespace springtail::pg_log_mgr {
         LSN_t _current_lsn{0};                ///< LSN from last message received
         uint64_t _msg_log_start_offset{0};    ///< start offset of unpushed messages
         char _current_msg_type{0};            ///< current message type being processed
+        std::shared_ptr<std::vector<char>> _msg_buffer;  ///< accumulator for current message data
+        bool _memory_buffer_mode{true};       ///< true = use memory buffers, false = file-only mode
 
         /** Process data from replication stream in loop, queue path, offsets */
         void _log_writer_thread();
@@ -283,13 +285,14 @@ namespace springtail::pg_log_mgr {
          * Function for writer thread to read data from connection and store it
          * @param data data read from connection
          * @param logger current log writer
-         * @param queue_append_func function to append data to the logger queue
-         *                          start_offset, end_offset, log file path
+         * @param queue_append_func optional callback to append data to a custom queue
+         *                          (used during recovery); if not provided, pushes directly
+         *                          to _logger_queue with memory buffer optimization
          * @return true if data was read and processed, false on error
          */
         bool _writer_read_data(PgCopyData &data,
                                PgLogWriterPtr &logger,
-                               std::function<void (uint64_t, uint64_t, const std::filesystem::path &)> queue_append_func);
+                               std::function<void (uint64_t, uint64_t, const std::filesystem::path &)> queue_append_func = nullptr);
 
         /**
          * Function for reading replicated data from the connection; attempts reconnect on failure

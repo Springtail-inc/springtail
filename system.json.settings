@@ -61,11 +61,12 @@
             "client_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem"
         },
         "cache_size": 4096,
-        "roots_shm_cache_size": 10485760
+        "roots_shm_cache_size": 10485760,
+        "schema_shm_cache_size": 10485760
     },
     "storage": {
         "table_dir": "table",
-        "data_cache_size": 16384,
+        "data_cache_size": 32768,
         "page_cache_size": 16384,
         "btree_cache_size": 512,
         "max_extent_per_page": 16,
@@ -85,6 +86,8 @@
         "log_size_rollover_threshold": 134217728,
         "archive_logs": true,
         "indexer_worker_threads": 1,
+	"reader_queue_mem_high_watermark": 134217728,
+	"reader_queue_mem_low_watermark": 100663296,
         "committer_fsync_interval_ms": 500,
         "committer_fsync_worker_threads": 1,
         "rpc_config" : {

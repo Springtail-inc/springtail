@@ -604,30 +604,37 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_try_create_cache()
     {
         std::unique_lock<std::shared_mutex> lock(_rc_mutex);
-        if (_roots_cache && _roots_cache->is_alive()) {
-            return;
-        }
-        try {
-            auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
-            if (cache) {
-                _roots_cache = cache;
+
+        //helper to create cache
+        auto create_cache = [](auto name) -> std::shared_ptr<sys_tbl_mgr::ShmCache> {
+            try {
+                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(name);
+                return cache;
+            } catch (const boost::interprocess::bad_alloc&) {
+                // the cache hasn't been created
+                // this could happen if xid_mgr_subscriber isn't running
+                LOG_ERROR("unable to open the cache of type: {}", name);
+            } catch (const std::exception& e) {
+                LOG_ERROR("exception:{}, {} ", name, e.what());
+                throw;
+            }
+            return nullptr;
+        };
+
+        if (!_roots_cache || !_roots_cache->is_alive()) {
+            _roots_cache = create_cache(sys_tbl_mgr::SHM_CACHE_ROOTS);
+            if (_roots_cache) {
                 // start using the new cache
                 sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
-            } else {
-                // If (!cache) continue with the existing cache anyway.
-                // It'll still work as a cache but without
-                // the advantages of push notifications.
-                // If xid_subscriber comes online, we'll try to
-                // open the new (live) IPC cache the next time we come here.
-                LOG_WARN("The IPC roots cache is dead.");
             }
-        } catch (const boost::interprocess::bad_alloc&) {
-            // the cache hasn't been created
-            // this could happen if xid_mgr_subscriber isn't running
-            LOG_ERROR("fdw_create_state unable to open the roots cache");
-        } catch (const std::exception& e) {
-            LOG_ERROR("fdw_create_state exception:{} ", e.what());
-            throw;
+        }
+
+        if (!_schema_shm_cache || !_schema_shm_cache->is_alive()) {
+            _schema_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
+            if (_schema_shm_cache) {
+                // start using the new cache
+                sys_tbl_mgr::Client::get_instance()->use_schema_cache(_schema_shm_cache);
+            }
         }
     }
 

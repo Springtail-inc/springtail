@@ -69,7 +69,8 @@ namespace springtail {
          */
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
-                          const XidLsn &xid, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false) override;
+                          const XidLsn &xid, const ExtensionCallback &extension_callback = {},
+                          bool allow_undefined = false, bool include_internal_row_id = true) override;
 
     private:
         /**
@@ -140,9 +141,10 @@ namespace springtail {
                          const std::vector<Index> &secondary,
                          const TableMetadata &metadata,
                          ExtentSchemaPtr schema,
+                         ExtentSchemaPtr schema_without_row_id,
                          const ExtensionCallback &extension_callback = {}) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, extension_callback) {}
+                         secondary, metadata, schema, schema_without_row_id, extension_callback) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing

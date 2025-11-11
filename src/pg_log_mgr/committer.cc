@@ -721,7 +721,7 @@ namespace springtail::committer {
             // TODO: another way to handle the case would be to drop the table mutation
             // records from the Batch object in the log reader. Marking this as TODO
             // just to keep the question open for now.
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exists: {}", tid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access/target XID: {} @ {} || {}", tid, xid, batch.final_xid);
             return;
         }
 
@@ -810,6 +810,7 @@ namespace springtail::committer {
         auto op_f = table->wc_op_field();
         auto wc_fields = table->wc_fields();
         auto wc_key_fields = table->wc_key_fields();
+        auto actual_table_fields = table->actual_table_fields();
 
         time_trace::Trace process_extent_trace;
         TIME_TRACE_START(process_extent_trace);
@@ -818,6 +819,10 @@ namespace springtail::committer {
         XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
         Extent extent(*wc_extent->data);
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "xid={} rows={}", xid.xid, extent.row_count());
+
+        // To add internal_row_id as part of INSERTS. Other mutations will have
+        // internal_row_id as part of wc_extent as-is
+        auto internal_row_id_field = std::make_shared<FieldArray>(1);
 
         TIME_TRACE_STOP(process_extent_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_write_extent-xid_{}", xid.xid), process_extent_trace);
@@ -834,7 +839,8 @@ namespace springtail::committer {
             switch (op) {
             case INSERT:
                 {
-                    auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
+                    (*internal_row_id_field)[0] = std::make_shared<ConstTypeField<uint64_t>>(table->get_next_internal_row_id());
+                    auto tuple = std::make_shared<KeyValueTuple>(actual_table_fields, internal_row_id_field, &row);
                     LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, constant::UNKNOWN_EXTENT);
                     break;
@@ -850,7 +856,7 @@ namespace springtail::committer {
                 {
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
-                        auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
+                        auto tuple = std::make_shared<FieldTuple>(actual_table_fields, &row);
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     } else {

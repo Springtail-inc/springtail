@@ -155,7 +155,8 @@ namespace springtail::pg_proxy {
                         {"replicas", replica_json},
                         {"client_count", static_cast<int>(client_sessions.size())},
                         {"client_sessions", client_sessions_array},
-                        {"pooled_sessions", pooled_sessions_array}
+                        {"pooled_sessions", pooled_sessions_array},
+                        {"database_manager", db_mgr->to_json()}
                     });
 
                     LOG_INFO("Admin /info request response: {}", json_response.dump());

@@ -51,7 +51,7 @@ namespace {
                     { "offset", 2, SchemaType::INT64, 0, false, 1 },
                     { "index", 3, SchemaType::INT16, 0, false, 2 }
                 });
-            _schema = std::make_shared<ExtentSchema>(columns);
+            _schema = std::make_shared<ExtentSchema>(columns, ExtensionCallback{}, false, false);
 
             _fields = _schema->get_fields();
             _csv_fields = std::make_shared<FieldArray>();

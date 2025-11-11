@@ -861,14 +861,16 @@ StorageCache::PageCache::background_cleaner()
 
     void
     StorageCache::Page::insert(TuplePtr tuple,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               MutationHandlerPtr post_insert_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // if the page is empty, do an _append() which handles the empty extent case
         if (_empty()) {
-            _append(tuple, schema);
+            _append(tuple, schema, post_insert_handler, handler_context);
             return;
         }
 
@@ -907,24 +909,33 @@ StorageCache::PageCache::background_cleaner()
         auto row = (*extent)->insert(row_i);
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
+        if (post_insert_handler) {
+            post_insert_handler(row, handler_context);
+        }
+
         // check for split
         _check_split(extent_i, *extent, schema);
     }
 
     void
     StorageCache::Page::append(TuplePtr tuple,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               MutationHandlerPtr post_append_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // perform the internal append
-        _append(tuple, schema);
+        _append(tuple, schema, post_append_handler, handler_context);
     }
 
     void
     StorageCache::Page::_append(TuplePtr tuple,
-                                ExtentSchemaPtr schema)
+                                ExtentSchemaPtr schema,
+                                MutationHandlerPtr post_append_handler,
+                                void* handler_context)
+
     {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
@@ -936,6 +947,11 @@ StorageCache::PageCache::background_cleaner()
             // insert the tuple into the extent
             auto row = (*extent)->append();
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+
+            if (post_append_handler) {
+                post_append_handler(row, handler_context);
+            }
+
             return;
         }
 
@@ -950,13 +966,20 @@ StorageCache::PageCache::background_cleaner()
         // set the value
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
+        if (post_append_handler) {
+            post_append_handler(row, handler_context);
+        }
+
         // check for split
         _check_split(extent_i, *extent, schema);
     }
 
     bool
     StorageCache::Page::upsert(TuplePtr tuple,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               MutationHandlerPtr pre_upsert_handler,
+                               MutationHandlerPtr post_upsert_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -971,6 +994,10 @@ StorageCache::PageCache::background_cleaner()
             // insert the tuple into the extent
             auto row = (*extent)->append();
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+
+            if (post_upsert_handler) {
+                post_upsert_handler(row, handler_context);
+            }
 
             return true;
         }
@@ -1005,13 +1032,36 @@ StorageCache::PageCache::background_cleaner()
         bool did_insert = false;
         if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), &*row_i).equal_strict(*key)) {
             // update the existing row
+
+            // get the existing internal row id
+            auto internal_row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
+            auto existing_internal_row_id = internal_row_id_f->get_uint64(&*row_i);
+
+            // update the existing row
             auto row = *row_i;
+
+            if (pre_upsert_handler) {
+                pre_upsert_handler(row, handler_context);
+            }
+
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
-            did_insert = true;
+
+            // update the original internal row id back to the row
+            internal_row_id_f->set_uint64(&row, existing_internal_row_id);
+
+            if (post_upsert_handler) {
+                post_upsert_handler(row, handler_context);
+            }
+
         } else {
             // insert the tuple into the extent
             auto &&row = (*extent)->insert(row_i);
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+            did_insert = true;
+
+            if (post_upsert_handler) {
+                post_upsert_handler(row, handler_context);
+            }
         }
 
         // check for split
@@ -1023,7 +1073,10 @@ StorageCache::PageCache::background_cleaner()
 
     void
     StorageCache::Page::update(TuplePtr tuple,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               MutationHandlerPtr pre_update_handler,
+                               MutationHandlerPtr post_update_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -1057,9 +1110,25 @@ StorageCache::PageCache::background_cleaner()
         // note: row's key should match the tuple's key
         DCHECK(FieldTuple(schema->get_sort_fields(), &*row_i).equal_strict(*key));
 
+        // get the existing internal row id
+        auto internal_row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
+        auto existing_internal_row_id = internal_row_id_f->get_uint64(&*row_i);
+
         // update the existing row
         auto row = *row_i;
+
+        if (pre_update_handler) {
+            pre_update_handler(row, handler_context);
+        }
+
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+
+        // update the original internal row id back to the row
+        internal_row_id_f->set_uint64(&row, existing_internal_row_id);
+
+        if (post_update_handler) {
+            post_update_handler(row, handler_context);
+        }
 
         // check for split
         _check_split(extent_i, *extent, schema);
@@ -1067,7 +1136,9 @@ StorageCache::PageCache::background_cleaner()
 
     void
     StorageCache::Page::remove(TuplePtr key,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               MutationHandlerPtr post_remove_handler,
+                               void* handler_context)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -1097,6 +1168,10 @@ StorageCache::PageCache::background_cleaner()
         // note: row's key should match the tuple's key
         DCHECK(FieldTuple(schema->get_sort_fields(), const_cast<Extent::Row *>(&*row_i)).equal_strict(*key));
 
+        if (post_remove_handler) {
+            post_remove_handler(*row_i, handler_context);
+        }
+
         // remove the row
         (*extent)->remove(row_i);
 
@@ -1109,12 +1184,20 @@ StorageCache::PageCache::background_cleaner()
 
     bool
     StorageCache::Page::try_remove_by_scan(TuplePtr value,
-                                           ExtentSchemaPtr schema)
+                                           ExtentSchemaPtr schema,
+                                           MutationHandlerPtr post_remove_handler,
+                                           void* handler_context)
     {
         bool found = false;
 
         boost::unique_lock lock(_mutex);
         auto fields = schema->get_fields();
+
+        if(schema->column_order().back() == constant::INTERNAL_ROW_ID) {
+            // Remove internal_row_id as the incoming tuple
+            // cant have internal row id
+            fields->pop_back();
+        }
 
         auto extent_i = _extents.begin();
         uint32_t row_pos;
@@ -1142,6 +1225,10 @@ StorageCache::PageCache::background_cleaner()
         auto extent = extent_i->make_dirty_safe_extent(_file, _database_id);
         auto it = (*extent)->at(row_pos);
         (*extent)->remove(it);
+
+        if (post_remove_handler) {
+            post_remove_handler(*it, handler_context);
+        }
 
         // if the extent has become empty, remove it from the page
         if ((*extent)->empty()) {

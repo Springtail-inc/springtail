@@ -12,11 +12,14 @@ using namespace springtail;
 using namespace springtail::pg_fdw;
 
 void
-PgXidSubscriberMgr::init(size_t cache_size, size_t worker_count)
+PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size_t worker_count)
 {
-    _cache_size = cache_size;
+    _roots_cache_size = roots_cache_size;
+    CHECK(_roots_cache_size);
+    _schema_cache_size = schema_cache_size;
+    CHECK(_schema_cache_size);
     _worker_count = worker_count;
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr creating {}, {}", _cache_size, _worker_count);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "creating {}, {}, {}", _roots_cache_size, _schema_cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
     pthread_setname_np(_t->native_handle(), "PgXidSubscriber");
 }
@@ -29,7 +32,7 @@ PgXidSubscriberMgr::~PgXidSubscriberMgr()
 void
 PgXidSubscriberMgr::task(std::stop_token st)
 {
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr task starting");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "task starting");
 
     static constexpr char const * const XID_SUBSCRIBER_WORKER_ID = "xid_subscriber";
 
@@ -38,13 +41,17 @@ PgXidSubscriberMgr::task(std::stop_token st)
 
     // remove old cache if any and create a new one
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_ROOTS);
-    _cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _cache_size);
+    _roots_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _roots_cache_size);
 
-    XidHistoryCleaner cleaner{_cache};
+    sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
+    _schema_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_SCHEMAS, _schema_cache_size);
+
+    XidHistoryCleaner cleaner{_roots_cache};
 
     auto client = sys_tbl_mgr::Client::get_instance();
     // Client should cache get_roots() responses now
-    client->use_roots_cache(_cache);
+    client->use_roots_cache(_roots_cache);
+    client->use_schema_cache(_schema_cache);
 
     // Flag indicating the connection status of XidMgrSubscriber
     // to the XidMgr server.
@@ -53,9 +60,11 @@ PgXidSubscriberMgr::task(std::stop_token st)
     // XID subscriber callbacks
     auto on_push = [this](DbId db, uint64_t xid, bool has_schema_changes) {
         // when we get an XID push notification, we pass it to the workers
-        // and return immediately. A worker calls get_roots() that will
-        // attempt to populate the cache.
-        _cache->update_committed_xid(db, xid, has_schema_changes);
+        // and return immediately. A worker calls get_roots() and get_schema() that will
+        // attempt to populate the caches.
+        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {}", db, xid);
+        _roots_cache->update_committed_xid(db, xid, has_schema_changes);
+        _schema_cache->update_committed_xid(db, xid, has_schema_changes);
         _enqueue_populate_job(db, xid);
     };
     auto on_disconnect = [&connected]() {
@@ -97,14 +106,17 @@ PgXidSubscriberMgr::task(std::stop_token st)
             subscriber->start();
         }
         std::this_thread::sleep_for(loop_time_period);
-        _cache->keep_alive();
+        _roots_cache->keep_alive();
+        _schema_cache->keep_alive();
     }
     subscriber.reset();
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
     workers.clear();
     client = sys_tbl_mgr::Client::get_instance();
     client->use_roots_cache({});
-    _cache.reset();
+    client->use_schema_cache({});
+    _roots_cache.reset();
+    _schema_cache.reset();
 }
 
 void
@@ -133,7 +145,7 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
             _populate_queue.pop();
         }
         auto [db, xid] = item;
-        auto table_ids = _cache->get_db_tables(db);
+        auto table_ids = _roots_cache->get_db_tables(db);
         for (auto tid: table_ids) {
             XidLsn x{xid};
 
@@ -143,11 +155,13 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
                 // the above call to get_db_tables()
                 // won't return it. So exists() should be called
                 // only once after the table is dropped.
-                _cache->mark_dropped(db, tid, xid);
+                _roots_cache->mark_dropped(db, tid, xid);
+                _schema_cache->mark_dropped(db, tid, x);
                 continue;
             }
-            // the client will cache data in _cache
+            // the client will cache data in _roots_cache and _schema_cache
             client->get_roots(db, tid, xid);
+            client->get_schema(db, tid, x);
             if (st.stop_requested()) {
                 break;
             }
@@ -163,6 +177,9 @@ PgXidSubscriberMgr::start()
     size_t roots_cache_size = 0;
     Json::get_to<size_t>(json, "roots_shm_cache_size", roots_cache_size);
 
+    size_t schema_cache_size = 0;
+    Json::get_to<size_t>(json, "schema_shm_cache_size", schema_cache_size);
+
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
 
     CHECK(roots_cache_size) << "Bad cache size, terminating PgXidSubscriberRunner";
@@ -177,7 +194,7 @@ PgXidSubscriberMgr::start()
     // populate the cache. We use the same number or threads as there are in the RPC in service.
     auto worker_count = Json::get_or<size_t>(rpc_json, "server_worker_threads", 1);
 
-    get_instance()->init(roots_cache_size, worker_count);
+    get_instance()->init(roots_cache_size, schema_cache_size, worker_count);
 }
 
 void

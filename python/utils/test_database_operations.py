@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 import psycopg2
+import socket
 import sys
 import threading
 import time
@@ -52,7 +53,7 @@ class DatabaseTester():
 
         self.logger = logging.getLogger('springtail')
         self.pp_buffer = io.StringIO()
-        self.pretty_printer = pprint.PrettyPrinter(4, 160, 1, self.pp_buffer, compact=True, underscore_numbers=True)
+        self.pretty_printer = pprint.PrettyPrinter(4, 120, None, self.pp_buffer, compact=True, underscore_numbers=True)
         self.config_redis = self.props.get_config_redis()
         self.instance_id = self.props.get_db_instance_id()
         self.preload_table_name = "test_preload"
@@ -60,8 +61,10 @@ class DatabaseTester():
         self.fdw_list = []
         self.primary_postgres_conn = None
         self.primary_conn = None
+        self.primary_ip = None
         self.proxy_conn = None
         self.fdw_conn = {}
+        self.fdw_ip = {}
         self.fdw_user = os.environ.get("FDW_USER")
         self.fdw_user_password = os.environ.get("FDW_USER_PASSWORD")
         self.stop_event = threading.Event()
@@ -116,6 +119,15 @@ class DatabaseTester():
         self.log_data(logging.INFO, "Found databases", db_names)
         return (database_name in db_names)
 
+    def _get_database_ip(self, conn: psycopg2.extensions.connection) -> str:
+        """
+        This method gets IP address of the host that database connection is connected to.
+        """
+        result = execute_sql_select(conn, f"SELECT inet_server_addr()")
+        ip = [row[0] for row in result][0]
+        self.log_data(logging.INFO, "Found database server address ", ip)
+        return ip
+
     def _create_database(self, database_name: str, replication_slot: str, publication_name: str) -> None:
         """
         This method creates database
@@ -130,7 +142,8 @@ class DatabaseTester():
             execute_sql(self.primary_postgres_conn, f"CREATE DATABASE {database_name}")
             self.logger.info(f"Created database '{database_name}'")
 
-        self.logger.info("Creating primary connection")
+        self.primary_ip = socket.gethostbyname("primary")
+        self.logger.info("Creating primary connection; ip {self.primary_ip}")
         self.primary_conn = connect_db(database_name, "postgres", "postgres", "primary", 5432)
 
         self._create_table(self.preload_table_name)
@@ -230,15 +243,33 @@ class DatabaseTester():
         self.proxy_conn = connect_db(database_name, "postgres", "postgres", "proxy", 5432)
         self.log_data(logging.INFO, "Creating FDW connections for", self.fdw_list)
         for fdw_instance in self.fdw_list:
+            ip = socket.gethostbyname(fdw_instance)
+            self.fdw_ip[ip] = fdw_instance
             self.fdw_conn[fdw_instance] = connect_db(database_name, self.fdw_user, self.fdw_user_password, fdw_instance, 5432)
+
+        # verify that proxy is connected to one of FDWs
+        server_ip = self._get_database_ip(self.proxy_conn)
+        if server_ip == self.primary_ip:
+            self.logger.error(f"Proxy connection is connected to primary")
+            raise SystemExit(f"FAILURE: Proxy is connected to primary database")
+        if server_ip in self.fdw_ip:
+            self.logger.info(f"Proxy connection is connected to {self.fdw_ip[server_ip]}")
+
+    def _verify_proxy_primary_connection(self):
+        server_ip = self._get_database_ip(self.proxy_conn)
+        if server_ip != self.primary_ip:
+            self.logger.error(f"Proxy connection is not connected to primary")
+            raise SystemExit(f"FAILURE: Proxy is not connected to primary database")
+        self.logger.info(f"Proxy connection is connected to IP: {server_ip}")
+
 
     def _verify_table(self, table_name: str, no_fdw: bool = False) -> None:
         self.logger.info(f"Verifying table '{table_name}'")
         primary_data = self._get_test_data(self.primary_conn, table_name)
-        self.log_data(logging.INFO, "Primary data", primary_data)
+        self.log_data(logging.DEBUG, "Primary data", primary_data)
 
         proxy_data = self._get_test_data(self.proxy_conn, table_name)
-        self.log_data(logging.INFO, "Proxy data", primary_data)
+        self.log_data(logging.DEBUG, "Proxy data", primary_data)
         if primary_data != proxy_data:
             raise SystemExit(f"FAILURE: Primary and proxy data do not match")
 
@@ -248,7 +279,7 @@ class DatabaseTester():
 
         for fdw_id, fdw_conn in self.fdw_conn.items():
             fdw_data = self._get_test_data(fdw_conn, table_name)
-            self.log_data(logging.INFO, f"FDW ({fdw_id}) data", fdw_data)
+            self.log_data(logging.DEBUG, f"FDW ({fdw_id}) data", fdw_data)
             if primary_data != fdw_data:
                 raise SystemExit(f"FAILURE: Primary and fdw '{fdw_id}' data do not match")
 
@@ -260,6 +291,7 @@ class DatabaseTester():
         and also creates a connection to 'postgres' database on primary.
         """
         self.primary_postgres_conn = connect_db("postgres", "postgres", "postgres", "primary", 5432)
+        self.primary_ip = socket.gethostbyname("primary")
         self.primary_conn = connect_db(database_name, "postgres", "postgres", "primary", 5432)
         self._create_connections(database_name)
 
@@ -284,7 +316,6 @@ class DatabaseTester():
         self._verify_database_query(self.primary_postgres_conn, database_name)
         self._verify_database_query(self.primary_conn, database_name)
 
-        # NOTE: temporary commented out
         self._verify_database_query(self.proxy_conn, database_name)
         for fdw_id, fdw_conn in self.fdw_conn.items():
             self._verify_database_query(fdw_conn, database_name)
@@ -469,21 +500,24 @@ class DatabaseTester():
                 self._remove_database_from_redis(database, database_id)
                 time.sleep(5)
 
-                # 5. Verify proxy and FDW connections fail
+                # 5. Verify that proxy connection is now connected to primary database
+                self._verify_proxy_primary_connection()
+
+                # 6. Verify proxy and FDW connections fail
                 self._verify_connections_fail(database)
 
-                # 6. Verify content of preload table on primary and proxy connections
+                # 7. Verify content of preload table on primary and proxy connections
                 self._verify_table(self.preload_table_name, True)
 
                 if remove_under_load:
-                    # 7. Stop writing thread
+                    # 8. Stop writing thread
                     self.stop_event.set()
                     self.thread.join()
                 else:
-                    # 7. Verify content of replicate table on primary and proxy connections
+                    # 8. Verify content of replicate table on primary and proxy connections
                     self._verify_table(self.replicate_table_name, True)
 
-                # 8. Remove database from postgres
+                # 9. Remove database from postgres
                 self._remove_database(database, replication_slot, publication_name)
 
             # --- cleanup case

@@ -21,6 +21,28 @@ namespace springtail {
         ComparatorFunc comparator_func = nullptr;
         ExtensionContext context = {};
     };
+
+    // GIST Proc
+    constexpr int GIST_CONSISTENT = 1;
+    constexpr int GIST_UNION = 2;
+    constexpr int GIST_COMPRESS = 3;
+    constexpr int GIST_DECOMPRESS = 4;
+    constexpr int GIST_PENALTY = 5;
+    constexpr int GIST_PICKSPLIT = 6;
+    constexpr int GIST_EQUAL = 7;
+    constexpr int GIST_DISTANCE = 8;
+    constexpr int GIST_FETCH = 9;
+    constexpr int GIST_OPTIONS = 10;
+    constexpr int GIST_SORTSUPPORT = 11;
+
+    // GIN Proc
+    constexpr int GIN_COMPARE = 1;
+    constexpr int GIN_EXTRACTVALUE = 2;
+    constexpr int GIN_EXTRACTQUERY = 3;
+    constexpr int GIN_CONSISTENT = 4;
+    constexpr int GIN_COMPARE_PARTIAL = 5;
+    constexpr int GIN_TRICONSISTENT = 6;
+    constexpr int GIN_OPTIONS = 7;
 }
 
 namespace springtail::constant {
@@ -68,6 +90,9 @@ namespace springtail::constant {
     /** An index ID that represents the primary index. */
     static constexpr uint64_t INDEX_PRIMARY = 0;
 
+    /** An index ID that represents the look-aside index. */
+    static constexpr uint64_t INDEX_LOOK_ASIDE = std::numeric_limits<uint64_t>::max();
+
     /** The name of the child pointer field in a BTree branch extent. */
     static const std::string BTREE_CHILD_FIELD = "__springtail_child";
 
@@ -80,6 +105,13 @@ namespace springtail::constant {
     /** The format of an index file name. */
     static constexpr std::string_view INDEX_FILE = "{}.idx";
     static constexpr std::string_view INDEX_PRIMARY_FILE = "0.idx";
+    static constexpr std::string_view INDEX_LOOK_ASIDE_FILE = "look_aside.idx";
+
+    /**
+     * Name of the internal row ID for the rows in the table,
+     * to be used in the look-aside index for secondary indexes
+     */
+    static const std::string INTERNAL_ROW_ID = "__springtail_internal_row_id";
 
     /** The format of a raw data file name. */
     static constexpr std::string_view DATA_FILE = "raw";
