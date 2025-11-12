@@ -3252,6 +3252,8 @@ Server::_populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn i
                 indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row));
         col->set_idx_position(
                 indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row));
+        col->set_opclass(
+                indexes_fields->at(sys_tbl::Indexes::Data::OPCLASS)->get_text(&row));
     }
 }
 
