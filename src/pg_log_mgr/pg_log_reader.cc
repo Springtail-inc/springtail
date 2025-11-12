@@ -143,21 +143,27 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::TableEntry::update_schema()
+    PgLogReader::Batch::TableEntry::update_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
     {
-        auto columns = table_schema->column_order();
-        DCHECK_GT(columns.size(), 0);
-
-        auto sort_keys = table_schema->get_sort_keys();
-        sort_keys.push_back("__springtail_lsn");
-
-        SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
-        SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
-
-        std::vector<SchemaColumn> new_columns{op, lsn};
-
+        // Get the cached batch schema
         ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
-        schema = table_schema->create_schema(columns, new_columns, sort_keys, extension_callback, true);
+        schema = TableMgr::get_instance()->get_pg_log_batch_schema(db_id, table_id, xid, extension_callback);
+
+        op_f = schema->get_mutable_field("__springtail_op");
+        lsn_f = schema->get_mutable_field("__springtail_lsn");
+        row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
+
+        // reset fields; forces a resync of fields during add_mutation()
+        fields = nullptr;
+    }
+
+    void
+    PgLogReader::Batch::TableEntry::create_schema(ExtentSchemaPtr table_schema)
+    {
+        // Create the batch schema directly from the provided table schema (non-cached)
+        // This is used for CREATE/ALTER TABLE where the table doesn't exist in the cache yet
+        ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+        schema = TableMgr::get_instance()->create_pg_log_batch_schema(table_schema, extension_callback);
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
@@ -267,7 +273,7 @@ namespace springtail::pg_log_mgr {
                 if (entry.table_schema == nullptr) {
                     entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, {PgExtnRegistry::get_instance()->comparator_func}, true, false);
                 }
-                entry.update_schema();
+                entry.update_schema(_db, tid, xidlsn);
             }
 
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Create extent with row width: {}", entry.schema->row_size());
@@ -356,7 +362,7 @@ namespace springtail::pg_log_mgr {
                 if (entry.table_schema == nullptr) {
                     entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, {PgExtnRegistry::get_instance()->comparator_func}, true, false);
                 }
-                entry.update_schema();
+                entry.update_schema(_db, tid, current);
             }
 
             entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size(),
@@ -579,7 +585,8 @@ namespace springtail::pg_log_mgr {
 
             ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
             entry.table_schema = std::make_shared<ExtentSchema>(columns, extension_callback, true, false);
-            entry.update_schema();
+            // Use create_schema() instead of update_schema() since the table doesn't exist in cache yet
+            entry.create_schema(entry.table_schema);
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set
             //     of mutations, but it's not clear we actually need it since the mutations would be
@@ -628,7 +635,8 @@ namespace springtail::pg_log_mgr {
 
                 // use the schema information from the current txn in the subtxn
                 auto &&p = sub_txn->table_map.try_emplace(entry.first, TableEntry{ table.table_schema });
-                p.first->second.update_schema();
+                // Use LATEST_XID to get the latest schema version
+                p.first->second.update_schema(_db, entry.first, XidLsn(constant::LATEST_XID));
             }
         }
 

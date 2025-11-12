@@ -24,49 +24,21 @@ namespace springtail {
 
         /**
          * Retrieves the schema for the table at a given XID.
+         * System tables have immutable schemas, so we return the stored schema.
          */
         virtual ExtentSchemaPtr extent_schema() const override
         {
-            return SystemTableMgr::get_instance()->get_extent_schema(0, _id, {0, 0});
+            return _schema;
         }
 
         /**
          * Get a schema for accessing an extent from this table that was written at the provided XID.
+         * System tables have immutable schemas, so we return the stored schema.
          */
         virtual SchemaPtr schema(uint64_t extent_xid) const override
         {
-            return SystemTableMgr::get_instance()->get_schema(0, _id, {0, 0}, {0, 0});
+            return _schema;
         }
     };
 
-    class SystemMutableTable: public MutableTable,
-                              public std::enable_shared_from_this<SystemMutableTable> {
-
-    public:
-        /**
-         * System mutable table constructor.
-         */
-        SystemMutableTable(uint64_t db_id,
-                           uint64_t table_id,
-                           uint64_t access_xid,
-                           uint64_t target_xid,
-                           const std::filesystem::path &table_base,
-                           const std::vector<std::string> &primary_key,
-                           const std::vector<Index> &secondary,
-                           const TableMetadata &metadata,
-                           ExtentSchemaPtr schema) :
-            MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema) {}
-
-        /**
-         * Truncate function call is empty as we are not going to truncate system tables.
-         *
-         */
-        virtual void truncate() override
-        {
-            // no truncation for system tables
-            LOG_WARN("Truncate operation on system table is not supported.");
-            DCHECK(false);
-        }
-    };
-} // springtail
+} // namespace springtail

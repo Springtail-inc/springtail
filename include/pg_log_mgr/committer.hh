@@ -6,6 +6,7 @@
 #include <pg_log_mgr/xid_ready.hh>
 #include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/mutable_table.hh>
 #include <write_cache/write_cache_index.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
