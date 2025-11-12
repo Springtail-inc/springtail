@@ -120,18 +120,18 @@ TEST(ShmTest, Lifecycle) {
             ASSERT_EQ(os.str(), r.value());
         }
 
-        auto db_tables = c.get_db_tables(10000);
+        auto db_tables = c.get_db_objects(10000);
         ASSERT_EQ(db_tables.size(), 1);
 
         // drop the table at some future xid
         c.mark_dropped(10000, 20000, 500);
 
-        db_tables = c.get_db_tables(10000);
+        db_tables = c.get_db_objects(10000);
         // no tables now
         ASSERT_EQ(db_tables.size(), 0);
 
         // include dropped tables
-        db_tables = c.get_db_tables(10000, false);
+        db_tables = c.get_db_objects(10000, false);
         ASSERT_EQ(db_tables.size(), 1);
 
         // but should still be able to access previous xid's
