@@ -165,29 +165,11 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
         return std::nullopt;
     }
 
-    auto pos_i = std::ranges::upper_bound(
+    return get_committed_xid_from_history(
         it->second,
         schema_xid,
-        [] (Xid a, Xid b) {
-            return a < b;
-        },
-        [] (const XidHistoryEntry& entry) {
-            return entry.schema_xid;
-        }
+        last_xid
     );
-
-    if (pos_i != it->second.end()) {
-        auto latest_schema_xid = pos_i->latest_committed_xid;
-        if (!latest_schema_xid) {
-            return std::nullopt;
-        }
-
-        if (latest_schema_xid <= last_xid) {
-            last_xid = latest_schema_xid;
-        }
-    }
-
-    return {last_xid};
 }
 
 void ShmCache::delete_xid_history(DbId db)
