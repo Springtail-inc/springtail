@@ -778,7 +778,7 @@ Server::finalize(uint64_t db_id, uint64_t xid, bool call_sync)
     Vacuumer::get_instance()->commit_expired_extents(db_id, request.xid());
 }
 
-void 
+void
 Server::sync(uint64_t db_id, uint64_t xid)
 {
     // block all mutations
@@ -1427,7 +1427,9 @@ Server::_create_index(const proto::IndexRequest& request, bool &created)
     // Set namespace ID for the requested index
     mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
 
-    if (request.index().index_type() == constant::INDEX_TYPE_GIN || _check_index_columns(request.db_id(), mutable_index_request.index(), keys, xid)) {
+    if (request.index().index_type() == constant::INDEX_TYPE_GIN ||
+        request.index().index_type() == constant::INDEX_TYPE_GIST ||
+        _check_index_columns(request.db_id(), mutable_index_request.index(), keys, xid)) {
         created = _upsert_index_name(request.db_id(), mutable_index_request.index(), xid, keys, op_classes);
     }
     return mutable_index_request.index();
@@ -3200,6 +3202,7 @@ Server::_read_schema_indexes(SchemaInfoPtr schema_info,
         info.set_name(names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row));
         info.set_table_id(tid);
         info.set_is_unique(names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row));
+        info.set_index_type(names_fields->at(sys_tbl::IndexNames::Data::INDEX_TYPE)->get_text(&row));
 
         // populate Index columns for the given XidLsn
         _populate_index_columns(db_id, info, index_xid);

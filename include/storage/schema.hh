@@ -109,6 +109,7 @@ namespace springtail {
         struct Column {
             uint32_t idx_position;
             uint32_t position;
+            std::string opclass;
         };
         uint64_t id;
         std::string schema;
@@ -116,6 +117,7 @@ namespace springtail {
         uint64_t table_id;
         bool is_unique;
         uint8_t state;
+        std::string index_type;
         std::vector<Column> columns;
     };
 

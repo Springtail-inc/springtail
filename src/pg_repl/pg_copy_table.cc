@@ -123,12 +123,16 @@ namespace springtail
         "    a.attname AS column_name, "
         "    s.snum AS secondary_index_num, "
         "    a.attnum AS column_attnum, "
-        "    idx.indisunique AS is_unique "
+        "    idx.indisunique AS is_unique, "
+        "    am.amname AS index_type, "
+        "    opc.opcname AS opclass_name "
         "FROM pg_index idx "
         "JOIN pg_class i ON i.oid = idx.indexrelid "
         "JOIN pg_namespace ns ON ns.oid = i.relnamespace "
         "JOIN pg_attribute a ON a.attrelid = idx.indrelid "
+        "JOIN pg_am am ON am.oid = i.relam "
         "JOIN generate_subscripts(idx.indkey, 1) s(snum) ON idx.indkey[s.snum] = a.attnum "
+        "LEFT JOIN pg_opclass opc ON opc.oid = idx.indclass[s.snum] "
         "LEFT JOIN pg_constraint c ON c.conindid = idx.indexrelid AND c.contype = 'p' "
         "WHERE idx.indrelid = {} "
         "  AND c.conname IS NULL "
@@ -303,10 +307,13 @@ namespace springtail
             std::uint32_t secondary_index_num = _connection.get_int32(i, 3);
             std::uint32_t column_attnum = _connection.get_int32(i, 4);
             bool is_unique = _connection.get_boolean(i, 5);
+            std::string index_type = _connection.get_string(i, 6);
+            std::string opclass_name = _connection.get_string(i, 7);
 
             Index::Column index_column;
             index_column.idx_position = secondary_index_num;
             index_column.position = column_attnum;
+            index_column.opclass = opclass_name;
 
             std::vector<Index::Column> columns;
             // If the existing key is found, use the list of columns from that.
@@ -325,6 +332,7 @@ namespace springtail
             index_obj.columns = std::move(columns);
             // set the index state to ready since its part of the initial table copy
             index_obj.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+            index_obj.index_type = index_type;
 
             secondary_indexes[index_name] = std::move(index_obj);
         }
@@ -682,11 +690,13 @@ namespace springtail
             index_info->set_is_unique(index.is_unique);
             index_info->set_name(index.name);
             index_info->set_state(index.state);
+            index_info->set_index_type(index.index_type);
 
             for (const auto &column : index.columns) {
                 auto* index_column = index_info->add_columns();
                 index_column->set_idx_position(column.idx_position);
                 index_column->set_position(column.position);
+                index_column->set_opclass(column.opclass);
             }
         }
 

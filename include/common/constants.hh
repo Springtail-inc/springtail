@@ -117,6 +117,7 @@ namespace springtail::constant {
      * Different types of secondary indexes
      */
     static constexpr std::string_view INDEX_TYPE_GIN = "gin";
+    static constexpr std::string_view INDEX_TYPE_GIST = "gist";
     static constexpr std::string_view INDEX_TYPE_BTREE = "btree";
 
     /** The format of a raw data file name. */

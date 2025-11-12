@@ -1350,7 +1350,7 @@ namespace springtail::pg_fdw {
             List      *attnums = NULL;
             List      *item = NULL;
             LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "adding index path: {}", idx.id);
-            for (const auto col: idx.columns) {
+            for (const auto &col: idx.columns) {
                 LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "adding pathkey attnum: {}", col.position);
                 attnums = list_append_unique_int(attnums, col.position);
             }
