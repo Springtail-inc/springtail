@@ -53,7 +53,7 @@ uint64_t get_committed_xid_from_history(const T& history, uint64_t schema_xid, u
         return last_xid;
     }
     auto target_xid = pos_i->latest_real_commit_xid;
-    CHECK(target_xid != 0);
+    DCHECK(target_xid != 0);
 
     if (target_xid > last_xid) {
         return last_xid;
