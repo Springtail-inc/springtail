@@ -771,6 +771,11 @@ namespace indexer_helpers {
          */
         MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {});
 
+        /** Create a btree that can be used for GIN indexes.
+         * @param index_id PG index ID.
+         */
+        MutableBTreePtr create_gin_index_root(uint64_t index_id, const ExtensionCallback& extension_callback = {});
+
         /**
          * Create a btree that can be used for look aside index.
          */
@@ -965,6 +970,11 @@ namespace indexer_helpers {
         template <MutationType m_type>
         auto _mutation_wrapper(StorageCache::SafePagePtr &page, TuplePtr value);
 
+        /**
+         * Create and set GIN index schema
+         */
+        void _set_gin_index_schema(const ExtensionCallback& extension_callback);
+
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
@@ -1005,6 +1015,11 @@ namespace indexer_helpers {
         ExtentSchemaPtr _schema_without_row_id; ///< The schema of the data extents of
                                                 ///the table without internal row id.
         ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index.
+
+        /**
+         * Schema for the GIN indices
+         */
+        ExtentSchemaPtr _gin_index_schema;
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.

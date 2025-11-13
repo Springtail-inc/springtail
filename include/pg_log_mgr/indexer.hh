@@ -4,6 +4,8 @@
 #include <pg_log_mgr/index_requests_manager.hh>
 #include <redis/redis_ddl.hh>
 #include <storage/mutable_btree.hh>
+#include <pg_ext/trgm_helpers.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::committer {
 
@@ -116,6 +118,9 @@ namespace springtail::committer {
         bool _was_dropped(const Key& key);
         void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx,
                 uint64_t end_xid, MutableBTreePtr look_aside_root);
+
+        MutableBTreePtr _build_gin_index(std::stop_token& st, MutableTablePtr mutable_table,
+                TablePtr table, const Key& key, const IndexParams& idx, std::vector<uint32_t>& idx_cols);
 
         // work state
         std::condition_variable_any _cv;

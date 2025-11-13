@@ -783,6 +783,9 @@ namespace indexer_helpers {
                 _look_aside_index->init_empty();
             }
         }
+
+        // Initialize GIN index schema to be used for GIN index building/mutations
+        _set_gin_index_schema(extension_callback);
     }
 
     void
@@ -1141,6 +1144,41 @@ namespace indexer_helpers {
         }
 
         return metadata;
+    }
+
+    void
+    MutableTable::_set_gin_index_schema(const ExtensionCallback& extension_callback)
+    {
+        SchemaColumn idx_position_c(constant::INDEX_POSITION_FIELD, 0, SchemaType::UINT32, 0, false);
+        SchemaColumn idx_gin_token_c(constant::INDEX_GIN_TOKEN_FIELD, 0, SchemaType::TEXT, 0, false);
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
+
+        std::vector<std::string> gin_index_keys;
+        gin_index_keys.push_back(constant::INDEX_POSITION_FIELD);
+        gin_index_keys.push_back(constant::INDEX_GIN_TOKEN_FIELD);
+        gin_index_keys.push_back(constant::INTERNAL_ROW_ID);
+
+        _gin_index_schema = _schema->create_index_schema({},
+                { idx_position_c, idx_gin_token_c, internal_row_id },
+                gin_index_keys, extension_callback);
+    }
+
+    MutableBTreePtr
+    MutableTable::create_gin_index_root(uint64_t index_id, const ExtensionCallback& extension_callback)
+    {
+        std::vector<std::string> gin_index_keys;
+        gin_index_keys.push_back(constant::INDEX_POSITION_FIELD);
+        gin_index_keys.push_back(constant::INDEX_GIN_TOKEN_FIELD);
+        gin_index_keys.push_back(constant::INTERNAL_ROW_ID);
+
+        auto btree = std::make_shared<MutableBTree>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                gin_index_keys, _gin_index_schema,
+                _target_xid,
+                get_max_extent_size_secondary(),
+                extension_callback
+                );
+        return btree;
     }
 
     MutableBTreePtr

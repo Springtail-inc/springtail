@@ -96,6 +96,12 @@ namespace springtail::constant {
     /** The name of the child pointer field in a BTree branch extent. */
     static const std::string BTREE_CHILD_FIELD = "__springtail_child";
 
+    /** The name of the index column position (in the table) field in an index leaf extent. */
+    static const std::string INDEX_POSITION_FIELD = "__springtail_idx_position";
+
+    /** The name of the GIN index token field in an index leaf extent. */
+    static const std::string INDEX_GIN_TOKEN_FIELD = "__springtail_gin_idx_token";
+
     /** The name of the extent ID field in an index leaf extent. */
     static const std::string INDEX_EID_FIELD = "__springtail_eid";
 

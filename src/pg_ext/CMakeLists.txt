@@ -28,6 +28,7 @@ set(LIB_PGEXT_SOURCES
     pqformat.cc
     domains.cc
     type.cc
+    trgm_helpers.cc
     extn_registry.cc
 )
 

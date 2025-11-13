@@ -1,6 +1,5 @@
 #include <pg_log_mgr/indexer.hh>
 #include <sys_tbl_mgr/server.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_ext/extn_registry.hh>
 
@@ -28,9 +27,7 @@ namespace springtail::committer {
             LOG_INFO("Process index request {} for XID: {}@{}, table_id: {}", index_request.action(), db_id, xid, index_request.index().table_id());
             auto &action = index_request.action();
             if (action == "create_index") {
-                if (index_request.index().index_type() == constant::INDEX_TYPE_BTREE) {
-                    build({db_id, xid, index_request});
-                }
+                build({db_id, xid, index_request});
             } else if (action == "drop_index") {
                 drop(db_id, index_request.index().id(), xid);
             } else if (action == "abort_index") {
@@ -326,8 +323,6 @@ namespace springtail::committer {
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
         auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid, {PgExtnRegistry::get_instance()->comparator_func});
-        MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols, {PgExtnRegistry::get_instance()->comparator_func});
-        root->init_empty();
 
         auto look_aside_index = mutable_table->look_aside_index();
         bool build_look_aside = false;
@@ -344,12 +339,6 @@ namespace springtail::committer {
             }
         }
 
-        key_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
-
-        auto internal_row_id_f = mutable_table->schema()->get_field(constant::INTERNAL_ROW_ID);
-
-        // additional fields in the root schema to keep extent and row ids
-        auto value_fields = std::make_shared<FieldArray>(1);
         uint64_t row_cnt = 0;
 
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Indexing build in progress: {}:{}", db_id, index_id);
@@ -393,30 +382,101 @@ namespace springtail::committer {
             }
         }
 
-        row_cnt = 0;
+        // Now build the actual index
+        MutableBTreePtr root;
+        if (idx._index_request.index().index_type() == constant::INDEX_TYPE_GIN) {
+            root = _build_gin_index(st, mutable_table, table, key, idx, idx_cols);
+        } else {
+            // Default - btree index builder
+            root = mutable_table->create_index_root(index_id, idx_cols, {PgExtnRegistry::get_instance()->comparator_func});
+            root->init_empty();
+
+            key_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
+
+            auto internal_row_id_f = mutable_table->schema()->get_field(constant::INTERNAL_ROW_ID);
+
+            // additional fields in the root schema to keep extent and row ids
+            auto value_fields = std::make_shared<FieldArray>(1);
+            row_cnt = 0;
+            for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
+                if (st.stop_requested()) {
+                    root->truncate();
+                    if (build_look_aside) {
+                        look_aside_index->truncate();
+                    }
+                    return {nullptr, key, idx, tid, look_aside_index};
+                }
+                // check if the index was dropped
+                if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
+                    return {root, key, idx, tid, look_aside_index};
+                }
+
+                // insert key
+                auto &&row = *row_i;
+                (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, &row);
+                root->insert(svalue);
+
+                ++row_cnt;
+            }
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
+        }
+        return {root, key, idx, tid, look_aside_index};
+    }
+
+    MutableBTreePtr
+    Indexer::_build_gin_index(std::stop_token &st, MutableTablePtr mutable_table, TablePtr table,
+            const Key& key, const IndexParams& idx, std::vector<uint32_t>& idx_cols)
+    {
+        constexpr int DROP_CHECK_PERIOD = 1000;
+
+        auto [db_id, index_id] = key;
+
+        auto root = mutable_table->create_gin_index_root(index_id, {PgExtnRegistry::get_instance()->comparator_func});
+        root->init_empty();
+
+        auto key_fields = std::make_shared<FieldArray>(3);
+        auto index_column_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
+
+        auto internal_row_id_f = mutable_table->schema()->get_field(constant::INTERNAL_ROW_ID);
+
+        // For each row, for each of the index columns, invoke opclass extract_value and get the tokens
+        // then for each token, create entry in the tree as (column position, token, internal_row_id)
+        auto value_fields = std::make_shared<FieldArray>(1);
+        auto row_cnt = 0;
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
                 root->truncate();
-                if (build_look_aside) {
-                    look_aside_index->truncate();
-                }
-                return {nullptr, key, idx, tid, look_aside_index};
+                return nullptr;
             }
             // check if the index was dropped
             if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
-                return {root, key, idx, tid, look_aside_index};
+                return root;
             }
 
-            // insert key
+            // for every index column, get tokens, and insert them into the index
             auto &&row = *row_i;
-            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
-            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, &row);
-            root->insert(svalue);
+            for (int i = 0; i < idx_cols.size(); i++) {
+                auto&& col_field = (*index_column_fields)[i];
+                auto pos = idx_cols[i];
+                auto& column = idx._index_request.index().columns()[i];
+                auto&& tokens = extract_trgm_from_value(std::string(col_field->get_text(&row)), column.opclass(), GIN_EXTRACTVALUE);
 
+                for (auto& token: tokens) {
+                    // Set idx_position, token, internal_row_id
+                    key_fields->at(0) = std::make_shared<ConstTypeField<uint32_t>>(pos);
+                    key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(token);
+                    key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                    auto tuple = std::make_shared<FieldTuple>(key_fields, nullptr);
+                    root->insert(tuple);
+                }
+            }
+
+            // Increment row count
             ++row_cnt;
         }
-        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
-        return {root, key, idx, tid, look_aside_index};
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "GIN Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
+        return root;
     }
 
     std::vector<uint32_t>
@@ -657,12 +717,32 @@ namespace springtail::committer {
                         indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._look_aside_root, look_aside_keys, prev_schema);
                     }
 
+                    auto key_fields = std::make_shared<FieldArray>(3);
                     // and invalidate index for the rows in the prev page
                     auto &&idx_col_fields = prev_schema->get_fields(prev_schema->get_column_names(idx_cols));
                     for (auto &row: *prev_extent) {
-                        (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
-                        auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-                        idx_state._root->remove(svalue);
+                        if (idx_state._idx._index_request.index().index_type() == constant::INDEX_TYPE_GIN) {
+                            for (int i = 0; i < idx_cols.size(); i++) {
+                                auto&& col_field = (*idx_col_fields)[i];
+                                auto pos = idx_cols[i];
+                                auto& column = idx_state._idx._index_request.index().columns()[i];
+                                auto&& tokens = extract_trgm_from_value(std::string(col_field->get_text(&row)), column.opclass(), GIN_EXTRACTVALUE);
+
+                                for (auto& token: tokens) {
+                                    // Set idx_position, token, internal_row_id
+                                    key_fields->at(0) = std::make_shared<ConstTypeField<uint32_t>>(pos);
+                                    key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(token);
+                                    key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                                    auto tuple = std::make_shared<FieldTuple>(key_fields, nullptr);
+                                    idx_state._root->remove(tuple);
+                                }
+                            }
+
+                        } else {
+                            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                            auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
+                            idx_state._root->remove(svalue);
+                        }
                     }
 
                     // Insert into a set to skip for other extents pointing
@@ -677,11 +757,30 @@ namespace springtail::committer {
 
                 // Populate index for the rows in the next page
                 auto internal_row_id_f = next_schema->get_field(constant::INTERNAL_ROW_ID);
+                auto key_fields = std::make_shared<FieldArray>(3);
                 auto &&idx_col_fields = next_schema->get_fields(next_schema->get_column_names(idx_cols));
                 for (auto &row: *next_extent) {
-                    (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
-                    auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-                    idx_state._root->insert(svalue);
+                    if (idx_state._idx._index_request.index().index_type() == constant::INDEX_TYPE_GIN) {
+                        for (int i = 0; i < idx_cols.size(); i++) {
+                            auto&& col_field = (*idx_col_fields)[i];
+                            auto pos = idx_cols[i];
+                            auto& column = idx_state._idx._index_request.index().columns()[i];
+                            auto&& tokens = extract_trgm_from_value(std::string(col_field->get_text(&row)), column.opclass(), GIN_EXTRACTVALUE);
+
+                            for (auto& token: tokens) {
+                                // Set idx_position, token, internal_row_id
+                                key_fields->at(0) = std::make_shared<ConstTypeField<uint32_t>>(pos);
+                                key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(token);
+                                key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                                auto tuple = std::make_shared<FieldTuple>(key_fields, nullptr);
+                                idx_state._root->insert(tuple);
+                            }
+                        }
+                    } else {
+                        (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                        auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
+                        idx_state._root->insert(svalue);
+                    }
                 }
 
                 // Get the next extent if next_offset is present, else exit the reconciliation
