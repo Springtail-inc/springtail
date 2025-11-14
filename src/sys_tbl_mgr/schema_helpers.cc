@@ -21,9 +21,9 @@ namespace springtail::schema_helpers {
     {
         // Static singleton - initialized once
         static ExtentSchemaPtr look_aside_schema = []() {
-            SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
-            SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
-            SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, 0, false);
+            SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 1, SchemaType::UINT64, 0, false, 0);
+            SchemaColumn extent_c(constant::INDEX_EID_FIELD, 2, SchemaType::UINT64, 0, false);
+            SchemaColumn row_c(constant::INDEX_RID_FIELD, 3, SchemaType::UINT32, 0, false);
             std::vector<SchemaColumn> columns = { internal_row_id, extent_c, row_c };
             return std::make_shared<ExtentSchema>(columns, ExtensionCallback{}, false, false);
         }();

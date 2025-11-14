@@ -12,13 +12,14 @@ namespace springtail {
 
     /** Type of ExtentSchema being cached */
     enum class ExtentSchemaType : uint8_t {
-        TABLE,           // Base table schema from get_extent_schema()
-        INDEX,           // Secondary index schema (has index_id)
-        PRIMARY_INDEX,   // Primary index schema (index_id = 0)
-        LOOK_ASIDE,      // Look-aside index schema (maps internal_row_id to extent_id/row_id)
-        BTREE_BRANCH,    // Branch schema for MutableBTree internal nodes
-        PG_LOG_BATCH,    // PgLogReader batch schema (with __springtail_op/lsn)
-        CUSTOM           // Other derived schemas from create_schema()
+        TABLE_WITH_ROW_ID,    // Base table schema with __internal_row_id (for mutable tables)
+        TABLE_WITHOUT_ROW_ID, // Base table schema without __internal_row_id (for write cache/wire)
+        INDEX,                // Secondary index schema (has index_id)
+        PRIMARY_INDEX,        // Primary index schema (index_id = 0)
+        LOOK_ASIDE,           // Look-aside index schema (maps internal_row_id to extent_id/row_id)
+        BTREE_BRANCH,         // Branch schema for MutableBTree internal nodes
+        PG_LOG_BATCH,         // PgLogReader batch schema (with __springtail_op/lsn)
+        CUSTOM                // Other derived schemas from create_schema()
     };
 
     /** Key for looking up cached ExtentSchema objects (without XID since entries store version ranges) */

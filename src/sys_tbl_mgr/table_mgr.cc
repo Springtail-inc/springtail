@@ -106,9 +106,11 @@ namespace springtail {
         auto schema_with_row_id = schema->create_schema(schema->column_order(), {}, schema->get_sort_keys(), extension_callback);
 
         // construct an empty mutable table with the provided snapshot XID and return it
+        // bypass_schema_cache=true since the table doesn't exist in system tables yet
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema_with_row_id->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema_with_row_id, schema, extension_callback);
+                                                  tbl_meta, schema_with_row_id, schema, extension_callback,
+                                                  true);
     }
 
     std::map<uint32_t, SchemaColumn>
@@ -153,8 +155,10 @@ namespace springtail {
             return SystemTableMgrServer::get_instance()->get_extent_schema(db_id, table_id, xid, extension_callback, allow_undefined);
         }
 
-        // Try cache first
-        ExtentSchemaCacheKey key{db_id, table_id, ExtentSchemaType::TABLE, 0};
+        // Try cache first - use different type based on whether internal_row_id is included
+        ExtentSchemaType schema_type = include_internal_row_id ? ExtentSchemaType::TABLE_WITH_ROW_ID
+                                                                : ExtentSchemaType::TABLE_WITHOUT_ROW_ID;
+        ExtentSchemaCacheKey key{db_id, table_id, schema_type, 0};
         if (auto cached = _lookup_cached_schema(key, xid)) {
             return cached;
         }
@@ -205,7 +209,8 @@ namespace springtail {
         }
 
         // Cache miss - get the base table schema first (this will use cache if available)
-        auto table_schema = get_extent_schema(db_id, table_id, xid, extension_callback, true);
+        // NOTE: Use schema WITHOUT internal_row_id since write cache extents don't include it
+        auto table_schema = get_extent_schema(db_id, table_id, xid, extension_callback, true, false);
 
         // Build the batch schema using the helper
         auto batch_schema = schema_helpers::create_pg_log_batch_schema(table_schema, extension_callback);

@@ -7,6 +7,7 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/mutable_table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/schema_helpers.hh>
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
@@ -159,12 +160,14 @@ namespace indexer_helpers {
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
                                ExtentSchemaPtr schema_without_table_id,
-                               const ExtensionCallback &extension_callback)
+                               const ExtensionCallback &extension_callback,
+                               bool bypass_schema_cache)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
       _target_xid(target_xid),
       _primary_key(primary_key),
+      _bypass_schema_cache(bypass_schema_cache),
       _schema(schema),
       _schema_without_row_id(schema_without_table_id)
     {
@@ -184,7 +187,7 @@ namespace indexer_helpers {
         std::filesystem::create_directories(_table_dir);
 
         // Get the singleton roots schema
-        _roots_schema = TableMgr::get_instance()->get_roots_schema();
+        _roots_schema = schema_helpers::get_roots_schema();
         _roots_root_f = _roots_schema->get_mutable_field("root");
         _roots_index_id_f = _roots_schema->get_mutable_field("index_id");
         _roots_last_internal_row_id_f = _roots_schema->get_mutable_field("last_internal_row_id");
@@ -676,7 +679,7 @@ namespace indexer_helpers {
     MutableTable::create_look_aside_root(const ExtensionCallback& extension_callback)
     {
         // Get the singleton look-aside schema
-        _look_aside_schema = TableMgr::get_instance()->get_look_aside_schema();
+        _look_aside_schema = schema_helpers::get_look_aside_schema();
 
         std::vector<std::string> look_aside_keys;
         look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
@@ -692,8 +695,10 @@ namespace indexer_helpers {
     MutableBTreePtr
     MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback)
     {
-        // Get the cached index schema
-        auto index_schema = TableMgr::get_instance()->get_index_schema(_db_id, _id, index_id, index_columns, XidLsn{_target_xid}, extension_callback);
+        // Get the index schema - bypass cache if this is a snapshot table without system table metadata
+        auto index_schema = _bypass_schema_cache
+            ? schema_helpers::create_index_schema(_schema, index_columns, index_id, extension_callback)
+            : TableMgr::get_instance()->get_index_schema(_db_id, _id, index_id, index_columns, XidLsn{_target_xid}, extension_callback);
 
         // get the column names for the keys
         auto &&col_names = _schema->get_column_names(index_columns);

@@ -22,7 +22,8 @@ namespace springtail {
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
                      ExtentSchemaPtr schema_without_row_id = nullptr,
-                     const ExtensionCallback &extension_callback = {});
+                     const ExtensionCallback &extension_callback = {},
+                     bool bypass_schema_cache = false);
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -347,6 +348,7 @@ namespace springtail {
         std::vector<std::string> _primary_key; ///< The key columns of the primary index.
 
         bool _use_empty; ///< True if the table started or became empty, requiring use of the _empty_page.
+        bool _bypass_schema_cache; ///< True if schema construction should bypass TableMgr cache and use schema_helpers directly.
         FieldPtr _primary_extent_id_f; ///< A field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */

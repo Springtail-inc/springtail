@@ -185,9 +185,10 @@ namespace springtail {
                          const TableMetadata &metadata,
                          ExtentSchemaPtr schema,
                          ExtentSchemaPtr schema_without_row_id,
-                         const ExtensionCallback &extension_callback = {}) :
+                         const ExtensionCallback &extension_callback = {},
+                         bool bypass_schema_cache = false) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, schema_without_row_id, extension_callback) {}
+                         secondary, metadata, schema, schema_without_row_id, extension_callback, bypass_schema_cache) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing
