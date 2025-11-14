@@ -42,11 +42,12 @@ namespace xid_mgr {
          * @param xid - transaction id
          */
         void
-        notify_subscriber(uint64_t db_id, uint64_t xid)
+        notify_subscriber(uint64_t db_id, uint64_t xid, bool has_schema_changes)
         {
             proto::XidPushResponse msg;
             msg.set_db_id(db_id);
             msg.set_xid(xid);
+            msg.set_has_schema_changes(has_schema_changes);
             _notification_thread->notify(msg);
         }
 
