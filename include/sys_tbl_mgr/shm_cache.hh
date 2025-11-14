@@ -27,11 +27,12 @@ namespace ipc = boost::interprocess;
 // global cache names
 static constexpr char SHM_CACHE_ROOTS[] = "springtail.roots";
 static constexpr char SHM_CACHE_SCHEMAS[] = "springtail.schemas";
+static constexpr char SHM_CACHE_USERTYPES[] = "springtail.usertypes";
 
 /**
  * A generic interprocess cache. The cache is intended for caching serialized
- * table metadata. The metadata strings are keyed by the database ID,
- * table ID and XID/LSN.
+ * object/table metadata. The metadata strings are keyed by the database ID,
+ * object ID and XID/LSN.
  */
 class ShmCache 
 {
@@ -98,80 +99,80 @@ public:
     }
 
     /**
-     * Mark the table as dropped.
+     * Mark the object as dropped.
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID/LSN.
      */
-    bool mark_dropped(DbId db, TableId tid, XidLsn xid)
+    bool mark_dropped(DbId db, ObjId obj_id, XidLsn xid)
     {
-        return _msg_cache.insert(db, tid, xid, "", true);
+        return _msg_cache.insert(db, obj_id, xid, "", true);
     }
 
     /**
-     * Mark the table as dropped (overload for Xid only).
+     * Mark the object as dropped (overload for Xid only).
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID.
      */
-    bool mark_dropped(DbId db, TableId tid, Xid xid)
+    bool mark_dropped(DbId db, ObjId obj_id, Xid xid)
     {
-        return mark_dropped(db, tid, XidLsn{xid, 0});
+        return mark_dropped(db, obj_id, XidLsn{xid, 0});
     }
 
     /**
      * Cache the string message.
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID/LSN.
      * @param msg The message to cache. Usually it's a serialized proto message.
      * @return true if the element has been actually inserted
      *         and false if it was already in the cache.
      */
     bool
-    insert(DbId db, TableId tid, const XidLsn& xid, std::string_view msg)
+    insert(DbId db, ObjId obj_id, const XidLsn& xid, std::string_view msg)
     {
         check_free_space_locked();
-        return _msg_cache.insert(db, tid, xid, msg, false);
+        return _msg_cache.insert(db, obj_id, xid, msg, false);
     }
 
     /**
      * Cache the string message (overload for Xid only).
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID.
      * @param msg The message to cache. Usually it's a serialized proto message.
      * @return true if the element has been actually inserted
      *         and false if it was already in the cache.
      */
     bool
-    insert(DbId db, TableId tid, Xid xid, std::string_view msg)
+    insert(DbId db, ObjId obj_id, Xid xid, std::string_view msg)
     {
-        return insert(db, tid, XidLsn{xid, 0}, msg);
+        return insert(db, obj_id, XidLsn{xid, 0}, msg);
     }
 
     /**
      * Get the cached string if present based on a key.
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID/LSN.
      * @return The cached string.
      */
-    std::optional<std::string> find(DbId db, TableId tid, const XidLsn& xid)
+    std::optional<std::string> find(DbId db, ObjId obj_id, const XidLsn& xid)
     {
-        return _msg_cache.find(db, tid, xid);
+        return _msg_cache.find(db, obj_id, xid);
     }
 
     /**
      * Get the cached string if present based on a key (overload for Xid only).
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID.
      * @return The cached string.
      */
-    std::optional<std::string> find(DbId db, TableId tid, Xid xid)
+    std::optional<std::string> find(DbId db, ObjId obj_id, Xid xid)
     {
-        return find(db, tid, XidLsn{xid, 0});
+        return find(db, obj_id, XidLsn{xid, 0});
     }
 
     /**
@@ -196,12 +197,12 @@ public:
     bool is_alive();
 
     /**
-     * Return all tables that are tracked by the cache.
-     * The least used tables will be at the front.
+     * Return all objects that are tracked by the cache.
+     * The least used objects will be at the front.
      */
-    std::vector<TableId> get_db_tables(DbId db, bool exclude_dropped=true)
+    std::vector<ObjId> get_db_objects(DbId db, bool exclude_dropped=true)
     {
-        return _msg_cache.get_db_tables(db, exclude_dropped);
+        return _msg_cache.get_db_objects(db, exclude_dropped);
     }
 
     /**
