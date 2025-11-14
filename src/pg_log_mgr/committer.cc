@@ -77,7 +77,7 @@ namespace springtail::committer {
                 _batch_state.clear();
             }
 
-            std::unique_lock lock(_main_mutex);
+            std::unique_lock main_lock(_main_mutex);
 
             // process all messages, grouping by db_id and handling special cases
             // use iterator-based loop to allow peeking ahead for batch boundaries
