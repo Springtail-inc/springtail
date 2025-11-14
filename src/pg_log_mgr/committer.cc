@@ -72,7 +72,10 @@ namespace springtail::committer {
             }
 
             // clear batch state from previous iteration
-            _batch_state.clear();
+            {
+                boost::unique_lock lock(_mutex);    
+                _batch_state.clear();
+            }
 
             std::unique_lock lock(_main_mutex);
 
@@ -97,11 +100,18 @@ namespace springtail::committer {
                 // if the message isn't an XACT then make sure we've done a commit
                 if (result->type() != XidReady::Type::XACT_MSG) {
                     // commit any pending batch for this database before blocking
-                    auto batch_it = _batch_state.find(db_id);
-                    if (batch_it != _batch_state.end()) {
+                    std::optional<BatchState> batch;
+                    {
+                        boost::unique_lock lock(_mutex);
+                        auto batch_it = _batch_state.find(db_id);
+                        if (batch_it != _batch_state.end()) {
+                            batch = batch_it->second;
+                            _batch_state.erase(batch_it);
+                        }
+                    }
+                    if (batch.has_value()) {
                         uint64_t completed_xid = _completed_xids[db_id];
-                        _commit_batch(db_id, batch_it->second, completed_xid);
-                        _batch_state.erase(batch_it);
+                        _commit_batch(db_id, std::move(batch.value()), completed_xid);
                     }
                 }
 
@@ -146,18 +156,25 @@ namespace springtail::committer {
                 // handle XACT_MSG - process mutations and accumulate in batch
                 // Check if this is the first XACT_MSG in a new batch (final_xid not yet set)
                 if (result->type() == XidReady::Type::XACT_MSG) {
-                    auto& batch = _batch_state[db_id];
+                    uint64_t final_xid = 0;
+                    {
+                        boost::unique_lock lock(_mutex);
+                        final_xid = _batch_state[db_id].final_xid;
+                    }
 
                     // If final_xid is not set, this is the start of a new batch - scan ahead
-                    if (batch.final_xid == 0) {
+                    if (final_xid == 0) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "First XACT_MSG in batch for db {}, scanning ahead for final_xids", db_id);
 
                         // Scan from current position to find final_xid for all databases in this batch
                         auto final_xids = _scan_batch_final_xids(it, results.end());
 
                         // Set final_xid for all databases found in the scan
-                        for (auto& [scan_db_id, final_xid] : final_xids) {
-                            _batch_state[scan_db_id].final_xid = final_xid;
+                        {
+                            boost::unique_lock lock(_mutex);
+                            for (auto& [scan_db_id, final_xid] : final_xids) {
+                                _batch_state[scan_db_id].final_xid = final_xid;
+                            }
                         }
                     }
                 }
@@ -165,10 +182,16 @@ namespace springtail::committer {
                 _handle_transaction_message(result, db_id, completed_xid);
             }
 
+            decltype(_batch_state) batches_to_commit;
+            {
+                boost::unique_lock lock(_mutex);
+                batches_to_commit = _batch_state;
+            }
+
             // commit all accumulated batches
-            for (auto& [db_id, batch] : _batch_state) {
+            for (auto [db_id, batch] : batches_to_commit) {
                 uint64_t completed_xid = _completed_xids[db_id];
-                _commit_batch(db_id, batch, completed_xid);
+                _commit_batch(db_id, std::move(batch), completed_xid);
             }
         }
 
@@ -225,7 +248,7 @@ namespace springtail::committer {
     void
     Committer::_commit_batch(
         uint64_t db_id,
-        BatchState& batch,
+        BatchState batch,
         uint64_t completed_xid)
     {
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committing batch for db {} with {} XIDs",
@@ -493,8 +516,11 @@ namespace springtail::committer {
         assert(xid > completed_xid);
 
         // accumulate this XID in the batch state
-        auto& batch = _batch_state[db_id];
-        batch.xid_results.push_back(result);
+        {
+            boost::unique_lock lock(_mutex);
+            auto& batch = _batch_state[db_id];
+            batch.xid_results.push_back(result);
+        }
         // Note: final_xid is set when the first XACT_MSG of a batch is encountered in run()
 
         // check if there were DDL mutations as part of this txn, invalidate the schema cache
@@ -712,40 +738,43 @@ namespace springtail::committer {
         // find the coordinator keep-alive
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
         auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, thread_name);
-        auto& batch = _batch_state[db_id];
-
-        if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid}) ||
-            !sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{batch.final_xid})) {
-            // This could happen if the table is dropped in the same transaction
-            // BEGIN/INSERT/DROP/COMMIT
-            // TODO: another way to handle the case would be to drop the table mutation
-            // records from the Batch object in the log reader. Marking this as TODO
-            // just to keep the question open for now.
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access/target XID: {} @ {} || {}", tid, xid, batch.final_xid);
-            return;
-        }
 
         // get or create the mutable table object from batch cache
         MutableTablePtr table;
+        {
+            boost::unique_lock lock(_mutex);
+            auto& batch = _batch_state[db_id];
 
-        auto table_it = batch.table_cache.find(tid);
-        if (table_it != batch.table_cache.end()) {
-            // reuse existing table from batch
-            table = table_it->second;
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Reusing table {} from batch cache", tid);
-        } else {
-            // create new mutable table with target_xid set to final_xid
-            // All operations in this batch will be applied at the final XID
-            CHECK_GT(batch.final_xid, 0);
+            if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid}) ||
+                !sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{batch.final_xid})) {
+                // This could happen if the table is dropped in the same transaction
+                // BEGIN/INSERT/DROP/COMMIT
+                // TODO: another way to handle the case would be to drop the table mutation
+                // records from the Batch object in the log reader. Marking this as TODO
+                // just to keep the question open for now.
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access/target XID: {} @ {} || {}", tid, xid, batch.final_xid);
+                return;
+            }
 
-            ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
-            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid, extension_callback);
+            auto table_it = batch.table_cache.find(tid);
+            if (table_it != batch.table_cache.end()) {
+                // reuse existing table from batch
+                table = table_it->second;
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Reusing table {} from batch cache", tid);
+            } else {
+                // create new mutable table with target_xid set to final_xid
+                // All operations in this batch will be applied at the final XID
+                CHECK_GT(batch.final_xid, 0);
 
-            // Initialize write cache schema once for this table (performance optimization)
-            table->initialize_wc_schema(extension_callback);
+                ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+                table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid, extension_callback);
 
-            batch.table_cache[tid] = table;
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, batch.final_xid);
+                // Initialize write cache schema once for this table (performance optimization)
+                table->initialize_wc_schema(extension_callback);
+
+                batch.table_cache[tid] = table;
+                LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, batch.final_xid);
+            }
         }
 
         // retrieve extents and apply the mutations to them
@@ -789,6 +818,8 @@ namespace springtail::committer {
         // Update the batch's per-XID metadata (used for per-transaction metrics in _commit_batch)
         // Track the earliest metadata for this XID across all its tables
         if (min_md) {
+            boost::unique_lock lock(_mutex);
+            auto& batch = _batch_state[db_id];
             auto it = batch.xid_metadata.find(xid);
             if (it == batch.xid_metadata.end()) {
                 batch.xid_metadata[xid] = *min_md;

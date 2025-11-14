@@ -195,7 +195,7 @@ namespace springtail::committer {
          */
         void _commit_batch(
             uint64_t db_id,
-            BatchState& batch,
+            BatchState batch,
             uint64_t completed_xid
         );
 
