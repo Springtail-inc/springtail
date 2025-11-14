@@ -83,7 +83,7 @@ springtail_unit_test(test_schema_cache
 springtail_unit_test(test_shm_cache
   SOURCES test/test_shm_cache.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_sch_mem_cache GTest::gtest_main
+  LIBS springtail_test springtail_sch_mem_cache GTest::gtest_main
 )
 
 # install file system validation utility to install directory
