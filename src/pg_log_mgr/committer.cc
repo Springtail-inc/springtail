@@ -10,6 +10,92 @@
 
 namespace springtail::committer {
 
+    // ---------------- BatchState implementation ----------------
+    std::pair<MutableTablePtr, bool>
+    Committer::BatchState::get_or_create_table(
+        uint64_t tid,
+        uint64_t db_id,
+        uint64_t completed_xid,
+        const ExtensionCallback& extension_callback)
+    {
+        std::unique_lock lock(_mutex);
+
+        auto table_it = _table_cache.find(tid);
+        if (table_it != _table_cache.end()) {
+            return {table_it->second, false};
+        }
+
+        // Create new mutable table with target_xid set to final_xid
+        CHECK_GT(_final_xid, 0);
+        auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, _final_xid, extension_callback);
+
+        // Initialize write cache schema once for this table (performance optimization)
+        table->initialize_wc_schema(extension_callback);
+
+        _table_cache[tid] = table;
+        return {table, true};
+    }
+
+    uint64_t
+    Committer::BatchState::get_final_xid() const
+    {
+        std::unique_lock lock(_mutex);
+        return _final_xid;
+    }
+
+    void
+    Committer::BatchState::set_final_xid(uint64_t xid)
+    {
+        std::unique_lock lock(_mutex);
+        _final_xid = xid;
+    }
+
+    void
+    Committer::BatchState::update_xid_metadata(uint64_t xid, const WriteCacheTableSet::Metadata& md)
+    {
+        std::unique_lock lock(_mutex);
+        auto it = _xid_metadata.find(xid);
+        if (it == _xid_metadata.end()) {
+            _xid_metadata[xid] = md;
+        } else if (md.pg_commit_ts < it->second.pg_commit_ts) {
+            _xid_metadata[xid] = md;
+        }
+    }
+
+    void
+    Committer::BatchState::add_xid_result(const std::shared_ptr<XidReady>& result)
+    {
+        std::unique_lock lock(_mutex);
+        _xid_results.push_back(result);
+    }
+
+    void
+    Committer::BatchState::clear_table_cache()
+    {
+        std::unique_lock lock(_mutex);
+        _table_cache.clear();
+    }
+
+    std::map<uint64_t, MutableTablePtr>&
+    Committer::BatchState::table_cache()
+    {
+        return _table_cache;
+    }
+
+    std::vector<std::shared_ptr<XidReady>>&
+    Committer::BatchState::xid_results()
+    {
+        return _xid_results;
+    }
+
+    std::map<uint64_t, WriteCacheTableSet::Metadata>&
+    Committer::BatchState::xid_metadata()
+    {
+        return _xid_metadata;
+    }
+
+    // ---------------- Committer implementation ----------------
+
     bool
     _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     {
@@ -72,7 +158,10 @@ namespace springtail::committer {
             }
 
             // clear batch state from previous iteration
-            _batch_state.clear();
+            {
+                std::unique_lock lock(_batch_state_mutex);
+                _batch_state.clear();
+            }
 
             std::unique_lock lock(_main_mutex);
 
@@ -97,11 +186,18 @@ namespace springtail::committer {
                 // if the message isn't an XACT then make sure we've done a commit
                 if (result->type() != XidReady::Type::XACT_MSG) {
                     // commit any pending batch for this database before blocking
-                    auto batch_it = _batch_state.find(db_id);
-                    if (batch_it != _batch_state.end()) {
+                    std::shared_ptr<BatchState> batch;
+                    {
+                        std::unique_lock batch_lock(_batch_state_mutex);
+                        auto batch_it = _batch_state.find(db_id);
+                        if (batch_it != _batch_state.end()) {
+                            batch = batch_it->second;
+                            _batch_state.erase(batch_it);
+                        }
+                    }
+                    if (batch) {
                         uint64_t completed_xid = _completed_xids[db_id];
-                        _commit_batch(db_id, batch_it->second, completed_xid);
-                        _batch_state.erase(batch_it);
+                        _commit_batch(db_id, batch, completed_xid);
                     }
                 }
 
@@ -146,10 +242,21 @@ namespace springtail::committer {
                 // handle XACT_MSG - process mutations and accumulate in batch
                 // Check if this is the first XACT_MSG in a new batch (final_xid not yet set)
                 if (result->type() == XidReady::Type::XACT_MSG) {
-                    auto& batch = _batch_state[db_id];
+                    std::shared_ptr<BatchState> batch;
+                    {
+                        std::unique_lock batch_lock(_batch_state_mutex);
+                        auto batch_it = _batch_state.find(db_id);
+                        if (batch_it == _batch_state.end()) {
+                            // Create new batch state for this database
+                            batch = std::make_shared<BatchState>();
+                            _batch_state[db_id] = batch;
+                        } else {
+                            batch = batch_it->second;
+                        }
+                    }
 
                     // If final_xid is not set, this is the start of a new batch - scan ahead
-                    if (batch.final_xid == 0) {
+                    if (batch->get_final_xid() == 0) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "First XACT_MSG in batch for db {}, scanning ahead for final_xids", db_id);
 
                         // Scan from current position to find final_xid for all databases in this batch
@@ -157,7 +264,18 @@ namespace springtail::committer {
 
                         // Set final_xid for all databases found in the scan
                         for (auto& [scan_db_id, final_xid] : final_xids) {
-                            _batch_state[scan_db_id].final_xid = final_xid;
+                            std::shared_ptr<BatchState> scan_batch;
+                            {
+                                std::unique_lock batch_lock(_batch_state_mutex);
+                                auto scan_it = _batch_state.find(scan_db_id);
+                                if (scan_it == _batch_state.end()) {
+                                    scan_batch = std::make_shared<BatchState>();
+                                    _batch_state[scan_db_id] = scan_batch;
+                                } else {
+                                    scan_batch = scan_it->second;
+                                }
+                            }
+                            scan_batch->set_final_xid(final_xid);
                         }
                     }
                 }
@@ -166,7 +284,14 @@ namespace springtail::committer {
             }
 
             // commit all accumulated batches
-            for (auto& [db_id, batch] : _batch_state) {
+            std::vector<std::pair<uint64_t, std::shared_ptr<BatchState>>> batches_to_commit;
+            {
+                std::unique_lock batch_lock(_batch_state_mutex);
+                for (auto& [db_id, batch] : _batch_state) {
+                    batches_to_commit.emplace_back(db_id, batch);
+                }
+            }
+            for (auto& [db_id, batch] : batches_to_commit) {
                 uint64_t completed_xid = _completed_xids[db_id];
                 _commit_batch(db_id, batch, completed_xid);
             }
@@ -225,28 +350,30 @@ namespace springtail::committer {
     void
     Committer::_commit_batch(
         uint64_t db_id,
-        BatchState& batch,
+        std::shared_ptr<BatchState> batch,
         uint64_t completed_xid)
     {
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Committing batch for db {} with {} XIDs",
-                  db_id, batch.xid_results.size());
+                  db_id, batch->xid_results().size());
 
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
         Coordinator::get_instance()->unregister_thread(daemon_type, "committer");
 
+        uint64_t final_xid = batch->get_final_xid();
+
         // finalize all tables in the batch
         std::vector<MutableTablePtr> tables_to_sync;
-        for (auto& [tid, table] : batch.table_cache) {
+        for (auto& [tid, table] : batch->table_cache()) {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Finalizing table {}", tid);
             auto metadata = table->finalize(false);
-            sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, batch.final_xid, metadata);
+            sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, final_xid, metadata);
             tables_to_sync.push_back(table);
         }
 
         Coordinator::get_instance()->register_thread(daemon_type, "committer");
 
         // process each XID in the batch
-        for (auto& result : batch.xid_results) {
+        for (auto& result : batch->xid_results()) {
             CHECK(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xact().xid();
             uint64_t pg_xid = result->xact().pg_xid();
@@ -263,7 +390,7 @@ namespace springtail::committer {
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
-            bool is_last_xid = (xid == batch.final_xid);
+            bool is_last_xid = (xid == final_xid);
 
             if (!_block_commit.contains(db_id)) {
                 // only finalize system metadata once at the end
@@ -272,7 +399,7 @@ namespace springtail::committer {
                     // note: we do this even without DDL changes to ensure the primary and secondary
                     //       index root offsets are written to disk
                     // we will fsync system table along with the user tables in the table sync processor:w
-                    sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid, batch.table_cache.empty() == true);
+                    sys_tbl_mgr::Server::get_instance()->finalize(db_id, xid, batch->table_cache().empty() == true);
                 }
 
                 // Check and notify vacuumer about dropped tables
@@ -285,15 +412,15 @@ namespace springtail::committer {
 
                 // use record_mapping for intermediate XIDs, commit_xid only for last
                 if (is_last_xid) {
-                    if (batch.table_cache.empty()) {
+                    if (batch->table_cache().empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
                         xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null(),
                                 result->timestamp(), result->get_tracker());
                     } else {
                         // commit the completed XID without xlog update because table data has not been persisted (fsync).
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), true,
-                                result->timestamp(), result->get_tracker()); 
-                        _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
+                                result->timestamp(), result->get_tracker());
+                        _table_sync_processor->add(final_xid, std::move(tables_to_sync));
                     }
 
                     // push completed DDL changes to the FDWs
@@ -309,16 +436,16 @@ namespace springtail::committer {
                 }
             } else {
                 if (is_last_xid) {
-                    if (batch.table_cache.empty()) {
+                    if (batch->table_cache().empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
                         // don't commit, but record any DDL changes to the history
-                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), 
+                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
                                 result->timestamp(), result->get_tracker());
                     } else {
                         // commit the completed XID without xlog update
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false,
-                                result->timestamp(), result->get_tracker()); 
-                        _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
+                                result->timestamp(), result->get_tracker());
+                        _table_sync_processor->add(final_xid, std::move(tables_to_sync));
                     }
                 } else {
                     // don't commit, but record any DDL changes to the history
@@ -333,8 +460,8 @@ namespace springtail::committer {
             WriteCacheServer::get_instance()->evict_xid(db_id, xid);
 
             // Record per-transaction latency metrics for this XID
-            auto metadata_it = batch.xid_metadata.find(xid);
-            if (metadata_it != batch.xid_metadata.end()) {
+            auto metadata_it = batch->xid_metadata().find(xid);
+            if (metadata_it != batch->xid_metadata().end()) {
                 auto now = std::chrono::steady_clock::now();
                 auto finalize_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                         now - metadata_it->second.local_commit_ts);
@@ -353,7 +480,7 @@ namespace springtail::committer {
 
         // Collect all index requests across all XIDs in the batch
         std::list<proto::IndexProcessRequest> combined_index_requests;
-        for (auto& result : batch.xid_results) {
+        for (auto& result : batch->xid_results()) {
             uint64_t xid = result->xact().xid();
 
             auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
@@ -377,7 +504,7 @@ namespace springtail::committer {
         }
 
         // clear the table cache for this batch
-        batch.table_cache.clear();
+        batch->clear_table_cache();
     }
 
     void
@@ -434,6 +561,12 @@ namespace springtail::committer {
             static_cast<char>(result->type()), db_id, completed_xid);
 
         auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
+
+        // Table sync should always have DDL operations
+        CHECK(!ddls.is_null()) << "TABLE_SYNC should have DDL operations";
+
+        // Invalidate schema cache for tables with DDL changes during table sync
+        _invalidate_systbl_cache(db_id, ddls);
 
         // pre-commit the DDLs in case there's a failure
         RedisDDL::get_instance()->precommit_ddl(db_id, completed_xid, ddls);
@@ -493,8 +626,12 @@ namespace springtail::committer {
         assert(xid > completed_xid);
 
         // accumulate this XID in the batch state
-        auto& batch = _batch_state[db_id];
-        batch.xid_results.push_back(result);
+        std::shared_ptr<BatchState> batch;
+        {
+            std::unique_lock lock(_batch_state_mutex);
+            batch = _batch_state[db_id];
+        }
+        batch->add_xid_result(result);
         // Note: final_xid is set when the first XACT_MSG of a batch is encountered in run()
 
         // check if there were DDL mutations as part of this txn, invalidate the schema cache
@@ -651,6 +788,9 @@ namespace springtail::committer {
             uint64_t tid = ddl["tid"].get<uint64_t>();
             XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
             server->invalidate_table(db, tid, ddl_xid);
+
+            // Invalidate the extent schema cache for this table
+            TableMgr::get_instance()->record_schema_change(db, tid, ddl_xid);
         }
     }
 
@@ -712,40 +852,35 @@ namespace springtail::committer {
         // find the coordinator keep-alive
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
         auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, thread_name);
-        auto& batch = _batch_state[db_id];
+
+        // Get the batch state for this database
+        std::shared_ptr<BatchState> batch;
+        {
+            std::unique_lock lock(_batch_state_mutex);
+            batch = _batch_state[db_id];
+        }
+
+        uint64_t final_xid = batch->get_final_xid();
 
         if (!sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{xid}) ||
-            !sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{batch.final_xid})) {
+            !sys_tbl_mgr::Server::get_instance()->exists(db_id, tid, XidLsn{final_xid})) {
             // This could happen if the table is dropped in the same transaction
             // BEGIN/INSERT/DROP/COMMIT
             // TODO: another way to handle the case would be to drop the table mutation
             // records from the Batch object in the log reader. Marking this as TODO
             // just to keep the question open for now.
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access/target XID: {} @ {} || {}", tid, xid, batch.final_xid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "The table doesn't exist at access/target XID: {} @ {} || {}", tid, xid, final_xid);
             return;
         }
 
         // get or create the mutable table object from batch cache
-        MutableTablePtr table;
+        ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+        auto [table, is_new] = batch->get_or_create_table(tid, db_id, completed_xid, extension_callback);
 
-        auto table_it = batch.table_cache.find(tid);
-        if (table_it != batch.table_cache.end()) {
-            // reuse existing table from batch
-            table = table_it->second;
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Reusing table {} from batch cache", tid);
+        if (is_new) {
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, final_xid);
         } else {
-            // create new mutable table with target_xid set to final_xid
-            // All operations in this batch will be applied at the final XID
-            CHECK_GT(batch.final_xid, 0);
-
-            ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
-            table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, batch.final_xid, extension_callback);
-
-            // Initialize write cache schema once for this table (performance optimization)
-            table->initialize_wc_schema(extension_callback);
-
-            batch.table_cache[tid] = table;
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, batch.final_xid);
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Reusing table {} from batch cache", tid);
         }
 
         // retrieve extents and apply the mutations to them
@@ -789,12 +924,7 @@ namespace springtail::committer {
         // Update the batch's per-XID metadata (used for per-transaction metrics in _commit_batch)
         // Track the earliest metadata for this XID across all its tables
         if (min_md) {
-            auto it = batch.xid_metadata.find(xid);
-            if (it == batch.xid_metadata.end()) {
-                batch.xid_metadata[xid] = *min_md;
-            } else if (min_md->pg_commit_ts < it->second.pg_commit_ts) {
-                batch.xid_metadata[xid] = *min_md;
-            }
+            batch->update_xid_metadata(xid, *min_md);
         }
 
     }
@@ -956,7 +1086,10 @@ namespace springtail::committer {
                 sys_tbl_mgr::Server::get_instance()->sync(db_id, item.xid);
 
                 // all files  have been fsync'ed for this xid, update xlog
-                xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, item.xid); 
+                xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, item.xid);
+
+                // evict expired schema cache entries now that this XID is fully committed
+                TableMgr::get_instance()->on_xid_committed(item.xid);
             }
         }
         LOG_INFO("thread joined");

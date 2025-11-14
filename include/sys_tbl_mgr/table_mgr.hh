@@ -120,7 +120,13 @@ namespace springtail {
          * @brief Construct a new TableMgr object
          */
         TableMgr() : Singleton<TableMgr>(ServiceId::TableMgrId) {}
-        ~TableMgr() override = default;
+        ~TableMgr() override {
+            // Clear the schema cache before destruction to avoid static destruction order issues
+            std::lock_guard<std::mutex> lock(_extent_schema_cache._mutex);
+            _extent_schema_cache._entries.clear();
+            _extent_schema_cache._lru_list.clear();
+            _extent_schema_cache._schema_change_xids.clear();
+        }
     };
 
     /**

@@ -5,28 +5,31 @@ namespace springtail::schema_helpers {
 
     ExtentSchemaPtr get_roots_schema()
     {
-        // Static singleton - initialized once
-        static ExtentSchemaPtr roots_schema = []() {
-            std::vector<SchemaColumn> columns = {
+        // Singleton schema - created on demand, never destroyed during normal shutdown
+        // to avoid static destruction order issues
+        static ExtentSchemaPtr roots_schema = std::make_shared<ExtentSchema>(
+            std::vector<SchemaColumn>{
                 { "root", 1, SchemaType::UINT64, 20, true },
                 { "index_id", 2, SchemaType::UINT64, 20, false },
                 { "last_internal_row_id", 3, SchemaType::UINT64, 20, false }
-            };
-            return std::make_shared<ExtentSchema>(columns, ExtensionCallback{}, false, false);
-        }();
+            },
+            ExtensionCallback{}, false, false
+        );
         return roots_schema;
     }
 
     ExtentSchemaPtr get_look_aside_schema()
     {
-        // Static singleton - initialized once
-        static ExtentSchemaPtr look_aside_schema = []() {
-            SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 1, SchemaType::UINT64, 0, false, 0);
-            SchemaColumn extent_c(constant::INDEX_EID_FIELD, 2, SchemaType::UINT64, 0, false);
-            SchemaColumn row_c(constant::INDEX_RID_FIELD, 3, SchemaType::UINT32, 0, false);
-            std::vector<SchemaColumn> columns = { internal_row_id, extent_c, row_c };
-            return std::make_shared<ExtentSchema>(columns, ExtensionCallback{}, false, false);
-        }();
+        // Singleton schema - created on demand, never destroyed during normal shutdown
+        // to avoid static destruction order issues
+        static ExtentSchemaPtr look_aside_schema = std::make_shared<ExtentSchema>(
+            std::vector<SchemaColumn>{
+                SchemaColumn(constant::INTERNAL_ROW_ID, 1, SchemaType::UINT64, 0, false, 0),
+                SchemaColumn(constant::INDEX_EID_FIELD, 2, SchemaType::UINT64, 0, false),
+                SchemaColumn(constant::INDEX_RID_FIELD, 3, SchemaType::UINT32, 0, false)
+            },
+            ExtensionCallback{}, false, false
+        );
         return look_aside_schema;
     }
 
