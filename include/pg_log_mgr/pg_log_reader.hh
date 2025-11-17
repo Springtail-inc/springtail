@@ -227,9 +227,15 @@ namespace springtail::pg_log_mgr {
                 {}
 
                 /**
-                 * Updates the schema and related fields from the table_schema.
+                 * Updates the schema and related fields from the cached table schema.
                  */
-                void update_schema();
+                void update_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+                /**
+                 * Creates the batch schema from the provided table_schema (non-cached).
+                 * Use this for CREATE/ALTER TABLE where the table schema isn't in the cache yet.
+                 */
+                void create_schema(ExtentSchemaPtr table_schema);
 
                 /**
                  * Update the fields and pkey fields for the table.
