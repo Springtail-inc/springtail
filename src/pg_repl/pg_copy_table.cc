@@ -700,10 +700,18 @@ namespace springtail
             }
         }
 
-        ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+
+        OpClassHandler opclass_handler = {
+            PgExtnRegistry::get_instance()->get_opclass_method_func_ptr_by_method_name,
+        };
+
+        ExtensionCallback extension_callback = {
+            PgExtnRegistry::get_instance()->comparator_func,
+        };
         auto schema = std::make_shared<ExtentSchema>(_schema.columns, extension_callback, false, false);
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
-                                                                  schema, _schema.secondary_keys, extension_callback);
+                                                                  schema, _schema.secondary_keys,
+                                                                  extension_callback, opclass_handler);
 
         // mark the copy as inflight and record the snapshot details
         // note: we create a version of the schema that may contain undefined data so that we can

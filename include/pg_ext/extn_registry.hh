@@ -39,7 +39,7 @@ struct PgOpsClassMethod {
     std::string key_type;
     int support_number;
     std::string function_name;
-    PGFunction function_ptr = nullptr;
+    void* function_ptr = nullptr;
 };
 
 /**
@@ -174,25 +174,25 @@ public:
      * @param oid The operator oid
      * @return The operator function
      */
-    PGFunction get_operator_func_by_oid(uint32_t oid) const;
+    void* get_operator_func_by_oid(uint32_t oid) const;
     /**
      * Get the operator function by operator name
      * @param oper_name The operator name
      * @return The operator function
      */
-    PGFunction get_operator_func_by_oper_name(const char* oper_name) const;
+    void* get_operator_func_by_oper_name(const char* oper_name) const;
     /**
      * Get the operator function by proc name
      * @param proc_name The proc name
      * @return The operator function
      */
-    PGFunction get_operator_func_by_proc_name(const std::string& proc_name) const;
+    void* get_operator_func_by_proc_name(const std::string& proc_name) const;
     /**
      * Get the type function by type name
      * @param type_name The type name
      * @return The type function
      */
-    PGFunction get_type_func_by_type_name(const std::string& type_name) const;
+    void* get_type_func_by_type_name(const std::string& type_name) const;
     /**
      * Get the opclass method by opclass name and support number
      * @param opclass_name The opclass name
@@ -200,15 +200,17 @@ public:
      * @return The opclass method
      */
     PgOpsClassMethod get_opclass_method_by_method_name(const std::string& opclass_name,
-                                                       int support_number) const;
+                                                       int support_number);
     /**
      * Get the opclass method function pointer by opclass name and support number
      * @param opclass_name The opclass name
      * @param support_number The support number of the method ( defined constants.hh )
      * @return The opclass method function pointer
      */
-    PGFunction get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name,
-                                                          int support_number) const;
+    static void* get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name,
+                                                            int support_number);
+
+
 
     /**
      * Convert a datum to a string - Using the typeouput function of the extension type
@@ -240,7 +242,7 @@ public:
                                 const std::span<const char> &lhval,
                                 const std::span<const char> &rhval);
 private:
-    PGFunction _load_extn_function(void* library, const std::string_view oper_name);
+    void* _load_extn_function(void* library, const std::string_view oper_name);
     void* _load_library(const std::string_view lib_path);
 
     PgExtnRegistry() = default;
@@ -251,9 +253,9 @@ private:
     std::unordered_map<uint32_t, std::string> _proc_oid_to_name;
     std::unordered_map<uint32_t, PgType> _type_oid_to_type;
 
-    std::unordered_map<std::string, PGFunction> _oper_name_to_func;
-    std::unordered_map<std::string, PGFunction> _proc_name_to_func;
-    std::unordered_map<std::string, PGFunction> _type_func_name_to_func;
+    std::unordered_map<std::string, void*> _oper_name_to_func;
+    std::unordered_map<std::string, void*> _proc_name_to_func;
+    std::unordered_map<std::string, void*> _type_func_name_to_func;
 
     // Map of opclass name to a map of support_number to function pointer
     std::unordered_map<std::string, std::unordered_map<int, PgOpsClassMethod>> _opclass_function_map;

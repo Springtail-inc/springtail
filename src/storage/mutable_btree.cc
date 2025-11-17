@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <common/constants.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
@@ -10,14 +11,18 @@ namespace springtail {
                                ExtentSchemaPtr schema,
                                uint64_t xid,
                                uint64_t max_extent_size,
-                               const ExtensionCallback &extension_callback)
+                               const ExtensionCallback &extension_callback,
+                               const OpClassHandler &opclass_handler,
+                               const std::string& index_type)
         : _database_id(database_id),
           _file(file),
           _sort_keys(keys),
           _xid(xid),
           _max_extent_size(max_extent_size),
           _finalized(true),
-          _extension_callback(extension_callback)
+          _extension_callback(extension_callback),
+          _opclass_handler(opclass_handler),
+          _index_type(index_type)
     {
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         uint64_t size = Json::get_or<uint64_t>(json, "btree_cache_size", 512);
@@ -82,6 +87,36 @@ namespace springtail {
 
         // make sure that we can modify this tree
         assert(!_finalized);
+
+        if (_index_type == "gist") {
+            LOG_INFO("Inserting value {} into gist index", value->to_string());
+
+
+            // auto datum = _opclass_handler.tuple_to_datum_ptr_func(value.get());
+
+            auto field = value->field(0);
+
+            auto val = field->get_text(value->row());
+
+            auto datum = (uintptr_t)val.data();
+
+            LOG_INFO("[DEBUG] datum: {}", datum);
+
+            // Datum key = make_datum_from_field(value);
+
+            auto compress_func = _opclass_handler.opclass_func("gist_trgm_ops", GIST_COMPRESS);
+
+            LOG_INFO("[DEBUG] compress_func: {}", (void *)compress_func);
+
+            // GistEntry entry;
+            // entry.key = compressed_key;
+            // entry.row_id = value->internal_row_id;
+            // entry.is_leaf = true;
+
+            // _root->insert(entry);
+
+            return;
+        }
 
         // get the search key for this value
         TuplePtr search_key = _leaf_schema->tuple_subset(value, _sort_keys);
@@ -203,7 +238,7 @@ namespace springtail {
     }
 
     uint64_t
-    MutableBTree::finalize(bool call_sync) 
+    MutableBTree::finalize(bool call_sync)
     {
         // must have called init() or init_empty()
         assert(_root != nullptr);
@@ -230,8 +265,8 @@ namespace springtail {
         return _root->extent_id;
     }
 
-void 
-MutableBTree::sync() 
+void
+MutableBTree::sync()
 {
     // sync the file to ensure all data is written to disk
     auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);

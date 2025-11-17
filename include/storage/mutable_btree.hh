@@ -93,7 +93,9 @@ namespace springtail {
                      ExtentSchemaPtr schema,
                      uint64_t xid,
                      uint64_t max_extent_size,
-                     const ExtensionCallback &extension_callback = {});
+                     const ExtensionCallback &extension_callback = {},
+                     const OpClassHandler &opclass_handler = {},
+                     const std::string& index_type = "btree");
 
         MutableBTree() = delete;
 
@@ -157,7 +159,7 @@ namespace springtail {
         /** Write the index to disk (fsync). */
         void sync();
 
-        /** Get the file path for the underlying data. */ 
+        /** Get the file path for the underlying data. */
         std::filesystem::path get_file_path() const {
             return _file;
         }
@@ -558,6 +560,12 @@ namespace springtail {
 
         /** The extension callback for the tree. */
         ExtensionCallback _extension_callback;
+
+        /** The opclass handler for the tree. */
+        OpClassHandler _opclass_handler;
+
+        /** The type of the index. */
+        std::string _index_type;
 
         /** The schema for the leaf nodes. */
         std::shared_ptr<ExtentSchema> _leaf_schema;

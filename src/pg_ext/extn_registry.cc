@@ -49,7 +49,7 @@ PgExtnRegistry::add_opclass(const std::string& extension, PgOpsClass opclass, Pg
     _opclass_function_map[opclass.name][method.support_number] = method;
 }
 
-PGFunction
+void*
 PgExtnRegistry::get_operator_func_by_oid(uint32_t oid) const
 {
     auto it = _oper_oid_to_name.find(oid);
@@ -60,7 +60,7 @@ PgExtnRegistry::get_operator_func_by_oid(uint32_t oid) const
     return _oper_name_to_func.at(it->second);
 }
 
-PGFunction
+void*
 PgExtnRegistry::get_operator_func_by_oper_name(const char* oper_name) const
 {
     auto it = _oper_name_to_func.find(oper_name);
@@ -71,7 +71,7 @@ PgExtnRegistry::get_operator_func_by_oper_name(const char* oper_name) const
     return it->second;
 }
 
-PGFunction
+void*
 PgExtnRegistry::get_operator_func_by_proc_name(const std::string& proc_name) const
 {
     auto it = _proc_name_to_func.find(proc_name);
@@ -82,7 +82,7 @@ PgExtnRegistry::get_operator_func_by_proc_name(const std::string& proc_name) con
     return it->second;
 }
 
-PGFunction
+void*
 PgExtnRegistry::get_type_func_by_type_name(const std::string& type_name) const
 {
     auto it = _type_func_name_to_func.find(type_name);
@@ -120,7 +120,7 @@ PgExtnRegistry::init_libraries(uint64_t db_id,
 }
 
 PgOpsClassMethod
-PgExtnRegistry::get_opclass_method_by_method_name(const std::string& opclass_name, int support_number) const
+PgExtnRegistry::get_opclass_method_by_method_name(const std::string& opclass_name, int support_number)
 {
     // Find the opclass by name
     auto opclass_it = _opclass_function_map.find(opclass_name);
@@ -146,10 +146,12 @@ PgExtnRegistry::get_opclass_method_by_method_name(const std::string& opclass_nam
     return method_it->second;
 }
 
-PGFunction
-PgExtnRegistry::get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name, int support_number) const
+void*
+PgExtnRegistry::get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name, int support_number)
 {
-    auto method = get_opclass_method_by_method_name(opclass_name, support_number);
+    auto extn_registry = PgExtnRegistry::get_instance();
+
+    auto method = extn_registry->get_opclass_method_by_method_name(opclass_name, support_number);
 
     // Check if the function pointer is valid
     if (method.function_ptr == nullptr) {
@@ -178,7 +180,8 @@ PgExtnRegistry::comparator_func(const ExtensionContext* context,
 
     auto operator_func = extn_registry->get_operator_func_by_oper_name(op_str);
 
-    Datum result = DirectFunctionCall3(operator_func, left_datum, right_datum, ObjectIdGetDatum(0));
+    PGFunction operator_func_ptr = (PGFunction)operator_func;
+    Datum result = DirectFunctionCall3(operator_func_ptr, left_datum, right_datum, ObjectIdGetDatum(0));
 
     auto left_datum_string = extn_registry->datum_to_string(left_datum, type_oid);
     auto right_datum_string = extn_registry->datum_to_string(right_datum, type_oid);
@@ -199,7 +202,8 @@ PgExtnRegistry::datum_to_string(Datum value, Oid pg_oid) const
     DCHECK(typoutput);
 
     // call the output function
-    Datum result = DirectFunctionCall1(typoutput, value);
+    PGFunction typoutput_func = (PGFunction)typoutput;
+    Datum result = DirectFunctionCall1(typoutput_func, value);
     const char* str = DatumGetCString(result);
 
     return std::string(str);
@@ -222,14 +226,15 @@ PgExtnRegistry::binary_to_datum(const std::span<const char> &value,
     Datum datum = PointerGetDatum(&string);
 
     // call the receive function
-    Datum result = DirectFunctionCall3(typreceive, datum, ObjectIdGetDatum(0), Int32GetDatum(atttypmod));
+    PGFunction typreceive_func = (PGFunction)typreceive;
+    Datum result = DirectFunctionCall3(typreceive_func, datum, ObjectIdGetDatum(0), Int32GetDatum(atttypmod));
     return result;
 };
 
-PGFunction
+void*
 PgExtnRegistry::_load_extn_function(void* library, const std::string_view func_name)
 {
-    auto extn_function = (PGFunction)dlsym(library, func_name.data());
+    auto extn_function = (void*)dlsym(library, func_name.data());
     if (!extn_function) {
         LOG_ERROR("Failed to find function PGFunction {}", func_name);
         return nullptr;

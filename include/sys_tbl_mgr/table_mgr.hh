@@ -39,7 +39,7 @@ namespace springtail {
          *                     available until a later stable XID.
          * @param schema The ExtentSchema of the table.
          */
-        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema, const std::vector<Index>& secondary_keys, const ExtensionCallback &extension_callback = {});
+        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema, const std::vector<Index>& secondary_keys, const ExtensionCallback &extension_callback = {}, const OpClassHandler &opclass_handler = {});
 
         /**
          * @brief Get table data dir for a table_id
@@ -142,9 +142,10 @@ namespace springtail {
                          const TableMetadata &metadata,
                          ExtentSchemaPtr schema,
                          ExtentSchemaPtr schema_without_row_id,
-                         const ExtensionCallback &extension_callback = {}) :
+                         const ExtensionCallback &extension_callback = {},
+                         const OpClassHandler &opclass_handler = {}) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, schema_without_row_id, extension_callback) {}
+                         secondary, metadata, schema, schema_without_row_id, extension_callback, opclass_handler) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing
