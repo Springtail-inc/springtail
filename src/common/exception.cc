@@ -4,12 +4,12 @@
 #include <common/init.hh>
 
 namespace {
-    // Flag to prevent re-entrant signal handling
-    static std::atomic<bool> in_signal_handler{false};
-
     void
     backtrace_handler(int signo)
     {
+        // Flag to prevent re-entrant signal handling
+        static std::atomic<bool> in_signal_handler{false};
+
         // Prevent re-entrant signal handling which can cause infinite loops
         // and heap corruption during shutdown
         bool expected = false;

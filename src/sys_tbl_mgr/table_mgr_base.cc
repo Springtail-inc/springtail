@@ -32,19 +32,19 @@ namespace springtail {
 
         auto it = _extent_schema_cache._entries.find(key);
         if (it == _extent_schema_cache._entries.end()) {
-            _extent_schema_cache._misses++;
+            ++_extent_schema_cache._misses;
             return nullptr;
         }
 
         // Find the schema version valid at the requested XID
         ExtentSchemaPtr schema = it->second.find_schema_at(xid);
         if (!schema) {
-            _extent_schema_cache._misses++;
+            ++_extent_schema_cache._misses;
             return nullptr;
         }
 
         // Found - update LRU and return
-        _extent_schema_cache._hits++;
+        ++_extent_schema_cache._hits;
         _touch_entry(it->second);
 
         return schema;

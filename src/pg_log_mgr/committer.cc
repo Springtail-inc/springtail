@@ -362,6 +362,7 @@ namespace springtail::committer {
         uint64_t final_xid = batch->get_final_xid();
 
         // finalize all tables in the batch
+        // Note: table_cache() is not thread-safe, but safe here since all workers are done
         std::vector<MutableTablePtr> tables_to_sync;
         for (auto& [tid, table] : batch->table_cache()) {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Finalizing table {}", tid);
@@ -373,6 +374,7 @@ namespace springtail::committer {
         Coordinator::get_instance()->register_thread(daemon_type, "committer");
 
         // process each XID in the batch
+        // Note: xid_results() is not thread-safe, but safe here since all workers are done
         for (auto& result : batch->xid_results()) {
             CHECK(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xact().xid();
@@ -460,6 +462,7 @@ namespace springtail::committer {
             WriteCacheServer::get_instance()->evict_xid(db_id, xid);
 
             // Record per-transaction latency metrics for this XID
+            // Note: xid_metadata() is not thread-safe, but safe here since all workers are done
             auto metadata_it = batch->xid_metadata().find(xid);
             if (metadata_it != batch->xid_metadata().end()) {
                 auto now = std::chrono::steady_clock::now();
@@ -877,11 +880,8 @@ namespace springtail::committer {
         ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
         auto [table, is_new] = batch->get_or_create_table(tid, db_id, completed_xid, extension_callback);
 
-        if (is_new) {
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Created new table {} for batch (target_xid={})", tid, final_xid);
-        } else {
-            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Reusing table {} from batch cache", tid);
-        }
+        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "{} table {} for batch (target_xid={})",
+                  is_new ? "Created new" : "Reusing", tid, final_xid);
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;

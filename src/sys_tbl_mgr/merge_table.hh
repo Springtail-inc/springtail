@@ -17,7 +17,7 @@ public:
         using reference = std::vector<Extent::Row>&;
 
         Iterator();
-        Iterator(const std::vector<Txn>& changes, bool is_end = false);
+        explicit Iterator(const std::vector<Txn>& changes, bool is_end = false);
         Iterator(const std::vector<Txn>& changes, const TuplePtr& search_key, bool lower_bound = true);
         
         Iterator& operator++();
@@ -79,7 +79,7 @@ private:
             using reference = Extent::Row&;
 
             Iterator();
-            Iterator(const std::vector<ExtentPtr>& extents, bool is_end = false);
+            explicit Iterator(const std::vector<ExtentPtr>& extents, bool is_end = false);
             Iterator(const std::vector<ExtentPtr>& extents, const TuplePtr& search_key, bool lower_bound = true);
             
             Iterator& operator++();
