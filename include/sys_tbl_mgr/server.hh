@@ -8,6 +8,7 @@
 #include <storage/xid.hh>
 #include <sys_tbl_mgr/schema_cache.hh>
 #include <sys_tbl_mgr/service.hh>
+#include <sys_tbl_mgr/mutable_table.hh>
 
 namespace springtail::sys_tbl_mgr {
 
