@@ -660,7 +660,8 @@ namespace indexer_helpers {
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
                      ExtentSchemaPtr schema_without_row_id = nullptr,
-                     const ExtensionCallback &extension_callback = {});
+                     const ExtensionCallback &extension_callback = {},
+                     const OpClassHandler &opclass_handler = {});
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -769,7 +770,7 @@ namespace indexer_helpers {
          * @param index_id PG index ID.
          * @param index_columns Positions of the index columns.
          */
-        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {});
+        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {}, const OpClassHandler& opclass_handler = {}, const std::string& index_type = "btree");
 
         /**
          * Create a btree that can be used for look aside index.
@@ -803,7 +804,7 @@ namespace indexer_helpers {
             return _stats;
         }
 
-        /** Commit the data and indexes to disk. */ 
+        /** Commit the data and indexes to disk. */
         void sync_data_and_indexes();
 
         /** Get the list of table data and index files. */

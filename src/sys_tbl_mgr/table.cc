@@ -630,7 +630,8 @@ namespace indexer_helpers {
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
                                ExtentSchemaPtr schema_without_table_id,
-                               const ExtensionCallback &extension_callback)
+                               const ExtensionCallback &extension_callback,
+                               const OpClassHandler &opclass_handler)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
@@ -748,16 +749,16 @@ namespace indexer_helpers {
             }
             if (!idx_cols.empty()) {
 
-                auto btree = create_index_root(idx.id, idx_cols, extension_callback);
+                auto btree = create_index_root(idx.id, idx_cols, extension_callback, opclass_handler, idx.index_type);
 
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
 
                 if (it->extent_id != constant::UNKNOWN_EXTENT) {
-                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init with root: {}", idx.id, it->extent_id);
+                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} of type {} init with root: {}", idx.id, idx.index_type, it->extent_id);
                     btree->init(it->extent_id);
                 } else {
-                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init empty", idx.id);
+                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} of type {} init empty", idx.id, idx.index_type);
                     btree->init_empty();
                 }
                 assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
@@ -1163,7 +1164,7 @@ namespace indexer_helpers {
     }
 
     MutableBTreePtr
-    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback)
+    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback, const OpClassHandler& opclass_handler, const std::string& index_type)
     {
         // get the column names in the order they appear in the index
         auto &&col_names = _schema->get_column_names(index_columns);
@@ -1180,7 +1181,9 @@ namespace indexer_helpers {
                 key, index_schema,
                 _target_xid,
                 index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary(),
-                extension_callback
+                extension_callback,
+                opclass_handler,
+                index_type
                 );
         return btree;
     }
