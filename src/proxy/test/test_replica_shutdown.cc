@@ -390,12 +390,14 @@ namespace {
         EXPECT_EQ(replica_set->get_shutdown_pending_count(), 0);
     }
 
+#ifndef NDEBUG
     TEST_F(ReplicaShutdownTest, ShutdownNonExistentReplica) {
         // in debug mode this would abort with DCHECK
         EXPECT_DEATH(
             replica_set->initiate_replica_shutdown("non_existent_replica"), "replica != nullptr"
         );
     }
+#endif
 
     TEST_F(ReplicaShutdownTest, MixedActiveAndPooledSessions) {
         // Create a mix of active and pooled sessions

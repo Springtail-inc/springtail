@@ -153,17 +153,9 @@ namespace springtail::pg_log_mgr {
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue),
                 _exists_cache(exists_cache), _index_requests_mgr(index_requests_mgr)
             {
-                auto tracer = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader");
-                _span = tracer->StartSpan("Transaction");
-                _span->SetAttribute("pg_xid", pg_xid);
             }
 
-            ~Batch()
-            {
-                if (_span->IsRecording()) {
-                    _span->End();
-                }
-            }
+            ~Batch() = default;
 
             /**
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
@@ -373,7 +365,6 @@ namespace springtail::pg_log_mgr {
 
             uint64_t _lsn = 0; ///< The LSN counter
 
-            open_telemetry::SpanPtr _span; ///< Timing for the txn processing.
             CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
 
             ExistsCachePtr _exists_cache; ///< Reference to the exists cache

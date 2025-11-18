@@ -47,8 +47,6 @@ namespace springtail::pg_log_mgr {
     {
         time_trace::Trace commit_trace;
         TIME_TRACE_START(commit_trace);
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-        _span->AddEvent("commit", {{"pg_commit_time", md.pg_commit_ts.to_unix_ns()}});
 
         // update any changes in the table invalidation state
         for (const auto &entry : _table_validations) {
@@ -92,11 +90,6 @@ namespace springtail::pg_log_mgr {
         WriteCacheServer::get_instance()->commit(_db, xid, pg_xids, std::move(md));
 
         // stop timing for this transaction
-        if (_span->IsRecording()) {
-            _span->SetAttribute("xid", static_cast<int64_t>(xid));
-            _span->SetAttribute("pg_xids", fmt::format("{}", fmt::join(pg_xids, ",")));
-        }
-        _span->End();
         TIME_TRACE_STOP(commit_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("commit-xid_{}", xid), commit_trace);
     }
@@ -104,30 +97,16 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-        _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
-
         // drop any batches for all active txns
         for (auto &&entry : _txns) {
             auto txn = entry.second;
             WriteCacheServer::get_instance()->abort(_db, txn->pg_xid);
         }
-
-        // stop timing for this transaction
-        _span->End();
     }
 
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-
-        // Add subtransaction abort event with the provided timestamp
-        _span->AddEvent("subtransaction_abort", {
-            {"sub_xid", pg_xid},
-            {"pg_abort_time", abort_ts.to_unix_ns()}
-        });
-
         // find the txn to abort it
         auto itr = _txns.find(pg_xid);
         assert(itr != _txns.end());
@@ -262,7 +241,6 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -320,8 +298,6 @@ namespace springtail::pg_log_mgr {
                                  int32_t pg_xid,
                                  const PgMsgTruncate &msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-
         // get the current txn
         auto txn = _get_txn(pg_xid);
 
@@ -465,8 +441,6 @@ namespace springtail::pg_log_mgr {
                                       PgMsgPtr msg,
                                       const std::vector<std::string>& include_schemas)
     {
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-
         // perform the table column validations and update the message accordingly
         if (!_handle_validation(msg, include_schemas)) {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Skip CREATE_TABLE due to invalid table: tid={} pg_xid={}\n", oid, pg_xid);
