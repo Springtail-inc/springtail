@@ -104,14 +104,13 @@ namespace springtail {
 
             // Datum key = make_datum_from_field(value);
 
-            auto compress_func = _opclass_handler.opclass_func("gist_trgm_ops", GIST_COMPRESS);
+            auto result = _opclass_handler.opclass_func("gist_trgm_ops", GIST_COMPRESS, datum);
 
-            LOG_INFO("[DEBUG] compress_func: {}", (void *)compress_func);
+            LOG_INFO("[DEBUG] compress_func: {}", (uintptr_t)result);
 
-            // GistEntry entry;
-            // entry.key = compressed_key;
-            // entry.row_id = value->internal_row_id;
-            // entry.is_leaf = true;
+            GistEntry entry;
+            entry.key = result;
+            entry.leafkey = true;
 
             // _root->insert(entry);
 

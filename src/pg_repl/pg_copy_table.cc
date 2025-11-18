@@ -702,7 +702,7 @@ namespace springtail
 
 
         OpClassHandler opclass_handler = {
-            PgExtnRegistry::get_instance()->get_opclass_method_func_ptr_by_method_name,
+            PgExtnRegistry::get_instance()->invoke_opclass_method,
         };
 
         ExtensionCallback extension_callback = {

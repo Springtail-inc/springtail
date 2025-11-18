@@ -213,6 +213,15 @@ public:
 
 
     /**
+     * Invoke an opclass method
+     * @param opclass_name The opclass name
+     * @param support_number The support number of the method ( defined constants.hh )
+     * @param value The datum value used for the opclass function
+     * @return The result of the opclass method
+     */
+    static Datum invoke_opclass_method(const std::string& opclass_name, int support_number, Datum value);
+
+    /**
      * Convert a datum to a string - Using the typeouput function of the extension type
      * @param value The datum
      * @param pg_oid The oid of the type

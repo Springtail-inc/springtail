@@ -43,6 +43,11 @@ namespace springtail {
         typedef std::shared_ptr<Node> NodePtr;
 
     public:
+        struct GistEntry {
+            GistEntry() = default;
+            uintptr_t key;
+            bool leafkey;
+        };
         /**
          * Cache of Page objects.  Works with the BTree page locks to enable thread-safe access.
          */

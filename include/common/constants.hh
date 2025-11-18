@@ -23,8 +23,9 @@ namespace springtail {
     };
 
     struct OpClassHandler {
-        using OpClassFunc = void* (*)(const std::string& opclass_name,
-                                     int support_number);
+        using OpClassFunc = uintptr_t (*)(const std::string& opclass_name,
+                                     int support_number,
+                                     uintptr_t /*Datum*/ datum);
 
         OpClassFunc opclass_func = nullptr;
         ExtensionContext context = {};

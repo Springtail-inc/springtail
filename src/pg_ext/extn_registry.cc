@@ -163,6 +163,24 @@ PgExtnRegistry::get_opclass_method_func_ptr_by_method_name(const std::string& op
     return method.function_ptr;
 }
 
+Datum
+PgExtnRegistry::invoke_opclass_method(const std::string& opclass_name, int support_number, Datum value)
+{
+    auto extn_registry = PgExtnRegistry::get_instance();
+
+    auto method = extn_registry->get_opclass_method_by_method_name(opclass_name, support_number);
+    if (method.function_ptr == nullptr) {
+        LOG_ERROR("Failed to find opclass method function by opclass name: {} and support number: {}", opclass_name, support_number);
+        return Datum();
+    }
+
+    LOG_INFO("Invoking opclass method: {} with datum: {}", method.function_name, value);
+    PGFunction operator_func_ptr = (PGFunction)method.function_ptr;
+
+    Datum result = DirectFunctionCall1(operator_func_ptr, value);
+    return result;
+}
+
 bool
 PgExtnRegistry::comparator_func(const ExtensionContext* context,
                                 const std::span<const char> &lhval,
