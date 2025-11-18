@@ -62,7 +62,7 @@ namespace springtail {
     {
         auto* input_string = cstring_to_text_auto(value.c_str());
 
-        auto&& extract_func = PgExtnRegistry::get_instance()->get_opclass_method_func_ptr_by_method_name(opclass, method_strategy_number);
+        auto&& extract_func = (PGFunction) PgExtnRegistry::get_instance()->get_opclass_method_func_ptr_by_method_name(opclass, method_strategy_number);
         LOCAL_FCINFO(fcinfo, 2);
 
         InitFunctionCallInfoData(*fcinfo, nullptr, 2, 0, nullptr, nullptr);
