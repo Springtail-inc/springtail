@@ -88,7 +88,9 @@ namespace springtail {
                                  uint64_t snapshot_xid,
                                  ExtentSchemaPtr schema,
                                  const std::vector<Index>& secondary_keys,
-                                 const ExtensionCallback &extension_callback)
+                                 const ExtensionCallback &extension_callback,
+                                 const OpClassHandler &opclass_handler
+                                )
     {
         TableMetadata tbl_meta{};
         tbl_meta.snapshot_xid = snapshot_xid;
@@ -107,7 +109,7 @@ namespace springtail {
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema_with_row_id->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema_with_row_id, schema, extension_callback);
+                                                  tbl_meta, schema_with_row_id, schema, extension_callback, opclass_handler);
     }
 
     std::map<uint32_t, SchemaColumn>

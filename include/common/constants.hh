@@ -22,6 +22,15 @@ namespace springtail {
         ExtensionContext context = {};
     };
 
+    struct OpClassHandler {
+        using OpClassFunc = uintptr_t (*)(const std::string& opclass_name,
+                                     int support_number,
+                                     uintptr_t /*Datum*/ datum);
+
+        OpClassFunc opclass_func = nullptr;
+        ExtensionContext context = {};
+    };
+
     // GIST Proc
     constexpr int GIST_CONSISTENT = 1;
     constexpr int GIST_UNION = 2;

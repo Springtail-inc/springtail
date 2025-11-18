@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <common/constants.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
@@ -10,14 +11,18 @@ namespace springtail {
                                ExtentSchemaPtr schema,
                                uint64_t xid,
                                uint64_t max_extent_size,
-                               const ExtensionCallback &extension_callback)
+                               const ExtensionCallback &extension_callback,
+                               const OpClassHandler &opclass_handler,
+                               const std::string& index_type)
         : _database_id(database_id),
           _file(file),
           _sort_keys(keys),
           _xid(xid),
           _max_extent_size(max_extent_size),
           _finalized(true),
-          _extension_callback(extension_callback)
+          _extension_callback(extension_callback),
+          _opclass_handler(opclass_handler),
+          _index_type(index_type)
     {
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         uint64_t size = Json::get_or<uint64_t>(json, "btree_cache_size", 512);
@@ -203,7 +208,7 @@ namespace springtail {
     }
 
     uint64_t
-    MutableBTree::finalize(bool call_sync) 
+    MutableBTree::finalize(bool call_sync)
     {
         // must have called init() or init_empty()
         assert(_root != nullptr);
@@ -230,8 +235,8 @@ namespace springtail {
         return _root->extent_id;
     }
 
-void 
-MutableBTree::sync() 
+void
+MutableBTree::sync()
 {
     // sync the file to ensure all data is written to disk
     auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
