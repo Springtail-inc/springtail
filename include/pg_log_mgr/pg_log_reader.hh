@@ -155,9 +155,7 @@ namespace springtail::pg_log_mgr {
             {
             }
 
-            ~Batch()
-            {
-            }
+            ~Batch() = default;
 
             /**
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
