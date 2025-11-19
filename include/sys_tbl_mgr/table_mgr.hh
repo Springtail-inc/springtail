@@ -2,6 +2,7 @@
 
 #include <common/init.hh>
 #include <sys_tbl_mgr/table_mgr_base.hh>
+#include <sys_tbl_mgr/mutable_table.hh>
 
 namespace springtail {
 
@@ -72,12 +73,60 @@ namespace springtail {
                           const XidLsn &xid, const ExtensionCallback &extension_callback = {},
                           bool allow_undefined = false, bool include_internal_row_id = true) override;
 
+        /**
+         * Get an index schema for a secondary index at the provided XID.
+         * This creates a schema suitable for index extents (includes __extent_id and __row_id fields).
+         */
+        std::shared_ptr<ExtentSchema>
+        get_index_schema(uint64_t db_id, uint64_t table_id, uint64_t index_id,
+                        const std::vector<uint32_t>& index_columns, const XidLsn &xid,
+                        const ExtensionCallback &extension_callback = {});
+
+        /**
+         * Get a PgLogReader batch schema at the provided XID (cached version).
+         * This retrieves/caches a schema suitable for batching mutations (includes __springtail_op and __springtail_lsn fields).
+         */
+        std::shared_ptr<ExtentSchema>
+        get_pg_log_batch_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid,
+                                const ExtensionCallback &extension_callback = {});
+
+        /**
+         * Create a PgLogReader batch schema from a provided base schema (non-cached version).
+         * This creates a schema suitable for batching mutations without caching it.
+         * Use this for CREATE/ALTER TABLE scenarios where the base schema doesn't exist in the cache yet.
+         */
+        std::shared_ptr<ExtentSchema>
+        create_pg_log_batch_schema(ExtentSchemaPtr base_schema,
+                                   const ExtensionCallback &extension_callback = {});
+
+        /**
+         * Get the look-aside index schema.
+         * This returns a singleton schema for the look-aside index that maps __internal_row_id to (__extent_id, __row_id).
+         * The schema is the same for all tables since it's a fixed mapping.
+         */
+        std::shared_ptr<ExtentSchema>
+        get_look_aside_schema();
+
+        /**
+         * Get the roots schema.
+         * This returns a singleton schema for table roots metadata.
+         * The schema is the same for all tables since it's a fixed structure.
+         */
+        std::shared_ptr<ExtentSchema>
+        get_roots_schema();
+
     private:
         /**
          * @brief Construct a new TableMgr object
          */
         TableMgr() : Singleton<TableMgr>(ServiceId::TableMgrId) {}
-        ~TableMgr() override = default;
+        ~TableMgr() override {
+            // Clear the schema cache before destruction to avoid static destruction order issues
+            // No lock needed in destructor - no other threads can be accessing this object
+            _extent_schema_cache._entries.clear();
+            _extent_schema_cache._lru_list.clear();
+            _extent_schema_cache._schema_change_xids.clear();
+        }
     };
 
     /**
@@ -143,9 +192,10 @@ namespace springtail {
                          ExtentSchemaPtr schema,
                          ExtentSchemaPtr schema_without_row_id,
                          const ExtensionCallback &extension_callback = {},
-                         const OpClassHandler &opclass_handler = {}) :
+                         const OpClassHandler &opclass_handler = {},
+                         bool bypass_schema_cache = false) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, schema_without_row_id, extension_callback, opclass_handler) {}
+                         secondary, metadata, schema, schema_without_row_id, extension_callback, opclass_handler, bypass_schema_cache) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing

@@ -4,7 +4,7 @@
 #include <storage/field.hh>
 #include <storage/io_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/system_table_mgr.hh>
+#include <sys_tbl_mgr/system_table_mgr_server.hh>
 
 using namespace springtail;
 
@@ -33,9 +33,9 @@ main(int argc,
                            sys_tbl::IndexNames::ID,
                            sys_tbl::NamespaceNames::ID,
                            sys_tbl::UserTypes::ID }) {
-        auto table = SystemTableMgr::get_instance()->get_table(db_id,
-                                                         table_id,
-                                                         constant::LATEST_XID);
+        auto table = SystemTableMgrServer::get_instance()->get_table(db_id,
+                                                                  table_id,
+                                                                  constant::LATEST_XID);
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 

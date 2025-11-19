@@ -9,7 +9,7 @@
 #include <storage/vacuumer.hh>
 #include <sys_tbl_mgr/request_helper.hh>
 #include <sys_tbl_mgr/server.hh>
-#include <sys_tbl_mgr/system_table_mgr.hh>
+#include <sys_tbl_mgr/system_table_mgr_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::sys_tbl_mgr {
@@ -3877,7 +3877,7 @@ Server::_get_system_table(uint64_t db_id, uint64_t table_id)
 
     // otherwise create an interface to the table and cache it
     auto&& read_xid = _get_read_xid(db_id);
-    TablePtr table = SystemTableMgr::get_instance()->get_table(db_id, table_id, read_xid.xid);
+    TablePtr table = SystemTableMgrServer::get_instance()->get_table(db_id, table_id, read_xid.xid);
 
     // cache the table interface
     cache[table_id] = table;
@@ -3900,7 +3900,7 @@ Server::_get_mutable_system_table(uint64_t db_id, uint64_t table_id)
     auto&& read_xid = _get_read_xid(db_id);
     auto&& write_xid = _get_write_xid(db_id);
     MutableTablePtr table =
-        SystemTableMgr::get_instance()->get_mutable_system_table(db_id, table_id, read_xid.xid, write_xid);
+        SystemTableMgrServer::get_instance()->get_mutable_system_table(db_id, table_id, read_xid.xid, write_xid);
 
     // save the mutable table into the cache
     cache[table_id] = table;

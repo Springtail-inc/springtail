@@ -6,6 +6,7 @@
 #include <pg_log_mgr/xid_ready.hh>
 #include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/mutable_table.hh>
 #include <write_cache/write_cache_index.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
@@ -181,10 +182,77 @@ namespace springtail::committer {
          * Batch state tracked per database during batch processing
          */
         struct BatchState {
-            std::map<uint64_t, MutableTablePtr> table_cache;  ///< tid → MutableTable
-            std::vector<std::shared_ptr<XidReady>> xid_results;  ///< All XidReady messages for this db
-            uint64_t final_xid = 0;  ///< The final XID where this batch will commit (determined upfront)
-            std::map<uint64_t, WriteCacheTableSet::Metadata> xid_metadata;  ///< xid → earliest metadata for that XID
+            /**
+             * Get or create a MutableTable from the cache.
+             * @param tid Table ID
+             * @param db_id Database ID
+             * @param completed_xid The most recent completed XID
+             * @param extension_callback Extension callback for table creation
+             * @return Tuple of (table, is_new) where is_new indicates if the table was newly created
+             */
+            std::pair<MutableTablePtr, bool> get_or_create_table(
+                uint64_t tid,
+                uint64_t db_id,
+                uint64_t completed_xid,
+                const ExtensionCallback& extension_callback);
+
+            /**
+             * Get the final_xid for this batch.
+             * @return The final XID
+             */
+            uint64_t get_final_xid() const;
+
+            /**
+             * Set the final_xid for this batch.
+             * @param xid The final XID to set
+             */
+            void set_final_xid(uint64_t xid);
+
+            /**
+             * Update metadata for a specific XID.
+             * @param xid The XID to update metadata for
+             * @param md The metadata to store (will only store if earlier than existing)
+             */
+            void update_xid_metadata(uint64_t xid, const WriteCacheTableSet::Metadata& md);
+
+            /**
+             * Add a XidReady result to the batch.
+             * @param result The XidReady message to add
+             */
+            void add_xid_result(const std::shared_ptr<XidReady>& result);
+
+            /**
+             * Clear the table cache.
+             */
+            void clear_table_cache();
+
+            /**
+             * Get the table cache for iteration.
+             * Should only be called when no workers are accessing this batch.
+             * @return Reference to the table_cache map
+             */
+            std::map<uint64_t, MutableTablePtr>& table_cache();
+
+            /**
+             * Get XID results for iteration.
+             * Should only be called when no workers are accessing this batch.
+             * @return Reference to the xid_results vector
+             */
+            std::vector<std::shared_ptr<XidReady>>& xid_results();
+
+            /**
+             * Get XID metadata map.
+             * Should only be called when no workers are accessing this batch.
+             * @return Reference to the xid_metadata map
+             */
+            std::map<uint64_t, WriteCacheTableSet::Metadata>& xid_metadata();
+
+        private:
+            mutable std::mutex _mutex;  ///< Protects all fields in this struct
+            std::map<uint64_t, MutableTablePtr> _table_cache;  ///< tid → MutableTable
+            std::vector<std::shared_ptr<XidReady>> _xid_results;  ///< All XidReady messages for this db
+            uint64_t _final_xid = 0;  ///< The final XID where this batch will commit (determined upfront)
+            std::map<uint64_t, WriteCacheTableSet::Metadata> _xid_metadata;  ///< xid → earliest metadata for that XID
         };
 
         /**
@@ -195,7 +263,7 @@ namespace springtail::committer {
          */
         void _commit_batch(
             uint64_t db_id,
-            BatchState& batch,
+            std::shared_ptr<BatchState> batch,
             uint64_t completed_xid
         );
 
@@ -208,9 +276,14 @@ namespace springtail::committer {
         uint32_t _worker_count;
 
         /**
-         * Batch processing state per database. Maps db_id → BatchState
+         * Batch processing state per database. Maps db_id → shared_ptr<BatchState>
          */
-        std::map<uint64_t, BatchState> _batch_state;
+        std::map<uint64_t, std::shared_ptr<BatchState>> _batch_state;
+
+        /**
+         * Mutex to protect _batch_state map
+         */
+        std::mutex _batch_state_mutex;
 
         /**
          * Indexer worker threads to process indexes
