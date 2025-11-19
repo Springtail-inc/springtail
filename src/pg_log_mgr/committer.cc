@@ -423,11 +423,7 @@ namespace springtail::committer {
                         // commit the completed XID without xlog update because table data has not been persisted (fsync).
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), true,
                                 result->timestamp(), result->get_tracker());
-<<<<<<< HEAD
-                        _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
-=======
                         _table_sync_processor->add(final_xid, std::move(tables_to_sync));
->>>>>>> origin/main
                     }
 
                     // push completed DDL changes to the FDWs
@@ -452,11 +448,7 @@ namespace springtail::committer {
                         // commit the completed XID without xlog update
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false,
                                 result->timestamp(), result->get_tracker());
-<<<<<<< HEAD
-                        _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
-=======
                         _table_sync_processor->add(final_xid, std::move(tables_to_sync));
->>>>>>> origin/main
                     }
                 } else {
                     // don't commit, but record any DDL changes to the history
