@@ -29,6 +29,7 @@ static constexpr char SHM_CACHE_ROOTS[] = "springtail.roots";
 static constexpr char SHM_CACHE_SCHEMAS[] = "springtail.schemas";
 static constexpr char SHM_CACHE_USERTYPES[] = "springtail.usertypes";
 static constexpr char SHM_CACHE_TABLE_IDS[] = "springtail.table_ids";
+static constexpr char SHM_CACHE_EXTENTS[] = "springtail.extents";
 
 /**
  * Find XID from history using schema XID as the key.

@@ -13,7 +13,7 @@ using namespace springtail::pg_fdw;
 
 void
 PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size_t usertype_cache_size,
-                         size_t table_ids_cache_size, size_t worker_count)
+                         size_t table_ids_cache_size, size_t extents_cache_size, size_t worker_count)
 {
     _roots_cache_size = roots_cache_size;
     CHECK(_roots_cache_size);
@@ -23,9 +23,12 @@ PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size
     CHECK(_usertype_cache_size);
     _table_ids_cache_size = table_ids_cache_size;
     CHECK(_table_ids_cache_size);
+    _extents_cache_size = extents_cache_size;
+    CHECK(_extents_cache_size);
     _worker_count = worker_count;
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "creating {}, {}, {}, {}, {}",
-              _roots_cache_size, _schema_cache_size, _usertype_cache_size, _table_ids_cache_size, _worker_count);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "creating {}, {}, {}, {}, {}, {}",
+              _roots_cache_size, _schema_cache_size, _usertype_cache_size, _table_ids_cache_size,
+              _extents_cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
     pthread_setname_np(_t->native_handle(), "PgXidSubscriber");
 }
@@ -60,6 +63,9 @@ PgXidSubscriberMgr::task(std::stop_token st)
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_TABLE_IDS);
     _table_ids_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, _table_ids_cache_size, true);
     XidHistoryCleaner table_ids_cleaner{_table_ids_cache};
+
+    sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_EXTENTS);
+    _extents_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_EXTENTS, _extents_cache_size, false);
 
     auto client = sys_tbl_mgr::Client::get_instance();
     // Client should cache get_roots() responses now
@@ -136,6 +142,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         _schema_cache->keep_alive();
         _usertype_cache->keep_alive();
         _table_ids_cache->keep_alive();
+        _extents_cache->keep_alive();
     }
     subscriber.reset();
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
@@ -149,6 +156,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     _schema_cache.reset();
     _usertype_cache.reset();
     _table_ids_cache.reset();
+    _extents_cache.reset();
 }
 
 void
@@ -228,6 +236,9 @@ PgXidSubscriberMgr::start()
     size_t table_ids_cache_size = 0;
     Json::get_to<size_t>(json, "table_ids_shm_cache_size", table_ids_cache_size);
 
+    size_t extents_cache_size = 0;
+    Json::get_to<size_t>(json, "extents_shm_cache_size", extents_cache_size);
+
     CHECK(roots_cache_size) << "Bad cache size, terminating PgXidSubscriberRunner";
 
     json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
@@ -240,7 +251,8 @@ PgXidSubscriberMgr::start()
     // populate the cache. We use the same number or threads as there are in the RPC in service.
     auto worker_count = Json::get_or<size_t>(rpc_json, "server_worker_threads", 1);
 
-    get_instance()->init(roots_cache_size, schema_cache_size, usertype_cache_size, table_ids_cache_size, worker_count);
+    get_instance()->init(roots_cache_size, schema_cache_size, usertype_cache_size, table_ids_cache_size,
+                        extents_cache_size, worker_count);
 }
 
 void

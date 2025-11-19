@@ -508,8 +508,9 @@ namespace springtail::pg_fdw {
         // NOTE: first call to XidMgrClient needs to be done on the main thread to prevent occasional
         //      deadlock during shutdown for short-lived FDW processes.
         (void)XidMgrClient::get_instance();
-        // NOTE: the same for RedisDDL
+        // NOTE: the same for RedisDDL and WriteCacheClient
         (void)RedisDDL::get_instance();
+        (void)WriteCacheClient::get_instance();
         start_thread();
         LOG_INFO("FDW process finished initialization");
     }
@@ -643,6 +644,10 @@ namespace springtail::pg_fdw {
                 // start using the new cache
                 sys_tbl_mgr::Client::get_instance()->use_usertype_cache(_usertype_shm_cache);
             }
+        }
+
+        if (!_extents_cache || !_extents_cache->is_alive()) {
+            _extents_cache = create_cache(sys_tbl_mgr::SHM_CACHE_EXTENTS);
         }
     }
 

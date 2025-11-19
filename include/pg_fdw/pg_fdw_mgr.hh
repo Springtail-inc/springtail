@@ -16,6 +16,7 @@
 #include <sys_tbl_mgr/shm_cache.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
+#include <write_cache/write_cache_client.hh>
 
 #include <pg_fdw/pg_fdw_ddl_common.hh>
 #include <pg_fdw/pg_fdw_plan_state.hh>
@@ -286,6 +287,7 @@ namespace springtail::pg_fdw {
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
         std::shared_ptr<sys_tbl_mgr::ShmCache> _schema_shm_cache; ///< An IPC schema cache shared by pg_xid_subscriber_daemon
         std::shared_ptr<sys_tbl_mgr::ShmCache> _usertype_shm_cache; ///< An IPC usertype cache shared by pg_xid_subscriber_daemon
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _extents_cache; ///< An IPC cache for extents with table mutations from WriteCacheClient
 
         LruObjectCache<int32_t, UserType> _user_type_cache; ///< cache of user types
 

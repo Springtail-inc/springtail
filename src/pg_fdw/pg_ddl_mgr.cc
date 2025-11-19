@@ -1956,21 +1956,25 @@ namespace springtail::pg_fdw {
             _fdw_conn_cache.evict(db_id);
         }
 
-        // remove xid history from the shared memory cache
-        // this is best effort, so just log errors
-        try {
-            auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
-            if (cache) {
-                cache->delete_xid_history(db_id);
-            } else {
-                LOG_ERROR("unable to open the roots cache");
+        // helper to delete xid history from shm caches
+        auto delete_history =[](auto cache_name, uint64_t db_id) {
+            try {
+                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(cache_name);
+                if (cache) {
+                    cache->delete_xid_history(db_id);
+                } else {
+                    LOG_ERROR("unable to open the {} cache", cache_name);
+                }
+            } catch (const boost::interprocess::bad_alloc&) {
+                LOG_ERROR("unable to open the {} cache", cache_name);
+            } catch (const std::exception& e) {
+                LOG_ERROR("exception:{} ", e.what());
+                throw;
             }
-        } catch (const boost::interprocess::bad_alloc&) {
-            LOG_ERROR("unable to open the roots cache");
-        } catch (const std::exception& e) {
-            LOG_ERROR("exception:{} ", e.what());
-            throw;
-        }
+        };
+
+        delete_history(sys_tbl_mgr::SHM_CACHE_ROOTS, db_id);
+        delete_history(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, db_id);
 
         // set new state
         db_item.state = new_state;
