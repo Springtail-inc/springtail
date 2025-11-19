@@ -292,9 +292,6 @@ namespace indexer_helpers {
         _use_empty = _primary_index->empty();
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
-        // Set GIN Index schema to be used in constructing GIN index root
-        _set_gin_index_schema(extension_callback);
-
         // deal with secondary indexes
         for (auto const& idx: secondary) {
             if (idx.state != static_cast<uint8_t>(sys_tbl::IndexNames::State::READY)) {
@@ -713,28 +710,16 @@ namespace indexer_helpers {
         return metadata;
     }
 
-    void
-    MutableTable::_set_gin_index_schema(const ExtensionCallback& extension_callback)
-    {
-        SchemaColumn idx_position_c(constant::INDEX_POSITION_FIELD, 0, SchemaType::UINT32, 0, false);
-        SchemaColumn idx_gin_token_c(constant::INDEX_GIN_TOKEN_FIELD, 0, SchemaType::TEXT, 0, false);
-        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
-
-        std::vector<std::string> gin_index_keys;
-        gin_index_keys.push_back(constant::INDEX_POSITION_FIELD);
-        gin_index_keys.push_back(constant::INDEX_GIN_TOKEN_FIELD);
-        gin_index_keys.push_back(constant::INTERNAL_ROW_ID);
-
-        _gin_index_schema = _schema->create_index_schema({},
-                { idx_position_c, idx_gin_token_c, internal_row_id },
-                gin_index_keys, extension_callback);
-    }
-
     MutableBTreePtr
     MutableTable::create_gin_index_root(uint64_t index_id,
                                         const ExtensionCallback& extension_callback,
                                         const OpClassHandler& opclass_handler)
     {
+        // Get the index schema - bypass cache if this is a snapshot table without system table metadata
+        _gin_index_schema = _bypass_schema_cache
+            ? schema_helpers::create_gin_index_schema(_schema, extension_callback)
+            : TableMgr::get_instance()->get_index_schema(_db_id, _id, index_id, {}, XidLsn{_target_xid}, extension_callback, std::string(constant::INDEX_TYPE_GIN));
+
         std::vector<std::string> gin_index_keys;
         gin_index_keys.push_back(constant::INDEX_POSITION_FIELD);
         gin_index_keys.push_back(constant::INDEX_GIN_TOKEN_FIELD);

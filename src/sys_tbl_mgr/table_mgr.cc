@@ -179,7 +179,7 @@ namespace springtail {
     std::shared_ptr<ExtentSchema>
     TableMgr::get_index_schema(uint64_t db_id, uint64_t table_id, uint64_t index_id,
                                const std::vector<uint32_t>& index_columns, const XidLsn &xid,
-                               const ExtensionCallback &extension_callback)
+                               const ExtensionCallback &extension_callback, std::string index_type)
     {
         // Try cache first
         ExtentSchemaCacheKey key{db_id, table_id, ExtentSchemaType::INDEX, index_id};
@@ -191,7 +191,12 @@ namespace springtail {
         auto table_schema = get_extent_schema(db_id, table_id, xid, extension_callback);
 
         // Create the index schema using the helper
-        auto index_schema = schema_helpers::create_index_schema(table_schema, index_columns, index_id, extension_callback);
+        ExtentSchemaPtr index_schema;
+        if (index_type == constant::INDEX_TYPE_GIN) {
+            index_schema = schema_helpers::create_gin_index_schema(table_schema, extension_callback);
+        } else {
+            index_schema = schema_helpers::create_index_schema(table_schema, index_columns, index_id, extension_callback);
+        }
 
         // Cache the result
         _cache_schema(key, index_schema, xid);

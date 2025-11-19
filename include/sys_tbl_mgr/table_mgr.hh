@@ -80,7 +80,8 @@ namespace springtail {
         std::shared_ptr<ExtentSchema>
         get_index_schema(uint64_t db_id, uint64_t table_id, uint64_t index_id,
                         const std::vector<uint32_t>& index_columns, const XidLsn &xid,
-                        const ExtensionCallback &extension_callback = {});
+                        const ExtensionCallback &extension_callback = {},
+                        const std::string index_type = std::string(constant::INDEX_TYPE_BTREE));
 
         /**
          * Get a PgLogReader batch schema at the provided XID (cached version).

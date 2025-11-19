@@ -43,6 +43,17 @@ namespace springtail {
             const ExtensionCallback& extension_callback = {});
 
         /**
+         * Create an index schema for a GIN secondary index.
+         * The index schema includes columns - column position, token column and __internal_row_id
+         * @param base_schema The base table schema.
+         * @param extension_callback Extension callback for custom types.
+         * @return A new GIN index schema.
+         */
+        ExtentSchemaPtr create_gin_index_schema(
+            ExtentSchemaPtr base_schema,
+            const ExtensionCallback& extension_callback = {});
+
+        /**
          * Create a PgLogReader batch schema from a base table schema.
          * The batch schema includes all table columns plus __springtail_op and __springtail_lsn fields.
          * @param base_schema The base table schema.

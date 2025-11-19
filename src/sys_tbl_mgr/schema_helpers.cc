@@ -33,6 +33,24 @@ namespace springtail::schema_helpers {
         return look_aside_schema;
     }
 
+    ExtentSchemaPtr create_gin_index_schema(
+        ExtentSchemaPtr base_schema,
+        const ExtensionCallback& extension_callback)
+    {
+        SchemaColumn idx_position_c(constant::INDEX_POSITION_FIELD, 0, SchemaType::UINT32, 0, false);
+        SchemaColumn idx_gin_token_c(constant::INDEX_GIN_TOKEN_FIELD, 0, SchemaType::TEXT, 0, false);
+        SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
+
+        std::vector<std::string> gin_index_keys;
+        gin_index_keys.push_back(constant::INDEX_POSITION_FIELD);
+        gin_index_keys.push_back(constant::INDEX_GIN_TOKEN_FIELD);
+        gin_index_keys.push_back(constant::INTERNAL_ROW_ID);
+
+        return base_schema->create_index_schema({},
+                { idx_position_c, idx_gin_token_c, internal_row_id },
+                gin_index_keys, extension_callback);
+    }
+
     ExtentSchemaPtr create_index_schema(
         ExtentSchemaPtr base_schema,
         const std::vector<uint32_t>& index_columns,

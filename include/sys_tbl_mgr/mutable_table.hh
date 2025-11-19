@@ -342,11 +342,6 @@ namespace springtail {
         template <MutationType m_type>
         auto _mutation_wrapper(StorageCache::SafePagePtr &page, TuplePtr value);
 
-        /**
-         * Create and set GIN index schema
-         */
-        void _set_gin_index_schema(const ExtensionCallback& extension_callback);
-
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
