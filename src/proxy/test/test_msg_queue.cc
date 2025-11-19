@@ -30,14 +30,14 @@ namespace {
 
     TEST_F(SessionMsgQueueTest, PushBatch) {
         auto msg1 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY);
-        auto msg2 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_PARSE);
+        auto msg2 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXTENDED);
         batch.push_back(msg1);
         batch.push_back(msg2);
         queue->push_batch(batch);
         batch.clear();
 
-        msg1 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_BIND);
-        msg2 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_DESCRIBE);
+        msg1 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FLUSH);
+        msg2 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_STATE_REPLAY);
         batch.push_back(msg1);
         batch.push_back(msg2);
         queue->push_batch(std::move(batch));
@@ -48,7 +48,7 @@ namespace {
         EXPECT_EQ((*it)->type(), SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY);
         ++it;
         ASSERT_NE(it, queue->processing_batch_end());
-        EXPECT_EQ((*it)->type(), SessionMsg::MSG_CLIENT_SERVER_PARSE);
+        EXPECT_EQ((*it)->type(), SessionMsg::MSG_CLIENT_SERVER_EXTENDED);
     }
 
     TEST_F(SessionMsgQueueTest, LoadProcessingBatch) {
@@ -67,7 +67,7 @@ namespace {
 
     TEST_F(SessionMsgQueueTest, PopProcessingMsg) {
         auto msg1 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY);
-        auto msg2 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_PARSE);
+        auto msg2 = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXTENDED);
         batch.push_back(msg1);
         batch.push_back(msg2);
         queue->push_batch(std::move(batch));
@@ -78,7 +78,7 @@ namespace {
         EXPECT_EQ(popped_msg.value()->type(), SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY);
         popped_msg = queue->pop_processing_msg();
         ASSERT_TRUE(popped_msg.has_value());
-        EXPECT_EQ(popped_msg.value()->type(), SessionMsg::MSG_CLIENT_SERVER_PARSE);
+        EXPECT_EQ(popped_msg.value()->type(), SessionMsg::MSG_CLIENT_SERVER_EXTENDED);
 
         EXPECT_EQ(queue->pop_processing_msg(), std::nullopt); // No more messages to pop
         EXPECT_TRUE(queue->processing_empty());

@@ -15,16 +15,14 @@ namespace springtail::pg_proxy {
 
         /** message types -- add string defn to session.cc type_map */
         enum Type : int8_t {
+            NONE=0,                           ///< no message
             ///// client to server messages
             MSG_CLIENT_SERVER_SIMPLE_QUERY=1, ///< simple query; data str: query
-            MSG_CLIENT_SERVER_PARSE=2,        ///< parse packet; data buffer
-            MSG_CLIENT_SERVER_BIND=3,         ///< bind packet; data buffer
-            MSG_CLIENT_SERVER_DESCRIBE=4,     ///< describe packet; data buffer
-            MSG_CLIENT_SERVER_EXECUTE=5,      ///< execute packet; data buffer
-            MSG_CLIENT_SERVER_CLOSE=6,        ///< close packet; data buffer
-            MSG_CLIENT_SERVER_SYNC=7,         ///< sync packet; data buffer
-            MSG_CLIENT_SERVER_FUNCTION=8,     ///< function call; data buffer
-            MSG_CLIENT_SERVER_FORWARD=10,     ///< forward packet; data buffer
+            MSG_CLIENT_SERVER_EXTENDED=2,     ///< extended packet (parse/bind/describe/execute/close/sync/flush); data buffer
+            MSG_CLIENT_SERVER_FUNCTION=3,     ///< function call; data buffer
+            MSG_CLIENT_SERVER_FORWARD=4,      ///< forward packet; data buffer
+            MSG_CLIENT_SERVER_FLUSH=5,        ///< flush packet; data buffer
+            MSG_CLIENT_SERVER_STATE_REPLAY=6, ///< state replay packet; dependencies
 
             MSG_SERVER_CLIENT_FATAL_ERROR=99  ///< fatal error; no data
         };
@@ -74,17 +72,24 @@ namespace springtail::pg_proxy {
             return _buffer;
         }
 
-        /** Get query statement ptr from dependency queue; otherwise nullptr if none */
-        const QueryStmtPtr peek_dependency() const {
-            if (_dependencies.empty()) {
-                return nullptr;
+        /** Convert dependencies to session messages and return as vector */
+        std::vector<std::shared_ptr<SessionMsg>> dependencies() const
+        {
+            std::vector<std::shared_ptr<SessionMsg>> deps;
+            for (const auto& qs : _dependencies) {
+                // For simple queries, create a simple query message
+                if (qs->data_type == QueryStmt::DataType::SIMPLE) {
+                    deps.emplace_back(std::make_shared<SessionMsg>(MSG_CLIENT_SERVER_SIMPLE_QUERY, qs, _seq_id));
+                } else if (qs->data_type == QueryStmt::DataType::PACKET) {
+                    deps.emplace_back(std::make_shared<SessionMsg>(MSG_CLIENT_SERVER_EXTENDED, qs->buffer(), _seq_id));
+                } else {
+                    // should not happen; other types not valid for dependencies
+                    LOG_ERROR("Invalid dependency data type in session message");
+                    DCHECK(false) << "Invalid dependency data type in session message";
+                }
             }
-            return _dependencies.front();
-        }
 
-        /** Get dependency at index */
-        QueryStmtPtr get_dependency(size_t idx) const {
-            return _dependencies.at(idx);
+            return deps;
         }
 
         /** Number of dependencies */
@@ -95,6 +100,13 @@ namespace springtail::pg_proxy {
         /** Add a query statement to dependency queue */
         void add_dependency(QueryStmtPtr stmt) {
             _dependencies.push_back(stmt);
+        }
+
+        /** Add dependencies by moving from input vector */
+        void add_dependencies(std::vector<QueryStmtPtr> &&dependencies) {
+            _dependencies.insert(_dependencies.end(),
+                                 std::make_move_iterator(dependencies.begin()),
+                                 std::make_move_iterator(dependencies.end()));
         }
 
         /** Set dependencies by moving from input vector */
@@ -130,6 +142,42 @@ namespace springtail::pg_proxy {
             return msg;
         }
 
+        /**
+         * @brief Check if message is a replay message
+         *
+         * messages that contain dependencies that must be replayed
+         * to restore session and transaction state before executing queries.
+         * @returns true if message is a replay message, false otherwise
+         */
+        bool is_dependency_message() const {
+            return _type == MSG_CLIENT_SERVER_STATE_REPLAY;
+        }
+
+        /**
+         * @brief Check if message is a simple query
+         * @return true if message is a simple query, false otherwise
+         */
+        bool is_simple_query_message() const {
+            return _type == MSG_CLIENT_SERVER_SIMPLE_QUERY;
+        }
+
+        /**
+         * @brief Check if message is a sync message
+         * @return true if message is a sync message, false otherwise
+         */
+        bool is_sync_message() const {
+            return _type == MSG_CLIENT_SERVER_EXTENDED && _data != nullptr &&
+                   _data->type == QueryStmt::Type::SYNC;
+        }
+
+        /**
+         * @brief Check if message is a flush message
+         * @return true if message is a flush message, false otherwise
+         */
+        bool is_flush_message() const {
+            return _type == MSG_CLIENT_SERVER_FLUSH;
+        }
+
         /** Helper to create a session message */
         static std::shared_ptr<SessionMsg> create(Type type, QueryStmtPtr data=nullptr, uint64_t seq_id=-1) {
             return std::make_shared<SessionMsg>(type, data, seq_id);
@@ -151,7 +199,7 @@ namespace springtail::pg_proxy {
         int _completed=0;                        ///< number of completed queries (for multi-statement queries)
         std::vector<QueryStmtPtr> _dependencies; ///< query statements
         uint64_t _seq_id=0;                      ///< sequence id for this message
-        bool _is_read_safe=false;                 ///< is read-only
+        bool _is_read_safe=false;                ///< is read-only
     };
     using SessionMsgPtr = std::shared_ptr<SessionMsg>;
 

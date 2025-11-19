@@ -157,6 +157,7 @@ namespace springtail::pg_proxy {
     void
     ServerSession::queue_msg_batch(std::deque<SessionMsgPtr> msg_batch)
     {
+        // Called from client session to queue a batch of messages
         _wrap_error_handler([this, &msg_batch] {
             // queue the message batch
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session queueing message batch: size={}, state={}",
@@ -172,31 +173,7 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::_process_next_batch()
-    {
-        // process the next queued message batch
-        // typically we'll just go through this once, however if the batch is just
-        // a forward message, we'll just send it to the server and then be ready
-        // for the next batch if there is one
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session processing next batch", _id);
-
-        while (_pending_queue.empty() && _state == State::READY) {
-            if (!_batch_queue.load_processing_batch()) {
-                // batch queue is empty
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session batch queue is empty", _id);
-                return;
-            }
-            while (!_batch_queue.processing_empty()) {
-                // process the message
-                auto msg = _batch_queue.pop_processing_msg();
-                CHECK(msg.has_value());
-                process_msg(msg.value());
-            }
-        }
-    }
-
-    void
-    ServerSession::process_msg(SessionMsgPtr msg)
+    ServerSession::forward_msg(SessionMsgPtr msg)
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server {}{}; message: type: {}, seq_id: {}", _id,
                     (_is_shadow ? "Shadow " : ""), (_type == Type::REPLICA ? "Replica" : "Primary"),
@@ -209,30 +186,13 @@ namespace springtail::pg_proxy {
                 _seq_id = msg->seq_id();
             }
 
-            // process the message
-            switch(msg->type()) {
-                case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
-                case SessionMsg::MSG_CLIENT_SERVER_PARSE:
-                case SessionMsg::MSG_CLIENT_SERVER_BIND:
-                case SessionMsg::MSG_CLIENT_SERVER_DESCRIBE:
-                case SessionMsg::MSG_CLIENT_SERVER_EXECUTE:
-                case SessionMsg::MSG_CLIENT_SERVER_CLOSE:
-                case SessionMsg::MSG_CLIENT_SERVER_SYNC:
-                case SessionMsg::MSG_CLIENT_SERVER_FUNCTION:
-                    _handle_msg_to_server(msg);
-                    break;
+            DCHECK(msg->type() == SessionMsg::MSG_CLIENT_SERVER_FORWARD);
 
-                case SessionMsg::MSG_CLIENT_SERVER_FORWARD:
-                    // forward the message to the server
-                    // usually things like copy data, etc.
-                    // write out the buffer
-                    _send_buffer(msg->buffer(), msg->seq_id());
-                    break;
+            // forward the message to the server
+            // usually things like copy data, etc.
+            // write out the buffer
+            _send_buffer(msg->buffer(), msg->seq_id());
 
-                default:
-                    LOG_WARN("Unknown message: {}", (int8_t)msg->type());
-                    break;
-            }
         });
     }
 
@@ -469,16 +429,19 @@ namespace springtail::pg_proxy {
         // first handle messages where we just need to forward to client
         switch(code) {
             // these are messages that are a direct responses to queries
-            case 'T': // Row description (describe)
+            case 'T': { // Row description (describe)
                 // 'T' can be a response to a simple query for a select or for a describe
-                if (_get_pending_query_type() == QueryStmt::Type::SIMPLE_QUERY) {
+                auto query_status = _current_batch->get_current_query_status();
+                CHECK_NE(query_status, nullptr);
+
+                if (query_status->msg->is_simple_query_message()) {
                     // simple query, not a completion
                     CHECK_EQ(_state, State::QUERY);
                     // forward to client
                     _stream_to_remote_session(code, msg_length, _seq_id);
                     return;
                 }
-
+            }
                 // fall through if not a simple query
 
             case '1': // Parse complete (parse)
@@ -494,7 +457,7 @@ namespace springtail::pg_proxy {
 
                 if (_state == State::DEPENDENCIES) {
                     // we are in dependency checking state, continue with dependencies
-                    _handle_dependency_response(false);
+                    _handle_msg_response();
 
                     // drop data
                     _read_and_drop_message(msg_length);
@@ -505,7 +468,7 @@ namespace springtail::pg_proxy {
                 if (_state == State::QUERY) {
                     // we are in query state, continue with query responses
                     // this may send a message to the client
-                    _handle_query_response();
+                    _handle_msg_response();
                 }
 
                 // fall through, forward message to client
@@ -579,7 +542,8 @@ namespace springtail::pg_proxy {
 
                 if (_state == State::DEPENDENCIES) {
                     // error during dependency checking, shouldn't happen
-                    _handle_dependency_response(true);
+                    _handle_msg_response();
+                    DCHECK(false) << "Error during dependency checking shouldn't happen";
                     // drop the buffer
                 }
 
@@ -652,126 +616,448 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::_handle_dependency_response(bool error)
+    ServerSession::_handle_query_error()
     {
-        // response to dependency
-        CHECK_EQ(_state, State::DEPENDENCIES);
-        DCHECK(!error);
-
-        CHECK(!_pending_queue.empty());
-        QueryStatusPtr query_status = _pending_queue.front();
-
-        // add dependency to cache
-        auto dep = query_status->msg->get_dependency(query_status->dependency_complete_count);
-        if (dep->type == QueryStmt::Type::PREPARE) {
-            // add prepared statement to cache
-            _stmts.insert(dep->get_hashed_name());
-        }
-
-        // check if all dependencies are complete
-        query_status->dependency_complete_count++;
-        assert (query_status->dependency_complete_count <= query_status->dependency_count);
-
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Query dependency complete, count: {:d}/{:d}",
-                    _id, query_status->dependency_complete_count,
-                    query_status->dependency_count);
-
-        if (query_status->dependency_complete_count < query_status->dependency_count) {
+        if (_state != State::QUERY && _state != State::DEPENDENCIES) {
+            LOG_ERROR("[S:{}] Received query error in unexpected state: {}",
+                    _id, static_cast<int>(_state));
             return;
         }
 
-        // all dependencies are complete
-
-        // we need to know if we are expecting a ready for query
-        // message from the server (for simple query dependency)
-        // if so we shouldn't set the _state to QUERY
-        if (!query_status->simple_query_dependency) {
-            _state = State::QUERY;
+        if (!_current_batch || _current_batch->query_status_queue.empty()) {
+            LOG_ERROR("[S:{}] Received query error but no current batch or empty queue", _id);
+            return;
         }
+
+        // Get the current QueryStatus being processed
+        // This is always at the front of the queue due to in-order processing
+        QueryStatusPtr query_status = _current_batch->get_current_query_status();
+        if (!query_status) {
+            LOG_ERROR("[S:{}] No current query status for error handling", _id);
+            return;
+        }
+
+        SessionMsgPtr msg = query_status->msg;
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                "[S:{}] Query error for message seq_id: {}, query_stmt: {}, state: {}",
+                _id,
+                msg->seq_id(),
+                static_cast<int8_t>(msg->data()->type),
+                static_cast<int>(_state));
+
+        // Check if this is a dependency error
+        if (query_status->is_dependency()) {
+            // Dependency error - log but don't send to client
+            LOG_WARN("[S:{}] Dependency message failed, seq_id: {}, type: {}",
+                    _id,
+                    msg->seq_id(),
+                    static_cast<int8_t>(msg->data()->type));
+
+            // XXX need to decide what to do here, should we fail the entire session?
+            // it is possible the failure is due to a non-existent table on a replica
+            // or something similar, which should not be fatal, but could cause this
+            // to be rerun on the primary.
+
+            // for now fail the session (if primary) / replica
+            _state = State::ERROR;
+
+            return;
+        }
+
+        // Send error notification to client
+        msg->set_msg_response(query_status->query_count);
+        _client_msg_response(msg, false); // false = not successful
+
+        // Mark all statements as complete (failed)
+        query_status->query_complete_count = query_status->query_count;
+
+        // Remove failed query from queue
+        _current_batch->remove_completed_query_status();
+
+        // Check protocol type to determine error handling strategy
+        if (msg->is_simple_query_message()) {
+            // Simple query error
+            // Server will send ReadyForQuery after ErrorResponse
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                    "[S:{}] Simple query error, waiting for ReadyForQuery", _id);
+
+            // Wait for ReadyForQuery - it will handle state transition
+            return;
+        }
+
+        // Extended protocol error
+
+        // Enter extended error state
+        // Server will remain in error state until it receives Sync
+        _state = State::EXTENDED_ERROR;
+
+        // all queued queries are now invalid until Sync
+        bool sync_found = false;
+        while (!_current_batch->query_status_queue.empty()) {
+            QueryStatusPtr qs = _current_batch->get_current_query_status();
+            if (qs->msg->is_sync_message()) {
+                // Stop at Sync message
+                sync_found = true;
+                break;
+            }
+            _current_batch->remove_completed_query_status();
+        }
+
+        if (!sync_found) {
+            LOG_ERROR("[S:{}] No Sync message found after extended protocol error", _id);
+            // protocol error, set to ERROR state
+            DCHECK(false) << "No Sync message found after extended protocol error";
+        }
+
+        // Server requires Sync message to recover from error state
+        // Enter EXTENDED_ERROR state and wait for Sync
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                "[S:{}] Extended protocol error, entering EXTENDED_ERROR state", _id);
+
+        // Note: We continue processing remaining messages in batch
+        // The next message should be a Sync (or we have a protocol error)
+        // When Sync's ReadyForQuery arrives, we'll handle recovery
     }
 
     void
-    ServerSession::_handle_query_error()
+    ServerSession::_handle_extended_error_ready_for_query(char transaction_status)
     {
-        assert (!_pending_queue.empty());
-        QueryStatusPtr query_status = _pending_queue.front();
+        CHECK_EQ(_state, State::EXTENDED_ERROR);
 
-        // pop the query from the queue, and issue response
-        _pending_queue.pop();
-        query_status->msg->set_msg_response(query_status->query_complete_count);
-        _client_msg_response(query_status->msg, false);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                "[S:{}] Extended error recovery complete, transaction_status: {}",
+                _id, transaction_status);
 
-        // if we are in extended error state, we need to wait for
-        // sync message and won't get any responses until then
-        if (!query_status->msg->data()->is_extended()) {
+        if (!_current_batch) {
+            LOG_ERROR("[S:{}] No current batch during extended error recovery", _id);
+            // Transition back to READY state anyway to prevent getting stuck
+            _state = State::READY;
+            _process_next_batch();
             return;
         }
 
-        _state = State::EXTENDED_ERROR;
+        // Send ReadyForQuery to client
+        // Client needs to know that error state is cleared
+        if (!_is_shadow) {
+            auto client_session = get_client_session();
+            if (client_session != nullptr) {
+                client_session->server_ready_msg(transaction_status);
+            }
+        }
 
-        // iterate through all pending messages and set them to error
-        while (!_pending_queue.empty()) {
-            query_status = _pending_queue.front();
-            if (query_status->msg->data()->type == QueryStmt::Type::SYNC) {
-                // wait for query ready
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3,
+                "[S:{}] Extended error ReadyForQuery",
+                _id);
+
+        // Transition back to QUERY state
+        // Server is now ready to process normal queries again
+        _state = State::QUERY;
+
+        // Check if batch is complete
+        if (_current_batch->is_complete()) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                    "[S:{}] Batch complete after extended error recovery", _id);
+
+            // Clean up current batch
+            _current_batch = nullptr;
+
+            // Reset state to ready
+            _state = State::READY;
+            _seq_id = 0;
+
+            // Check for deferred shadow shutdown
+            if (_defer_shadow_shutdown && _batch_queue.empty()) {
+                CHECK(_is_shadow);
+                reset_session();
+                _state = State::RESET_SESSION;
+                _send_reset();
                 return;
             }
 
-            // pop the query from the queue, and issue response
-            _pending_queue.pop();
-            _client_msg_response(query_status->msg, false);
+            // Process next batch if available
+            _process_next_batch();
+            return;
         }
     }
 
     void
-    ServerSession::_handle_ready_for_query_response(char xact_status)
+    ServerSession::_process_next_batch()
     {
-        QueryStatusPtr query_status = nullptr;
-        if (!_pending_queue.empty()) {
-            query_status = _pending_queue.front();
-        }
+        // process the next queued message batch
+        // typically we'll just go through this once, however if the batch is just
+        // a forward message, we'll just send it to the server and then be ready
+        // for the next batch if there is one
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session processing next batch", _id);
 
-        if (_state == State::DEPENDENCIES) {
-            // we are in dependency checking state,
-            // this shouldn't generate message back to client
-            // check if have more messages in queue;
-            // if so, check next message for more dependencies
-            assert (!_pending_queue.empty());
-            assert (query_status != nullptr);
-
-            if (query_status->dependency_count == 0) {
-                // we had dependencies, set state to query
-                _state = State::QUERY;
+        std::vector<SessionMsgPtr> messages;
+        while (_pending_queue.empty() && _state == State::READY) {
+            if (!_batch_queue.load_processing_batch()) {
+                // batch queue is empty
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Server session batch queue is empty", _id);
+                return;
             }
+
+            while (!_batch_queue.processing_empty()) {
+                // process the message
+                auto msg = _batch_queue.pop_processing_msg();
+                CHECK(msg.has_value());
+                messages.push_back(msg.value());
+            }
+        }
+
+        if (messages.empty()) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] No messages to process in next batch", _id);
             return;
         }
 
-        DCHECK(_state == State::QUERY || _state == State::EXTENDED_ERROR);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] Processing next batch with {} messages",
+                _id, messages.size());
 
-        // check if current message is a sync message
-        if (query_status != nullptr && query_status->msg->data()->type == QueryStmt::Type::SYNC) {
-            _pending_queue.pop();
+        // Create batch structure from messages
+        _current_batch = std::make_shared<Batch>(messages);
+        DCHECK_EQ(_current_batch->is_empty(), false);
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] Created batch: {} total messages",
+                _id,
+                _current_batch->get_total_message_count());
+
+        _send_all_messages();
+    }
+
+
+    void
+    ServerSession::_send_all_messages()
+    {
+        if (!_current_batch) {
+            LOG_ERROR("[S:{}] Cannot send dependencies: no current batch", _id);
+            return;
         }
 
-        // send ready for query message to client
+        auto front_query_status = _current_batch->get_current_query_status();
+        if (!front_query_status) {
+            LOG_ERROR("[S:{}] Cannot send messages: current batch has no messages", _id);
+            return;
+        }
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] Sending messages (pipelined)",
+                _id);
+
+        size_t messages_sent = 0;
+        size_t flush_messages = 0;
+
+        // Determine initial state based on first message type
+        if (front_query_status->is_dependency()) {
+            // Start in DEPENDENCIES state
+            _state = State::DEPENDENCIES;
+        } else {
+            // Start in QUERY state
+            _state = State::QUERY;
+        }
+
+        // set seq_id to first message
+        _seq_id = front_query_status->msg->seq_id();
+
+        // Iterate through query_status_queue and send all dependencies
+        // Dependencies should always be at the front of the queue in a batch
+        for (auto it = _current_batch->query_status_queue.begin();
+                  it != _current_batch->query_status_queue.end();) {
+
+            auto query_status = *it;
+            auto msg = query_status->msg;
+            auto is_dependency = query_status->is_dependency();
+
+            DCHECK(msg);
+
+            if (_state == State::DEPENDENCIES && !is_dependency) {
+                // Reached end of dependencies, stop
+                break;
+            }
+
+            if (_state == State::QUERY && is_dependency) {
+                // Should not happen, dependencies should be first
+                LOG_WARN("[S:{}] Unexpected dependency message in QUERY state", _id);
+                break;
+            }
+
+            // no reply for flush message so remove from queue here, prior to sending
+            if (msg->is_flush_message()) {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                        "[S:{}] Removing flush message from queue, seq_id: {}",
+                        _id, msg->seq_id());
+                it = _current_batch->query_status_queue.erase(it);
+                flush_messages++;
+            } else {
+                ++it;
+            }
+
+            // Send message to server
+            _send_msg(query_status);
+            messages_sent++;
+        }
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] Sent {} messages",
+                _id, messages_sent);
+
+
+        if (flush_messages == messages_sent) {
+            // All messages were flush messages, can complete batch
+            // no responses expected, transition to READY state
+            _state = State::READY;
+            _current_batch = nullptr;
+            _seq_id = 0;
+        }
+    }
+
+    void
+    ServerSession::_send_msg(QueryStatusPtr query_status)
+    {
+        if (!query_status || !query_status->msg) {
+            LOG_ERROR("[S:{}] Cannot send message: invalid QueryStatus or message", _id);
+            return;
+        }
+
+        SessionMsgPtr msg = query_status->msg;
+        DCHECK(_state == State::QUERY || _state == State::DEPENDENCIES);
+
+        QueryStmtPtr qs = msg->data();
+        if (qs->data_type == QueryStmt::DataType::SIMPLE) {
+            // send the simple query using the query string
+            _send_simple_query(qs->query(), msg->seq_id());
+        } else {
+            // send the data buffer
+            DCHECK(qs->data_type == QueryStmt::DataType::PACKET);
+            _send_buffer(qs->buffer(), msg->seq_id());
+        }
+    }
+
+    void
+    ServerSession::_handle_msg_response()
+    {
+        CHECK(_state == State::QUERY || _state == State::DEPENDENCIES);
+
+        if (!_current_batch || _current_batch->query_status_queue.empty()) {
+            LOG_ERROR("[S:{}] Received query response but no current batch or empty queue", _id);
+            return;
+        }
+
+        // Get the current QueryStatus being processed
+        // This is always at the front of the queue due to in-order processing
+        QueryStatusPtr query_status = _current_batch->get_current_query_status();
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                "[S:{}] Query statement complete: state: {}, query_stmt: {}",
+                _id,
+                (_state == State::QUERY) ? "QUERY" : "DEPENDENCIES",
+                static_cast<int8_t>(query_status->msg->data()->type));
+
+        bool query_complete = _current_batch->mark_message_complete();
+        if (!query_complete) {
+            // More messages to process in current state
+            return;
+        }
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                "[S:{}] All statements complete for this message, seq_id: {}",
+                _id, query_status->msg->seq_id());
+
+        // Send completion notification to client session
+        // This is called BEFORE ReadyForQuery is received
+        if (_state == State::QUERY) {
+            query_status->msg->set_msg_response(query_status->query_complete_count);
+            _client_msg_response(query_status->msg, true);
+        }
+
+        // State transition happens in _handle_ready_for_query when ReadyForQuery arrives
+    }
+
+    void
+    ServerSession::_handle_ready_for_query_response(char transaction_status)
+    {
+        if (!_current_batch) {
+            LOG_ERROR("[S:{}] Cannot handle query ReadyForQuery: no current batch", _id);
+            DCHECK(false) << "No current batch in ReadyForQuery handling";
+            return;
+        }
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] ReadyForQuery received, transaction_status: {}",
+                _id,
+                transaction_status);
+
+        // Check if current message is a Sync message
+        // Sync messages only generate ReadyForQuery, so mark it as complete
+        auto query_status = _current_batch->get_current_query_status();
+        if (query_status && query_status->msg->is_sync_message()) {
+            query_status->mark_message_complete();
+            _current_batch->mark_message_complete();
+
+            // notify client of sync completion to add to session history
+            if (!_is_shadow && !query_status->is_dependency()) {
+                auto client_session = get_client_session();
+                CHECK_NE(client_session, nullptr);
+                client_session->server_msg_response(query_status->msg, _id, true);
+            }
+        }
+
+        // Handle ready for query based on state
+        switch (_state) {
+            case State::DEPENDENCIES:
+                _handle_dependency_ready_for_query(transaction_status);
+                break;
+
+            case State::QUERY:
+                _handle_query_ready_for_query(transaction_status);
+                break;
+
+            case State::EXTENDED_ERROR:
+                // Extended error state handling for extended protocol recovery
+                // Requires special handling to wait for Sync message
+                _handle_extended_error_ready_for_query(transaction_status);
+                break;
+
+            default:
+                LOG_ERROR("[S:{}] Received ReadyForQuery in unexpected state: {}",
+                    _id, static_cast<int>(_state));
+                DCHECK(false) << "Unexpected state in ReadyForQuery handling";
+                break;
+        }
+    }
+
+    void
+    ServerSession::_handle_query_ready_for_query(char transaction_status)
+    {
+        // State must be QUERY here
+        DCHECK_EQ(_state, State::QUERY);
+
+        // Send ReadyForQuery to client session
         if (!_is_shadow) {
-            auto cs = get_client_session();
-            CHECK_NE(cs, nullptr);
-            cs->server_ready_msg(xact_status);
+            auto client_session = get_client_session();
+            CHECK_NE(client_session, nullptr);
+            client_session->server_ready_msg(transaction_status);
         }
 
-        // if pending queue is not empty need to wait for them to complete
-        if (!_pending_queue.empty()) {
+        // Check if all queries are complete
+        if (!_current_batch->is_complete()) {
             return;
         }
 
-        // no pending message, set state to ready and process next batch
+        // All queries in this batch are complete
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
+                    "[S:{}] All queries complete, batch finished", _id);
+
+        // Reset state
+        _current_batch = nullptr;
         _state = State::READY;
         _seq_id = 0;
 
+        // Check for deferred shadow shutdown
+        // Shadow sessions may defer shutdown until all batches complete
         if (_defer_shadow_shutdown && _batch_queue.empty()) {
-            // we are in shadow mode with a deferred shutdown and no more messages to process
-            // we can reset the session and release it to the pool
             CHECK(_is_shadow);
             reset_session();
             _state = State::RESET_SESSION;
@@ -779,134 +1065,26 @@ namespace springtail::pg_proxy {
             return;
         }
 
+        // Process next batch if available
         _process_next_batch();
     }
 
-    QueryStmt::Type
-    ServerSession::_get_pending_query_type()
-    {
-        if (_pending_queue.empty()) {
-            return QueryStmt::Type::NONE;
-        }
-        QueryStatusPtr query_status = _pending_queue.front();
-        return query_status->msg->data()->type;
-    }
-
     void
-    ServerSession::_handle_query_response()
+    ServerSession::_handle_dependency_ready_for_query(char transaction_status)
     {
-        CHECK_EQ(_state, State::QUERY);
-        CHECK(!_pending_queue.empty());
+        // State must be DEPENDENCIES here
+        DCHECK_EQ(_state, State::DEPENDENCIES);
 
-        // no error, mark query as complete
-        QueryStatusPtr query_status = _pending_queue.front();
-        query_status->query_complete_count++;
-
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Query complete, count: {:d}/{:d}, query_stmt: {}",
-                    _id, query_status->query_complete_count,
-                    query_status->query_count,
-                    (int8_t)query_status->msg->data()->type);
-
-        CHECK_LE(query_status->query_complete_count, query_status->query_count);
-
-        // check if this was a prepare that completed
-        QueryStmtPtr qs = query_status->msg->data();
-        switch (qs->type) {
-            case QueryStmt::Type::PREPARE:
-                // add prepared statement to cache
-                _stmts.insert(qs->get_hashed_name());
-                break;
-
-            case QueryStmt::Type::SIMPLE_QUERY:
-                // it is possible for children.size() == 0 when there is an empty query
-                if (qs->children.size() > 0) {
-                    assert (qs->children.size() >= query_status->query_complete_count);
-                    qs = qs->children[query_status->query_complete_count-1];
-                    if (qs->type == QueryStmt::Type::PREPARE) {
-                        // add prepared statement to cache
-                        _stmts.insert(qs->get_hashed_name());
-                    }
-                }
-                break;
-            default:
-                break;
-        }
-
-        // check if not done with parent query, if not then return now
-        if (query_status->query_complete_count < query_status->query_count) {
+        // If all dependencies are complete, transition to query phase
+        if (!_current_batch->are_dependencies_complete()) {
             return;
         }
 
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] All queries complete for this msg, seq_id: {}", _id, query_status->msg->seq_id());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] All dependency ReadyForQuery responses received, transitioning to query phase",
+                _id);
 
-        // this query is complete; send response to client session
-        _pending_queue.pop();
-
-        // send response notification to client
-        query_status->msg->set_msg_response(query_status->query_complete_count);
-        _client_msg_response(query_status->msg, true);
-
-        // if all queries complete
-        if (_pending_queue.empty()) {
-            return;
-        }
-
-        // have more messages in queue; look at next message
-        query_status = _pending_queue.front();
-        _seq_id = query_status->msg->seq_id();
-
-        // see if there are more dependencies
-        if (query_status->dependency_count > 0) {
-            // we have dependencies, set state to handle them
-            _state = State::DEPENDENCIES;
-        }
-    }
-
-    void
-    ServerSession::_handle_msg_to_server(SessionMsgPtr msg)
-    {
-        // Entry point for client session message to server
-        // we send all dependencies and then the server msg
-        // NOTE: this may be called multiple times before
-        // receiving a response from the server (if client
-        // is pipelining queries)
-
-        // track the query status
-        QueryStatusPtr query_status = std::make_shared<QueryStatus>(msg);
-        // set query count
-        if (msg->data()->children.size() > 0) {
-            query_status->query_count = msg->data()->children.size();
-        } else {
-            query_status->query_count = 1;
-        }
-
-        _state = State::QUERY;
-
-        // set seq_id if this is a new message that is current
-        if (_pending_queue.empty()) {
-            _seq_id = msg->seq_id();
-        }
-
-        _pending_queue.push(query_status);
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session: msg to server, msg: {}, seq_id: {}, query_count: {}",
-                    _id, msg->type_str(), msg->seq_id(), query_status->query_count);
-
-        // get dependencies and issue them to server
-        int num_dependencies = msg->num_dependencies();
-        for (int i = 0; i < num_dependencies; i++) {
-            auto dep = msg->get_dependency(i);
-            assert (dep->type == QueryStmt::Type::PREPARE);
-            std::string hashed_name = dep->get_hashed_name();
-            if (_stmts.contains(hashed_name)) {
-                // already prepared, no need to send to server
-                continue;
-            }
-            query_status->dependency_count++;
-            _send_dependency(dep, msg->seq_id());
-        }
-
-        // send the message to server
-        _send_server_msg(query_status);
+        _send_all_messages();
     }
 
     void
@@ -919,28 +1097,7 @@ namespace springtail::pg_proxy {
         // otherwise send message and status to client session
         auto cs = get_client_session();
         CHECK_NE(cs, nullptr);
-        cs->server_msg_response(msg, success);
-    }
-
-    void
-    ServerSession::_send_server_msg(QueryStatusPtr query_status)
-    {
-        SessionMsgPtr msg = query_status->msg;
-        // queue server message
-        if (_state == State::READY) {
-            _state = State::QUERY;
-        }
-
-        QueryStmtPtr qs = msg->data();
-
-        if (qs->data_type == QueryStmt::DataType::SIMPLE) {
-            // send the simple query using the query string
-            _send_simple_query(qs->query(), msg->seq_id());
-        } else {
-            // send the data buffer
-            DCHECK_EQ(qs->data_type, QueryStmt::DataType::PACKET);
-            _send_buffer(qs->buffer(), msg->seq_id());
-        }
+        cs->server_msg_response(msg, _id, success);
     }
 
     void

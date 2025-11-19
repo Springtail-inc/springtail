@@ -118,9 +118,10 @@ namespace springtail::pg_proxy {
         /**
          * @brief Callback from Server indicating that a message is ready
          * @param msg message containing query statement
+         * @param session_id server session id
          * @param success true if successful, false if error
          */
-        void server_msg_response(SessionMsgPtr msg, bool success);
+        void server_msg_response(SessionMsgPtr msg, uint64_t session_id, bool success);
 
         /**
          * @brief Callback from Server indicating reception of ready for query message
@@ -263,9 +264,10 @@ namespace springtail::pg_proxy {
          * associated session or _primary, _replica before calling create.
          * @param type type of server session to select
          * @param seq_id sequence id
+         * @param replay_transaction_history output parameter set to true if transaction history needs to be replayed
          * @return ServerSessionPtr server session
          */
-        ServerSessionPtr _select_session(Type type, uint64_t seq_id);
+        ServerSessionPtr _select_session(Type type, uint64_t seq_id, bool &replay_transaction_history);
 
         /** Helper associated session as a server session ptr */
         ServerSessionPtr _get_associated_session() {
@@ -277,6 +279,14 @@ namespace springtail::pg_proxy {
          * @return true if the switch was successful, false otherwise (requeue needed)
          */
         bool _switch_failover_replica();
+
+        /**
+         * @brief Helper to add dependencies to a message from the statement cache
+         * @param msg_queue message queue to which to add dependencies
+         * @param server_session server session for which to get replay history
+         * @param replay_transaction_history true if transaction history needs to be replayed
+         */
+        void _add_dependencies(std::deque<SessionMsgPtr> &msg_queue, ServerSessionPtr server_session, bool replay_transaction_history);
 
         /**
          * @brief Remap a parse type from the parser context to a QueryStmt::Type
