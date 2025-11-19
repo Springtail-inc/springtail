@@ -15,7 +15,7 @@ TEST(ShmTest, Basic) {
 
     sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
 
-    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE};
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE, true};
 
     for (uint64_t i = 0; i != 100; ++i) {
         std::ostringstream os;
@@ -90,11 +90,11 @@ TEST(ShmTest, Lifecycle) {
 
     // create the cache
     std::unique_ptr<sys_tbl_mgr::ShmCache> parent;
-    parent = std::make_unique<sys_tbl_mgr::ShmCache>(CACHE_NAME, CACHE_SIZE); 
+    parent = std::make_unique<sys_tbl_mgr::ShmCache>(CACHE_NAME, CACHE_SIZE, true); 
 
     // try to create another instance, it must throw.
     try {
-        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME, CACHE_SIZE); 
+        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME, CACHE_SIZE, true); 
         // must not come here
         ASSERT_TRUE(false);
     } catch (const boost::interprocess::interprocess_exception&) {
@@ -142,7 +142,7 @@ TEST(ShmTest, Lifecycle) {
         parent.reset();
 
         // create new parent
-        parent = std::make_unique<sys_tbl_mgr::ShmCache>(CACHE_NAME, CACHE_SIZE); 
+        parent = std::make_unique<sys_tbl_mgr::ShmCache>(CACHE_NAME, CACHE_SIZE, true); 
         
         // should still have the old read
         for (uint64_t i = 0; i != 100; ++i) {
@@ -167,7 +167,7 @@ TEST(ShmTest, BasicEviction) {
 
     sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
 
-    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE};
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE, true};
 
     for (uint64_t i = 0; i != 10000; ++i) {
         std::ostringstream os;
@@ -237,7 +237,7 @@ TEST(ShmTest, BasicEviction) {
 
 TEST(ShmTest, XidUpdates) {
     sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
-    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE};
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE, true};
 
     uint64_t db = 1;
     uint64_t xid = 100;

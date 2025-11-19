@@ -32,7 +32,7 @@ public:
     void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, 
             uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker = nullptr);
 
-    /**     
+    /**
      * @brief commit up to and including given xid without writing to xlog
      * @param db_id database id
      * @param pg_xid Postgres xid
@@ -41,9 +41,12 @@ public:
      * @param real_commit true if this is a real commit
      * @param timestamp commit timestamp
      * @param tracker WAL progress tracker, this is to synchronize xlog and wal progress
+     * @param table_ids list of table IDs mutated in the transaction, used in push notifications. 
+     *                      It is applicable only when real_commit is false.
      */
     void commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit,
-            uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker);
+            uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker,
+            const std::vector<uint64_t>& table_ids = {});
 
     /**
      * @brief Commit xlog entries that were commited with commit_xid_no_xlog and are now ready to be written to xlog
@@ -59,9 +62,11 @@ public:
      * @param has_schema_changes true if transaction has schema changes
      * @param timestamp commit timestamp
      * @param tracker WAL progress tracker, this is to synchronize xlog and wal progress
+     * @param table_ids list of table IDs mutated in the transaction
      */
     void record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes,
-            uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker);
+            uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker,
+            const std::vector<uint64_t>& table_ids);
 
     /**
      * @brief Get the latest committed xid object

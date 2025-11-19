@@ -28,6 +28,7 @@ namespace ipc = boost::interprocess;
 static constexpr char SHM_CACHE_ROOTS[] = "springtail.roots";
 static constexpr char SHM_CACHE_SCHEMAS[] = "springtail.schemas";
 static constexpr char SHM_CACHE_USERTYPES[] = "springtail.usertypes";
+static constexpr char SHM_CACHE_TABLE_IDS[] = "springtail.table_ids";
 
 /**
  * Find XID from history using schema XID as the key.
@@ -113,9 +114,11 @@ public:
      * the name already exists, it will throw.
      * @param name The global cache name.
      * @param size The cache size in bytes.
+     * @param enable_xid_history If true, enable XID history. If disabled, update_committed_xid(),
+     *        get_committed_xid() will have undefined behavior.
      */
 
-    ShmCache(std::string name, size_t size);
+    ShmCache(std::string name, size_t size, bool enable_xid_history);
     /*
      * Open a cache with the give name. If the cache hasn't been created,
      * it will throw.
@@ -291,6 +294,7 @@ private:
     using CacheContainer = GenericCache::Cache;
 
     std::string _name;
+    bool _enable_xid_history;
     bool _created;
     ipc::managed_shared_memory _shm;
     Mutex _mutex;

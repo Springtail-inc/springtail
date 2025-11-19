@@ -236,11 +236,17 @@ namespace springtail::committer {
 
         // finalize all tables in the batch
         std::vector<MutableTablePtr> tables_to_sync;
+        tables_to_sync.reserve(batch.table_cache.size());
+
+        std::vector<uint64_t> table_ids;
+        table_ids.reserve(batch.table_cache.size());
+
         for (auto& [tid, table] : batch.table_cache) {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Finalizing table {}", tid);
             auto metadata = table->finalize(false);
             sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, batch.final_xid, metadata);
-            tables_to_sync.push_back(table);
+            tables_to_sync.emplace_back(table);
+            table_ids.push_back(tid);
         }
 
         Coordinator::get_instance()->register_thread(daemon_type, "committer");
@@ -305,25 +311,25 @@ namespace springtail::committer {
                 } else {
                     // for intermediate XIDs, just record the mapping
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
-                            result->timestamp(), result->get_tracker());
+                            result->timestamp(), result->get_tracker(), table_ids);
                 }
             } else {
                 if (is_last_xid) {
                     if (batch.table_cache.empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
                         // don't commit, but record any DDL changes to the history
-                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), 
-                                result->timestamp(), result->get_tracker());
+                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
+                                result->timestamp(), result->get_tracker(), table_ids);
                     } else {
                         // commit the completed XID without xlog update
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false,
-                                result->timestamp(), result->get_tracker()); 
+                                result->timestamp(), result->get_tracker(), table_ids);
                         _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
                     }
                 } else {
                     // don't commit, but record any DDL changes to the history
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
-                            result->timestamp(), result->get_tracker());
+                            result->timestamp(), result->get_tracker(), table_ids);
                 }
             }
 
@@ -409,7 +415,7 @@ namespace springtail::committer {
             xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, xid, false, result->timestamp());
         } else {
             // Record mapping if commits are blocked
-            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, xid, false, result->timestamp(), nullptr);
+            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, xid, false, result->timestamp(), nullptr, {});
         }
 
         _completed_xids[db_id] = xid;
@@ -464,7 +470,7 @@ namespace springtail::committer {
             }
         } else {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Record DDL changes db {} xid {}", db_id, completed_xid);
-            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true, result->timestamp(), nullptr);
+            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true, result->timestamp(), nullptr, {});
         }
         _completed_xids[db_id] = completed_xid;
         WriteCacheServer::get_instance()->evict_xid(db_id, completed_xid);

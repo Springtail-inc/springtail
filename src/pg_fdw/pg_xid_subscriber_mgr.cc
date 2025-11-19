@@ -12,7 +12,8 @@ using namespace springtail;
 using namespace springtail::pg_fdw;
 
 void
-PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size_t usertype_cache_size, size_t worker_count)
+PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size_t usertype_cache_size,
+                         size_t table_ids_cache_size, size_t worker_count)
 {
     _roots_cache_size = roots_cache_size;
     CHECK(_roots_cache_size);
@@ -20,8 +21,11 @@ PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size
     CHECK(_schema_cache_size);
     _usertype_cache_size = usertype_cache_size;
     CHECK(_usertype_cache_size);
+    _table_ids_cache_size = table_ids_cache_size;
+    CHECK(_table_ids_cache_size);
     _worker_count = worker_count;
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "creating {}, {}, {}, {}", _roots_cache_size, _schema_cache_size, _usertype_cache_size, _worker_count);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "creating {}, {}, {}, {}, {}",
+              _roots_cache_size, _schema_cache_size, _usertype_cache_size, _table_ids_cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
     pthread_setname_np(_t->native_handle(), "PgXidSubscriber");
 }
@@ -43,14 +47,19 @@ PgXidSubscriberMgr::task(std::stop_token st)
 
     // remove old caches if any and create a new ones
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_ROOTS);
-    _roots_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _roots_cache_size);
+    _roots_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _roots_cache_size, true);
 
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
-    _schema_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_SCHEMAS, _schema_cache_size);
+    _schema_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_SCHEMAS, _schema_cache_size, false);
 
-    XidHistoryCleaner cleaner{_roots_cache};
+    XidHistoryCleaner roots_cleaner{_roots_cache};
+
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_USERTYPES);
-    _usertype_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_USERTYPES, _usertype_cache_size);
+    _usertype_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_USERTYPES, _usertype_cache_size, false);
+
+    sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_TABLE_IDS);
+    _table_ids_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, _table_ids_cache_size, true);
+    XidHistoryCleaner table_ids_cleaner{_table_ids_cache};
 
     auto client = sys_tbl_mgr::Client::get_instance();
     // Client should cache get_roots() responses now
@@ -62,14 +71,27 @@ PgXidSubscriberMgr::task(std::stop_token st)
     std::atomic<bool> connected = false;
 
     // XID subscriber callbacks
-    auto on_push = [this](DbId db, uint64_t xid, bool has_schema_changes) {
-        // when we get an XID push notification, we pass it to the workers
-        // and return immediately. A worker calls get_roots() and get_schema() that will
-        // attempt to populate the caches.
-        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {}", db, xid);
-        _roots_cache->update_committed_xid(db, xid, has_schema_changes);
-        _schema_cache->update_committed_xid(db, xid, has_schema_changes);
-        _enqueue_populate_job(db, xid);
+    auto on_push = [this](DbId db, uint64_t xid, bool has_schema_changes, bool real_commit, std::vector<uint64_t> table_ids) {
+        if (real_commit) {
+            // when we get an XID push notification with real commit, we pass it to the workers
+            // and return immediately. A worker calls get_roots() and get_schema() that will
+            // attempt to populate the caches proactively.
+            LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {} real_commit={} with {} tables",
+                      db, xid, real_commit, table_ids.size());
+            _roots_cache->update_committed_xid(db, xid, has_schema_changes);
+            _enqueue_populate_job(db, xid);
+        } else {
+            // Store table IDs associated with the XID to be used later for
+            // requesting mutation records from WriteCache.
+            DCHECK(!table_ids.empty());
+            std::string_view data(reinterpret_cast<const char*>(table_ids.data()),
+                                           table_ids.size() * sizeof(table_ids[0]));
+            // 0 as the object ID to indicate transaction-level data not object-level.
+            _table_ids_cache->insert(db, 0, xid, data);
+            _table_ids_cache->update_committed_xid(db, xid, has_schema_changes);
+            LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Stored {} table IDs for db {} xid {}", table_ids.size(), db, xid);
+        }
+
     };
     auto on_disconnect = [&connected]() {
         LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber disconnected");
@@ -113,6 +135,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         _roots_cache->keep_alive();
         _schema_cache->keep_alive();
         _usertype_cache->keep_alive();
+        _table_ids_cache->keep_alive();
     }
     subscriber.reset();
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
@@ -121,9 +144,11 @@ PgXidSubscriberMgr::task(std::stop_token st)
     client->use_roots_cache({});
     client->use_schema_cache({});
     client->use_usertype_cache({});
+
     _roots_cache.reset();
     _schema_cache.reset();
     _usertype_cache.reset();
+    _table_ids_cache.reset();
 }
 
 void
@@ -200,6 +225,9 @@ PgXidSubscriberMgr::start()
     size_t usertype_cache_size = 0;
     Json::get_to<size_t>(json, "usertype_shm_cache_size", usertype_cache_size);
 
+    size_t table_ids_cache_size = 0;
+    Json::get_to<size_t>(json, "table_ids_shm_cache_size", table_ids_cache_size);
+
     CHECK(roots_cache_size) << "Bad cache size, terminating PgXidSubscriberRunner";
 
     json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
@@ -212,7 +240,7 @@ PgXidSubscriberMgr::start()
     // populate the cache. We use the same number or threads as there are in the RPC in service.
     auto worker_count = Json::get_or<size_t>(rpc_json, "server_worker_threads", 1);
 
-    get_instance()->init(roots_cache_size, schema_cache_size, usertype_cache_size, worker_count);
+    get_instance()->init(roots_cache_size, schema_cache_size, usertype_cache_size, table_ids_cache_size, worker_count);
 }
 
 void

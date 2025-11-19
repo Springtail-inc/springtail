@@ -7,8 +7,9 @@
 
 using namespace springtail::sys_tbl_mgr;
 
-ShmCache::ShmCache(std::string name, size_t size)
+ShmCache::ShmCache(std::string name, size_t size, bool enable_xid_history)
     :_name{std::move(name)},
+    _enable_xid_history{enable_xid_history},
     _created{true},
     _shm{ipc::create_only, _name.c_str(), size, nullptr,
         []{ipc::permissions  p; p.set_unrestricted(); return p;}()},
@@ -69,9 +70,11 @@ ShmCache::_init()
             XidMap::allocator_type(_shm.get_segment_manager()));
     CHECK(_committed_xid_map);
 
-    _xid_history_map = _shm.find_or_construct<XidHistoryMap>("xid_history")(
-            XidHistoryMap::allocator_type(_shm.get_segment_manager()));
-    CHECK(_xid_history_map);
+    if (_enable_xid_history) {
+        _xid_history_map = _shm.find_or_construct<XidHistoryMap>("xid_history")(
+                XidHistoryMap::allocator_type(_shm.get_segment_manager()));
+        CHECK(_xid_history_map);
+    }
 }
 
 
