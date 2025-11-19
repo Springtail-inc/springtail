@@ -68,6 +68,7 @@ namespace indexer_helpers {
     void index_mutation_handler(
             const ExtentSchemaPtr schema,
             const SecondaryIndexesCache& secondary_indexes,
+            const std::map<uint64_t, Index>& index_lookup,
             const Extent::Row& row)
     {
         auto internal_row_id_f = schema->get_field(constant::INTERNAL_ROW_ID);
@@ -76,12 +77,35 @@ namespace indexer_helpers {
 
         for (auto const& [index_id, idx]: secondary_indexes) {
             auto idx_col_fields = schema->get_fields(schema->get_column_names(idx.second));
-            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
-            auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-            if constexpr (op == IndexOperation::Insert) {
-                idx.first->insert(svalue);
-            } else { /* op == IndexOperation::Remove */
-                idx.first->remove(svalue);
+            if (index_lookup.at(index_id).index_type == constant::INDEX_TYPE_GIN) {
+                auto key_fields = std::make_shared<FieldArray>(3);
+                for (int i = 0; i < idx.second.size(); i++) {
+                    auto&& col_field = (*idx_col_fields)[i];
+                    auto pos = idx.second[i];
+                    auto& column = index_lookup.at(index_id).columns[i];
+                    auto&& tokens = extract_trgm_from_value(std::string(col_field->get_text(&row)), column.opclass, GIN_EXTRACTVALUE);
+
+                    for (auto& token: tokens) {
+                        // Set idx_position, token, internal_row_id
+                        key_fields->at(0) = std::make_shared<ConstTypeField<uint32_t>>(pos);
+                        key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(token);
+                        key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+                        auto tuple = std::make_shared<FieldTuple>(key_fields, nullptr);
+                        if constexpr (op == IndexOperation::Insert) {
+                            idx.first->insert(tuple);
+                        } else {
+                            idx.first->remove(tuple);
+                        }
+                    }
+                }
+            } else {
+                (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+                auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
+                if constexpr (op == IndexOperation::Insert) {
+                    idx.first->insert(svalue);
+                } else { /* op == IndexOperation::Remove */
+                    idx.first->remove(svalue);
+                }
             }
         }
     }
@@ -135,6 +159,7 @@ namespace indexer_helpers {
     {
         const ExtentSchemaPtr schema;
         const SecondaryIndexesCache& indexes;
+        const std::map<uint64_t, Index>& index_lookup;
     };
 
     /**
@@ -145,7 +170,7 @@ namespace indexer_helpers {
     template<IndexOperation op>
     static void mutation_handler(const Extent::Row& row, void* ctx) {
         auto* c = static_cast<const IndexMutationContext*>(ctx);
-        index_mutation_handler<op>(c->schema, c->indexes, row);
+        index_mutation_handler<op>(c->schema, c->indexes, c->index_lookup, row);
     }
 
 } // namespace indexer_helpers
@@ -267,12 +292,19 @@ namespace indexer_helpers {
         _use_empty = _primary_index->empty();
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
+        // Set GIN Index schema to be used in constructing GIN index root
+        _set_gin_index_schema(extension_callback);
+
         // deal with secondary indexes
         for (auto const& idx: secondary) {
             if (idx.state != static_cast<uint8_t>(sys_tbl::IndexNames::State::READY)) {
                 continue;
             }
             assert(idx.id != constant::INDEX_PRIMARY);
+
+            // Populate lookup to be used during mutation
+            _index_lookup.emplace(idx.id, idx);
+
             // work with the index
             std::vector<uint32_t> idx_cols;
             idx_cols.reserve(idx.columns.size());
@@ -281,7 +313,12 @@ namespace indexer_helpers {
             }
             if (!idx_cols.empty()) {
 
-                auto btree = create_index_root(idx.id, idx_cols, extension_callback, opclass_handler, idx.index_type);
+                MutableBTreePtr btree;
+                if (idx.index_type == constant::INDEX_TYPE_GIN) {
+                    btree = create_gin_index_root(idx.id, extension_callback, opclass_handler);
+                } else {
+                    btree = create_index_root(idx.id, idx_cols, extension_callback, opclass_handler, idx.index_type);
+                }
 
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
@@ -316,9 +353,6 @@ namespace indexer_helpers {
                 _look_aside_index->init_empty();
             }
         }
-
-        // Initialize GIN index schema to be used for GIN index building/mutations
-        _set_gin_index_schema(extension_callback);
     }
 
     void
@@ -697,7 +731,9 @@ namespace indexer_helpers {
     }
 
     MutableBTreePtr
-    MutableTable::create_gin_index_root(uint64_t index_id, const ExtensionCallback& extension_callback)
+    MutableTable::create_gin_index_root(uint64_t index_id,
+                                        const ExtensionCallback& extension_callback,
+                                        const OpClassHandler& opclass_handler)
     {
         std::vector<std::string> gin_index_keys;
         gin_index_keys.push_back(constant::INDEX_POSITION_FIELD);
@@ -709,7 +745,9 @@ namespace indexer_helpers {
                 gin_index_keys, _gin_index_schema,
                 _target_xid,
                 get_max_extent_size_secondary(),
-                extension_callback
+                extension_callback,
+                opclass_handler,
+                constant::INDEX_TYPE_GIN
                 );
         return btree;
     }
@@ -732,7 +770,11 @@ namespace indexer_helpers {
     }
 
     MutableBTreePtr
-    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback, const OpClassHandler& opclass_handler, const std::string_view index_type)
+    MutableTable::create_index_root(uint64_t index_id,
+                                    const std::vector<uint32_t>& index_columns,
+                                    const ExtensionCallback& extension_callback,
+                                    const OpClassHandler& opclass_handler,
+                                    const std::string_view index_type)
     {
         // Get the index schema - bypass cache if this is a snapshot table without system table metadata
         auto index_schema = _bypass_schema_cache
@@ -764,7 +806,7 @@ namespace indexer_helpers {
 
         // Create a context to passed to cache and so the same will be
         // passed back to the mutation_handler
-        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes };
+        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes, _index_lookup };
 
         // Find and invoke appropriate mutations in the cache
         if constexpr (m_type == MutationType::INSERT) {

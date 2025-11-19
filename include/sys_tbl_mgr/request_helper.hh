@@ -175,8 +175,9 @@ namespace springtail::sys_tbl_mgr {
                 info.state = idx.state();
                 info.table_id = idx.table_id();
                 info.is_unique = idx.is_unique();
+                info.index_type = idx.index_type();
                 for (const auto &col : idx.columns()) {
-                    info.columns.emplace_back(col.idx_position(), col.position());
+                    info.columns.emplace_back(col.idx_position(), col.position(), col.opclass());
                 }
                 // sort by index position
                 std::ranges::sort(info.columns, [](auto const &a, auto const &b) {

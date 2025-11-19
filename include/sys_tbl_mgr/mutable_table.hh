@@ -135,12 +135,18 @@ namespace springtail {
          * @param index_id PG index ID.
          * @param index_columns Positions of the index columns.
          */
-        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {}, const OpClassHandler& opclass_handler = {}, const std::string_view index_type = constant::INDEX_TYPE_BTREE);
+        MutableBTreePtr create_index_root(uint64_t index_id,
+                                          const std::vector<uint32_t>& index_columns,
+                                          const ExtensionCallback& extension_callback = {},
+                                          const OpClassHandler& opclass_handler = {},
+                                          const std::string_view index_type = constant::INDEX_TYPE_BTREE);
 
         /** Create a btree that can be used for GIN indexes.
          * @param index_id PG index ID.
          */
-        MutableBTreePtr create_gin_index_root(uint64_t index_id, const ExtensionCallback& extension_callback = {});
+        MutableBTreePtr create_gin_index_root(uint64_t index_id,
+                                              const ExtensionCallback& extension_callback = {},
+                                              const OpClassHandler& opclass_handler = {});
 
         /**
          * Create a btree that can be used for look aside index.
@@ -405,6 +411,10 @@ namespace springtail {
         FieldArrayPtr _wc_fields;             ///< Field accessors for all data columns
         FieldArrayPtr _actual_table_fields;   ///< Field accessors for all data columns without internal_row_id
         FieldArrayPtr _wc_key_fields;         ///< Field accessors for primary key columns
+        /**
+         * A lookup map to get index type given an index id
+         */
+        std::map<uint64_t, Index> _index_lookup;
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

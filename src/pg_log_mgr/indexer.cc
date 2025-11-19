@@ -432,7 +432,14 @@ namespace springtail::committer {
 
         auto [db_id, index_id] = key;
 
-        auto root = mutable_table->create_gin_index_root(index_id, {PgExtnRegistry::get_instance()->comparator_func});
+        OpClassHandler opclass_handler = {
+            PgExtnRegistry::get_instance()->invoke_opclass_method,
+        };
+
+        ExtensionCallback extension_callback = {
+            PgExtnRegistry::get_instance()->comparator_func,
+        };
+        auto root = mutable_table->create_gin_index_root(index_id, std::move(extension_callback), std::move(opclass_handler));
         root->init_empty();
 
         auto key_fields = std::make_shared<FieldArray>(3);
