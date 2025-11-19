@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <queue>
 #include <thread>
 #include <common/properties.hh>
@@ -29,9 +30,10 @@ namespace springtail::pg_fdw {
         /** Initialize the PgXidSubscriberMgr.
          * @param roots_cache_size The size of the cache for table roots.
          * @param schema_cache_size The size of the cache for table schemas.
+         * @param usertype_cache_size The size of the cache for user types.
          * @param worker_count The number of worker threads to populate the cache.
          */
-        void init(size_t roots_cache_size, size_t schema_cache_size, size_t worker_count);
+        void init(size_t roots_cache_size, size_t schema_cache_size, size_t usertype_cache_size, size_t worker_count);
 
         static void start();
 
@@ -39,12 +41,35 @@ namespace springtail::pg_fdw {
         PgXidSubscriberMgr() : Singleton<PgXidSubscriberMgr>(ServiceId::PgXidSubscriberMgrId) {}
         ~PgXidSubscriberMgr();
 
+        struct XidHistoryCleaner
+        {
+            static constexpr std::chrono::microseconds CLEANER_INTERVAL{500};
+
+            explicit XidHistoryCleaner(std::shared_ptr<sys_tbl_mgr::ShmCache> cache)
+                : _cache(std::move(cache))
+            {
+                _t = std::make_unique<std::jthread>([this](std::stop_token st) { _task(st); });
+            }
+            XidHistoryCleaner(const XidHistoryCleaner&&) = delete;
+
+        private:
+            void _task(std::stop_token st);
+
+            std::shared_ptr<sys_tbl_mgr::ShmCache> _cache;
+            std::condition_variable_any _cv;
+            std::mutex _m;
+
+            std::unique_ptr<std::jthread> _t;
+        };
+
         size_t _roots_cache_size;
         size_t _schema_cache_size;
+        size_t _usertype_cache_size;
         size_t _worker_count = 4;
 
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache;
         std::shared_ptr<sys_tbl_mgr::ShmCache> _schema_cache;
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _usertype_cache;
 
         std::condition_variable_any _cv;
         std::mutex _m;

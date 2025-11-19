@@ -31,7 +31,8 @@ namespace springtail {
         PgLogCoordinatorId,
         StorageCacheId,
         VacuumerId,
-        SystemTableMgrId,
+        SystemTableMgrClientId,
+        SystemTableMgrServerId,
         RedisDDLId,
         ServiceCountId
     };

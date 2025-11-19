@@ -1,6 +1,7 @@
 #pragma once
 #include <pg_repl/pg_repl_msg.hh>
 #include <proto/sys_tbl_mgr.grpc.pb.h>
+#include <sys_tbl_mgr/mutable_table.hh>
 
 namespace springtail::test::ddl_helpers {
     void create_table(uint64_t db_id, uint64_t table_id, uint64_t xid, std::string table_name, std::vector<PgMsgSchemaColumn> columns);

@@ -7,6 +7,19 @@ namespace {
     void
     backtrace_handler(int signo)
     {
+        // Flag to prevent re-entrant signal handling
+        static std::atomic<bool> in_signal_handler{false};
+
+        // Prevent re-entrant signal handling which can cause infinite loops
+        // and heap corruption during shutdown
+        bool expected = false;
+        if (!in_signal_handler.compare_exchange_strong(expected, true)) {
+            // Already in a signal handler, just re-raise and exit
+            signal(signo, SIG_DFL);
+            raise(signo);
+            return;
+        }
+
         LOG_ERROR("Crash detected from signal {}", signo);
 
         // flush open telemetry data

@@ -23,6 +23,7 @@ message SubscribeRequest {
 message XidPushResponse {
   int64 db_id = 1;
   int64 xid = 2;
+  bool has_schema_changes = 3;
 }
 
 // XID Manager service definition
