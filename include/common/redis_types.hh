@@ -66,16 +66,9 @@ namespace springtail::redis {
      * key: <database id>
      * value: a hash table in the following format:
      * {
-     *      "schema_actions":
-     *      {
-     *          "schema 1": "remove",
-     *          "schema 2": "remove",
-     *          ...,
-     *          "schema M": "add"
-     *          "schema M + 1": "add",
-     *          ...
-     *      },
-     *      "schema_include": [<new list of schemas>]
+     *     "remove_schemas": [<add schema list>],
+     *     "add_schemas": [<remove schema list>],
+     *     "schema_include": [<new schema list>]
      * }
      *
      */
