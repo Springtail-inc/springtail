@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <queue>
 #include <thread>
 #include <common/properties.hh>
@@ -39,6 +40,27 @@ namespace springtail::pg_fdw {
     private:
         PgXidSubscriberMgr() : Singleton<PgXidSubscriberMgr>(ServiceId::PgXidSubscriberMgrId) {}
         ~PgXidSubscriberMgr();
+
+        struct XidHistoryCleaner
+        {
+            static constexpr std::chrono::microseconds CLEANER_INTERVAL{500};
+
+            explicit XidHistoryCleaner(std::shared_ptr<sys_tbl_mgr::ShmCache> cache)
+                : _cache(std::move(cache))
+            {
+                _t = std::make_unique<std::jthread>([this](std::stop_token st) { _task(st); });
+            }
+            XidHistoryCleaner(const XidHistoryCleaner&&) = delete;
+
+        private:
+            void _task(std::stop_token st);
+
+            std::shared_ptr<sys_tbl_mgr::ShmCache> _cache;
+            std::condition_variable_any _cv;
+            std::mutex _m;
+
+            std::unique_ptr<std::jthread> _t;
+        };
 
         size_t _roots_cache_size;
         size_t _schema_cache_size;

@@ -48,6 +48,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
     _schema_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_SCHEMAS, _schema_cache_size);
 
+    XidHistoryCleaner cleaner{_roots_cache};
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_USERTYPES);
     _usertype_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_USERTYPES, _usertype_cache_size);
 
@@ -61,14 +62,13 @@ PgXidSubscriberMgr::task(std::stop_token st)
     std::atomic<bool> connected = false;
 
     // XID subscriber callbacks
-    auto on_push = [this](DbId db, uint64_t xid) {
+    auto on_push = [this](DbId db, uint64_t xid, bool has_schema_changes) {
         // when we get an XID push notification, we pass it to the workers
         // and return immediately. A worker calls get_roots() and get_schema() that will
         // attempt to populate the caches.
         LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {}", db, xid);
-        _roots_cache->update_committed_xid(db, xid);
-        _schema_cache->update_committed_xid(db, xid);
-        _usertype_cache->update_committed_xid(db, xid);
+        _roots_cache->update_committed_xid(db, xid, has_schema_changes);
+        _schema_cache->update_committed_xid(db, xid, has_schema_changes);
         _enqueue_populate_job(db, xid);
     };
     auto on_disconnect = [&connected]() {
@@ -213,4 +213,18 @@ PgXidSubscriberMgr::start()
     auto worker_count = Json::get_or<size_t>(rpc_json, "server_worker_threads", 1);
 
     get_instance()->init(roots_cache_size, schema_cache_size, usertype_cache_size, worker_count);
+}
+
+void
+PgXidSubscriberMgr::XidHistoryCleaner::_task(std::stop_token st)
+{
+    std::unique_lock lock(_m);
+
+    while(true) {
+        _cv.wait_for(lock, st, CLEANER_INTERVAL, []{ return false; });
+        if (st.stop_requested()) {
+            break;
+        }
+        _cache->cleanup_xid_history();
+    }
 }

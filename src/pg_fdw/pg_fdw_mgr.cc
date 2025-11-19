@@ -557,28 +557,19 @@ namespace springtail::pg_fdw {
     uint64_t
     PgFdwMgr::_update_last_xid(uint64_t schema_xid)
     {
-        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "XidMgrClient returned xid = {}", xid);
-
-        // TODO: fix _root_cache so that we can acquire correct xid
-        /*
-        std::optional<uint64_t> cached_xid;
         {
-            std::shared_lock<std::shared_mutex> rc_lock(_rc_mutex);
+            std::unique_lock<std::shared_mutex> lock(_rc_mutex);
             if (_roots_cache) {
-                cached_xid = _roots_cache->get_committed_xid(_db_id);
+                auto cached_xid = _roots_cache->get_committed_xid(_db_id, schema_xid);
+                if (cached_xid.has_value()) {
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Use cached xid = {}", *cached_xid);
+                    return *cached_xid;
+                }
             }
         }
 
-        uint64_t xid = constant::INVALID_XID;
-        if (!cached_xid.has_value() || cached_xid.value() < _schema_xid) {
-            xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
-            LOG_DEBUG(LOG_FDW, "XidMgrClient returned xid = {}", xid);
-        } else {
-            xid = cached_xid.value();
-            LOG_DEBUG(LOG_FDW, "Cached xid returned xid = {}", xid);
-        }
-        */
+        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "XidMgrClient returned xid = {}", xid);
         return xid;
     }
 
