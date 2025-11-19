@@ -13,7 +13,7 @@ namespace springtail {
                                uint64_t max_extent_size,
                                const ExtensionCallback &extension_callback,
                                const OpClassHandler &opclass_handler,
-                               const std::string& index_type)
+                               const std::string_view index_type)
         : _database_id(database_id),
           _file(file),
           _sort_keys(keys),

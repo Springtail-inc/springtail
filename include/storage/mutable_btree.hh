@@ -95,7 +95,7 @@ namespace springtail {
                      uint64_t max_extent_size,
                      const ExtensionCallback &extension_callback = {},
                      const OpClassHandler &opclass_handler = {},
-                     const std::string& index_type = "btree");
+                     const std::string_view index_type = constant::INDEX_TYPE_BTREE);
 
         MutableBTree() = delete;
 
@@ -565,7 +565,7 @@ namespace springtail {
         OpClassHandler _opclass_handler;
 
         /** The type of the index. */
-        std::string _index_type;
+        std::string_view _index_type;
 
         /** The schema for the leaf nodes. */
         std::shared_ptr<ExtentSchema> _leaf_schema;

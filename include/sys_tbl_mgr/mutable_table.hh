@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sys_tbl_mgr/table.hh>
+#include "common/constants.hh"
 
 namespace springtail {
 
@@ -133,7 +134,7 @@ namespace springtail {
          * @param index_id PG index ID.
          * @param index_columns Positions of the index columns.
          */
-        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {}, const OpClassHandler& opclass_handler = {}, const std::string& index_type = "btree");
+        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {}, const OpClassHandler& opclass_handler = {}, const std::string_view index_type = constant::INDEX_TYPE_BTREE);
 
         /** Create a btree that can be used for GIN indexes.
          * @param index_id PG index ID.
