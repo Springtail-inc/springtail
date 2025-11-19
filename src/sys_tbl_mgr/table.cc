@@ -1164,7 +1164,7 @@ namespace indexer_helpers {
     }
 
     MutableBTreePtr
-    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback, const OpClassHandler& opclass_handler, const std::string& index_type)
+    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback, const OpClassHandler& opclass_handler, const std::string_view index_type)
     {
         // get the column names in the order they appear in the index
         auto &&col_names = _schema->get_column_names(index_columns);

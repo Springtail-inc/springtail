@@ -11,6 +11,7 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_msg_stream.hh>
+#include <common/constants.hh>
 
 extern "C" {
 #    include <postgres.h>
@@ -235,7 +236,7 @@ namespace springtail {
         msg["table_oid"] = table_oid;
         msg["table_name"] = table_name;
         msg["identity"] = index;
-        msg["index_type"] = "btree";
+        msg["index_type"] = constant::INDEX_TYPE_BTREE;
 
         nlohmann::json columns_json;
 

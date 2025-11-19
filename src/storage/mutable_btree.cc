@@ -13,7 +13,7 @@ namespace springtail {
                                uint64_t max_extent_size,
                                const ExtensionCallback &extension_callback,
                                const OpClassHandler &opclass_handler,
-                               const std::string& index_type)
+                               const std::string_view index_type)
         : _database_id(database_id),
           _file(file),
           _sort_keys(keys),
@@ -88,33 +88,41 @@ namespace springtail {
         // make sure that we can modify this tree
         assert(!_finalized);
 
-        if (_index_type == "gist") {
-            LOG_INFO("Inserting value {} into gist index", value->to_string());
+        if (_index_type == constant::INDEX_TYPE_GIST) {
+            LOG_INFO("Inserting value into GIST index");
+            try {
+                // Get the text field to be indexed. Use the first field as default for now
+                auto field = value->field(0);
+                if (!field) {
+                    throw std::runtime_error("No field available in the tuple for GIST index");
+                }
 
+                auto val = field->get_text(value->row());
+                if (val.empty()) {
+                    LOG_INFO("Skipping empty value for GIST index");
+                    return;
+                }
 
-            // auto datum = _opclass_handler.tuple_to_datum_ptr_func(value.get());
+                // Create GIST entry with the data
+                GistEntry entry;
+                entry.key = reinterpret_cast<uintptr_t>(val.data());
+                entry.leafkey = true;
 
-            auto field = value->field(0);
+                // Compress the value using the GIST compression function
+                auto gist_entry_datum = reinterpret_cast<uintptr_t>(&entry);
+                auto compressed = _opclass_handler.opclass_func("gist_trgm_ops", GIST_COMPRESS, gist_entry_datum);
 
-            auto val = field->get_text(value->row());
+                DCHECK(compressed);
 
-            auto datum = (uintptr_t)val.data();
+                // XXX Insert
 
-            LOG_INFO("[DEBUG] datum: {}", datum);
+                LOG_INFO("Successfully inserted value into GIST index");
+                return;
 
-            // Datum key = make_datum_from_field(value);
-
-            auto result = _opclass_handler.opclass_func("gist_trgm_ops", GIST_COMPRESS, datum);
-
-            LOG_INFO("[DEBUG] compress_func: {}", (uintptr_t)result);
-
-            GistEntry entry;
-            entry.key = result;
-            entry.leafkey = true;
-
-            // _root->insert(entry);
-
-            return;
+            } catch (const std::exception &e) {
+                LOG_ERROR("Error inserting into GIST index: %s", e.what());
+                throw;
+            }
         }
 
         // get the search key for this value
