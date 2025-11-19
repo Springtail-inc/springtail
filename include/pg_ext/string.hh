@@ -54,6 +54,9 @@ extern "C" PGEXT_API bool scanner_isspace(char ch);
 extern "C" PGEXT_API char *pg_strerror_r(int errnum, char *buf, size_t buflen);
 
 extern "C" PGEXT_API text *cstring_to_text_with_len(const char *s, int len);
+extern "C" PGEXT_API void* cstring_to_text_4b(const char *s);
+extern "C" PGEXT_API void* cstring_to_text_1b(const char *s);
+extern "C" PGEXT_API void* cstring_to_text_auto(const char *s);
 
 extern "C" PGEXT_API char *lowerstr(const char *str);
 extern "C" PGEXT_API char *lowerstr_with_len(const char *str, int len);
