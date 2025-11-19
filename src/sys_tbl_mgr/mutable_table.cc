@@ -694,7 +694,7 @@ namespace indexer_helpers {
     }
 
     MutableBTreePtr
-    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback, const OpClassHandler& opclass_handler, const std::string& index_type)
+    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback, const OpClassHandler& opclass_handler, const std::string_view index_type)
     {
         // Get the index schema - bypass cache if this is a snapshot table without system table metadata
         auto index_schema = _bypass_schema_cache
