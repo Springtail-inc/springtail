@@ -49,8 +49,8 @@ constexpr uint32_t JENTRY_ISCONTAINER		= 0x50000000;	/* array or object */
 			(offset) += JBE_OFFLENFLD(je_); \
 	} while(0)
 
-#define JSONB_MAX_ELEMS (Min(MaxAllocSize / sizeof(JsonbValue), JB_CMASK))
-#define JSONB_MAX_PAIRS (Min(MaxAllocSize / sizeof(JsonbPair), JB_CMASK))
+#define JSONB_MAX_ELEMS (ExtMin(MaxAllocSize / sizeof(JsonbValue), JB_CMASK))
+#define JSONB_MAX_PAIRS (ExtMin(MaxAllocSize / sizeof(JsonbPair), JB_CMASK))
 
 #define JsonContainerSize(jc)		((jc)->header & JB_CMASK)
 #define JsonContainerIsScalar(jc)	(((jc)->header & JB_FSCALAR) != 0)

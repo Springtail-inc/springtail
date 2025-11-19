@@ -100,10 +100,10 @@ static const char DIGIT_TABLE[200] = {
  * Max
  *		Return the maximum of two numbers.
  */
- #define Max(x, y)		((x) > (y) ? (x) : (y))
+ #define ExtMax(x, y)		((x) > (y) ? (x) : (y))
 
  /*
   * Min
   *		Return the minimum of two numbers.
   */
- #define Min(x, y)		((x) < (y) ? (x) : (y))
+ #define ExtMin(x, y)		((x) < (y) ? (x) : (y))

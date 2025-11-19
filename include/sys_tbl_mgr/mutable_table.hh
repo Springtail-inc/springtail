@@ -1,7 +1,8 @@
 #pragma once
 
 #include <sys_tbl_mgr/table.hh>
-#include "common/constants.hh"
+#include <common/constants.hh>
+#include <pg_ext/trgm_helpers.hh>
 
 namespace springtail {
 
