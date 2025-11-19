@@ -10,6 +10,7 @@
 
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
+#include <sys_tbl_mgr/shm_cache.hh>
 
 namespace springtail::xid_mgr {
 
@@ -106,7 +107,9 @@ XidMgrServer::commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit, timestamp, tracker, false);
-    _service->notify_subscriber(db_id, xid);
+    if (real_commit) {
+        _service->notify_subscriber(db_id, xid, has_schema_changes);
+    }
 }
 
 void 
@@ -137,7 +140,7 @@ XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit, timestamp, tracker, true);
     if (real_commit) {
-        _service->notify_subscriber(db_id, xid);
+        _service->notify_subscriber(db_id, xid, has_schema_changes);
     }
 }
 
@@ -298,28 +301,9 @@ XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
         return last_xid;
     }
 
-    // get upper bound based on schema xid
-    auto pos_i = std::upper_bound(
-        _xact_history.begin(),
-        _xact_history.end(),
-        schema_xid,
-        XactHistoryComparator{});
-
-    if (pos_i == _xact_history.end()) {
-        // if the schema XID is ahead of the history, return the most recent commited XID
-        return last_xid;
-    }
-
-    // if the history is ahead of the commit, return the committed xid
-    auto target_xid = pos_i->latest_real_commit_xid;
-    if (target_xid > last_xid) {
-        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Get committed xid for db_id={}: {}; ahead of history {}", _db_id, last_xid, target_xid);
-        return last_xid;
-    }
-
-    // if we found an entry in the history, return the XID directly before that
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Get committed xid for db_id={}: xid limited by schema_xid: {} -> {}", _db_id, schema_xid, target_xid);
-    return target_xid;
+    auto xid = sys_tbl_mgr::get_committed_xid_from_history(_xact_history, schema_xid, last_xid);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Get committed xid for db_id={}: {}; {}", _db_id, last_xid, xid);
+    return xid;
 }
 
 void

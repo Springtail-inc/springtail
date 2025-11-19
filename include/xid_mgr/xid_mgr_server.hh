@@ -12,6 +12,7 @@
 
 namespace springtail::xid_mgr {
 
+
 class XidMgrServer : public Singleton<XidMgrServer>
 {
     friend class Singleton<XidMgrServer>;

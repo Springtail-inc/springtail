@@ -12,14 +12,16 @@ using namespace springtail;
 using namespace springtail::pg_fdw;
 
 void
-PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size_t worker_count)
+PgXidSubscriberMgr::init(size_t roots_cache_size, size_t schema_cache_size, size_t usertype_cache_size, size_t worker_count)
 {
     _roots_cache_size = roots_cache_size;
     CHECK(_roots_cache_size);
     _schema_cache_size = schema_cache_size;
     CHECK(_schema_cache_size);
+    _usertype_cache_size = usertype_cache_size;
+    CHECK(_usertype_cache_size);
     _worker_count = worker_count;
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "creating {}, {}, {}", _roots_cache_size, _schema_cache_size, _worker_count);
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "creating {}, {}, {}, {}", _roots_cache_size, _schema_cache_size, _usertype_cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
     pthread_setname_np(_t->native_handle(), "PgXidSubscriber");
 }
@@ -39,12 +41,16 @@ PgXidSubscriberMgr::task(std::stop_token st)
     auto coordinator = Coordinator::get_instance();
     auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::XID_SUBSCRIBER, XID_SUBSCRIBER_WORKER_ID);
 
-    // remove old cache if any and create a new one
+    // remove old caches if any and create a new ones
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_ROOTS);
     _roots_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _roots_cache_size);
 
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
     _schema_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_SCHEMAS, _schema_cache_size);
+
+    XidHistoryCleaner cleaner{_roots_cache};
+    sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_USERTYPES);
+    _usertype_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_USERTYPES, _usertype_cache_size);
 
     auto client = sys_tbl_mgr::Client::get_instance();
     // Client should cache get_roots() responses now
@@ -56,13 +62,13 @@ PgXidSubscriberMgr::task(std::stop_token st)
     std::atomic<bool> connected = false;
 
     // XID subscriber callbacks
-    auto on_push = [this](DbId db, uint64_t xid) {
+    auto on_push = [this](DbId db, uint64_t xid, bool has_schema_changes) {
         // when we get an XID push notification, we pass it to the workers
         // and return immediately. A worker calls get_roots() and get_schema() that will
         // attempt to populate the caches.
         LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {}", db, xid);
-        _roots_cache->update_committed_xid(db, xid);
-        _schema_cache->update_committed_xid(db, xid);
+        _roots_cache->update_committed_xid(db, xid, has_schema_changes);
+        _schema_cache->update_committed_xid(db, xid, has_schema_changes);
         _enqueue_populate_job(db, xid);
     };
     auto on_disconnect = [&connected]() {
@@ -106,6 +112,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         std::this_thread::sleep_for(loop_time_period);
         _roots_cache->keep_alive();
         _schema_cache->keep_alive();
+        _usertype_cache->keep_alive();
     }
     subscriber.reset();
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberMgr thread stopping");
@@ -113,8 +120,10 @@ PgXidSubscriberMgr::task(std::stop_token st)
     client = sys_tbl_mgr::Client::get_instance();
     client->use_roots_cache({});
     client->use_schema_cache({});
+    client->use_usertype_cache({});
     _roots_cache.reset();
     _schema_cache.reset();
+    _usertype_cache.reset();
 }
 
 void
@@ -143,11 +152,13 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
             _populate_queue.pop();
         }
         auto [db, xid] = item;
-        auto table_ids = _roots_cache->get_db_tables(db);
+
+        auto client = sys_tbl_mgr::Client::get_instance();
+
+        auto table_ids = _roots_cache->get_db_objects(db);
         for (auto tid: table_ids) {
             XidLsn x{xid};
 
-            auto client = sys_tbl_mgr::Client::get_instance();
             if (!client->exists(db, tid, x)) {
                 // After the table is marked as dropped
                 // the above call to get_db_tables()
@@ -157,9 +168,17 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
                 _schema_cache->mark_dropped(db, tid, x);
                 continue;
             }
-            // the client will cache data in _roots_cache and _schema_cache
+            // the client will cache data in _roots_cache and _schema_cache and _usertype_cache
             client->get_roots(db, tid, xid);
             client->get_schema(db, tid, x);
+            if (st.stop_requested()) {
+                break;
+            }
+        }
+        auto type_ids = _usertype_cache->get_db_objects(db);
+        for (auto tid: type_ids) {
+            XidLsn x{xid};
+            client->get_usertype(db, tid, x);
             if (st.stop_requested()) {
                 break;
             }
@@ -178,7 +197,8 @@ PgXidSubscriberMgr::start()
     size_t schema_cache_size = 0;
     Json::get_to<size_t>(json, "schema_shm_cache_size", schema_cache_size);
 
-    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
+    size_t usertype_cache_size = 0;
+    Json::get_to<size_t>(json, "usertype_shm_cache_size", usertype_cache_size);
 
     CHECK(roots_cache_size) << "Bad cache size, terminating PgXidSubscriberRunner";
 
@@ -192,5 +212,19 @@ PgXidSubscriberMgr::start()
     // populate the cache. We use the same number or threads as there are in the RPC in service.
     auto worker_count = Json::get_or<size_t>(rpc_json, "server_worker_threads", 1);
 
-    get_instance()->init(roots_cache_size, schema_cache_size, worker_count);
+    get_instance()->init(roots_cache_size, schema_cache_size, usertype_cache_size, worker_count);
+}
+
+void
+PgXidSubscriberMgr::XidHistoryCleaner::_task(std::stop_token st)
+{
+    std::unique_lock lock(_m);
+
+    while(true) {
+        _cv.wait_for(lock, st, CLEANER_INTERVAL, []{ return false; });
+        if (st.stop_requested()) {
+            break;
+        }
+        _cache->cleanup_xid_history();
+    }
 }

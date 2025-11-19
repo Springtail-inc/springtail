@@ -7,8 +7,8 @@ namespace springtail {
 
 struct XidMgrSubscriber : public grpc::ClientReadReactor<proto::XidPushResponse>
 {
-    //void PushCallback(uint64_t db_id, uint64_t xid)
-    using PushCallback = std::function<void(uint64_t, uint64_t)>;
+    //void PushCallback(uint64_t db_id, uint64_t xid, bool has_schema_change);
+    using PushCallback = std::function<void(uint64_t, uint64_t, bool)>;
     using DisconnectCallback = std::function<void()>;
 
 
