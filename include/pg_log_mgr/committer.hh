@@ -3,6 +3,7 @@
 #include <pg_log_mgr/indexer.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
+#include <pg_log_mgr/table_copy_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -35,7 +36,8 @@ namespace springtail::committer {
               _fsync_worker_count(fsync_worker_count),
               _committer_queue(committer_queue),
               _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
-              _index_requests_mgr(index_requests_mgr)
+              _index_requests_mgr(index_requests_mgr),
+              _table_copy_tracker(std::make_shared<TableCopyTracker>())
         {}
 
         Committer(const Committer &) = delete;
@@ -58,6 +60,13 @@ namespace springtail::committer {
          * @param db_id database id
          */
         void remove_db(uint64_t db_id);
+
+        /**
+         * @brief Get the table copy tracker object
+         *
+         * @return std::shared_ptr<TableCopyTracker>
+         */
+        std::shared_ptr<TableCopyTracker> get_table_copy_tracker() { return _table_copy_tracker; }
 
         // constants for the coordinator thread IDs
         constexpr static const std::string_view THREAD_TYPE = "commit";
@@ -303,5 +312,8 @@ namespace springtail::committer {
         };
 
         std::unique_ptr<TableSyncProcessor> _table_sync_processor;
+        /** This class allows to track table copies in progress and allows threads to wait for table
+            copy completion. */
+        std::shared_ptr<TableCopyTracker> _table_copy_tracker;
     };
 }

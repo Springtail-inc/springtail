@@ -61,6 +61,8 @@ namespace springtail {
         static inline constexpr char FDW_CONFIG_PATH[] = "fdw";
         /** Redis notification path for the list of FDW databases */
         static inline constexpr char FDW_DBS_PATH[] = "fdw_dbs";
+        /** Redis notification path for database schema changes */
+        static inline constexpr char DATABASE_SCHEMA_CHANGE_PATH[] = "schema_change";
 
         /* Secrets mgr roles */
         /** FDW secrets mgr role */
@@ -234,7 +236,7 @@ namespace springtail {
         static std::vector<uint64_t> get_database_ids(const nlohmann::json &json_db_ids);
 
         /** Helper to get included schemas */
-        static std::vector<std::string> get_include_schemas(uint64_t db_id);
+        static std::vector<std::string> get_include_schemas(uint64_t db_id, bool with_pending);
 
         /**
          * @brief Helper to get system role from map based on role name
@@ -267,6 +269,37 @@ namespace springtail {
         std::set<uint64_t> get_fdw_db_ids(const std::string &fdw_id);
         void set_fdw_db_ids(const std::string &fdw_id, const std::set<uint64_t> &db_ids);
 
+        /**
+         * @brief Set the db include schemas in properties
+         *
+         * @param db_id - database that this include schemas belong to
+         * @param schemas_json - json object representing schema included
+         */
+        void set_db_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json);
+
+        /**
+         * @brief Set the pending include schemas while the update is being processed.
+         *
+         * @param db_id - database that this include schemas belong to
+         * @param schemas_json - json object representing schema included
+         */
+        void set_pending_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json);
+
+        /**
+         * @brief Clear the pending include schemas in properties
+         *
+         * @param db_id - database that this include schemas belong to
+         */
+        void clear_pending_include_schemas(uint64_t db_id);
+
+        /**
+         * @brief Get the pending include schemas for the given database
+         *
+         * @param db_id - database id
+         * @return const nlohmann::json - json object representing pending include schemas
+         */
+        const nlohmann::json get_pending_include_schemas(uint64_t db_id);
+
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;
@@ -279,6 +312,12 @@ namespace springtail {
 
         /** Cache of system roles: role_name -> (db_user, db_password) */
         std::unordered_map<std::string, std::tuple<std::string, std::string>> _system_roles;
+
+        /** Pending include schemas map per database */
+        std::unordered_map<uint64_t, nlohmann::json> _pending_schema_include;
+
+        /** Mutex protecting access to pending include schemas map */
+        std::shared_mutex _pending_schema_include_mutex;
 
         /**
          * @brief Construct a new Properties object

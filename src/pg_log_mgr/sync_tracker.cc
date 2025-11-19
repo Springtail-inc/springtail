@@ -209,7 +209,7 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
 
         // construct an XidReady record from the XidRecord objects
         std::vector<PgCopyResult::TableInfoPtr> tids;
-        for (auto record : completed) {
+        for (auto &record : completed) {
             tids.insert(tids.end(), record->tids().begin(), record->tids().end());
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found {} tables", tids.size());

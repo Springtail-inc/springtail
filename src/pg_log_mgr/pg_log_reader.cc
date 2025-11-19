@@ -1254,7 +1254,7 @@ namespace springtail::pg_log_mgr {
             // for operations at the SysTblMgr
             auto server = sys_tbl_mgr::Server::get_instance();
             nlohmann::json ddls = nlohmann::json::array({});
-            std::vector<uint64_t> table_ids;
+            std::vector<uint32_t> table_ids;
 
             // issue the updates to the system tables
             for (auto &entry : swap->table_info()) {
@@ -1311,7 +1311,7 @@ namespace springtail::pg_log_mgr {
                     auto ddl = nlohmann::json::parse(ddl_str);
                     CHECK(ddl.is_array());
                     ddls.insert(ddls.end(), ddl.begin(), ddl.end());
-                    table_ids.emplace_back(static_cast<uint64_t>(entry->table_id));
+                    table_ids.emplace_back(static_cast<uint32_t>(entry->table_id));
                 }
             }
             LOG_INFO("Swapped synced tables: {}@{}", db_id, xid);
@@ -1578,6 +1578,6 @@ namespace springtail::pg_log_mgr {
         // record the schema change into the batch
         // note: the current XID is only used to determine table existence
         _current_batch->schema_change(this->get_current_xid(), table_oid, oid, pg_xid, pg_xid_txn,
-                msg, Properties::get_include_schemas(_db_id));
+                msg, Properties::get_include_schemas(_db_id, true));
     }
 } // namespace springtail::pg_log_mgr

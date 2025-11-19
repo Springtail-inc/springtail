@@ -51,6 +51,36 @@ namespace springtail::redis {
      */
     static constexpr char FDW_DB_LIST[] = "{}:fdw_dbs";
 
+    /**
+     * Hash that defines the change of schema restrictions per database id
+     * args: db_instance_id
+     * key: <database id>
+     * value: list of schema represented either by a wildcard, ["*"], or by an explicit list of schemas, ["s1", "s2", ...]
+     *
+     */
+    static constexpr char SCHEMA_CHANGE[] = "{}:schema_change";
+
+    /**
+     * Hash that defines the list of pending schema changes to be performed by the log manager
+     * args: db_instance_id
+     * key: <database id>
+     * value: a hash table in the following format:
+     * {
+     *      "schema_actions":
+     *      {
+     *          "schema 1": "remove",
+     *          "schema 2": "remove",
+     *          ...,
+     *          "schema M": "add"
+     *          "schema M + 1": "add",
+     *          ...
+     *      },
+     *      "schema_include": [<new list of schemas>]
+     * }
+     *
+     */
+    static constexpr char PENDING_SCHEMA_CHANGES[] = "{}:pending_schema_changes";
+
     //// Data DB (1) accessed via RedisClient::
 
     //// Postgres redis key prefixes.  Value defs in: pg_log_mgr/pg_redis_xact.hh

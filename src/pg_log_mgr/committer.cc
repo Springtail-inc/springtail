@@ -24,6 +24,7 @@ namespace springtail::committer {
     Committer::remove_db(uint64_t db_id)
     {
         _indexer->remove_db(db_id);
+        _table_copy_tracker->remove_db(db_id);
         std::unique_lock lock(_main_mutex);
         _completed_xids.erase(db_id);
     }
@@ -292,7 +293,7 @@ namespace springtail::committer {
                     } else {
                         // commit the completed XID without xlog update because table data has not been persisted (fsync).
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), true,
-                                result->timestamp(), result->get_tracker()); 
+                                result->timestamp(), result->get_tracker());
                         _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
                     }
 
@@ -312,12 +313,12 @@ namespace springtail::committer {
                     if (batch.table_cache.empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
                         // don't commit, but record any DDL changes to the history
-                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(), 
+                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
                                 result->timestamp(), result->get_tracker());
                     } else {
                         // commit the completed XID without xlog update
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false,
-                                result->timestamp(), result->get_tracker()); 
+                                result->timestamp(), result->get_tracker());
                         _table_sync_processor->add(batch.final_xid, std::move(tables_to_sync));
                     }
                 } else {
@@ -453,6 +454,7 @@ namespace springtail::committer {
                 _has_ddl_precommit = false;
             }
 
+            _table_copy_tracker->notify(db_id, swapped_tids);
             for (const auto swapped_tid: swapped_tids) {
                 // Notify vacuumer to expire old table snapshot
                 // Send completed_xid - 1 to get the previous old snapshot dir
@@ -886,7 +888,7 @@ namespace springtail::committer {
     }
 
     // ---------------- TableSyncProcessor ----------------
-    void 
+    void
     Committer::TableSyncProcessor::add(uint64_t xid, const std::vector<MutableTablePtr>& tables)
     {
         DCHECK(!tables.empty());
@@ -908,11 +910,11 @@ namespace springtail::committer {
         }
     }
 
-    void 
+    void
     Committer::TableSyncProcessor::task(std::stop_token st)
     {
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Thread started, interval: {}ms",
-                std::chrono::duration_cast<std::chrono::milliseconds>(_sync_interval).count()); 
+                std::chrono::duration_cast<std::chrono::milliseconds>(_sync_interval).count());
 
         while(!st.stop_requested()) {
             uint64_t db_id;
@@ -956,7 +958,7 @@ namespace springtail::committer {
                 sys_tbl_mgr::Server::get_instance()->sync(db_id, item.xid);
 
                 // all files  have been fsync'ed for this xid, update xlog
-                xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, item.xid); 
+                xid_mgr::XidMgrServer::get_instance()->commit_xlog(db_id, item.xid);
             }
         }
         LOG_INFO("thread joined");

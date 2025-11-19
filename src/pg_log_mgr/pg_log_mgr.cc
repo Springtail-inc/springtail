@@ -44,6 +44,17 @@ namespace springtail::pg_log_mgr {
                 _on_database_state_changed(path, new_value);
             }
         );
+
+        // construct the callback for watching for database include schema changes
+        _cache_watcher_schema_change = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) {
+                if (new_value.is_null()) {
+                    return;
+                }
+                DCHECK(new_value.is_array());
+                _on_database_schema_change(path, new_value);
+            }
+        );
     }
 
     nlohmann::json
@@ -127,6 +138,12 @@ namespace springtail::pg_log_mgr {
             std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
             _cache_watcher_db_states);
 
+        // add redis cache callback for watching include schemas changes
+        redis_cache->add_callback(
+            std::string(Properties::DATABASE_SCHEMA_CHANGE_PATH) + "/" + std::to_string(_db_id),
+            _cache_watcher_schema_change
+        );
+
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Starting up: db_id: {}, DB state: {}", _db_id, state);
 
         // need to add back table sync worker items to redis sync queue and clear the queue
@@ -156,23 +173,9 @@ namespace springtail::pg_log_mgr {
             _startup_init();
             _wal_buffer_flag = true;
 
-            // start streaming immediately so that we can't miss any mutations to copied tables
-            if (!_start_streaming(lsn, true)) {
-                LOG_ERROR("Failed to start streaming");
+            if (!_start_threads(do_init, lsn)) {
                 return;
             }
-
-            // initiate table copy thread; this will perform the initial copy of all tables
-            _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
-            pthread_setname_np(_table_copy_thread.native_handle(), "TableCopy");
-
-            // start the index reconciliation thread
-            _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
-            pthread_setname_np(_reconciliation_thread.native_handle(), "Reconciliation");
-
-            // start the log reader thread since it is also required for processing table copy completions
-            _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
-            pthread_setname_np(_reader_thread.native_handle(), "LogReader");
 
         } else {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Started in recovery state");
@@ -183,27 +186,9 @@ namespace springtail::pg_log_mgr {
             PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader, committed_xid);
             lsn = recovery.repair_logs();
 
-            // once we have the target LSN the system is ready to start streaming
-            if (!_start_streaming(lsn, false)) {
-                LOG_ERROR("Failed to start streaming");
+            if (!_start_threads(do_init, lsn)) {
                 return;
             }
-
-            // set the system into the running state
-            _startup_running();
-
-            // initiate table copy thread; do this before we start replaying the log since it's needed
-            // for table re-syncs that might have to be run
-            _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
-            pthread_setname_np(_table_copy_thread.native_handle(), "TableCopy");
-
-            // start the index reconciliation thread
-            _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
-            pthread_setname_np(_reconciliation_thread.native_handle(), "Reconciliation");
-
-            // start the log reader thread since it is also used to process recovery messages
-            _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
-            pthread_setname_np(_reader_thread.native_handle(), "LogReader");
 
             // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
@@ -215,6 +200,41 @@ namespace springtail::pg_log_mgr {
             _wal_buffer_flag = false;
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Done with recovery");
         }
+    }
+
+    bool
+    PgLogMgr::_start_threads(bool is_init, uint64_t lsn)
+    {
+        // start streaming immediately so that we can't miss any mutations to copied tables
+        if (!_start_streaming(lsn, is_init)) {
+            LOG_ERROR("Failed to start streaming");
+            return false;
+        }
+
+        if (!is_init) {
+            // set the system into the running state
+            _startup_running();
+        }
+
+        // in init case: initiate table copy thread; this will perform the initial copy of all tables
+        // in recovery case: initiate table copy thread  before we start replaying the log since it's needed
+        // for table re-syncs that might have to be run
+        _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+        pthread_setname_np(_table_copy_thread.native_handle(), "TableCopy");
+
+        // start the index reconciliation thread
+        _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
+        pthread_setname_np(_reconciliation_thread.native_handle(), "Reconciliation");
+
+        // start the log reader thread since it is also required for processing table copy completions
+        _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+        pthread_setname_np(_reader_thread.native_handle(), "LogReader");
+
+        // database config include change thread
+        _db_include_change_thread = std::thread(&PgLogMgr::_db_include_change, this);
+        pthread_setname_np(_db_include_change_thread.native_handle(), "IncludeChange");
+
+        return true;
     }
 
     void
@@ -309,6 +329,107 @@ namespace springtail::pg_log_mgr {
 
         // unregister thread before exiting
         coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+    }
+
+    void
+    PgLogMgr::_db_include_change()
+    {
+        // auto xid_server = xid_mgr::XidMgrServer::get_instance();
+        auto [redis_db_id, redis_client] = RedisMgr::get_instance()->create_client(true);
+        std::string schema_change_hash_name = fmt::format(redis::SCHEMA_CHANGE, _db_instance_id);
+        std::string pending_hash_name = fmt::format(redis::PENDING_SCHEMA_CHANGES, _db_instance_id);
+        std::string db_id_str = std::to_string(_db_id);
+        bool first_time = true;
+
+        while(!_shutdown)
+        {
+            bool signal_received = _db_include_change_sem.try_acquire_for(std::chrono::seconds(1));
+
+            // do not do anything till the state is running
+            if (!_internal_state.is(STATE_RUNNING)) {
+                continue;
+            }
+
+            // allow to check redis the first time, but after that this can only be triggered by
+            // a semaphore signal
+            // this is done to avoid querying redis on every iteration
+            if (!first_time && !signal_received) {
+                continue;
+            }
+            first_time = false;
+
+            // signal received
+            std::optional<std::string> val = redis_client->hget(pending_hash_name, db_id_str);
+            if (!val.has_value()) {
+                continue;
+            }
+
+            // convert system_value to json and merge to _json
+            nlohmann::json val_json = nlohmann::json::parse(val.value());
+
+            // process all added schema
+            auto& add_schemas = val_json["add_schemas"];
+
+            LOG_INFO("Adding {} schema(s): '{}' ", add_schemas.size(), fmt::join(Json::get_vector<std::string>(add_schemas), ", "));
+
+            // get list of tables for each schema
+            auto schema_tables_map = (add_schemas.size() != 0)?
+                    PgCopyTable::get_table_oids_for_schemas(_db_id, add_schemas) :
+                    std::unordered_map<std::string, std::unordered_set<uint32_t>>();
+
+            std::shared_ptr<committer::TableCopyTracker> table_sync = PgLogCoordinator::get_instance()->get_committer()->get_table_copy_tracker();
+            for (auto it = add_schemas.begin(); it != add_schemas.end(); /* no increment here */) {
+                DCHECK(it->is_string());
+                std::string schema_name = it->get<std::string>();
+                auto table_oids = schema_tables_map[schema_name];
+
+                LOG_INFO("Replicating schema {} with {} table(s) '{}'", schema_name, table_oids.size(), fmt::join(table_oids, ", "));
+                if (table_oids.size() == 0) {
+                    ++it;
+                    continue;
+                }
+
+                table_sync->set_toids(_db_id, table_oids);
+                uint64_t next_xid = _pg_log_reader->get_next_xid();
+                XidLsn xid_lsn(next_xid);
+                SyncTracker::get_instance()->issue_resync_and_wait(_db_id, table_oids, xid_lsn,
+                                                           _committer_queue);
+
+                // wait for all tables to finish syncing
+                while (!_shutdown && !table_sync->is_toids_empty(_db_id)) {
+                    table_sync->wait(_db_id, _shutdown);
+                }
+
+                // remove schema from add_schemas list
+                it = add_schemas.erase(it);
+                redis_client->hset(pending_hash_name, db_id_str, val_json.dump());
+            }
+
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+
+            // update properties db config to the value of val_json["schema_include"]
+            Properties::get_instance()->set_db_include_schemas(_db_id, val_json["schema_include"]);
+
+            // process all removed schemas
+            auto& remove_schemas = val_json["remove_schemas"];
+            LOG_INFO("Removing {} schema(s): '{}' ", remove_schemas.size(), fmt::join(Json::get_vector<std::string>(remove_schemas), ", "));
+
+            PgCopyTable::drop_schemas(_db_id, remove_schemas);
+            remove_schemas.clear();
+            redis_client->hset(pending_hash_name, db_id_str, val_json.dump());
+
+            // update properties db config to the value of val_json["schema_include"]
+            Properties::get_instance()->set_db_include_schemas(_db_id, val_json["schema_include"]);
+
+            // clear pending schema includes
+            Properties::get_instance()->clear_pending_include_schemas(_db_id);
+
+            // all pending schema actions are processed
+            redis_client->hdel(pending_hash_name, db_id_str);
+
+            // this indicates to the front end that the action is completed
+            redis_client->hdel(schema_change_hash_name, db_id_str);
+        }
     }
 
     void
@@ -907,6 +1028,75 @@ namespace springtail::pg_log_mgr {
         return std::make_shared<PgLogWriter>(_db_id, file,
             [this](LSN_t lsn) { LOG_INFO("Flushed LSN: {}", lsn);
                 _pg_conn.set_last_flushed_LSN(lsn); });
+    }
+
+    void
+    PgLogMgr::_on_database_schema_change(const std::string &path, const nlohmann::json &new_value)
+    {
+        nlohmann::json db_config = Properties::get_db_config(_db_id);
+        nlohmann::json schema_list = db_config["include"]["schemas"];
+        std::vector<std::string> old_schemas = Json::get_vector<std::string>(schema_list);
+        std::vector<std::string> new_schemas = Json::get_vector<std::string>(new_value);
+        std::vector<std::string> existing_schemas = PgCopyTable::get_schema_list(_db_id);
+        std::unordered_set<std::string> existing_schemas_set(existing_schemas.begin(), existing_schemas.end());
+
+        DCHECK(_internal_state.get() == STATE_RUNNING);
+        DCHECK(schema_list != new_value);
+
+        // if old list is a wildcard, expand it to the list of existing databases
+        if (!old_schemas.empty() && old_schemas[0] == "*") {
+            old_schemas = existing_schemas;
+        }
+        // if new list is a wildcard, expand it to the list of existing databases
+        if (!new_schemas.empty() && new_schemas[0] == "*") {
+            new_schemas = existing_schemas;
+        }
+
+        // temporary new schemas set
+        std::unordered_set<std::string> temp_new_schemas(new_schemas.begin(), new_schemas.end());
+
+        // remove common elements
+        RedisCache::array_diff(old_schemas, new_schemas, true, true);
+        nlohmann::json pending_schema_changes = {
+            {"remove_schemas", nlohmann::json::array()},
+            {"add_schemas", nlohmann::json::array()},
+            {"schema_include", new_value}
+        };
+
+        // remove actions, exclude schemas that do not exist
+        for (const auto &schema: old_schemas) {
+            if (!existing_schemas_set.contains(schema)) {
+                continue;
+            }
+            pending_schema_changes["remove_schemas"].push_back(schema);
+        }
+
+        // add actions, exclude schemas that do not exist
+        for (const auto &schema: new_schemas) {
+            if (!existing_schemas_set.contains(schema)) {
+                continue;
+            }
+            pending_schema_changes["add_schemas"].push_back(schema);
+            // remove the schema that has not been added yet
+            temp_new_schemas.erase(schema);
+        }
+
+        // set pending schema include
+        Properties::get_instance()->set_pending_include_schemas(_db_id, new_value);
+
+        // set temporary value for database schemas with those that do not require replication
+        nlohmann::json temp_new_schemas_json = nlohmann::json::array();
+        for (const auto& schema : temp_new_schemas) {
+            temp_new_schemas_json.push_back(schema);
+        }
+        Properties::get_instance()->set_db_include_schemas(_db_id, temp_new_schemas_json);
+
+        auto redis_client = RedisMgr::get_instance()->create_client(true);
+        std::string hash_name = fmt::format(redis::PENDING_SCHEMA_CHANGES, _db_instance_id);
+        std::get<1>(redis_client)->hset(hash_name, std::to_string(_db_id), pending_schema_changes.dump());
+
+        // notify
+        _db_include_change_sem.release();
     }
 
 } // namespace springtail::pg_log_mgr

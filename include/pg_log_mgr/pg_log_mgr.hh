@@ -124,6 +124,8 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Index reconciliation thread joined");
             _tracer_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "tracer thread joined");
+            _db_include_change_thread.join();
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "database include thread joined");
         }
 
         /** Set shutdown flag */
@@ -192,6 +194,9 @@ namespace springtail::pg_log_mgr {
 
         /** normal startup from running state */
         void _startup_running();
+
+        /** start log manager threads */
+        bool _start_threads(bool is_init, uint64_t lsn);
 
         /** Setup streaming and startup threads */
         bool _start_streaming(uint64_t lsn = INVALID_LSN, bool do_init = false);
@@ -301,6 +306,24 @@ namespace springtail::pg_log_mgr {
          * @return true if no error, false on error or shutdown
          */
         bool _read_repl_data(PgLogWriterPtr logger, PgCopyData &data);
+
+        /** Redis cache callback for watching for database schema set change request */
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_schema_change;
+
+        /** Thread for handling database schema includes */
+        std::thread _db_include_change_thread;
+
+        /** Semaphore for signaling include change thread to wake up and start processing
+            pending changes */
+        std::binary_semaphore _db_include_change_sem{0};
+
+        /** Handle database state changes from Redis */
+        void _on_database_schema_change(const std::string &path,
+                                        const nlohmann::json &new_value);
+
+        /** Function for running in include change thread */
+        void _db_include_change();
+
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 
