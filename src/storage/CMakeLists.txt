@@ -17,6 +17,8 @@ target_include_directories(springtail_storage
   PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
 target_link_libraries(springtail_storage
+  PRIVATE -Wl,--unresolved-symbols=ignore-all
+  PRIVATE -Wl,-rpath,/home/dev/springtail/shared-lib
   PRIVATE lz4::lz4 xxHash::xxhash
   PUBLIC Boost::thread
          springtail_redis
