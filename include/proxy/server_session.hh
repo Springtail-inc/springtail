@@ -306,9 +306,6 @@ namespace springtail::pg_proxy {
             unpin_client_session();
             _defer_shadow_shutdown = false;
             _stmts.clear();
-            while (!_pending_queue.empty()) {
-                _pending_queue.pop();
-            }
             _batch_queue.reset();
             _current_batch.reset();
             _seq_id = 0;
@@ -382,8 +379,6 @@ namespace springtail::pg_proxy {
         std::weak_ptr<ClientSession> _client_session; ///< client session
 
         SessionMsgQueue<SessionMsgPtr> _batch_queue; ///< queue for client msg batches
-
-        std::queue<QueryStatusPtr> _pending_queue;   ///< queue of pending (inflight) messages
 
         std::set<std::string> _stmts;        ///< completed prepared statement ids
 

@@ -216,7 +216,8 @@ namespace springtail::pg_proxy {
         SessionMsgQueue() = default;
 
         /**
-         * @brief Add a new batch to the queue
+         * @brief Add a new batch to the queue, maintains batch boundaries
+         * @param new_batch New batch of messages to add to the queue
          */
         void push_batch(std::deque<T> new_batch) {
             std::unique_lock lock(_mutex);
@@ -227,72 +228,10 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Load the next processing batch if current one is empty
-         * @return true if one was loaded, or false if queue is empty
-         */
-        bool load_processing_batch() {
-            std::unique_lock lock(_mutex);
-            if (_processing_batch.empty()) {
-                if (_msg_queue.empty()) {
-                    return false;
-                }
-                _processing_batch = std::move(_msg_queue.front());
-                _msg_queue.pop();
-            }
-            return true;
-        }
-
-        /** Get iterator to start of processing batch -- not thread safe */
-        auto processing_batch_start() {
-            return _processing_batch.begin();
-        }
-
-        /** Get iterator to end of processing batch -- not thread safe */
-        auto processing_batch_end() {
-            return _processing_batch.end();
-        }
-
-        /**
-         * @brief Get first message from processing batch; without removing it
-         * @return first message or nullopt if empty
-         */
-        std::optional<T> front_processing_msg() {
-            std::shared_lock lock(_mutex);
-            if (_processing_batch.empty()) {
-                return std::nullopt;
-            }
-            return _processing_batch.front();
-        }
-
-        /**
-         * @brief Pop/remove first message from processing batch
-         * @return first message or nullopt if empty
-         */
-        std::optional<T> pop_processing_msg() {
-            std::unique_lock lock(_mutex);
-            if (_processing_batch.empty()) {
-                return std::nullopt;
-            }
-            auto msg = _processing_batch.front();
-            _processing_batch.pop_front();
-            return msg;
-        }
-
-        /**
-         * Check if batch being processed has more message
-         * @returns true if processing batch is not empty, false if empty
-         */
-        bool processing_empty() {
-            std::shared_lock lock(_mutex);
-            return _processing_batch.empty();
-        }
-
-        /**
          * Reset the queue to empty state
          */
         void reset() {
             std::unique_lock lock(_mutex);
-            _processing_batch.clear();
             while (!_msg_queue.empty()) {
                 _msg_queue.pop();
             }
@@ -304,6 +243,28 @@ namespace springtail::pg_proxy {
         bool empty() {
             std::shared_lock lock(_mutex);
             return _msg_queue.empty();
+        }
+
+        /**
+         * Get size of msg queue
+         */
+        size_t size() {
+            std::shared_lock lock(_mutex);
+            return _msg_queue.size();
+        }
+
+        /**
+         * Pop the next batch from the queue for processing
+         * Returns the batch by value (moved) to avoid dangling references.
+         */
+        std::deque<T> pop_batch() {
+            std::unique_lock lock(_mutex);
+            if (_msg_queue.empty()) {
+                return {};
+            }
+            auto front = std::move(_msg_queue.front());
+            _msg_queue.pop();
+            return front;
         }
 
     private:

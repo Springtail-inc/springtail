@@ -143,15 +143,15 @@ namespace springtail::pg_proxy {
         _seq_id = 0;
         _state = State::READY;
 
-        // check for any pending messages
-        _process_next_batch();
-
-        // XXX these params may have to be merged with the ones we just set
+        // XXX these auth params may have to be merged with the ones we just set
 
         // do callback to client session
         auto cs = get_client_session();
         CHECK_NE(cs, nullptr);
         cs->server_auth_done(shared_from_this(), _auth->server_parameters());
+
+        // check for any pending messages
+        _process_next_batch();
     }
 
     void
@@ -165,8 +165,11 @@ namespace springtail::pg_proxy {
 
             _batch_queue.push_batch(std::move(msg_batch));
 
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session batch queue size: {}",
+                        _id, _batch_queue.size());
+
             // if not processing anything, start processing this batch
-            if (_pending_queue.empty() && _state == State::READY) {
+            if (_current_batch == nullptr && _state == State::READY) {
                 _process_next_batch();
             }
         });
@@ -216,7 +219,7 @@ namespace springtail::pg_proxy {
             if (_state == State::READY && _db_id != constant::INVALID_DB_ID) {
                 // if in ready state, we can reuse this session, and add back to pool
                 // reset server_session and the private session state
-                DCHECK(_batch_queue.empty() && _pending_queue.empty());
+                DCHECK(_batch_queue.empty() && _current_batch == nullptr);
 
                 reset_session();
                 _state = State::RESET_SESSION;
@@ -788,32 +791,29 @@ namespace springtail::pg_proxy {
         // typically we'll just go through this once, however if the batch is just
         // a forward message, we'll just send it to the server and then be ready
         // for the next batch if there is one
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session processing next batch", _id);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session processing next batch, batch size: {}",
+                  _id, _batch_queue.size());
 
         std::vector<SessionMsgPtr> messages;
-        while (_pending_queue.empty() && _state == State::READY) {
-            if (!_batch_queue.load_processing_batch()) {
-                // batch queue is empty
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Server session batch queue is empty", _id);
-                return;
-            }
 
-            while (!_batch_queue.processing_empty()) {
-                // process the message
-                auto msg = _batch_queue.pop_processing_msg();
-                CHECK(msg.has_value());
-                messages.push_back(msg.value());
-            }
+        if (_state != State::READY || _current_batch != nullptr || _batch_queue.empty()) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Server session not ready, cannot process next batch",
+                      _id);
+            return;
+        }
+
+        // pop the next batch from the queue
+        auto batch = _batch_queue.pop_batch();
+        while (!batch.empty()) {
+            auto msg = batch.front();
+            batch.pop_front();
+            messages.push_back(msg);
         }
 
         if (messages.empty()) {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] No messages to process in next batch", _id);
             return;
         }
-
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
-                "[S:{}] Processing next batch with {} messages",
-                _id, messages.size());
 
         // Create batch structure from messages
         _current_batch = std::make_shared<Batch>(messages);
@@ -824,6 +824,7 @@ namespace springtail::pg_proxy {
                 _id,
                 _current_batch->get_total_message_count());
 
+        // send all messages in the batch
         _send_all_messages();
     }
 
@@ -831,20 +832,13 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_send_all_messages()
     {
-        if (!_current_batch) {
-            LOG_ERROR("[S:{}] Cannot send dependencies: no current batch", _id);
-            return;
-        }
+        DCHECK_NE(_current_batch, nullptr);
 
         auto front_query_status = _current_batch->get_current_query_status();
         if (!front_query_status) {
             LOG_ERROR("[S:{}] Cannot send messages: current batch has no messages", _id);
             return;
         }
-
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
-                "[S:{}] Sending messages (pipelined)",
-                _id);
 
         size_t messages_sent = 0;
         size_t flush_messages = 0;
