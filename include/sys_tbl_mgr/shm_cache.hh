@@ -124,8 +124,10 @@ public:
      * Open a cache with the give name. If the cache hasn't been created,
      * it will throw.
      * @param name The global cache name.
+     * @param enable_xid_history If true, enable XID history. If disabled, update_committed_xid(),
+     *        get_committed_xid() will have undefined behavior.
      */
-    explicit ShmCache(std::string name);
+    explicit ShmCache(std::string name, bool enable_xid_history);
 
     ~ShmCache();
 

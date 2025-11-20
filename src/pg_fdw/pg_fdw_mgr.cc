@@ -562,7 +562,15 @@ namespace springtail::pg_fdw {
         PgFdwMgr::XidCommitInfo result;
         result.schema_xid = schema_xid;
         {
-            std::unique_lock<std::shared_mutex> lock(_rc_mutex);
+            std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
+            if (_tabld_ids_cache) {
+                auto cached_xid = _tabld_ids_cache->get_committed_xid(_db_id, schema_xid);
+                if (cached_xid.has_value()) {
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found pending table mutations cached xid = {}", *cached_xid);
+                    result.last_recored_xid = *cached_xid;
+                }
+            }
+
             if (_roots_cache) {
                 auto cached_xid = _roots_cache->get_committed_xid(_db_id, schema_xid);
                 if (cached_xid.has_value()) {
@@ -608,12 +616,12 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::_try_create_cache()
     {
-        std::unique_lock<std::shared_mutex> lock(_rc_mutex);
+        std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
 
         //helper to create cache
-        auto create_cache = [](auto name) -> std::shared_ptr<sys_tbl_mgr::ShmCache> {
+        auto create_cache = [](auto name, bool enable_xid_history) -> std::shared_ptr<sys_tbl_mgr::ShmCache> {
             try {
-                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(name);
+                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(name, enable_xid_history);
                 return cache;
             } catch (const boost::interprocess::bad_alloc&) {
                 // the cache hasn't been created
@@ -627,7 +635,7 @@ namespace springtail::pg_fdw {
         };
 
         if (!_roots_cache || !_roots_cache->is_alive()) {
-            _roots_cache = create_cache(sys_tbl_mgr::SHM_CACHE_ROOTS);
+            _roots_cache = create_cache(sys_tbl_mgr::SHM_CACHE_ROOTS, true);
             if (_roots_cache) {
                 // start using the new cache
                 sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
@@ -635,7 +643,7 @@ namespace springtail::pg_fdw {
         }
 
         if (!_schema_shm_cache || !_schema_shm_cache->is_alive()) {
-            _schema_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
+            _schema_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_SCHEMAS, false);
             if (_schema_shm_cache) {
                 // start using the new cache
                 sys_tbl_mgr::Client::get_instance()->use_schema_cache(_schema_shm_cache);
@@ -643,7 +651,7 @@ namespace springtail::pg_fdw {
         }
 
         if (!_usertype_shm_cache || !_usertype_shm_cache->is_alive()) {
-            _usertype_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
+            _usertype_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_USERTYPES, false);
             if (_usertype_shm_cache) {
                 // start using the new cache
                 sys_tbl_mgr::Client::get_instance()->use_usertype_cache(_usertype_shm_cache);
@@ -651,7 +659,11 @@ namespace springtail::pg_fdw {
         }
 
         if (!_extents_cache || !_extents_cache->is_alive()) {
-            _extents_cache = create_cache(sys_tbl_mgr::SHM_CACHE_EXTENTS);
+            _extents_cache = create_cache(sys_tbl_mgr::SHM_CACHE_EXTENTS, false);
+        }
+
+        if (!_tabld_ids_cache || !_tabld_ids_cache->is_alive()) {
+            _tabld_ids_cache = create_cache(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, true);
         }
     }
 

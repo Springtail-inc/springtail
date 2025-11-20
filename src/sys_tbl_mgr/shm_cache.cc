@@ -25,8 +25,9 @@ ShmCache::ShmCache(std::string name, size_t size, bool enable_xid_history)
     _init();
 }
 
-ShmCache::ShmCache(std::string name)
+ShmCache::ShmCache(std::string name, bool enable_xid_history)
     :_name{std::move(name)},
+    _enable_xid_history{enable_xid_history},
     _created{false},
     _shm{ipc::open_only, _name.c_str()},
     _mutex{ipc::open_only, (_name + std::string(".mutex")).c_str()},
@@ -139,6 +140,7 @@ ShmCache::is_alive()
 std::optional<Xid>
 ShmCache::get_committed_xid(DbId db, Xid schema_xid)
 {
+    CHECK(_enable_xid_history);
     ipc::sharable_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
