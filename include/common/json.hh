@@ -77,6 +77,24 @@ namespace springtail {
             }
         }
 
+        /**
+         * @brief Get the vector from json
+         *
+         * @tparam T - type of vector element
+         * @param json - json array
+         * @return std::vector<T> - vector from json array
+         */
+        template<typename T> static inline std::vector<T>
+        get_vector(const nlohmann::json &json)
+        {
+            DCHECK(json.is_array());
+            if (!json.is_array()) {
+                return {};
+            }
+
+            return json.get<std::vector<T>>();
+        }
+
     private:
         template<typename T> static inline void
         _get_to_helper(const nlohmann::json &json, T &result) {

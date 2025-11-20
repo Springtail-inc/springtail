@@ -41,7 +41,7 @@ namespace springtail::committer {
          */
         class SwapMsg {
         public:
-            SwapMsg(uint64_t xid, nlohmann::json &&ddls, std::vector<uint64_t>&& tids)
+            SwapMsg(uint64_t xid, nlohmann::json &&ddls, std::vector<uint32_t>&& tids)
                 : _xid(xid),
                   _ddls(std::move(ddls)),
                   _tids(std::move(tids))
@@ -55,14 +55,14 @@ namespace springtail::committer {
                 return _ddls;
             }
 
-            const std::vector<uint64_t> &tids() const {
+            const std::vector<uint32_t> &tids() const {
                 return _tids;
             }
 
         private:
             uint64_t _xid;
             nlohmann::json _ddls;
-            std::vector<uint64_t> _tids;
+            std::vector<uint32_t> _tids;
         };
 
         /**
