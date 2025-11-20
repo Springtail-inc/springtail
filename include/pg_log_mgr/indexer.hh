@@ -4,6 +4,7 @@
 #include <pg_log_mgr/index_requests_manager.hh>
 #include <redis/redis_ddl.hh>
 #include <storage/mutable_btree.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::committer {
 
