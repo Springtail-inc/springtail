@@ -62,7 +62,7 @@ namespace springtail {
         /** Redis notification path for the list of FDW databases */
         static inline constexpr char FDW_DBS_PATH[] = "fdw_dbs";
         /** Redis notification path for database schema changes */
-        static inline constexpr char DATABASE_SCHEMA_CHANGE_PATH[] = "schema_change";
+        static inline constexpr char INCLUDE_SCHEMAS_CHANGE_PATH[] = "schema_change";
 
         /* Secrets mgr roles */
         /** FDW secrets mgr role */
@@ -305,9 +305,9 @@ namespace springtail {
          * @brief Get the pending include schemas for the given database
          *
          * @param db_id - database id
-         * @return const nlohmann::json - json object representing pending include schemas
+         * @return nlohmann::json - json object representing pending include schemas
          */
-        const nlohmann::json get_pending_include_schemas(uint64_t db_id);
+        nlohmann::json get_pending_include_schemas(uint64_t db_id);
 
     private:
         /** json containing parsed settings file */

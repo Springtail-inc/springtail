@@ -47,7 +47,7 @@ namespace springtail::committer {
         *
         * @param shutdown Atomic flag to signal shutdown.
         */
-        void wait(std::atomic<bool> &shutdown)
+        void wait(const std::atomic<bool> &shutdown)
         {
             std::unique_lock lock(_toids_mutex);
             _toid_cv.wait(lock, [this, &shutdown] { return _toids.empty() || shutdown.load(); });
@@ -166,7 +166,7 @@ namespace springtail::committer {
             std::shared_lock lock(_table_sync_notify_mutex);
             auto it = _table_sync_notify.find(db_id);
             DCHECK(it != _table_sync_notify.end());
-            TableCopyNotify &notify_object = it->second;
+            const TableCopyNotify &notify_object = it->second;
             lock.unlock();
             return notify_object.is_toids_empty();
         }

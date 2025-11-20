@@ -37,8 +37,7 @@ namespace springtail::committer {
               _fsync_worker_count(fsync_worker_count),
               _committer_queue(committer_queue),
               _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
-              _index_requests_mgr(index_requests_mgr),
-              _table_copy_tracker(std::make_shared<TableCopyTracker>())
+              _index_requests_mgr(index_requests_mgr)
         {}
 
         Committer(const Committer &) = delete;
@@ -387,6 +386,6 @@ namespace springtail::committer {
         std::unique_ptr<TableSyncProcessor> _table_sync_processor;
         /** This class allows to track table copies in progress and allows threads to wait for table
             copy completion. */
-        TableCopyTrackerPtr _table_copy_tracker;
+        TableCopyTrackerPtr _table_copy_tracker{std::make_shared<TableCopyTracker>()};
     };
 }

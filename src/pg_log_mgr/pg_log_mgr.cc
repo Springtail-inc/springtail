@@ -140,7 +140,7 @@ namespace springtail::pg_log_mgr {
 
         // add redis cache callback for watching include schemas changes
         redis_cache->add_callback(
-            std::string(Properties::DATABASE_SCHEMA_CHANGE_PATH) + "/" + std::to_string(_db_id),
+            fmt::format("{}/{}", Properties::INCLUDE_SCHEMAS_CHANGE_PATH, _db_id),
             _cache_watcher_schema_change
         );
 
@@ -334,7 +334,6 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_db_include_change()
     {
-        // auto xid_server = xid_mgr::XidMgrServer::get_instance();
         auto [redis_db_id, redis_client] = RedisMgr::get_instance()->create_client(true);
         std::string schema_change_hash_name = fmt::format(redis::SCHEMA_CHANGE, _db_instance_id);
         std::string pending_hash_name = fmt::format(redis::PENDING_SCHEMA_CHANGES, _db_instance_id);
@@ -1091,9 +1090,9 @@ namespace springtail::pg_log_mgr {
         }
         Properties::get_instance()->set_db_include_schemas(_db_id, temp_new_schemas_json);
 
-        auto redis_client = RedisMgr::get_instance()->create_client(true);
+        auto [redis_db_id, redis_client] = RedisMgr::get_instance()->create_client(true);
         std::string hash_name = fmt::format(redis::PENDING_SCHEMA_CHANGES, _db_instance_id);
-        std::get<1>(redis_client)->hset(hash_name, std::to_string(_db_id), pending_schema_changes.dump());
+        redis_client->hset(hash_name, std::to_string(_db_id), pending_schema_changes.dump());
 
         // notify
         _db_include_change_sem.release();

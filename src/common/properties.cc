@@ -717,7 +717,7 @@ namespace springtail {
     void
     Properties::set_db_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json)
     {
-        _cache->set_value("db_config/" + std::to_string(db_id) + "/include/schemas", schemas_json);
+        _cache->set_value(fmt::format("db_config/{}/include/schemas", db_id), schemas_json);
     }
 
     void
@@ -734,7 +734,7 @@ namespace springtail {
         _pending_schema_include.erase(db_id);
     }
 
-    const nlohmann::json
+    nlohmann::json
     Properties::get_pending_include_schemas(uint64_t db_id)
     {
         std::shared_lock lock(_pending_schema_include_mutex);
