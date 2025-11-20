@@ -56,7 +56,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     // Client should cache get_roots() responses now
     client->use_roots_cache(_roots_cache);
     client->use_schema_cache(_schema_cache);
-//    client->use_usertype_cache(_usertype_cache);
+    client->use_usertype_cache(_usertype_cache);
 
     // Flag indicating the connection status of XidMgrSubscriber
     // to the XidMgr server.
