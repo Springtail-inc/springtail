@@ -500,7 +500,8 @@ namespace springtail {
                 Int32 Type modifier of the column (atttypmod).
         */
 
-        PgMsgRelation relation;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::RELATION);
+        auto& relation = msg->msg.emplace<PgMsgRelation>();
 
         if (_streaming) {
             relation.xid = _recvint32();
@@ -520,9 +521,6 @@ namespace springtail {
             relation.columns[i].oid = _recvint32();
             relation.columns[i].type_modifier = _recvint32();
         }
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::RELATION);
-        msg->msg.emplace<PgMsgRelation>(relation);
 
         return msg;
     }
@@ -548,7 +546,8 @@ namespace springtail {
             TupleData TupleData message part representing the contents of new tuple.
         */
 
-        PgMsgInsert insert;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::INSERT);
+        auto& insert = msg->msg.emplace<PgMsgInsert>();
 
         if (_streaming) {
             insert.xid = _recvint32(); // only present in v2
@@ -557,8 +556,6 @@ namespace springtail {
         insert.new_type = _recvint8(); // should be 'N
 
         _decode_tuple(insert.new_tuple);
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::INSERT);
-        msg->msg.emplace<PgMsgInsert>(insert);
 
         return msg;
     }
@@ -608,7 +605,8 @@ namespace springtail {
             neither of them, but never both of them.
         */
 
-        PgMsgUpdate update;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::UPDATE);
+        auto& update = msg->msg.emplace<PgMsgUpdate>();
 
         if (_streaming) {
             update.xid = _recvint32();
@@ -626,9 +624,6 @@ namespace springtail {
 
         CHECK_EQ(update.new_type, 'N');
         _decode_tuple(update.new_tuple);
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::UPDATE);
-        msg->msg.emplace<PgMsgUpdate>(update);
 
         return msg;
     }
@@ -667,7 +662,8 @@ namespace springtail {
             but never both of them.
         */
 
-        PgMsgDelete delete_msg;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DELETE);
+        auto& delete_msg = msg->msg.emplace<PgMsgDelete>();
 
         if (_streaming) {
             delete_msg.xid = _recvint32();
@@ -676,9 +672,6 @@ namespace springtail {
         delete_msg.type = _recvint8();
         assert(delete_msg.type == 'K' || delete_msg.type == 'O');
         _decode_tuple(delete_msg.tuple);
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DELETE);
-        msg->msg.emplace<PgMsgDelete>(delete_msg);
 
         return msg;
     }
@@ -706,7 +699,8 @@ namespace springtail {
                             This field is repeated for each relation.
         */
 
-        PgMsgTruncate truncate;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::TRUNCATE);
+        auto& truncate = msg->msg.emplace<PgMsgTruncate>();
 
         if (_streaming) {
             truncate.xid = _recvint32();
@@ -718,9 +712,6 @@ namespace springtail {
         for (int i = 0; i < truncate.num_rels; i++) {
             truncate.rel_ids[i] = _recvint32();
         }
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::TRUNCATE);
-        msg->msg.emplace<PgMsgTruncate>(truncate);
 
         return msg;
     }
@@ -749,7 +740,8 @@ namespace springtail {
             String Name of the data type.
         */
 
-        PgMsgType type;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::TYPE);
+        auto& type = msg->msg.emplace<PgMsgType>();
 
         if (_streaming) {
             type.xid = _recvint32();
@@ -758,9 +750,6 @@ namespace springtail {
         type.oid = _recvint32();
         _decode_string(type.namespace_str);
         _decode_string(type.data_type_str);
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::TYPE);
-        msg->msg.emplace<PgMsgType>(type);
 
         return msg;
     }
@@ -783,12 +772,11 @@ namespace springtail {
             Note that there can be multiple Origin messages inside a single transaction.
         */
 
-        PgMsgOrigin origin;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::ORIGIN);
+        auto& origin = msg->msg.emplace<PgMsgOrigin>();
+
         origin.commit_lsn = _recvint64();
         _decode_string(origin.name_str);
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::ORIGIN);
-        msg->msg.emplace<PgMsgOrigin>(origin);
 
         return msg;
     }
@@ -808,14 +796,13 @@ namespace springtail {
             Int64 Commit timestamp of the transaction. Number of microseconds since Y2K
             Int32 Xid of the transaction.
         */
-        PgMsgBegin begin;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::BEGIN);
+        auto& begin = msg->msg.emplace<PgMsgBegin>();
+
         begin.xact_lsn = _recvint64();
         begin.commit_ts = _recvint64();
         begin.xid = _recvint32();
         begin.local_begin_ts = std::chrono::steady_clock::now();
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::BEGIN);
-        msg->msg.emplace<PgMsgBegin>(begin);
 
         return msg;
     }
@@ -842,7 +829,8 @@ namespace springtail {
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_COMMIT_TXN_FREQ, f);
         }
 
-        PgMsgCommit commit;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COMMIT);
+        auto& commit = msg->msg.emplace<PgMsgCommit>();
 
         int8_t flags = _recvint8();
         CHECK_EQ(flags, 0);
@@ -851,9 +839,6 @@ namespace springtail {
         commit.xact_lsn = _recvint64();
         commit.commit_ts = _recvint64();
         commit.local_commit_ts = std::chrono::steady_clock::now();
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COMMIT);
-        msg->msg.emplace<PgMsgCommit>(commit);
 
         return msg;
     }
@@ -874,14 +859,12 @@ namespace springtail {
             Int32       Xid of the transaction.
             Int8_t      A value of 1 indicates this is the first stream segment for this XID, 0 for any other stream segment.
         */
-        PgMsgStreamStart start;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_START);
+        auto& start = msg->msg.emplace<PgMsgStreamStart>();
 
         start.xid = _recvint32();
         start.first = (_recvint8() == 1);
         start.local_ts = std::chrono::steady_clock::now();
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_START);
-        msg->msg.emplace<PgMsgStreamStart>(start);
 
         _streaming = true;
 
@@ -931,7 +914,8 @@ namespace springtail {
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_STREAM_COMMIT_FREQ, f);
         }
 
-        PgMsgStreamCommit commit;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_COMMIT);
+        auto& commit = msg->msg.emplace<PgMsgStreamCommit>();
 
         commit.xid = _recvint32();
         _recvint8(); // flags
@@ -939,9 +923,6 @@ namespace springtail {
         commit.xact_lsn = _recvint64();
         commit.commit_ts = _recvint64();
         commit.local_commit_ts = std::chrono::steady_clock::now();
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_COMMIT);
-        msg->msg.emplace<PgMsgStreamCommit>(commit);
 
         return msg;
     }
@@ -974,7 +955,8 @@ namespace springtail {
             open_telemetry::OpenTelemetry::get_instance()->record_histogram(LOG_READER_STREAM_ABORT_FREQ, f);
         }
 
-        PgMsgStreamAbort abort;
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_ABORT);
+        auto& abort = msg->msg.emplace<PgMsgStreamAbort>();
 
         abort.xid = _recvint32();
         abort.sub_xid = _recvint32();
@@ -983,9 +965,6 @@ namespace springtail {
             abort.abort_ts = _recvint64();
         }
         abort.local_abort_ts = std::chrono::steady_clock::now();
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_ABORT);
-        msg->msg.emplace<PgMsgStreamAbort>(abort);
 
         return msg;
     }
@@ -1043,8 +1022,6 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        PgMsgIndex msg;
-
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "index") {
@@ -1052,6 +1029,9 @@ namespace springtail {
             CHECK_EQ(object_type, "index");
             return {};
         }
+
+        PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_INDEX);
+        auto& msg = decoded_msg->msg.emplace<PgMsgIndex>();
 
         msg.xid = message.xid; // only valid in streaming mode
         msg.lsn = message.lsn;
@@ -1078,9 +1058,6 @@ namespace springtail {
             msg.columns.push_back(col);
         }
 
-        PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_INDEX);
-        decoded_msg->msg.emplace<PgMsgIndex>(msg);
-
         return decoded_msg;
     }
 
@@ -1089,14 +1066,15 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        PgMsgDropIndex msg;
-
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "index") {
             LOG_INFO("Create index msg not for index object, for: {}\n", object_type);
             return {};
         }
+
+        PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_INDEX);
+        auto& msg = decoded_msg->msg.emplace<PgMsgDropIndex>();
 
         msg.xid = message.xid; // only valid in streaming mode
         msg.lsn = message.lsn;
@@ -1108,9 +1086,6 @@ namespace springtail {
             LOG_INFO("Create index skipped: {} {}\n", msg.oid, msg.namespace_name);
             return {};
         }
-
-        PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_INDEX);
-        decoded_msg->msg.emplace<PgMsgDropIndex>(msg);
 
         return decoded_msg;
     }
@@ -1134,8 +1109,6 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::_decode_create_table(PgMsgMessage &message, char *buffer, int len)
     {
-        PgMsgTable table_msg;
-
         // convert msg data to string (it is not null terminated)
         // and convert string to json
         std::string data_str(buffer, len);
@@ -1151,6 +1124,9 @@ namespace springtail {
             LOG_INFO("Create/alter table msg not for table object, for: {}\n", object_type);
             return nullptr;
         }
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
+        auto& table_msg = msg->msg.emplace<PgMsgTable>();
 
         table_msg.xid = message.xid; // only valid in streaming mode
         table_msg.lsn = message.lsn;
@@ -1188,9 +1164,6 @@ namespace springtail {
 
         _decode_schema_columns(json["columns"], table_msg.columns);
 
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
-        msg->msg.emplace<PgMsgTable>(table_msg);
-
         return msg;
     }
 
@@ -1211,7 +1184,6 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::_decode_drop_table(PgMsgMessage &message, char *buffer, int len)
     {
-        PgMsgDropTable drop_table_msg;
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
@@ -1227,6 +1199,9 @@ namespace springtail {
             return nullptr;
         }
 
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TABLE);
+        auto& drop_table_msg = msg->msg.emplace<PgMsgDropTable>();
+
         drop_table_msg.xid = message.xid; // only valid in streaming mode
         drop_table_msg.lsn = message.lsn;
 
@@ -1241,17 +1216,12 @@ namespace springtail {
 
         json["name"].get_to(drop_table_msg.table);
 
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TABLE);
-        msg->msg.emplace<PgMsgDropTable>(drop_table_msg);
-
         return msg;
     }
 
     PgMsgPtr
     PgMsgStreamReader::_decode_create_namespace(PgMsgMessage &message, char *buffer, int len)
     {
-        PgMsgNamespace ns_msg;
-
         // convert msg data to string (it is not null terminated)
         // and convert string to json
         std::string_view data_str(buffer, len);
@@ -1265,6 +1235,9 @@ namespace springtail {
             return nullptr;
         }
 
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_NAMESPACE);
+        auto& ns_msg = msg->msg.emplace<PgMsgNamespace>();
+
         ns_msg.xid = message.xid; // only valid in streaming mode
         ns_msg.lsn = message.lsn;
         json["name"].get_to(ns_msg.name);
@@ -1277,9 +1250,6 @@ namespace springtail {
             LOG_INFO("Create namespace skipped: {}\n", ns_msg.name);
             return {};
         }
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_NAMESPACE);
-        msg->msg.emplace<PgMsgNamespace>(ns_msg);
 
         return msg;
     }
@@ -1301,8 +1271,6 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::_decode_drop_namespace(PgMsgMessage &message, char *buffer, int len)
     {
-        PgMsgNamespace ns_msg;
-
         // convert msg data to string (it is not null terminated)
         // and convert string to json
         std::string data_str(buffer, len);
@@ -1315,6 +1283,9 @@ namespace springtail {
             LOG_ERROR("Drop namespace msg not for namespace object, for: {}\n", object_type);
             return nullptr;
         }
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_NAMESPACE);
+        auto& ns_msg = msg->msg.emplace<PgMsgNamespace>();
 
         ns_msg.xid = message.xid; // only valid in streaming mode
         ns_msg.lsn = message.lsn;
@@ -1329,21 +1300,19 @@ namespace springtail {
             return {};
         }
 
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_NAMESPACE);
-        msg->msg.emplace<PgMsgNamespace>(ns_msg);
-
         return msg;
     }
 
     PgMsgPtr
     PgMsgStreamReader::_decode_create_usertype(const PgMsgMessage &message, char *buffer, int len)
     {
-        PgMsgUserType usertype_msg;
-
         // convert msg data to string (it is not null terminated)
         // and convert string to json
         std::string_view data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TYPE);
+        auto& usertype_msg = msg->msg.emplace<PgMsgUserType>();
 
         usertype_msg.xid = message.xid; // only valid in streaming mode
         usertype_msg.lsn = message.lsn;
@@ -1365,9 +1334,6 @@ namespace springtail {
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded create/alter usertype: json: {}", json.dump());
 
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TYPE);
-        msg->msg.emplace<PgMsgUserType>(usertype_msg);
-
         return msg;
     }
 
@@ -1388,8 +1354,6 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::_decode_drop_usertype(const PgMsgMessage &message, char *buffer, int len)
     {
-        PgMsgUserType usertype_msg;
-
         // convert msg data to string (it is not null terminated)
         // and convert string to json
         std::string data_str(buffer, len);
@@ -1402,6 +1366,9 @@ namespace springtail {
             LOG_ERROR("Drop msg not for usertype object, for: {}\n", object_type);
             return nullptr;
         }
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TYPE);
+        auto& usertype_msg = msg->msg.emplace<PgMsgUserType>();
 
         usertype_msg.xid = message.xid; // only valid in streaming mode
         usertype_msg.lsn = message.lsn;
@@ -1417,9 +1384,6 @@ namespace springtail {
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded drop usertype: json: {}", json.dump());
 
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TYPE);
-        msg->msg.emplace<PgMsgUserType>(usertype_msg);
-
         return msg;
     }
 
@@ -1427,15 +1391,14 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::_decode_copy_sync(const PgMsgMessage &message, char *buffer, int len)
     {
-        PgMsgCopySync copy_sync_msg;
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COPY_SYNC);
+        auto& copy_sync_msg = msg->msg.emplace<PgMsgCopySync>();
+
         json["pg_xid"].get_to(copy_sync_msg.pg_xid);
         json["target_xid"].get_to(copy_sync_msg.target_xid);
-
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COPY_SYNC);
-        msg->msg.emplace<PgMsgCopySync>(copy_sync_msg);
 
         return msg;
     }
@@ -1443,11 +1406,13 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::_decode_attach_partition(const PgMsgMessage &message, const char *buffer, int len)
     {
-        PgMsgAttachPartition attach_partition_msg;
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded attach partition: json: {}", json.dump());
+
+        auto msg = std::make_shared<PgMsg>(PgMsgEnum::ATTACH_PARTITION);
+        auto& attach_partition_msg = msg->msg.emplace<PgMsgAttachPartition>();
 
         attach_partition_msg.xid = message.xid;
         attach_partition_msg.lsn = message.lsn;
@@ -1461,20 +1426,19 @@ namespace springtail {
             attach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
         }
 
-        auto msg = std::make_shared<PgMsg>(PgMsgEnum::ATTACH_PARTITION);
-        msg->msg.emplace<PgMsgAttachPartition>(attach_partition_msg);
-
         return msg;
     }
 
     PgMsgPtr
     PgMsgStreamReader::_decode_detach_partition(const PgMsgMessage &message, const char *buffer, int len)
     {
-        PgMsgDetachPartition detach_partition_msg;
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded detach partition: json: {}", json.dump());
+
+        auto msg = std::make_shared<PgMsg>(PgMsgEnum::DETACH_PARTITION);
+        auto& detach_partition_msg = msg->msg.emplace<PgMsgDetachPartition>();
 
         detach_partition_msg.xid = message.xid;
         detach_partition_msg.lsn = message.lsn;
@@ -1487,9 +1451,6 @@ namespace springtail {
         for (const auto &partition_data : json["partition_data"]) {
             detach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
         }
-
-        auto msg = std::make_shared<PgMsg>(PgMsgEnum::DETACH_PARTITION);
-        msg->msg.emplace<PgMsgDetachPartition>(detach_partition_msg);
 
         return msg;
     }

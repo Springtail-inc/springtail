@@ -1,5 +1,5 @@
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/system_table_mgr.hh>
+#include <sys_tbl_mgr/system_table_mgr_client.hh>
 #include <sys_tbl_mgr/table_mgr_client.hh>
 
 namespace springtail {
@@ -11,7 +11,7 @@ namespace springtail {
     {
         // check the system tables
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_table(db_id, table_id, xid);
+            return SystemTableMgrClient::get_instance()->get_table(db_id, table_id, xid);
         }
 
         // retrieve the roots and stats of the table
@@ -36,7 +36,7 @@ namespace springtail {
     {
         // handle system tables
         if (table_id <= constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_columns(db_id, table_id, xid);
+            return SystemTableMgrClient::get_instance()->get_columns(db_id, table_id, xid);
         }
 
         // non-system tables
@@ -48,7 +48,7 @@ namespace springtail {
     TableMgrClient::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_schema(db_id, table_id, access_xid, target_xid);
+            return SystemTableMgrClient::get_instance()->get_schema(db_id, table_id, access_xid, target_xid);
         }
 
         // XXX keep some kind of local cache?
@@ -70,7 +70,7 @@ namespace springtail {
                                       bool allow_undefined, bool include_internal_row_id)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_extent_schema(db_id, table_id, xid, extension_callback, allow_undefined);
+            return SystemTableMgrClient::get_instance()->get_extent_schema(db_id, table_id, xid, extension_callback, allow_undefined);
         }
 
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?

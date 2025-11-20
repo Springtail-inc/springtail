@@ -42,9 +42,14 @@ target_link_libraries(springtail_pgext
     PRIVATE absl::check
     PRIVATE absl::flat_hash_map
     PRIVATE fmt::fmt
-    PRIVATE springtail_common
 )
-target_link_options(springtail_pgext PRIVATE -W)
+# Allow undefined symbols to be resolved at runtime from the main executable
+# This prevents duplicating static data from springtail_common
+if(APPLE)
+    target_link_options(springtail_pgext PRIVATE -undefined dynamic_lookup -W)
+else()
+    target_link_options(springtail_pgext PRIVATE -Wl,--allow-shlib-undefined -W)
+endif()
 
 set_target_properties(springtail_pgext PROPERTIES
   CXX_VISIBILITY_PRESET default

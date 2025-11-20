@@ -424,8 +424,16 @@ namespace springtail::pg_fdw {
         /** Helper to create an IPC cache for table roots */
         void _try_create_cache();
 
-        /** Helper function to get the last xid */
-        uint64_t _update_last_xid(uint64_t schema_xid);
+        struct XidCommitInfo {
+            uint64_t schema_xid;
+            uint64_t last_real_xid; //< last real xid seen for schema
+
+            /** Last recorded xid for schema. The XID mutations are recored
+              in WriteCache but have not yet been committed. */
+            std::optional<uint64_t> last_recored_xid;
+        };
+        /** Helper to get XID commit info for a schema XID */
+        XidCommitInfo _get_xid_info(uint64_t schema_xid);
 
         std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate,
                                                        const List *qual_list,
