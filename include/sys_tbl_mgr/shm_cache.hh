@@ -166,7 +166,10 @@ public:
     bool
     insert(DbId db, ObjId obj_id, const XidLsn& xid, std::string_view msg)
     {
-        check_free_space_locked();
+        {
+            ipc::scoped_lock<Mutex> lock(_mutex);
+            check_free_space_locked();
+        }
         return _msg_cache.insert(db, obj_id, xid, msg, false);
     }
 
@@ -182,6 +185,10 @@ public:
     bool
     insert(DbId db, ObjId obj_id, Xid xid, std::string_view msg)
     {
+        {
+            ipc::scoped_lock<Mutex> lock(_mutex);
+            check_free_space_locked();
+        }
         return insert(db, obj_id, XidLsn{xid, 0}, msg);
     }
 
