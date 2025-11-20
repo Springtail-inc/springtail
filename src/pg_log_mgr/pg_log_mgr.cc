@@ -1034,8 +1034,8 @@ namespace springtail::pg_log_mgr {
     {
         nlohmann::json db_config = Properties::get_db_config(_db_id);
         nlohmann::json schema_list = db_config["include"]["schemas"];
-        std::vector<std::string> old_schemas = Json::get_vector<std::string>(schema_list);
-        std::vector<std::string> new_schemas = Json::get_vector<std::string>(new_value);
+        auto&& old_schemas = Json::get_vector<std::string>(schema_list);
+        auto&& new_schemas = Json::get_vector<std::string>(new_value);
         std::vector<std::string> existing_schemas = PgCopyTable::get_schema_list(_db_id);
         std::unordered_set<std::string> existing_schemas_set(existing_schemas.begin(), existing_schemas.end());
 

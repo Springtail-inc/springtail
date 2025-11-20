@@ -290,6 +290,7 @@ namespace springtail
         for (int i = 0; i < _connection.ntuples(); i++) {
             std::uint32_t index_id = _connection.get_int32(i, 0);
             std::string index_name = _connection.get_string(i, 1);
+            // std::string column_name = _connection.get_string(i, 2); // unused
             std::uint32_t secondary_index_num = _connection.get_int32(i, 3);
             std::uint32_t column_attnum = _connection.get_int32(i, 4);
             bool is_unique = _connection.get_boolean(i, 5);
@@ -1161,7 +1162,7 @@ namespace springtail
         PgCopyTable copy_table;
         copy_table.connect(db_id);
 
-        std::vector<std::string> schemas = Json::get_vector<std::string>(schema_list);
+        auto&& schemas = Json::get_vector<std::string>(schema_list);
         for (const auto &schema : schemas) {
             auto schema_name = fmt::format("'{}'", copy_table._connection.escape_string(schema));
             std::set<uint32_t> table_oids;
@@ -1180,7 +1181,7 @@ namespace springtail
         PgCopyTable copy_table;
         copy_table.connect(db_id);
 
-        std::vector<std::string> schemas = Json::get_vector<std::string>(schema_list);
+        auto&& schemas = Json::get_vector<std::string>(schema_list);
         for (const auto &schema : schemas) {
             auto schema_name = fmt::format("'{}'", copy_table._connection.escape_string(schema));
             copy_table._connection.exec(fmt::format(DROP_NAMESPACE_QUERY, schema_name));
@@ -1434,6 +1435,7 @@ namespace springtail
         // iterate through the results and get the user defined types
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t enum_type_oid = copy_table._connection.get_int32(i, 0);
+            // std::string extension_name = copy_table._connection.get_string(i, 1); // unused
             uint32_t namespace_oid = copy_table._connection.get_int32(i, 2);
             std::string namespace_name = copy_table._connection.get_string(i, 3);
             std::string extn_type_name = copy_table._connection.get_string(i, 4);
@@ -1496,6 +1498,7 @@ namespace springtail
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t oper_oid = copy_table._connection.get_int32(i, 0);
             std::string oper_name = copy_table._connection.get_string(i, 1);
+            // std::string oper_proc = copy_table._connection.get_string(i, 2); // unused
             std::string proc_name = copy_table._connection.get_string(i, 3);
 
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding operator: {}, name: {}, proc: {} for extension: {}", oper_oid, oper_name, proc_name, extension);
@@ -1517,6 +1520,7 @@ namespace springtail
         copy_table._connection.exec(fmt::format(PgExtnRegistry::OPCLASS_QUERY, extension));
 
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            // std::string extname = copy_table._connection.get_string(i, 0);       // unused
             std::string access_method = copy_table._connection.get_string(i, 1);
             uint32_t opclass_oid = copy_table._connection.get_int32(i, 2);
             std::string opclass_name = copy_table._connection.get_string(i, 3);
