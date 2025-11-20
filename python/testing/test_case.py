@@ -630,9 +630,9 @@ class TestCase:
             instance_id = self._props.get_db_instance_id()
             database_id = self._get_db_id(command['database_name'])
             redis_client = self._props.get_config_redis()
-            schema_change_hash_name = f"{instance_id}:schema_change"
+            include_changes_hash_name = f"{instance_id}:include_changes"
 
-            redis_client.hset(schema_change_hash_name, str(database_id), json.dumps(command['include_schemas']))
+            redis_client.hset(include_changes_hash_name, str(database_id), json.dumps(command['include_schemas']))
 
             while True:
                 time.sleep(1)
@@ -642,7 +642,7 @@ class TestCase:
 
             while True:
                 time.sleep(1)
-                result = redis_client.hget(schema_change_hash_name, str(database_id))
+                result = redis_client.hget(include_changes_hash_name, str(database_id))
                 if result is None:
                     break
 
