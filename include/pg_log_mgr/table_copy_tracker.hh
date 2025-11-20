@@ -105,7 +105,7 @@ namespace springtail::committer {
         * @param db_id Database ID.
         * @param shutdown Atomic flag to signal shutdown.
         */
-        void wait(uint64_t db_id, std::atomic<bool> &shutdown)
+        void wait(uint64_t db_id, const std::atomic<bool> &shutdown)
         {
             std::shared_lock lock(_table_sync_notify_mutex);
             auto it = _table_sync_notify.find(db_id);
