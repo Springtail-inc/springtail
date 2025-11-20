@@ -61,7 +61,7 @@ namespace springtail::redis {
     static constexpr char SCHEMA_CHANGE[] = "{}:schema_change";
 
     /**
-     * Hash that defines the list of pending schema changes to be performed by the log manager
+     * Hash that defines the list of pending include schemas changes to be performed by the log manager
      * args: db_instance_id
      * key: <database id>
      * value: a hash table in the following format:

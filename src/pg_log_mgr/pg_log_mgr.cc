@@ -377,7 +377,7 @@ namespace springtail::pg_log_mgr {
                     PgCopyTable::get_table_oids_for_schemas(_db_id, add_schemas) :
                     std::unordered_map<std::string, std::unordered_set<uint32_t>>();
 
-            std::shared_ptr<committer::TableCopyTracker> table_sync = PgLogCoordinator::get_instance()->get_committer()->get_table_copy_tracker();
+            committer::TableCopyTrackerPtr table_sync = PgLogCoordinator::get_instance()->get_committer()->get_table_copy_tracker();
             for (auto it = add_schemas.begin(); it != add_schemas.end(); /* no increment here */) {
                 DCHECK(it->is_string());
                 std::string schema_name = it->get<std::string>();
@@ -405,7 +405,7 @@ namespace springtail::pg_log_mgr {
                 redis_client->hset(pending_hash_name, db_id_str, val_json.dump());
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            std::this_thread::sleep_for(std::chrono::seconds(INCLUDE_CHANGES_SLEEP_SEC));
 
             // update properties db config to the value of val_json["schema_include"]
             Properties::get_instance()->set_db_include_schemas(_db_id, val_json["schema_include"]);

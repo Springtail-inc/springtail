@@ -67,7 +67,7 @@ namespace springtail::committer {
          *
          * @return std::shared_ptr<TableCopyTracker>
          */
-        std::shared_ptr<TableCopyTracker> get_table_copy_tracker() { return _table_copy_tracker; }
+        TableCopyTrackerPtr get_table_copy_tracker() const { return _table_copy_tracker; }
 
         // constants for the coordinator thread IDs
         constexpr static const std::string_view THREAD_TYPE = "commit";
@@ -387,6 +387,6 @@ namespace springtail::committer {
         std::unique_ptr<TableSyncProcessor> _table_sync_processor;
         /** This class allows to track table copies in progress and allows threads to wait for table
             copy completion. */
-        std::shared_ptr<TableCopyTracker> _table_copy_tracker;
+        TableCopyTrackerPtr _table_copy_tracker;
     };
 }

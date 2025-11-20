@@ -61,6 +61,9 @@ namespace springtail::pg_log_mgr {
         /** reconnect time period in seconds */
         static constexpr int RECONNECT_TIME_PERIOD_SEC = 60;
 
+        /** sleep interval for database include changes thread */
+        static constexpr int INCLUDE_CHANGES_SLEEP_SEC = 5;
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id

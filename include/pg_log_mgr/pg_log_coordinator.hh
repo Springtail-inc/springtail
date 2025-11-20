@@ -37,7 +37,7 @@ namespace springtail::pg_log_mgr {
          * @return std::shared_ptr<committer::Committer>
          */
         std::shared_ptr<committer::Committer>
-        get_committer() { return _committer; }
+        get_committer() const { return _committer; }
 
     private:
         friend class Singleton<PgLogCoordinator>;

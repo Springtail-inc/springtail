@@ -50,7 +50,7 @@ namespace springtail::committer {
         void wait(std::atomic<bool> &shutdown)
         {
             std::unique_lock lock(_toids_mutex);
-            _toid_cv.wait(lock, [&] { return _toids.empty() || shutdown.load(); });
+            _toid_cv.wait(lock, [this, &shutdown] { return _toids.empty() || shutdown.load(); });
         }
 
         /**
@@ -144,18 +144,14 @@ namespace springtail::committer {
         */
         void set_toids(uint64_t db_id, const std::unordered_set<uint32_t> &new_toids)
         {
-            std::shared_lock read_lock(_table_sync_notify_mutex);
+            std::unique_lock lock(_table_sync_notify_mutex);
             auto it = _table_sync_notify.find(db_id);
             if (it == _table_sync_notify.end()) {
-                read_lock.unlock();
-                std::unique_lock write_lock(_table_sync_notify_mutex);
                 it = _table_sync_notify.try_emplace(db_id).first;
                 DCHECK(it != _table_sync_notify.end());
-                write_lock.unlock();
-                read_lock.lock();
             }
             TableCopyNotify &notify_object = it->second;
-            read_lock.unlock();
+            lock.unlock();
             notify_object.set_toids(new_toids);
         }
 
@@ -186,4 +182,6 @@ namespace springtail::committer {
             _table_sync_notify.erase(db_id);
         }
     };
+
+    using TableCopyTrackerPtr = std::shared_ptr<TableCopyTracker>;
 } // springtail::committer

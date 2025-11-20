@@ -235,7 +235,14 @@ namespace springtail {
          */
         static std::vector<uint64_t> get_database_ids(const nlohmann::json &json_db_ids);
 
-        /** Helper to get included schemas */
+        /** @brief Helper to get included schemas. When with_pending flag is set, we will get
+         *  include schemas list from the pending changes if those are set. Otherwise,
+         *  the data will come from redis db_config hash.
+         * @param db_id - database id for include schemas
+         * @param with_pending - flag indicating if we need to check pending changes to
+         *                       include schemas first
+         * @return std::vector<std::string> - vector with database ids
+         */
         static std::vector<std::string> get_include_schemas(uint64_t db_id, bool with_pending);
 
         /**
@@ -278,7 +285,8 @@ namespace springtail {
         void set_db_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json);
 
         /**
-         * @brief Set the pending include schemas while the update is being processed.
+         * @brief Set the list of schemas that are pending to be made available for query
+         *          while the underlying tables are being copied.
          *
          * @param db_id - database that this include schemas belong to
          * @param schemas_json - json object representing schema included
@@ -286,7 +294,8 @@ namespace springtail {
         void set_pending_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json);
 
         /**
-         * @brief Clear the pending include schemas in properties
+         * @brief Clear the pending include schemas in properties. This function will be used
+         *        after include schema are updated in Redis with pending value.
          *
          * @param db_id - database that this include schemas belong to
          */
