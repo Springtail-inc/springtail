@@ -62,7 +62,7 @@ namespace springtail {
         /** Redis notification path for the list of FDW databases */
         static inline constexpr char FDW_DBS_PATH[] = "fdw_dbs";
         /** Redis notification path for database schema changes */
-        static inline constexpr char INCLUDE_SCHEMAS_CHANGE_PATH[] = "schema_change";
+        static inline constexpr char INCLUDE_CHANGES_PATH[] = "include_changes";
 
         /* Secrets mgr roles */
         /** FDW secrets mgr role */
