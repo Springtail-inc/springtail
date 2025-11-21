@@ -179,6 +179,21 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Pop the next batch off the queue
+         *
+         * @return std::deque<T> - first deq
+         */
+        std::deque<T> pop_batch() {
+            std::unique_lock lock(_mutex);
+            if (!_msg_queue.empty()) {
+                auto next_batch = std::move(_msg_queue.front());
+                _msg_queue.pop();
+                return next_batch;
+            }
+            return {};
+        }
+
+        /**
          * @brief Load the next processing batch if current one is empty
          * @return true if one was loaded, or false if queue is empty
          */

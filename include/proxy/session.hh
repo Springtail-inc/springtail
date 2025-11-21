@@ -14,6 +14,28 @@ namespace springtail::pg_proxy {
     using DatabaseInstancePtr = std::shared_ptr<DatabaseInstance>;
 
     /**
+     * @brief Help function to help convert the state to its string representation
+     *
+     * @tparam T - state enum type
+     * @param value - state value
+     * @param state_to_name - the mapping from state to name
+     * @return std::string - string representing the given state
+     */
+    template <typename T> std::string
+    state_to_string(T value, const std::unordered_map<T, std::string_view> &state_to_name)
+    {
+        static_assert(std::is_enum_v<T>, "T must be an enum or enum class");
+
+        auto it = state_to_name.find(value);
+        std::string_view name = (it != state_to_name.end()) ? it->second : "UNKNOWN";
+
+        // convert enum to its underlying integer
+        auto int_value = static_cast<std::underlying_type_t<T>>(value);
+
+        return fmt::format("{}({})", name, int_value);
+    }
+
+    /**
      * @brief Session base class.  Derived classes  include:
      * - ClientSession -- client session client connects to proxy
      * - ServerSession -- proxy connects to the server; either a replica or primary
@@ -64,6 +86,10 @@ namespace springtail::pg_proxy {
         friend std::ostream& operator<<(std::ostream& os, State state) {
             return os << "Session::State(" << static_cast<int>(state) << ")";
         }
+
+        /** Convert state to string */
+        static std::string
+        to_string(State s);
 
         /** Out-of-band notification message sent to a session via the server */
         struct NotificationMsg {

@@ -90,6 +90,27 @@ public:
 private:
     enum State : int8_t { STARTUP = 0, SSL_HANDSHAKE = 1, AUTH = 2, READY = 3, ERROR = 99 };
 
+    /** Map of state to state names */
+    const static inline std::unordered_map<State, std::string_view> _state_names{
+        { State::STARTUP,         "STARTUP" },
+        { State::SSL_HANDSHAKE,   "SSL_HANDSHAKE" },
+        { State::AUTH,            "AUTH" },
+        { State::READY,           "READY" },
+        { State::ERROR,           "ERROR" }
+    };
+
+    /**
+     * @brief Convert state to state name
+     *
+     * @param s - state
+     * @return std::string - state name
+     */
+    static inline std::string
+    _to_string(State s)
+    {
+        return state_to_string(s, _state_names);
+    }
+
     State _state;
     ProxyConnectionPtr _connection;
     uint64_t _id;
@@ -219,6 +240,28 @@ private:
         READY = 4,
         ERROR = 99
     };
+
+    /** Map of state to state names */
+    const static inline std::unordered_map<State, std::string_view> _state_names{
+        { State::STARTUP,         "STARTUP" },
+        { State::SSL_HANDSHAKE,   "SSL_HANDSHAKE" },
+        { State::AUTH,            "AUTH" },
+        { State::AUTH_DONE,       "AUTH_DONE" },
+        { State::READY,           "READY" },
+        { State::ERROR,           "ERROR" }
+    };
+
+    /**
+     * @brief Convert state to state name
+     *
+     * @param s - state
+     * @return std::string - state name
+     */
+    static inline std::string
+    _to_string(State s)
+    {
+        return state_to_string(s, _state_names);
+    }
 
     State _state;
     ProxyConnectionPtr _connection;

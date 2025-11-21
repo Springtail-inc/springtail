@@ -64,19 +64,27 @@ namespace springtail::pg_proxy {
                 // go through fds and check if we have any pending data
                 // first check client session
                 if (fds.contains(_connection->get_socket())) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Process connection for client session, fd: {}",
+                            _id, _connection->get_socket());
                     _process_connection();
                 }
 
                 // check if we have any server sessions
                 if (_state != State::ERROR && _primary_session && fds.contains(_primary_session->get_connection()->get_socket())) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Process connection for primary, fd: {}",
+                            _id, _primary_session->get_connection()->get_socket());
                     _primary_session->process_connection(_gen_seq_id());
                 }
 
                 if (_state != State::ERROR && _replica_session && fds.contains(_replica_session->get_connection()->get_socket())) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Process connection for replica, fd: {}",
+                            _id, _replica_session->get_connection()->get_socket());
                     _replica_session->process_connection(_gen_seq_id());
                 }
 
                 if (_state != State::ERROR && _pending_replica_session && fds.contains(_pending_replica_session->get_connection()->get_socket())) {
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Process connection for pending replica, fd: {}",
+                            _id, _pending_replica_session->get_connection()->get_socket());
                     _pending_replica_session->process_connection(_gen_seq_id());
                 }
 
@@ -177,7 +185,7 @@ namespace springtail::pg_proxy {
     ClientSession::_process_connection()
     {
         // entry point for network connection message
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Processing packet, client session: state={:d}", _id, (int8_t)_state);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Processing packet, client session: state={}", _id, to_string(_state));
 
         // main entry point for thread processing
         // resume from where we left off
@@ -198,7 +206,7 @@ namespace springtail::pg_proxy {
                 break;
 
             default:
-                LOG_ERROR("Invalid state: {}", (int8_t)_state);
+                LOG_ERROR("Invalid state: {}", to_string(_state));
                 _state = State::ERROR;
                 break;
         }
@@ -504,7 +512,10 @@ namespace springtail::pg_proxy {
             // replica going away during a transaction and it is the associated session
             LOG_ERROR("[C:{}] Replica session shut down during transaction, cannot failover", _id);
             clear_associated_session();
-            _state = State::ERROR;
+
+            _primary_mode = true;
+            set_associated_session(_primary_session);
+            _primary_session->transfer_batch_queue(session);
             return;
         }
 

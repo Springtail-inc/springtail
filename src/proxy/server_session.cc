@@ -160,7 +160,7 @@ namespace springtail::pg_proxy {
         _wrap_error_handler([this, &msg_batch] {
             // queue the message batch
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[S:{}] Server session queueing message batch: size={}, state={}",
-                        _id, msg_batch.size(), (int8_t)_state);
+                        _id, msg_batch.size(), to_string(_state));
 
             _batch_queue.push_batch(std::move(msg_batch));
 
@@ -170,6 +170,23 @@ namespace springtail::pg_proxy {
             }
         });
     }
+
+    void
+    ServerSession::transfer_batch_queue(ServerSessionPtr session)
+    {
+        _wrap_error_handler([this, &session] {
+            DCHECK(session.get() != this);
+            while (!session->_batch_queue.empty()) {
+                _batch_queue.push_batch(session->_batch_queue.pop_batch());
+            }
+
+            // if not processing anything, start processing this batch
+            if (_pending_queue.empty() && _state == State::READY) {
+                _process_next_batch();
+            }
+        });
+    }
+
 
     void
     ServerSession::_process_next_batch()
@@ -281,7 +298,7 @@ namespace springtail::pg_proxy {
 
             // if not in ready state, we do a hard shutdown and close the connection
             // this will return us through Session::_handle_error() and to shutdown_session()
-            LOG_WARN("[S:{}] Server session shutting down, state not ready {}", _id, (int8_t)_state);
+            LOG_WARN("[S:{}] Server session shutting down, state not ready {}", _id, to_string(_state));
             _send_shutdown();
             _state = State::ERROR;
 
@@ -292,7 +309,7 @@ namespace springtail::pg_proxy {
     void
     ServerSession::process_connection(uint64_t seq_id)
     {
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={:d}", _id, (int8_t)_state);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={}", _id, to_string(_state));
 
         _wrap_error_handler([this, seq_id] {
             // entry point for connection message processing
@@ -342,7 +359,7 @@ namespace springtail::pg_proxy {
                     break;
 
                 default:
-                    LOG_ERROR("Unknown state: {:d}", (int8_t)_state);
+                    LOG_ERROR("Unknown state: {}", to_string(_state));
                     _state = State::ERROR;
                     break;
             }
@@ -462,7 +479,7 @@ namespace springtail::pg_proxy {
         // read just the header, the message length is the remaining bytes
         auto [code, msg_length] = Session::read_hdr(_connection);
 
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}, state={}", _id, code, msg_length, (int8)_state);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}, state={}", _id, code, msg_length, to_string(_state));
 
         DCHECK_LE(msg_length, 1000000); // sanity check
 

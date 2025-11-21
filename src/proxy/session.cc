@@ -26,6 +26,26 @@ namespace springtail::pg_proxy {
             {MSG_SERVER_CLIENT_FATAL_ERROR, "MSG_SERVER_CLIENT_FATAL_ERROR"}
     };
 
+    static const std::unordered_map<Session::State, std::string_view> state_names{
+        { Session::State::STARTUP,               "STARTUP" },
+        { Session::State::AUTH_SERVER,           "AUTH_SERVER" },
+        { Session::State::AUTH_DONE,             "AUTH_DONE" },
+        { Session::State::READY,                 "READY" },
+        { Session::State::DEPENDENCIES,          "DEPENDENCIES" },
+        { Session::State::QUERY,                 "QUERY" },
+        { Session::State::EXTENDED_ERROR,        "EXTENDED_ERROR" },
+        { Session::State::RESET_SESSION,         "RESET_SESSION" },
+        { Session::State::RESET_SESSION_READY,   "RESET_SESSION_READY" },
+        { Session::State::RESET_SESSION_PARAMS,  "RESET_SESSION_PARAMS" },
+        { Session::State::ERROR,                 "ERROR" }
+    };
+
+    std::string
+    Session::to_string(Session::State s)
+    {
+        return state_to_string(s, state_names);
+    }
+
     Session::Session(ProxyConnectionPtr connection)
         : _connection(connection),
           _state(State::STARTUP),
@@ -298,29 +318,11 @@ namespace springtail::pg_proxy {
     nlohmann::json
     Session::_to_json_brief() const
     {
-        std::string state;
-        switch (_state) {
-            case State::STARTUP: state = "STARTUP"; break;
-            case State::AUTH_DONE: state = "AUTH_DONE"; break;
-            case State::AUTH_SERVER: state = "AUTH_SERVER"; break;
-            case State::READY: state = "READY"; break;
-            case State::QUERY: state = "QUERY"; break;
-            case State::ERROR: state = "ERROR"; break;
-            case State::RESET_SESSION:
-            case State::RESET_SESSION_READY:
-            case State::RESET_SESSION_PARAMS:
-                state = "RESET";
-                break;
-            default:
-                state = "OTHER";
-                break;
-        }
-
         nlohmann::json j = nlohmann::json::object({
             {"id", id()},
             {"type", (type() == Type::CLIENT ? "CLIENT" : (type() == Type::PRIMARY ? "PRIMARY" : "REPLICA"))},
             {"instance_hostname", _instance ? nlohmann::json(_instance->hostname()) : nlohmann::json(nullptr)},
-            {"state", std::format("{}:{}", state, static_cast<int8_t>(_state))}
+            {"state", std::format("{}", to_string(_state))}
         });
 
         return j;
@@ -340,6 +342,7 @@ namespace springtail::pg_proxy {
         }
 
         nlohmann::json associated_sessions = nlohmann::json::array();
+        bool primary_mode = false;
         if (_type == Type::CLIENT) {
             auto client_session = static_cast<const ClientSession*>(this);
             auto primary_session = client_session->get_primary_session();
@@ -358,6 +361,7 @@ namespace springtail::pg_proxy {
                 pending_j["pending"] = true;
                 associated_sessions.push_back(pending_j);
             }
+            primary_mode = client_session->is_primary_mode();
         } else {
             auto server_session = static_cast<const ServerSession*>(this);
             // get_client_session performs a .lock on a weak ptr thus const_cast
@@ -375,7 +379,8 @@ namespace springtail::pg_proxy {
             {"associated_sessions", associated_sessions},
             {"instance_hostname", _instance ? nlohmann::json(_instance->hostname()) : nlohmann::json(nullptr)},
             {"connection", connection_json},
-            {"is_shadow", is_shadow()}
+            {"is_shadow", is_shadow()},
+            {"is_primary_mode", primary_mode}
         }));
 
         return j;
