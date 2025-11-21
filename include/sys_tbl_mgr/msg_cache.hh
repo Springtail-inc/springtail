@@ -317,7 +317,6 @@ namespace springtail::sys_tbl_mgr {
             evict_locked();
         }
 
-    protected:
         void evict_locked()
         {
             auto key = _lru->back();
@@ -340,6 +339,8 @@ namespace springtail::sys_tbl_mgr {
             _lru->pop_back();
         }
 
+
+    protected:
         Mutex& _mutex;
         Messages::allocator_type& _messages_alloc;
         Value::allocator_type& _value_alloc;

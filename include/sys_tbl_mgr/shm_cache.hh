@@ -282,6 +282,9 @@ private:
      */
     void check_free_space();
 
+    /** Same as above but without locking the mutex. The caller must to make sure that it's locked.*/
+    void check_free_space_locked();
+
     using String = GenericCache::Value;
     using Key = GenericCache::Key;
     using Message = GenericCache::Message; 
