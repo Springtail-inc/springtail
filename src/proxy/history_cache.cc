@@ -5,6 +5,49 @@
 namespace springtail {
 namespace pg_proxy {
 
+    static std::unordered_map<QueryStmt::Type, std::string> query_type_names = {
+        {QueryStmt::Type::NONE, "NONE"},
+        {QueryStmt::Type::SET, "SET"},
+        {QueryStmt::Type::SET_LOCAL, "SET_LOCAL"},
+        {QueryStmt::Type::RESET, "RESET"},
+        {QueryStmt::Type::RESET_ALL, "RESET_ALL"},
+        {QueryStmt::Type::PREPARE, "PREPARE"},
+        {QueryStmt::Type::DEALLOCATE, "DEALLOCATE"},
+        {QueryStmt::Type::DEALLOCATE_ALL, "DEALLOCATE_ALL"},
+        {QueryStmt::Type::DECLARE_HOLD, "DECLARE_HOLD"},
+        {QueryStmt::Type::DECLARE, "DECLARE"},
+        {QueryStmt::Type::CLOSE, "CLOSE"},
+        {QueryStmt::Type::CLOSE_ALL, "CLOSE_ALL"},
+        {QueryStmt::Type::FETCH, "FETCH"},
+        {QueryStmt::Type::DISCARD, "DISCARD"},
+        {QueryStmt::Type::DISCARD_ALL, "DISCARD_ALL"},
+        {QueryStmt::Type::LISTEN, "LISTEN"},
+        {QueryStmt::Type::UNLISTEN, "UNLISTEN"},
+        {QueryStmt::Type::UNLISTEN_ALL, "UNLISTEN_ALL"},
+        {QueryStmt::Type::SAVEPOINT, "SAVEPOINT"},
+        {QueryStmt::Type::ROLLBACK_TO_SAVEPOINT, "ROLLBACK_TO_SAVEPOINT"},
+        {QueryStmt::Type::RELEASE_SAVEPOINT, "RELEASE_SAVEPOINT"},
+        {QueryStmt::Type::BEGIN, "BEGIN"},
+        {QueryStmt::Type::COMMIT, "COMMIT"},
+        {QueryStmt::Type::ROLLBACK, "ROLLBACK"},
+        {QueryStmt::Type::EXECUTE, "EXECUTE"},
+        {QueryStmt::Type::SYNC, "SYNC"},
+        {QueryStmt::Type::DESCRIBE, "DESCRIBE"},
+        {QueryStmt::Type::SIMPLE_QUERY, "SIMPLE_QUERY"},
+        {QueryStmt::Type::FUNCTION, "FUNCTION"},
+        {QueryStmt::Type::ANONYMOUS, "ANONYMOUS"}
+    };
+
+    std::string
+    QueryStmt::type_string(QueryStmt::Type type_param) const
+    {
+        auto it = query_type_names.find(type_param);
+        if (it != query_type_names.end()) {
+            return it->second;
+        }
+        return "UNKNOWN";
+    }
+
     void
     HistoryCache::add(QueryStmtPtr entry)
     {

@@ -68,8 +68,14 @@ namespace springtail::pg_proxy {
             return _status;
         }
 
+        /** Get buffer */
         const BufferPtr buffer() const {
             return _buffer;
+        }
+
+        /** Get dependencies as query statements */
+        const std::vector<QueryStmtPtr> &qs_dependencies() const {
+            return _dependencies;
         }
 
         /** Convert dependencies to session messages and return as vector */

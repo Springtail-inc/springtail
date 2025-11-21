@@ -675,17 +675,48 @@ namespace springtail::pg_proxy {
     {
         // add any dependencies for the message; get replay history from statement cache
         auto is_read_only = server_session->type() == Type::REPLICA;
-        auto replay_stmts = _stmt_cache.get_session_history(server_session->id(), is_read_only);
+        auto session_id = server_session->id();
+        auto replay_stmts = _stmt_cache.get_session_history(session_id, is_read_only);
 
-        uint64_t seq_id = _msg_queue.front()->seq_id();
-        auto msg = std::make_shared<SessionMsg>(SessionMsg::Type::MSG_CLIENT_SERVER_STATE_REPLAY, seq_id);
-        msg->set_dependencies(std::move(replay_stmts));
+        if (replay_stmts.empty() && !replay_transaction_history) {
+            // no dependencies to add; common case
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] No dependencies to add for server session [S:{}]", _id, session_id);
+            return;
+        }
+
+        SessionMsgPtr msg{nullptr};
+
+        uint64_t seq_id = msg_queue.front()->seq_id();
+        if (!replay_stmts.empty()) {
+            msg = std::make_shared<SessionMsg>(SessionMsg::Type::MSG_CLIENT_SERVER_STATE_REPLAY, seq_id);
+            msg->set_dependencies(std::move(replay_stmts));
+        }
 
         if (replay_transaction_history) {
             // add any transaction history statements to back of dependencies
-            auto tx_stmts = _stmt_cache.get_transaction_history(server_session->id(), is_read_only);
-            msg->add_dependencies(std::move(tx_stmts));
+            auto tx_stmts = _stmt_cache.get_transaction_history(session_id, is_read_only);
+            if (!tx_stmts.empty()) {
+                if (msg == nullptr) {
+                    msg = std::make_shared<SessionMsg>(SessionMsg::Type::MSG_CLIENT_SERVER_STATE_REPLAY, seq_id);
+                }
+                msg->add_dependencies(std::move(tx_stmts));
+            }
         }
+
+        if (msg == nullptr) {
+            // no dependencies to add
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] No dependencies to add for server session [S:{}]", _id, session_id);
+            return;
+        }
+
+        // debugging
+        auto qs_deps = msg->qs_dependencies();
+        for (const auto& qs : qs_deps) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Query dependency: {}", _id, qs->to_string());
+        }
+
+        // add message to front of queue
+        msg_queue.push_front(msg);
     }
 
     void

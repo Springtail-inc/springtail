@@ -51,6 +51,7 @@ namespace springtail::pg_proxy {
             FUNCTION = 28,      ///< function call
             ANONYMOUS = 29,     ///< anonymous statement (no name)
         };
+        // for type changes update query_type_names in history_cache.cc
 
         /** Type of cached query string */
         enum class DataType : int8_t {
@@ -87,12 +88,23 @@ namespace springtail::pg_proxy {
             return std::get<std::string>(data);
         }
 
+        /** Is this an extended query type? */
         bool is_extended() const {
             if (type == Type::SIMPLE_QUERY || data_type == DataType::SIMPLE) {
                 assert (extended_type == Type::NONE);
                 return false;
             }
             return true;
+        }
+
+        /** Get type as string */
+        std::string type_string(QueryStmt::Type type_param) const;
+
+        /** Convert to string */
+        std::string to_string() const {
+            std::string str_type = type_string(type);
+            std::string extended_type_str = type_string(extended_type);
+            return fmt::format("Type: {}, Name: '{}', ReplayID: {}, ReadSafe: {}, ExtType: {}", str_type, name, replay_id, is_read_safe, extended_type_str);
         }
 
         uint64_t     replay_id{0};  ///< replay id for history cache
