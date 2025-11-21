@@ -346,6 +346,8 @@ namespace springtail::pg_proxy {
          * @return ServerSessionPtr session or nullptr if no session available
          */
         ServerSessionPtr get_pooled_session(uint64_t db_id, const std::string &username) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "try to get session from pool for db_id {}, user {}",
+                        db_id, username);
             auto session = _pool->get_session(db_id, username);
             DCHECK_GE(_active_sessions.size(), _pool->size());
             return session;
@@ -374,8 +376,10 @@ namespace springtail::pg_proxy {
          * @param session session to release
          * @param deallocate deallocate session, if false add back to pool,
          *                   otherwise session will ultimately be destroyed
+         * @return true - session deallocated
+         * @return false - session returned to the pool
          */
-        void release_session(ServerSessionPtr session, bool deallocate=false)
+        bool release_session(ServerSessionPtr session, bool deallocate=false)
         {
             if (deallocate) {
                 _pool->evict_session(session->id());
@@ -388,6 +392,7 @@ namespace springtail::pg_proxy {
                 dump();
             }
             DCHECK_GE(_active_sessions.size(), _pool->size());
+            return deallocate;
         }
 
         /**
@@ -480,8 +485,10 @@ namespace springtail::pg_proxy {
         /**
          * @brief Release session back to pool if space, or deallocate session
          * @param session session to release
+         * @return true - session deallocated
+         * @return false - session returned to the pool
          */
-        virtual void release_session(ServerSessionPtr session, bool deallocate) = 0;
+        virtual bool release_session(ServerSessionPtr session, bool deallocate) = 0;
 
         /**
          * @brief Release session from the free pools that are expired
@@ -568,9 +575,11 @@ namespace springtail::pg_proxy {
          * @param session session to release
          * @param deallocate deallocate session
          * @param lock unique_lock on _base_mutex
+         * @return true - session deallocated
+         * @return false - session returned to the pool
          * Note: caller must hold the lock
          */
-        void _release_session(ServerSessionPtr session, bool deallocate);
+        bool _release_session(ServerSessionPtr session, bool deallocate);
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
@@ -620,8 +629,10 @@ namespace springtail::pg_proxy {
          * If the pool is full, the session is deallocated and removed from the internal maps.
          * @param session Session to release
          * @param deallocate bool deallocate session (e.g., connection closed)
+         * @return true - session deallocated
+         * @return false - session returned to the pool
          */
-        void release_session(ServerSessionPtr session, bool deallocate) override;
+        bool release_session(ServerSessionPtr session, bool deallocate) override;
 
         /**
          * @brief Release session from the free pools that are expired
@@ -720,6 +731,7 @@ namespace springtail::pg_proxy {
         {
             std::unique_lock lock(_base_mutex);
             _primary = primary;
+            _active_instances.insert(primary);
         }
 
         /** Set standby instance */
@@ -739,8 +751,10 @@ namespace springtail::pg_proxy {
         /**
          * @brief Release session back to the db instance (and associated pool).
          * @param session Session to release
+         * @return true - session deallocated
+         * @return false - session returned to the pool
          */
-        void release_session(ServerSessionPtr session, bool deallocate) override;
+        bool release_session(ServerSessionPtr session, bool deallocate) override;
 
         /**
          * @brief Release session from the free pools that are expired
@@ -965,6 +979,8 @@ namespace springtail::pg_proxy {
         ServerSessionPtr get_pooled_session(const Session::Type type,
                                             const uint64_t db_id,
                                             const std::string &username) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "try to get session from pool for type {}, db_id {}, user {}",
+                        (type == Session::Type::PRIMARY) ? "PRIMARY" : "REPLICA",  db_id, username);
             if (type == Session::Type::PRIMARY) {
                 assert(_primary_set != nullptr);
                 return _primary_set->get_pooled_session(db_id, username);

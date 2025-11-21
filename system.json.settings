@@ -149,7 +149,7 @@
     "aws_users_override": [
         { "role": "replication", "username": "springtail", "password": "springtail", "type": "text" },
         { "role": "fdw_superuser", "username": "springtail", "password": "springtail", "type": "text" },
-        { "role": "proxy_to_fdw", "username": "springtail", "password": "springtail_proxy", "type": "text" },
+        { "role": "proxy_to_fdw", "username": "springtail", "password": "springtail", "type": "text" },
         { "role": "database", "username": "springtail", "password": "springtail", "type": "text" }
     ],
     "db_instances": {
