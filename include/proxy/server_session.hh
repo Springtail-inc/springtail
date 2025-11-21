@@ -612,7 +612,13 @@ namespace springtail::pg_proxy {
          * @brief Helper to release the session
          * @param deallocate if true it will deallocate the session and not add to the pool
          */
-        void _release_session(bool deallocate);
+        bool _release_session(bool deallocate);
+
+        /**
+         * @brief Perform server session cleanup.
+         *
+         */
+        void _session_cleanup();
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
     using ServerSessionWeakPtr = std::weak_ptr<ServerSession>;

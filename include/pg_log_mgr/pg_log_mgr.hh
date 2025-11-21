@@ -61,6 +61,9 @@ namespace springtail::pg_log_mgr {
         /** reconnect time period in seconds */
         static constexpr int RECONNECT_TIME_PERIOD_SEC = 60;
 
+        /** sleep interval for database include changes thread */
+        static constexpr int INCLUDE_CHANGES_SLEEP_SEC = 5;
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id
@@ -124,6 +127,8 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Index reconciliation thread joined");
             _tracer_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "tracer thread joined");
+            _db_include_change_thread.join();
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "database include thread joined");
         }
 
         /** Set shutdown flag */
@@ -193,6 +198,9 @@ namespace springtail::pg_log_mgr {
         /** normal startup from running state */
         void _startup_running();
 
+        /** start log manager threads */
+        bool _start_threads(bool is_init, uint64_t lsn);
+
         /** Setup streaming and startup threads */
         bool _start_streaming(uint64_t lsn = INVALID_LSN, bool do_init = false);
 
@@ -207,6 +215,8 @@ namespace springtail::pg_log_mgr {
         LSN_t _current_lsn{0};                ///< LSN from last message received
         uint64_t _msg_log_start_offset{0};    ///< start offset of unpushed messages
         char _current_msg_type{0};            ///< current message type being processed
+        std::shared_ptr<std::vector<char>> _msg_buffer;  ///< accumulator for current message data
+        bool _memory_buffer_mode{true};       ///< true = use memory buffers, false = file-only mode
 
         /** Process data from replication stream in loop, queue path, offsets */
         void _log_writer_thread();
@@ -283,13 +293,14 @@ namespace springtail::pg_log_mgr {
          * Function for writer thread to read data from connection and store it
          * @param data data read from connection
          * @param logger current log writer
-         * @param queue_append_func function to append data to the logger queue
-         *                          start_offset, end_offset, log file path
+         * @param queue_append_func optional callback to append data to a custom queue
+         *                          (used during recovery); if not provided, pushes directly
+         *                          to _logger_queue with memory buffer optimization
          * @return true if data was read and processed, false on error
          */
         bool _writer_read_data(PgCopyData &data,
                                PgLogWriterPtr &logger,
-                               std::function<void (uint64_t, uint64_t, const std::filesystem::path &)> queue_append_func);
+                               std::function<void (uint64_t, uint64_t, const std::filesystem::path &)> queue_append_func = nullptr);
 
         /**
          * Function for reading replicated data from the connection; attempts reconnect on failure
@@ -298,6 +309,24 @@ namespace springtail::pg_log_mgr {
          * @return true if no error, false on error or shutdown
          */
         bool _read_repl_data(PgLogWriterPtr logger, PgCopyData &data);
+
+        /** Redis cache callback for watching for database schema set change request */
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_schema_change;
+
+        /** Thread for handling database schema includes */
+        std::thread _db_include_change_thread;
+
+        /** Semaphore for signaling include change thread to wake up and start processing
+            pending changes */
+        std::binary_semaphore _db_include_change_sem{0};
+
+        /** Handle database state changes from Redis */
+        void _on_database_schema_change(const std::string &path,
+                                        const nlohmann::json &new_value);
+
+        /** Function for running in include change thread */
+        void _db_include_change();
+
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

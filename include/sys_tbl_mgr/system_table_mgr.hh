@@ -7,21 +7,18 @@
 
 namespace springtail {
 
-    class SystemTableMgr : public Singleton<SystemTableMgr>, public TableMgrBase
+    /**
+     * Base class for system table management. Provides read-only access to system tables.
+     * Use SystemTableMgrClient on client side or SystemTableMgrServer on server side.
+     */
+    class SystemTableMgr : public TableMgrBase
     {
-        friend class Singleton<SystemTableMgr>;
     public:
         /**
          * Construct a system table.
          */
         virtual TablePtr
         get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, const ExtensionCallback &extension_callback = {}) override;
-
-        /**
-         * Construct a mutable system table.
-         */
-        MutableTablePtr
-        get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
         /**
          * Retrieve the column metadata for a given table at a given XID/LSN.
@@ -42,7 +39,7 @@ namespace springtail {
         virtual std::shared_ptr<ExtentSchema>
         get_extent_schema(uint64_t db_id, uint64_t table_id,
                           const XidLsn &xid, const ExtensionCallback &extension_callback = {},
-                          bool allow_undefined = false) override;
+                          bool allow_undefined = false, bool include_internal_row_id = true) override;
 
     protected:
         /**

@@ -1,5 +1,6 @@
 import concurrent.futures
 import io
+import json
 import logging
 from lxml import etree
 import os
@@ -458,6 +459,38 @@ class TestCase:
                             self._raise_error(f'{line_num}: "require_overlays" must specify an overlay name')
                         self._overlays = directive[1:]
 
+                    # Usage - set_include_schema <database> <include schemas list>
+                    # Ex: ### set_include_schema springtail '["public", "test1", "test2", "test3"]'
+                    # Ex: ### set_include_schema springtail '["*"]'
+                    # Changes include schemas list in redis for the given database
+                    elif directive[0] == 'set_include_schema':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "set_include_schema" must be specified in the "test" section')
+                        if len(directive) < 3:
+                            self._raise_error(f'{line_num}: "set_include_schema" must specify database and include schema expression')
+                        self._append_command({
+                            'type': 'set_include_schema',
+                            'database_name': directive[1],
+                            'include_schemas': json.loads(directive[2])
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    # Usage - schema_exists <database> <schema name> <true or false>
+                    # Ex: ### schema_exists springtail public true
+                    # Ex: ### schema_exists springtail test1 false
+                    # In test section -- verifies that the schema exists or does not exists in replica
+                    # In verify section -- verifies that the schema exists or does not exists in primary and replica both
+                    elif directive[0] == 'schema_exists':
+                        if section != 'test' and section != 'verify':
+                            self._raise_error(f'{line_num}: "schema_exists" must be in either the "test" or "verify" sections')
+                        if len(directive) < 4:
+                            self._raise_error(f'{line_num}: "schema_exists" must specify database, schema, and schema exists value')
+                        self._append_command({
+                            'type': 'schema_exists',
+                            'database_name': directive[1],
+                            'schema_name': directive[2],
+                            'exists': directive[3] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
                     else:
                         self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
 
@@ -527,6 +560,14 @@ class TestCase:
                 return int(item['id'])
         return None
 
+    def _get_db_config(self, db_id: int) -> Optional[dict]:
+        """Get database configuration for the given database id."""
+        configs = self._props.get_db_configs()
+        for item in configs:
+            if item['id'] == str(db_id):
+                return item
+        return None
+
     def _restart(self, recovery_point: Optional[str] = None) -> None:
         target_db_id = None
         target_xid = None
@@ -583,6 +624,45 @@ class TestCase:
         if command['type'] == 'restart':
             self._restart()
             return None
+
+        if command['type'] == 'set_include_schema':
+            results = {}
+            instance_id = self._props.get_db_instance_id()
+            database_id = self._get_db_id(command['database_name'])
+            redis_client = self._props.get_config_redis()
+            include_changes_hash_name = f"{instance_id}:include_changes"
+
+            redis_client.hset(include_changes_hash_name, str(database_id), json.dumps(command['include_schemas']))
+
+            while True:
+                time.sleep(1)
+                db_config = self._get_db_config(database_id)
+                if sorted(db_config['include']['schemas']) == sorted(command['include_schemas']):
+                    break
+
+            while True:
+                time.sleep(1)
+                result = redis_client.hget(include_changes_hash_name, str(database_id))
+                if result is None:
+                    break
+
+            return results
+
+        if command['type'] == 'schema_exists':
+            results = {}
+            if self._status == 'TEST_BEGIN':
+                results = self._replica_command(command, do_fetch)
+                if results['exists'] != command['exists']:
+                    self._raise_failure(f'schema_exists: replica expected to return {command['exists']} but returned {results['exists']} instead')
+            else:
+                db_name = command['database_name']
+                txn = self._metadata['default_txn']
+                connection = self._connections[txn]['connections'][db_name]
+                results = self._get_schema_exists_result(connection, command['schema_name'], txn)
+                if results['exists'] != command['exists']:
+                    self._raise_failure(f'schema_exists: primary expected to return {command['exists']} but returned {results['exists']} instead')
+
+            return results
 
         # handle SQL statements
         txn = command['txn']
@@ -767,7 +847,7 @@ class TestCase:
         query = """
             SELECT count(DISTINCT index_id)
             FROM __pg_springtail_catalog.index_names
-            WHERE index_id <> 0 AND (
+            WHERE index_id <> 0 AND index_id <> -1 AND (
                 -- Rule 1 violation: index_id in state 0 but not in 1 or 2
                 (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 0)
                  AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state IN (1, 2)))
@@ -812,7 +892,7 @@ class TestCase:
 
 
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
-        index_cond = 'AND n.index_id <> 0' if is_index_query is True else 'AND n.index_id = 0'
+        index_cond = 'AND n.index_id <> 0 AND n.index_id <> -1' if is_index_query is True else 'AND n.index_id = 0'
 
         xid_sql = f"""SELECT distinct on (n.index_id) index_id, n.xid, n.lsn,n.state
             FROM "__pg_springtail_catalog"."index_names" n
@@ -829,6 +909,22 @@ class TestCase:
 
         return ranking_sql
 
+    def _get_schema_exists_result(self, connection: psycopg2.extensions.connection, schema_name: str, txn: str) -> bool:
+        with connection.cursor() as cursor:
+            results = {}
+
+            sql = f"""SELECT EXISTS (
+                            SELECT 1
+                            FROM pg_catalog.pg_namespace
+                            WHERE nspname = '{schema_name}') AS exists_flag"""
+
+            sql_result = self._execute_sql(cursor, sql, True, txn)
+
+            query_result = False if not sql_result else sql_result[0][0]
+            results['exists'] = query_result
+            return results
+
+
     def _replica_command(self, command: dict, do_fetch: bool = True) -> Optional[dict]:
         """Runs a SQL command against the Springtail replica
         database.
@@ -836,6 +932,12 @@ class TestCase:
         """
         if command['type'] == 'switch_db':
             return None
+
+        if command['type'] == 'schema_exists':
+            db_name = command['database_name']
+            connection = self._fdw[self._db_prefix + db_name]
+            results = self._get_schema_exists_result(connection, command['schema_name'], 'replica')
+            return results
 
         txn = command['txn']
         db_name = self._connections[txn]['current_db']

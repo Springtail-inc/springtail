@@ -27,11 +27,46 @@ namespace ipc = boost::interprocess;
 // global cache names
 static constexpr char SHM_CACHE_ROOTS[] = "springtail.roots";
 static constexpr char SHM_CACHE_SCHEMAS[] = "springtail.schemas";
+static constexpr char SHM_CACHE_USERTYPES[] = "springtail.usertypes";
+
+/**
+ * Find XID from history using schema XID as the key.
+ * @param history The history container.
+ * @param schema_xid The target schema XID.
+ * @param last_xid The latest committed XID.
+ */
+template<typename T>
+uint64_t get_committed_xid_from_history(const T& history, uint64_t schema_xid, uint64_t last_xid)
+{
+    auto pos_i = std::ranges::upper_bound(
+        history,
+        schema_xid,
+        [] (uint64_t a, uint64_t b) {
+            return a < b;
+        },
+        [] (const T::value_type& entry) {
+            return entry.schema_xid;
+        }
+    );
+
+    if (pos_i == history.end()) {
+        return last_xid;
+    }
+    auto target_xid = pos_i->latest_real_commit_xid;
+    DCHECK(target_xid != 0);
+
+    if (target_xid > last_xid) {
+        return last_xid;
+    }
+
+    return target_xid;
+}
+
 
 /**
  * A generic interprocess cache. The cache is intended for caching serialized
- * table metadata. The metadata strings are keyed by the database ID,
- * table ID and XID/LSN.
+ * object/table metadata. The metadata strings are keyed by the database ID,
+ * object ID and XID/LSN.
  */
 class ShmCache 
 {
@@ -68,10 +103,10 @@ class ShmCache
 public:
 
     /**
-     * In order for get_committed_xid() to return a valid XID, update_committed_xid() must
-     * be called at least once every XID_KEEP_ALIVE_PERIOD.
+     * In order for get_committed_xid() to return a valid XID, update_committed_xid() 
+     * or keep_alive() must be called at least once every XID_KEEP_ALIVE_PERIOD.
      */
-    static constexpr std::chrono::duration XID_KEEP_ALIVE_PERIOD = std::chrono::milliseconds(6);
+    static constexpr std::chrono::duration XID_KEEP_ALIVE_PERIOD = std::chrono::milliseconds(60);
 
     /*
      * Create a new cache with the given name. If a cache with
@@ -98,88 +133,100 @@ public:
     }
 
     /**
-     * Mark the table as dropped.
+     * Mark the object as dropped.
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID/LSN.
      */
-    bool mark_dropped(DbId db, TableId tid, XidLsn xid)
+    bool mark_dropped(DbId db, ObjId obj_id, XidLsn xid)
     {
-        return _msg_cache.insert(db, tid, xid, "", true);
+        return _msg_cache.insert(db, obj_id, xid, "", true);
     }
 
     /**
-     * Mark the table as dropped (overload for Xid only).
+     * Mark the object as dropped (overload for Xid only).
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID.
      */
-    bool mark_dropped(DbId db, TableId tid, Xid xid)
+    bool mark_dropped(DbId db, ObjId obj_id, Xid xid)
     {
-        return mark_dropped(db, tid, XidLsn{xid, 0});
+        return mark_dropped(db, obj_id, XidLsn{xid, 0});
     }
 
     /**
      * Cache the string message.
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID/LSN.
      * @param msg The message to cache. Usually it's a serialized proto message.
      * @return true if the element has been actually inserted
      *         and false if it was already in the cache.
      */
     bool
-    insert(DbId db, TableId tid, const XidLsn& xid, std::string_view msg)
+    insert(DbId db, ObjId obj_id, const XidLsn& xid, std::string_view msg)
     {
-        check_free_space_locked();
-        return _msg_cache.insert(db, tid, xid, msg, false);
+        check_free_space();
+        return _msg_cache.insert(db, obj_id, xid, msg, false);
     }
 
     /**
      * Cache the string message (overload for Xid only).
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID.
      * @param msg The message to cache. Usually it's a serialized proto message.
      * @return true if the element has been actually inserted
      *         and false if it was already in the cache.
      */
     bool
-    insert(DbId db, TableId tid, Xid xid, std::string_view msg)
+    insert(DbId db, ObjId obj_id, Xid xid, std::string_view msg)
     {
-        return insert(db, tid, XidLsn{xid, 0}, msg);
+        check_free_space();
+        return insert(db, obj_id, XidLsn{xid, 0}, msg);
     }
 
     /**
      * Get the cached string if present based on a key.
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID/LSN.
      * @return The cached string.
      */
-    std::optional<std::string> find(DbId db, TableId tid, const XidLsn& xid)
+    std::optional<std::string> find(DbId db, ObjId obj_id, const XidLsn& xid)
     {
-        return _msg_cache.find(db, tid, xid);
+        return _msg_cache.find(db, obj_id, xid);
     }
 
     /**
      * Get the cached string if present based on a key (overload for Xid only).
      * @param db The DB ID.
-     * @param tid The table ID.
+     * @param obj_id The object ID.
      * @param xid The XID.
      * @return The cached string.
      */
-    std::optional<std::string> find(DbId db, TableId tid, Xid xid)
+    std::optional<std::string> find(DbId db, ObjId obj_id, Xid xid)
     {
-        return find(db, tid, XidLsn{xid, 0});
+        return find(db, obj_id, XidLsn{xid, 0});
     }
 
     /**
      * This will update committed XID and set _xid_committed_time to now().
      * @param db The DB ID.
      * @param xid The XID.
+     * @param has_schema_changes Indicates if the XID includes schema changes. 
      */
-    void update_committed_xid(DbId db, Xid xid);
+    void update_committed_xid(DbId db, Xid xid, bool has_schema_changes);
+
+    /** 
+     * Cleanup committed history of schema changes
+     */ 
+    void cleanup_xid_history();
+
+    /** 
+     * Delete XID history for a DB
+     */
+    void delete_xid_history(DbId db);
 
     /**
      * This must be called periodically (see XID_KEEP_ALIVE_PERIOD).
@@ -188,20 +235,27 @@ public:
     void keep_alive();
 
     /**
-     * Return the last committed Xid if it is up to date or false otherwise.
-     * The function will check that now() - _xid_commit_time < XID_KEEP_ALIVE_PERIOD.
+     * Return true if the cache is alive (i.e. keep_alive() has been called
+     * recently enough).
      */
-    std::optional<Xid> get_committed_xid(DbId db);
-
     bool is_alive();
 
     /**
-     * Return all tables that are tracked by the cache.
-     * The least used tables will be at the front.
+     * Return the last committed Xid if it is up to date or false otherwise.
+     * The function will check that now() - _xid_commit_time < XID_KEEP_ALIVE_PERIOD.
+     * @param db The DB ID.
+     * @param schema_xid The last known schema XID.
      */
-    std::vector<TableId> get_db_tables(DbId db, bool exclude_dropped=true)
+    std::optional<Xid> get_committed_xid(DbId db, Xid schema_xid);
+
+
+    /**
+     * Return all objects that are tracked by the cache.
+     * The least used objects will be at the front.
+     */
+    std::vector<ObjId> get_db_objects(DbId db, bool exclude_dropped=true)
     {
-        return _msg_cache.get_db_tables(db, exclude_dropped);
+        return _msg_cache.get_db_objects(db, exclude_dropped);
     }
 
     /**
@@ -226,6 +280,9 @@ private:
      * if the free memory size goes below the limit, we start evictions
      * until we reach the watermark
      */
+    void check_free_space();
+
+    /** Same as above but without locking the mutex. The caller must to make sure that it's locked.*/
     void check_free_space_locked();
 
     using String = GenericCache::Value;
@@ -254,9 +311,18 @@ private:
     // Xid updates
     using Time = std::chrono::time_point<std::chrono::high_resolution_clock>;
     using XidMap = ipc::map<DbId, Xid, std::less<DbId>, Alloc<std::pair<const DbId, Xid>>>;
-
     Time* _xid_commit_time;
     XidMap* _committed_xid_map;
+
+    struct XidHistoryEntry {
+        Xid schema_xid;
+        Xid latest_real_commit_xid;
+    };
+    using XidHistory = ipc::vector<XidHistoryEntry, Alloc<XidHistoryEntry>>;
+    using XidHistoryMap = ipc::map<DbId, XidHistory, std::less<DbId>, Alloc<std::pair<const DbId, XidHistory>>>;
+
+    XidHistory::allocator_type _history_alloc;
+    XidHistoryMap* _xid_history_map;
 };
 
 }  // namespace springtail::sys_tbl_mgr

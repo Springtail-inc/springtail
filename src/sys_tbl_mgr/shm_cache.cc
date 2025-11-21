@@ -1,7 +1,9 @@
 #include <absl/log/check.h>
 #include <bits/ranges_algo.h>
+#include <optional>
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <common/logging.hh>
+#include <redis/redis_ddl.hh>
 
 using namespace springtail::sys_tbl_mgr;
 
@@ -13,7 +15,8 @@ ShmCache::ShmCache(std::string name, size_t size)
     _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str(), []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()},
-    _msg_cache(_mutex, _messages_alloc, _string_alloc)
+    _msg_cache(_mutex, _messages_alloc, _string_alloc),
+    _history_alloc{_shm.get_segment_manager()}
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {} - {}", _name, size);
     auto free_size = _shm.get_free_memory();
@@ -28,7 +31,8 @@ ShmCache::ShmCache(std::string name)
     _mutex{ipc::open_only, (_name + std::string(".mutex")).c_str()},
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()},
-    _msg_cache(_mutex, _messages_alloc, _string_alloc)
+    _msg_cache(_mutex, _messages_alloc, _string_alloc),
+    _history_alloc{_shm.get_segment_manager()}
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {}", _name);
     _init();
@@ -63,8 +67,11 @@ ShmCache::_init()
 
     _committed_xid_map = _shm.find_or_construct<XidMap>("committed_xid")(
             XidMap::allocator_type(_shm.get_segment_manager()));
-
     CHECK(_committed_xid_map);
+
+    _xid_history_map = _shm.find_or_construct<XidHistoryMap>("xid_history")(
+            XidHistoryMap::allocator_type(_shm.get_segment_manager()));
+    CHECK(_xid_history_map);
 }
 
 
@@ -78,14 +85,28 @@ ShmCache::remove(const std::string& name)
 }
 
 void
-ShmCache::update_committed_xid(DbId db, Xid xid)
+ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
 {
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
     CHECK(lock.owns());
 
+    check_free_space_locked();
+
     *_xid_commit_time = std::chrono::high_resolution_clock::now();
+    if (has_schema_changes) {
+        Xid last_xid = 0;
+        if (_committed_xid_map->find(db) != _committed_xid_map->end()) {
+            last_xid = (*_committed_xid_map)[db];
+        }
+        // put the schema change xid and last committed xid into history
+        auto it = _xid_history_map->find(db);
+        if (it == _xid_history_map->end()) {
+            it = _xid_history_map->emplace(db, XidHistory{_history_alloc}).first;
+        }
+        it->second.emplace_back(xid, last_xid);
+    }
     (*_committed_xid_map)[db] = xid;
 }
 
@@ -114,7 +135,7 @@ ShmCache::is_alive()
 }
 
 std::optional<Xid>
-ShmCache::get_committed_xid(DbId db)
+ShmCache::get_committed_xid(DbId db, Xid schema_xid)
 {
     ipc::sharable_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
@@ -122,18 +143,92 @@ ShmCache::get_committed_xid(DbId db)
     CHECK(lock.owns());
 
     if (*_xid_commit_time == Time()) {
-        return {};
+        return std::nullopt;
     }
 
     if ( (std::chrono::high_resolution_clock::now() -  *_xid_commit_time) > XID_KEEP_ALIVE_PERIOD) {
-        return {};
+        return std::nullopt;
     }
 
-    auto it = _committed_xid_map->find(db);
-    if (it == _committed_xid_map->end()) {
-        return {};
+    Xid last_xid = 0;
+    {
+        auto it = _committed_xid_map->find(db);
+        if (it == _committed_xid_map->end()) {
+            return std::nullopt;
+        }
+        last_xid = it->second;
     }
-    return it->second;
+
+    // Look up history if the history is ahead of the commit, return the committed xid
+    auto it = _xid_history_map->find(db); 
+    if (it == _xid_history_map->end()) {
+        // something is wrong, no history found
+        return std::nullopt;
+    }
+
+    return get_committed_xid_from_history(
+        it->second,
+        schema_xid,
+        last_xid
+    );
+}
+
+void ShmCache::delete_xid_history(DbId db)
+{
+    LOG_INFO("Delete db history: {}", db);
+    ipc::scoped_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    auto it = _xid_history_map->find(db);
+    if (it != _xid_history_map->end()) {
+        _xid_history_map->erase(it);
+    }
+    auto it1 = _committed_xid_map->find(db);
+    if (it1 != _committed_xid_map->end()) {
+        _committed_xid_map->erase(it1);
+    }
+}
+
+void ShmCache::cleanup_xid_history()
+{
+    ipc::scoped_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    if (_xid_history_map->empty()) {
+        return;
+    }
+
+    for (auto& [db, history] : *_xid_history_map) {
+        if (history.empty()) {
+            continue;
+        }
+        uint64_t min_schema_xid = RedisDDL::get_instance()->min_schema_xid(db);
+
+        // find position lower than min_schema_xid
+        auto it = std::ranges::lower_bound(
+            history,
+            min_schema_xid,
+            [] (Xid a, Xid b) {
+                return a < b;
+            },
+            [] (const XidHistoryEntry& entry) {
+                return entry.schema_xid;
+            }
+        );
+        // erase all smaller xids
+        history.erase(history.begin(), it);
+    }
+}
+
+void
+ShmCache::check_free_space()
+{
+    ipc::scoped_lock<Mutex> lock(_mutex);
+    check_free_space_locked();
 }
 
 void
@@ -149,8 +244,7 @@ ShmCache::check_free_space_locked()
         if (static_cast<double>(free_size) > static_cast<double>(_shm.get_size())*FREE_MEM_WATERMARK) {
             break;
         }
-
-        _msg_cache.evict();
+        _msg_cache.evict_locked();
     }
 }
 

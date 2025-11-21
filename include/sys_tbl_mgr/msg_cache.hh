@@ -17,10 +17,10 @@ namespace springtail::sys_tbl_mgr {
     namespace bmi = boost::multi_index;
 
     using DbId = uint64_t;
-    using TableId = uint64_t;
+    using ObjId = uint64_t; //< Object ID such as table ID
     using Xid = uint64_t;
 
-    /** A cache for storing messages per (db, table, xid_lsn) key.
+    /** A cache for storing messages per (db, object_id, xid_lsn) key.
      * It uses LRU eviction policy.
      * The cache is thread-safe.
      * The cache doesn't own the containers used for caching.
@@ -34,7 +34,7 @@ namespace springtail::sys_tbl_mgr {
         template<typename T>
         using Alloc = Traits::template Alloc<T>;
 
-        using Key = std::pair<DbId, TableId>;
+        using Key = std::pair<DbId, ObjId>;
         using Value = Traits::Value;
         using Mutex = Traits::Mutex;
         using Lock = Traits::Lock;
@@ -57,7 +57,7 @@ namespace springtail::sys_tbl_mgr {
         struct LruKey
         {
             DbId db;
-            TableId tid;
+            ObjId obj_id;
             XidLsn xid;
             bool operator==(const LruKey& rhs) const = default;
         };
@@ -65,8 +65,8 @@ namespace springtail::sys_tbl_mgr {
         {
             size_t operator()(const LruKey& k) const
             {
-                using Tuple = std::tuple<DbId, TableId, uint64_t, uint64_t>;
-                Tuple t{k.db, k.tid, k.xid.xid, k.xid.lsn};
+                using Tuple = std::tuple<DbId, ObjId, uint64_t, uint64_t>;
+                Tuple t{k.db, k.obj_id, k.xid.xid, k.xid.lsn};
                 return boost::hash<Tuple>{}(t);
             }
         };
@@ -116,20 +116,20 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Cache the string message.
          * @param db The DB ID.
-         * @param tid The table ID.
+         * @param obj_id The object ID.
          * @param xid The XID/LSN pair.
          * @param msg The message to cache. Usually it's a serialized proto message.
-         * @param drop_table Mark the table as dropped,
+         * @param drop_object Mark the object as dropped,
          * @return true if the element has been actually inserted
          *         and false if it was already in the cache.
          */
-        bool insert(DbId db, TableId tid, const XidLsn& xid, std::string_view msg, bool drop_table)
+        bool insert(DbId db, ObjId obj_id, const XidLsn& xid, std::string_view msg, bool drop_object)
         {
-            Key k{db, tid};
+            Key k{db, obj_id};
 
             Message item{_value_alloc};
             item.xid = xid;
-            item.dropped = drop_table;
+            item.dropped = drop_object;
 
             auto cmp = [](const auto& a, const auto& b) {return a.xid < b.xid;};
 
@@ -142,13 +142,13 @@ namespace springtail::sys_tbl_mgr {
 
             bool key_exists = it != _cache->end();
 
-            // get the last cached message for the table
+            // get the last cached message for the object
             // and make sure that it wasn't dropped
-            if (!drop_table && key_exists && !it->second.empty()) {
+            if (!drop_object && key_exists && !it->second.empty()) {
                 auto msg_it = it->second.end();
                 --msg_it;
                 if (msg_it->xid < xid) {
-                    // we don't resurrect tables
+                    // we don't resurrect object
                     DCHECK(!msg_it->dropped);
                 }
             }
@@ -170,7 +170,7 @@ namespace springtail::sys_tbl_mgr {
                         it->second.push_back(item);
                         std::ranges::sort(it->second, cmp);
                     }
-                    LruKey lk{db, tid, xid};
+                    LruKey lk{db, obj_id, xid};
                     _lru->push_front(lk);
                     break;
                 } catch (const std::exception&) {
@@ -184,7 +184,7 @@ namespace springtail::sys_tbl_mgr {
                         }
                     }
 
-                    auto it_lru = _lru->template get<1>().find(LruKey{db, tid, xid});
+                    auto it_lru = _lru->template get<1>().find(LruKey{db, obj_id, xid});
                     if (it_lru != _lru->template get<1>().end()) {
                         _lru->template get<1>().erase(it_lru);
                     }
@@ -201,19 +201,19 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Get the cached string if present based on a key.
          * @param db The DB ID.
-         * @param tid The table ID.
+         * @param obj_id The object ID.
          * @param xid The XID/LSN pair.
          * @return The cached string.
          */
-        std::optional<std::string> find(DbId db, TableId tid, const XidLsn& xid)
+        std::optional<std::string> find(DbId db, ObjId obj_id, const XidLsn& xid)
         {
             std::string ret;
-            LruKey lk{db, tid, xid};
+            LruKey lk{db, obj_id, xid};
 
             { //read-only portion
                 SharableLock l{_mutex};
 
-                auto it = _cache->find({db, tid});
+                auto it = _cache->find({db, obj_id});
                 if (it == _cache->end()) {
                     return {};
                 }
@@ -272,37 +272,37 @@ namespace springtail::sys_tbl_mgr {
         }
 
         /**
-         * Return all tables that are tracked by the cache.
-         * The least used tables will be at the front.
+         * Return all objects that are tracked by the cache.
+         * The least used objects will be at the front.
          */
-        std::vector<TableId>
-        get_db_tables(DbId db, bool exclude_dropped)
+        std::vector<ObjId>
+        get_db_objects(DbId db, bool exclude_dropped)
         {
-            std::vector<TableId> r;
+            std::vector<ObjId> r;
 
             Lock lock(_mutex);
 
             auto& seq_idx = _lru->template get<0>();
             for (auto const& v: seq_idx) {
-                if (v.db == db && std::ranges::find(r, v.tid) == r.end()) {
+                if (v.db == db && std::ranges::find(r, v.obj_id) == r.end()) {
                     if (exclude_dropped) {
-                        // check if the table was dropped
-                        const auto& it = _cache->find({db, v.tid});
+                        // check if the object was dropped
+                        const auto& it = _cache->find({db, v.obj_id});
                         CHECK(it != _cache->end());
                         CHECK(!it->second.empty());
                         auto msg_it = it->second.end();
                         --msg_it;
                         if (!msg_it->dropped) {
-                            r.push_back(v.tid);
+                            r.push_back(v.obj_id);
                         } else {
                             CHECK(msg_it->msg.empty());
                         }
                     } else {
-                        r.push_back(v.tid);
+                        r.push_back(v.obj_id);
                     }
                 }
             }
-            // least used tables are at the front of the list
+            // least used objects are at the front of the list
             std::ranges::reverse(r);
 
             return r;
@@ -317,11 +317,10 @@ namespace springtail::sys_tbl_mgr {
             evict_locked();
         }
 
-    protected:
         void evict_locked()
         {
             auto key = _lru->back();
-            auto it = _cache->find({key.db, key.tid});
+            auto it = _cache->find({key.db, key.obj_id});
             CHECK(it != _cache->end());
 
             Message msg(_value_alloc);
@@ -340,6 +339,8 @@ namespace springtail::sys_tbl_mgr {
             _lru->pop_back();
         }
 
+
+    protected:
         Mutex& _mutex;
         Messages::allocator_type& _messages_alloc;
         Value::allocator_type& _value_alloc;

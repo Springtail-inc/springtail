@@ -287,6 +287,11 @@ namespace springtail
         */
        static void _load_extn_operators(uint64_t db_id, const std::string& extension);
 
+       /**
+        * @brief Load pg extension opclasses
+        */
+       static void _load_extn_opclasses(uint64_t db_id, const std::string& extension);
+
         /**
          * @brief Get namespaces, returns a pair of namespace name and oid
          * @param db_id database id
@@ -461,5 +466,34 @@ namespace springtail
         static std::vector<PgCopyResultPtr>
             copy_table(uint64_t db_id, uint64_t xid,
                        const nlohmann::json &include_json);
+
+        /**
+         * @brief Get the schema list of schemas for the give database
+         *
+         * @param db_id - database id
+         * @return std::vector<std::string> - list of schema names
+         */
+        static std::vector<std::string>
+            get_schema_list(uint64_t db_id);
+
+        /**
+         * @brief Get a map of schema names to the list of table oids for each schema
+         *
+         * @param db_id - database
+         * @param schema_list - list of schema in json format
+         * @return std::unordered_map<std::string, std::unordered_set<uint32_t>> -
+         *                  map of schema names to the list of table oids for each schema
+         */
+        static std::unordered_map<std::string, std::unordered_set<uint32_t>>
+            get_table_oids_for_schemas(uint64_t db_id, const nlohmann::json &schema_list);
+
+        /**
+         * @brief Issue a query that signals to drop schemas.
+         *
+         * @param db_id - database
+         * @param schema_list - json list of schema names that need to be dropped
+         */
+        static void
+            drop_schemas(uint64_t db_id, const nlohmann::json &schema_list);
     };
 }

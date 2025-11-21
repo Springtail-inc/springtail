@@ -680,3 +680,32 @@ BEGIN
     END LOOP;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.send_drop_schema_msg(schema_name TEXT)
+    RETURNS void  LANGUAGE plpgsql AS $$
+DECLARE
+    schema_oid oid;
+    msg json;
+BEGIN
+    -- get OID of the schema
+    SELECT n.oid INTO schema_oid
+    FROM pg_namespace n
+    WHERE n.nspname = schema_name;
+
+    IF schema_oid IS NULL THEN
+        RAISE NOTICE 'Schema "%" does not exist', schema_name;
+        RETURN;
+    END IF;
+
+    -- generate message same for DROP SCHEMA
+    msg := json_build_object(
+        'cmd', 'DROP SCHEMA',
+        'oid', schema_oid::bigint, -- oid is unsigned int, but comes as string
+        'obj', 'schema',
+        'name', schema_name);
+
+    -- tag_name is DROP TABLE or DROP INDEX or DROP SCHEMA
+    PERFORM pg_logical_emit_message(true, 'springtail:DROP SCHEMA', msg::text);
+
+END;
+$$;

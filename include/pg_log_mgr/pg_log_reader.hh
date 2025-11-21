@@ -153,17 +153,9 @@ namespace springtail::pg_log_mgr {
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue),
                 _exists_cache(exists_cache), _index_requests_mgr(index_requests_mgr)
             {
-                auto tracer = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader");
-                _span = tracer->StartSpan("Transaction");
-                _span->SetAttribute("pg_xid", pg_xid);
             }
 
-            ~Batch()
-            {
-                if (_span->IsRecording()) {
-                    _span->End();
-                }
-            }
+            ~Batch() = default;
 
             /**
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
@@ -219,6 +211,7 @@ namespace springtail::pg_log_mgr {
 
                 MutableFieldPtr op_f; ///< The field accessor for the mutation's operation type.
                 MutableFieldPtr lsn_f; ///< The field accessor for the mutation's LSN.
+                MutableFieldPtr row_id_f; ///< The field accessor for the mutation's internal_row_id.
 
                 MutableFieldArrayPtr fields; ///< The underlying fields of the schema that match the columns from the table schema.
                 MutableFieldArrayPtr pkey_fields; ///< The underlying fields of the schema that match the pkey columns from the table schema.
@@ -232,9 +225,15 @@ namespace springtail::pg_log_mgr {
                 {}
 
                 /**
-                 * Updates the schema and related fields from the table_schema.
+                 * Updates the schema and related fields from the cached table schema.
                  */
-                void update_schema();
+                void update_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+                /**
+                 * Creates the batch schema from the provided table_schema (non-cached).
+                 * Use this for CREATE/ALTER TABLE where the table schema isn't in the cache yet.
+                 */
+                void create_schema(ExtentSchemaPtr table_schema);
 
                 /**
                  * Update the fields and pkey fields for the table.
@@ -366,7 +365,6 @@ namespace springtail::pg_log_mgr {
 
             uint64_t _lsn = 0; ///< The LSN counter
 
-            open_telemetry::SpanPtr _span; ///< Timing for the txn processing.
             CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
 
             ExistsCachePtr _exists_cache; ///< Reference to the exists cache

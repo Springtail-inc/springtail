@@ -105,7 +105,8 @@ const std::vector<std::string> Schemas::Primary::KEY = {"table_id", "position", 
 const std::vector<SchemaColumn> TableStats::Data::SCHEMA = {
     {"table_id", 1, SchemaType::UINT64, INT8OID, false, 0},
     {"xid", 2, SchemaType::UINT64, INT8OID, false, 1},
-    {"row_count", 3, SchemaType::UINT64, INT8OID, false}};
+    {"row_count", 3, SchemaType::UINT64, INT8OID, false},
+    {"last_internal_row_id", 4, SchemaType::UINT64, INT8OID, false}};
 
 const std::vector<SchemaColumn> TableStats::Primary::SCHEMA = {
     {"table_id", 1, SchemaType::UINT64, INT8OID, false},

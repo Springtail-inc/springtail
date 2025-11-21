@@ -47,8 +47,6 @@ namespace springtail::pg_log_mgr {
     {
         time_trace::Trace commit_trace;
         TIME_TRACE_START(commit_trace);
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-        _span->AddEvent("commit", {{"pg_commit_time", md.pg_commit_ts.to_unix_ns()}});
 
         // update any changes in the table invalidation state
         for (const auto &entry : _table_validations) {
@@ -92,11 +90,6 @@ namespace springtail::pg_log_mgr {
         WriteCacheServer::get_instance()->commit(_db, xid, pg_xids, std::move(md));
 
         // stop timing for this transaction
-        if (_span->IsRecording()) {
-            _span->SetAttribute("xid", static_cast<int64_t>(xid));
-            _span->SetAttribute("pg_xids", fmt::format("{}", fmt::join(pg_xids, ",")));
-        }
-        _span->End();
         TIME_TRACE_STOP(commit_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("commit-xid_{}", xid), commit_trace);
     }
@@ -104,30 +97,16 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-        _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
-
         // drop any batches for all active txns
         for (auto &&entry : _txns) {
             auto txn = entry.second;
             WriteCacheServer::get_instance()->abort(_db, txn->pg_xid);
         }
-
-        // stop timing for this transaction
-        _span->End();
     }
 
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-
-        // Add subtransaction abort event with the provided timestamp
-        _span->AddEvent("subtransaction_abort", {
-            {"sub_xid", pg_xid},
-            {"pg_abort_time", abort_ts.to_unix_ns()}
-        });
-
         // find the txn to abort it
         auto itr = _txns.find(pg_xid);
         assert(itr != _txns.end());
@@ -143,24 +122,31 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::TableEntry::update_schema()
+    PgLogReader::Batch::TableEntry::update_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
     {
-        auto columns = table_schema->column_order();
-        DCHECK_GT(columns.size(), 0);
-
-        auto sort_keys = table_schema->get_sort_keys();
-        sort_keys.push_back("__springtail_lsn");
-
-        SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
-        SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
-
-        std::vector<SchemaColumn> new_columns{op, lsn};
-
+        // Get the cached batch schema
         ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
-        schema = table_schema->create_schema(columns, new_columns, sort_keys, extension_callback, true);
+        schema = TableMgr::get_instance()->get_pg_log_batch_schema(db_id, table_id, xid, extension_callback);
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
+        row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
+
+        // reset fields; forces a resync of fields during add_mutation()
+        fields = nullptr;
+    }
+
+    void
+    PgLogReader::Batch::TableEntry::create_schema(ExtentSchemaPtr table_schema)
+    {
+        // Create the batch schema directly from the provided table schema (non-cached)
+        // This is used for CREATE/ALTER TABLE where the table doesn't exist in the cache yet
+        ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
+        schema = TableMgr::get_instance()->create_pg_log_batch_schema(table_schema, extension_callback);
+
+        op_f = schema->get_mutable_field("__springtail_op");
+        lsn_f = schema->get_mutable_field("__springtail_lsn");
+        row_id_f = schema->get_mutable_field(constant::INTERNAL_ROW_ID);
 
         // reset fields; forces a resync of fields during add_mutation()
         fields = nullptr;
@@ -255,7 +241,6 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -264,9 +249,9 @@ namespace springtail::pg_log_mgr {
             if (entry.schema == nullptr) {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, {PgExtnRegistry::get_instance()->comparator_func}, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, {PgExtnRegistry::get_instance()->comparator_func}, true, false);
                 }
-                entry.update_schema();
+                entry.update_schema(_db, tid, xidlsn);
             }
 
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Create extent with row width: {}", entry.schema->row_size());
@@ -293,6 +278,7 @@ namespace springtail::pg_log_mgr {
         }
         entry.op_f->set_uint8(&row, T);
         entry.lsn_f->set_uint64(&row, _lsn++);
+        entry.row_id_f->set_uint64(&row, 0);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
@@ -312,8 +298,6 @@ namespace springtail::pg_log_mgr {
                                  int32_t pg_xid,
                                  const PgMsgTruncate &msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-
         // get the current txn
         auto txn = _get_txn(pg_xid);
 
@@ -352,9 +336,9 @@ namespace springtail::pg_log_mgr {
                 XidLsn current(current_xid);
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, {PgExtnRegistry::get_instance()->comparator_func}, true);
+                    entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, current, {PgExtnRegistry::get_instance()->comparator_func}, true, false);
                 }
-                entry.update_schema();
+                entry.update_schema(_db, tid, current);
             }
 
             entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size(),
@@ -365,6 +349,7 @@ namespace springtail::pg_log_mgr {
             auto &&row = entry.extent->append();
             entry.op_f->set_uint8(&row, PgMsgEnum::TRUNCATE);
             entry.lsn_f->set_uint64(&row, _lsn++);
+            entry.row_id_f->set_uint64(&row, 0);
         }
     }
 
@@ -456,8 +441,6 @@ namespace springtail::pg_log_mgr {
                                       PgMsgPtr msg,
                                       const std::vector<std::string>& include_schemas)
     {
-        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
-
         // perform the table column validations and update the message accordingly
         if (!_handle_validation(msg, include_schemas)) {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Skip CREATE_TABLE due to invalid table: tid={} pg_xid={}\n", oid, pg_xid);
@@ -575,8 +558,9 @@ namespace springtail::pg_log_mgr {
             }
 
             ExtensionCallback extension_callback = {PgExtnRegistry::get_instance()->comparator_func};
-            entry.table_schema = std::make_shared<ExtentSchema>(columns, extension_callback, true);
-            entry.update_schema();
+            entry.table_schema = std::make_shared<ExtentSchema>(columns, extension_callback, true, false);
+            // Use create_schema() instead of update_schema() since the table doesn't exist in cache yet
+            entry.create_schema(entry.table_schema);
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set
             //     of mutations, but it's not clear we actually need it since the mutations would be
@@ -625,7 +609,8 @@ namespace springtail::pg_log_mgr {
 
                 // use the schema information from the current txn in the subtxn
                 auto &&p = sub_txn->table_map.try_emplace(entry.first, TableEntry{ table.table_schema });
-                p.first->second.update_schema();
+                // Use LATEST_XID to get the latest schema version
+                p.first->second.update_schema(_db, entry.first, XidLsn(constant::LATEST_XID));
             }
         }
 
@@ -727,17 +712,53 @@ namespace springtail::pg_log_mgr {
                 PgMsgNamespace namespace_msg{table_msg.lsn, table_msg.namespace_id, table_msg.xid, table_msg.namespace_name};
 
                 // make sure that the namespace is created
-                std::string &&ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
-                nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+                std::string &&ns_ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
+                nlohmann::json ns_action = nlohmann::json::parse(ns_ddl_stmt).at("action");
 
-                if (action.get<std::string>() != "no_change") {
+                if (ns_action.get<std::string>() != "no_change") {
                     LOG_INFO("Table namespace created: {} {} {}", table_msg.table, table_msg.namespace_name, table_msg.namespace_id);
-                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ns_ddl_stmt);
                 }
 
-                ddl_stmt = server->create_table(_db, xidlsn, table_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
-                _exists_cache->insert(_db, table_msg.oid, true);
+                // Create table - ALWAYS returns JSON array
+                std::string ddl_stmt = server->create_table(_db, xidlsn, table_msg);
+                nlohmann::json ddl_array = nlohmann::json::parse(ddl_stmt);
+
+                DCHECK(ddl_array.is_array());  // Always an array now
+
+                // Array structure: [CREATE TABLE, optional ATTACH PARTITION(s)...]
+                // Only the first entry (CREATE TABLE) has a tid that needs to be cached
+                DCHECK(!ddl_array.empty());  // Should always have at least CREATE TABLE
+
+                // Process first entry (CREATE TABLE) and update exists cache
+                const auto& create_ddl = ddl_array[0];
+                DCHECK(create_ddl["action"].get<std::string>() == "create");
+
+                std::string create_ddl_str = nlohmann::to_string(create_ddl);
+                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, create_ddl_str);
+
+                uint32_t tid = create_ddl["tid"].get<uint32_t>();
+                _exists_cache->insert(_db, tid, true);
+
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                          "Added CREATE TABLE DDL for table {} to FDW queue", tid);
+
+                // Process remaining entries (ATTACH PARTITION DDLs) - just add to RedisDDL
+                for (size_t i = 1; i < ddl_array.size(); i++) {
+                    const auto& attach_ddl = ddl_array[i];
+                    DCHECK(attach_ddl["action"].get<std::string>() == "attach_partition");
+
+                    std::string attach_ddl_str = nlohmann::to_string(attach_ddl);
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, attach_ddl_str);
+
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
+                              "Added ATTACH PARTITION DDL to FDW queue");
+                }
+
+                if (ddl_array.size() > 1) {
+                    LOG_INFO("Processed CREATE TABLE for {} and {} ATTACH PARTITION DDL(s)",
+                             tid, ddl_array.size() - 1);
+                }
                 break;
             }
         case PgMsgEnum::ALTER_TABLE:
@@ -921,8 +942,20 @@ namespace springtail::pg_log_mgr {
                              uint64_t timestamp,
                              const PgLogQueueEntryPtr& entry)
     {
-        // init stream reader
-        _reader.set_file(path, entry->start_offset);
+        // init stream reader based on entry type
+        if (entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER) {
+            // zero-copy path: read directly from memory buffer
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                      "Reading from memory buffer: size={}, path={}",
+                      entry->buffer_size, path);
+            _reader.set_buffer(entry->memory_buffer);
+        } else {
+            // traditional path: read from file
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                      "Reading from file: path={}, start_offset={}, end_offset={}",
+                      path, entry->start_offset, entry->end_offset);
+            _reader.set_file(path, entry->start_offset);
+        }
 
         static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
@@ -947,10 +980,19 @@ namespace springtail::pg_log_mgr {
             PgMsgPtr msg = _reader.read_message(filter, eos);
 
             if (msg != nullptr) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                          "Read message: msg_type={}, offset={}, eos={}, entry_type={}",
+                          static_cast<int>(msg->msg_type), _reader.offset(), eos,
+                          entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER ? "MEMORY" : "FILE");
                 msg->pg_log_timestamp = timestamp;
 
                 // process the message
                 this->enqueue_msg(msg);
+            } else {
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                          "Read null message: offset={}, eos={}, entry_type={}",
+                          _reader.offset(), eos,
+                          entry->type == PgLogQueueEntry::Type::MEMORY_BUFFER ? "MEMORY" : "FILE");
             }
         }
     }
@@ -1194,7 +1236,7 @@ namespace springtail::pg_log_mgr {
             // for operations at the SysTblMgr
             auto server = sys_tbl_mgr::Server::get_instance();
             nlohmann::json ddls = nlohmann::json::array({});
-            std::vector<uint64_t> table_ids;
+            std::vector<uint32_t> table_ids;
 
             // issue the updates to the system tables
             for (auto &entry : swap->table_info()) {
@@ -1249,9 +1291,9 @@ namespace springtail::pg_log_mgr {
 
                     // store the ddl mutations for the FDWs
                     auto ddl = nlohmann::json::parse(ddl_str);
-                    assert(ddl.is_array());
+                    CHECK(ddl.is_array());
                     ddls.insert(ddls.end(), ddl.begin(), ddl.end());
-                    table_ids.emplace_back(static_cast<uint64_t>(entry->table_id));
+                    table_ids.emplace_back(static_cast<uint32_t>(entry->table_id));
                 }
             }
             LOG_INFO("Swapped synced tables: {}@{}", db_id, xid);
@@ -1518,6 +1560,6 @@ namespace springtail::pg_log_mgr {
         // record the schema change into the batch
         // note: the current XID is only used to determine table existence
         _current_batch->schema_change(this->get_current_xid(), table_oid, oid, pg_xid, pg_xid_txn,
-                msg, Properties::get_include_schemas(_db_id));
+                msg, Properties::get_include_schemas(_db_id, true));
     }
 } // namespace springtail::pg_log_mgr

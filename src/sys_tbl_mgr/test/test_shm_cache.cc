@@ -120,18 +120,18 @@ TEST(ShmTest, Lifecycle) {
             ASSERT_EQ(os.str(), r.value());
         }
 
-        auto db_tables = c.get_db_tables(10000);
+        auto db_tables = c.get_db_objects(10000);
         ASSERT_EQ(db_tables.size(), 1);
 
         // drop the table at some future xid
         c.mark_dropped(10000, 20000, 500);
 
-        db_tables = c.get_db_tables(10000);
+        db_tables = c.get_db_objects(10000);
         // no tables now
         ASSERT_EQ(db_tables.size(), 0);
 
         // include dropped tables
-        db_tables = c.get_db_tables(10000, false);
+        db_tables = c.get_db_objects(10000, false);
         ASSERT_EQ(db_tables.size(), 1);
 
         // but should still be able to access previous xid's
@@ -233,4 +233,44 @@ TEST(ShmTest, BasicEviction) {
     // the first element must be present
     r = c.find(10000, 20000, 100);
     ASSERT_TRUE(r.has_value());
+}
+
+TEST(ShmTest, XidUpdates) {
+    sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE};
+
+    uint64_t db = 1;
+    uint64_t xid = 100;
+
+    // Initially, get_committed_xid should return nullopt
+    auto result = c.get_committed_xid(db, 0);
+    ASSERT_FALSE(result.has_value());
+
+    // Update committed XID without schema changes
+    c.update_committed_xid(db, xid, true);
+
+    // Now should get the XID back
+    result = c.get_committed_xid(db, xid);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result.value(), xid);
+
+    // Update to a higher XID
+    uint64_t xid2 = 200;
+    c.update_committed_xid(db, xid2, false);
+
+    result = c.get_committed_xid(db, xid);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result.value(), xid2);
+
+    // Update to a higher XID
+    uint64_t xid3 = 300;
+    c.update_committed_xid(db, xid3, true);
+
+    result = c.get_committed_xid(db, xid);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result.value(), xid2);
+
+    result = c.get_committed_xid(db, xid3);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result.value(), xid3);
 }
