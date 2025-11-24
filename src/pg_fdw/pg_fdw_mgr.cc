@@ -667,6 +667,8 @@ namespace springtail::pg_fdw {
         if (schema_xid > _schema_xid) {
             _schema_xid = schema_xid;
             sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
+            // Also invalidate the Table cache since table structures may have changed
+            TableMgrClient::get_instance()->invalidate_table_cache_on_schema_change();
         }
 
         // lookup pg_xid in xid_map;
@@ -2229,21 +2231,15 @@ namespace springtail::pg_fdw {
     PgFdwState::PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid)
             : table(table), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
-        columns = TableMgrClient::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
+        // Get columns from cached ExtentSchema instead of RPC
+        columns = table->extent_schema()->get_column_map();
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Received columns, column count: {}", columns.size());
 
         for (const auto &entry : columns) {
             name_map[entry.second.name] = entry.second.position;
         }
 
-        if (tid > constant::MAX_SYSTEM_TABLE_ID) {
-            auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
-            for (auto& v: meta->indexes) {
-                if (static_cast<sys_tbl::IndexNames::State>(v.state) != sys_tbl::IndexNames::State::READY) {
-                    continue;
-                }
-                indexes.push_back(v);
-            }
-        }
+        // Get indexes from cached Table instead of RPC
+        indexes = table->get_ready_indexes();
     }
 } // namespace springtail::pg_fdw
