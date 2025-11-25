@@ -390,7 +390,7 @@ namespace springtail::pg_fdw {
 
         for (auto const& c: idx.columns) {
             auto qual = find_qual(c.position);
-            if (find_qual(c.position)) {
+            if (qual) {
                 quals.push_back(qual);
             } else {
                 break;
