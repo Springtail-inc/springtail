@@ -206,11 +206,10 @@ namespace springtail::pg_fdw {
         List* fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, const List* quals, bool use_secondary = false);
 
         /** Get list of path keys -- indexes
-         * @param planstate Planstate
-         * @param state Scan state
+         * @param planstate Planstate (contains cached qual_indexes and join_indexes)
          * @return List of a List of path keys (key attnum, num rows)
          */
-        List *fdw_get_path_keys(const SpringtailPlanState *planstate, PgFdwState* state);
+        List *fdw_get_path_keys(const SpringtailPlanState *planstate);
 
         /**
          */
@@ -416,14 +415,28 @@ namespace springtail::pg_fdw {
                                       int32_t atttypmod);
 
         /** Helper to get the index quals for a given index */
-        friend std::vector<ConstQualPtr>
-        _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
+        static std::vector<ConstQualPtr>
+        _get_index_quals(const std::map<uint32_t, SchemaColumn>& columns,
+                        Index const& idx,
+                        List const* qual_list);
 
         /** Helper to create an IPC cache for table roots */
         void _try_create_cache();
 
         /** Helper function to get the last xid */
         uint64_t _update_last_xid(uint64_t schema_xid);
+
+        /** Helper to compute planning metadata (indexes, row estimates) without constructing PgFdwState.
+         *  Stores results in SpringtailPlanState for reuse by subsequent planning callbacks.
+         *  @param planstate Plan state to store results in
+         *  @param qual_list Restriction clauses
+         *  @param join_quals Join clauses
+         *  @param rows Output: estimated row count
+         */
+        void _compute_planning_metadata(SpringtailPlanState *planstate,
+                                       const List *qual_list,
+                                       const List* join_quals,
+                                       double *rows);
 
         std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate,
                                                        const List *qual_list,

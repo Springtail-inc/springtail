@@ -100,11 +100,11 @@ extern "C" {
     }
 
     /** Get list of path keys (key name, num rows) */
-    List* 
-    fdw_get_path_keys(List* planstate, void *scan_state)
+    List*
+    fdw_get_path_keys(List* planstate)
     {
         SpringtailPlanState ps{planstate};
-        return get_fdw_mgr()->fdw_get_path_keys(&ps, (PgFdwState*)scan_state);
+        return get_fdw_mgr()->fdw_get_path_keys(&ps);
     }
 
     void

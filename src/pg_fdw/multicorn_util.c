@@ -1010,10 +1010,8 @@ multicorn_getForeignPaths(PlannerInfo *root,
 
     _get_relation_quals(root, baserel, false, &quals, &join_quals);
 
-    // this will create PgFdwState
-    void *state = fdw_create_scan_state(baserel->fdw_private, quals, join_quals);
-
-    List *possiblePaths = fdw_get_path_keys(baserel->fdw_private, state); // see pathKeys()
+    // Get path keys using cached qual_indexes and join_indexes (no PgFdwState construction needed)
+    List *possiblePaths = fdw_get_path_keys(baserel->fdw_private); // see pathKeys()
 
     /* Try to find parameterized paths */
     paths = findPaths(root, baserel, possiblePaths, SPRINGTAIL_STARTUP_COST,
@@ -1031,13 +1029,16 @@ multicorn_getForeignPaths(PlannerInfo *root,
         NULL));
 
 
-    /* Handle sort pushdown */
+    /* Handle sort pushdown - only construct PgFdwState if needed */
+    void *state = NULL;
     if (root->query_pathkeys)
     {
         List* deparsed = deparse_sortgroup(root, foreigntableid, baserel);
 
         if (deparsed)
         {
+            // Need PgFdwState for sort pushdown analysis
+            state = fdw_create_scan_state(baserel->fdw_private, quals, join_quals);
             /* Update the sort_*_pathkeys lists if needed */
             computeDeparsedSortGroup(deparsed, baserel->fdw_private, state,
                     quals,
@@ -1045,6 +1046,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
                     &deparsed_pathkeys);
         }
     }
+
     /* Add each ForeignPath previously found */
     foreach(lc, paths)
     {
@@ -1073,7 +1075,10 @@ multicorn_getForeignPaths(PlannerInfo *root,
             add_path(baserel, (Path *) newpath);
         }
     }
-    fdw_delete_scan_state(state);
+
+    if (state) {
+        fdw_delete_scan_state(state);
+    }
 }
 
 

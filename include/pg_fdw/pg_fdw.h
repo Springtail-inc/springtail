@@ -58,7 +58,7 @@ void fdw_get_rel_size(List *state, List *qual_list, List* join_quals, double *ro
 List *fdw_can_sort(List* state, void* scan_state, List *sortgroup, List* quals);
 
 /** Helper to get list of path keys (key name, num rows) */
-List * fdw_get_path_keys(List* state, void* scan_state);
+List * fdw_get_path_keys(List* state);
 
 /** Explain scan */
 void fdw_explain_scan(ForeignScanState *node, struct ExplainState *es);
