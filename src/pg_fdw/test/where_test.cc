@@ -268,6 +268,11 @@ namespace {
                 plan.add_target_column(name, attnum);
             }
 
+            // Populate cache by calling fdw_get_rel_size (mirrors planning phase)
+            double rows;
+            int width;
+            mgr->fdw_get_rel_size(&plan, qual_list, NIL, &rows, &width);
+
             PgFdwState *state = mgr->create_scan_state(&plan, qual_list, NIL);
 
             // this should setup the sortgroup index
