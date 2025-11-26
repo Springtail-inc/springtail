@@ -677,7 +677,7 @@ namespace springtail::pg_fdw {
         }
 
         if (!_usertype_shm_cache || !_usertype_shm_cache->is_alive()) {
-            _usertype_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
+            _usertype_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_USERTYPES);
             if (_usertype_shm_cache) {
                 // start using the new cache
                 sys_tbl_mgr::Client::get_instance()->use_usertype_cache(_usertype_shm_cache);
@@ -2299,6 +2299,7 @@ namespace springtail::pg_fdw {
             XidLsn xidlsn{xid};
             utp = sys_tbl_mgr::Client::get_instance()->get_usertype(db_id, oid, xidlsn);
             CHECK_NE(utp, nullptr);
+            CHECK(utp->exists);
             _user_type_cache.insert(oid, utp);
         }
 
