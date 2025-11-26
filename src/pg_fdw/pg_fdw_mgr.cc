@@ -2316,35 +2316,38 @@ namespace springtail::pg_fdw {
             name_map[entry.second.name] = entry.second.position;
         }
 
-        // Add primary index if the table has one (identified by primary key columns)
-        auto &&sort_keys = table->extent_schema()->get_sort_keys();
-        if (!sort_keys.empty()) {
-            // Construct the primary index from the primary key information
-            Index primary_idx;
-            primary_idx.id = constant::INDEX_PRIMARY;
-            primary_idx.schema = "";  // primary key doesn't have a schema name
-            primary_idx.name = "PRIMARY";
-            primary_idx.table_id = tid;
-            primary_idx.is_unique = true;  // primary keys are always unique
-            primary_idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+        // Only populate indexes for user tables, not system tables
+        if (tid > constant::MAX_SYSTEM_TABLE_ID) {
+            // Add primary index if the table has one (identified by primary key columns)
+            auto &&sort_keys = table->extent_schema()->get_sort_keys();
+            if (!sort_keys.empty()) {
+                // Construct the primary index from the primary key information
+                Index primary_idx;
+                primary_idx.id = constant::INDEX_PRIMARY;
+                primary_idx.schema = "";  // primary key doesn't have a schema name
+                primary_idx.name = "PRIMARY";
+                primary_idx.table_id = tid;
+                primary_idx.is_unique = true;  // primary keys are always unique
+                primary_idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
 
-            // Map primary key column names to their positions
-            for (size_t i = 0; i < sort_keys.size(); ++i) {
-                auto col_it = name_map.find(sort_keys[i]);
-                if (col_it != name_map.end()) {
-                    Index::Column col;
-                    col.idx_position = i;  // position within the index (0-based)
-                    col.position = col_it->second;  // position in the table schema
-                    primary_idx.columns.push_back(col);
+                // Map primary key column names to their positions
+                for (size_t i = 0; i < sort_keys.size(); ++i) {
+                    auto col_it = name_map.find(sort_keys[i]);
+                    if (col_it != name_map.end()) {
+                        Index::Column col;
+                        col.idx_position = i;  // position within the index (0-based)
+                        col.position = col_it->second;  // position in the table schema
+                        primary_idx.columns.push_back(col);
+                    }
                 }
+                indexes.push_back(primary_idx);
             }
-            indexes.push_back(primary_idx);
-        }
 
-        // Get secondary indexes from cached Table
-        auto secondary_indexes = table->get_ready_indexes();
-        for (const auto &idx : secondary_indexes) {
-            indexes.push_back(idx);
+            // Get secondary indexes from cached Table
+            auto secondary_indexes = table->get_ready_indexes();
+            for (const auto &idx : secondary_indexes) {
+                indexes.push_back(idx);
+            }
         }
     }
 } // namespace springtail::pg_fdw
