@@ -157,7 +157,14 @@ namespace springtail::pg_fdw {
         void set_rel_size(uint64_t rows, uint64_t width);
         uint64_t get_rel_rows() const;
         uint64_t get_rel_width() const;
-        
+
+        // methods to access cached planning metadata (indexes matching quals/joins)
+        void set_cached_qual_indexes(const std::vector<uint64_t>& indexes);
+        PgVector<uint64_t> get_cached_qual_indexes() const;
+
+        void set_cached_join_indexes(const std::vector<uint64_t>& indexes);
+        PgVector<uint64_t> get_cached_join_indexes() const;
+
         /** Indexes of various List's in the root list of the state */
         enum RootIndex {
             TABLE_REF,
@@ -165,11 +172,14 @@ namespace springtail::pg_fdw {
             TARGET_COL_NAME, //target colum name
             TARGET_COL_ATTR,
             //list of qual states 0-ignored, 1-active
-            QUAL_STATE, 
+            QUAL_STATE,
             // sort index
             SORT_INDEX,
             // scan direction
             SCAN_DIRECTION,
+            // cached planning metadata
+            QUAL_INDEXES,
+            JOIN_INDEXES,
 
             LAST
         };

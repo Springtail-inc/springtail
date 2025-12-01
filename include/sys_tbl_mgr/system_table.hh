@@ -7,8 +7,6 @@ namespace springtail {
     class SystemTable : public Table,
                         public std::enable_shared_from_this<SystemTable> {
     public:
-        using Table::schema;
-
         /**
          * UserTable constructor.
          */
@@ -21,24 +19,6 @@ namespace springtail {
                   const TableMetadata &metadata,
                   ExtentSchemaPtr schema) :
             Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema) {}
-
-        /**
-         * Retrieves the schema for the table at a given XID.
-         * System tables have immutable schemas, so we return the stored schema.
-         */
-        virtual ExtentSchemaPtr extent_schema() const override
-        {
-            return _schema;
-        }
-
-        /**
-         * Get a schema for accessing an extent from this table that was written at the provided XID.
-         * System tables have immutable schemas, so we return the stored schema.
-         */
-        virtual SchemaPtr schema(uint64_t extent_xid) const override
-        {
-            return _schema;
-        }
     };
 
 } // namespace springtail

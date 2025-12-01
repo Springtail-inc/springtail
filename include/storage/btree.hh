@@ -327,6 +327,19 @@ namespace springtail {
         {
             return _root_offset;
         }
+
+        /**
+         * Updates the root offset and XID of this BTree.
+         * Used to advance a BTree to a new XID with a different root extent.
+         * @param new_xid The new XID
+         * @param new_root_offset The new root extent ID
+         */
+        void set_root_and_xid(uint64_t new_xid, uint64_t new_root_offset)
+        {
+            _xid = new_xid;
+            _root_offset = new_root_offset;
+        }
+
     private:
         /** Inverted comparison to ensure XID map is sorted in descending order. */
         class ReverseCompare {

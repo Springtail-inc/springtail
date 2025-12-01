@@ -439,14 +439,11 @@ namespace indexer_helpers {
         uint64_t primary_lookup(TuplePtr tuple);
 
         /**
-         * Retrieves the schema for the table at a given XID.
+         * Returns the extent schema of the table.
          */
-        virtual ExtentSchemaPtr extent_schema() const { return nullptr; }
-
-        /**
-         * Get a schema for accessing an extent from this table that was written at the provided XID.
-         */
-        virtual SchemaPtr schema(uint64_t extent_xid) const { return nullptr; }
+        ExtentSchemaPtr extent_schema() const {
+            return _schema;
+        }
 
         /** Retrieves the ordered set of columns that form the primary key. */
         std::vector<std::string> primary_key() const
@@ -540,13 +537,6 @@ namespace indexer_helpers {
         }
 
         /**
-         * Returns the schema of the table.
-         */
-        ExtentSchemaPtr schema() const {
-            return _schema;
-        }
-
-        /**
          * Returns the look aside schema of the table.
          */
         ExtentSchemaPtr look_aside_schema() const {
@@ -585,6 +575,19 @@ namespace indexer_helpers {
             }
             return index_ids;
         }
+
+        /**
+         * Advance this Table object to a new XID by updating the BTree roots.
+         * This avoids expensive Table reconstruction when the table structure hasn't changed.
+         *
+         * Pre-condition: Caller must ensure the table structure (schemas, indexes) hasn't changed.
+         * The table will be advanced in-place without rebuilding schemas.
+         *
+         * @param new_xid The new XID to advance the table to
+         * @param new_roots The table roots (index_id -> extent_id mappings) at the new XID
+         */
+        void advance_to_xid(uint64_t new_xid, const std::vector<TableRoot> &new_roots);
+
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
@@ -639,6 +642,19 @@ namespace indexer_helpers {
 
         TableStats _stats; ///< The statistics for this table.
         ExtensionCallback _extension_callback; ///< The extension callback for this table.
+
+        /** All READY indexes with full metadata (cached from SchemaMetadata). */
+        std::vector<Index> _ready_indexes;
+
+    public:
+        /**
+         * Get all READY indexes for this table.
+         * This provides cached access to index metadata without additional RPC calls.
+         * @return Vector of Index structures containing index metadata
+         */
+        const std::vector<Index>& get_ready_indexes() const {
+            return _ready_indexes;
+        }
     };
     typedef std::shared_ptr<Table> TablePtr;
 

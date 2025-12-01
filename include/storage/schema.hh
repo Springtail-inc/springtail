@@ -201,6 +201,12 @@ namespace springtail {
         /** The sort column names of the schema. */
         std::vector<std::string> _sort_keys;
 
+        /** The original SchemaColumn definitions (for metadata preservation). */
+        std::vector<SchemaColumn> _schema_columns;
+
+        /** Map from column name to position (for fast lookups). */
+        std::unordered_map<std::string, uint32_t> _column_name_to_position;
+
         /**
          * Helper to get all the columns by merging old and new columns
          * @param old_columns  Old/existing column names in the schema
@@ -213,6 +219,11 @@ namespace springtail {
         _get_all_columns_for_schema(const std::vector<std::string> &old_columns,
                       const std::vector<SchemaColumn> &new_columns,
                       const std::vector<std::string> &sort_columns) const;
+
+        /**
+         * Build the column name to position lookup map from _schema_columns.
+         */
+        void _build_name_lookup();
     protected:
         /**
          * Construct the set of column fields based on the column definitions.
@@ -229,6 +240,9 @@ namespace springtail {
          */
         explicit ExtentSchema(const std::vector<SchemaColumn> &columns, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false,
                 bool include_internal_row_id = true) {
+            // Store original SchemaColumns for metadata preservation
+            _schema_columns = columns;
+
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
@@ -239,7 +253,12 @@ namespace springtail {
                 auto next_key = column_map.empty() ? 0 : column_map.rbegin()->first + 1;
                 SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, next_key, SchemaType::UINT64, 0, false);
                 column_map.try_emplace(next_key, internal_row_id);
+                // Also add to _schema_columns so accessors see it
+                _schema_columns.push_back(internal_row_id);
             }
+
+            // Build name-to-position lookup map
+            _build_name_lookup();
 
             // populate the field map using the column definitions
             _populate(column_map, extension_callback, allow_undefined);
@@ -252,12 +271,23 @@ namespace springtail {
         explicit ExtentSchema(std::map<uint32_t, SchemaColumn> columns, const ExtensionCallback &extension_callback = {}, bool allow_undefined = false,
                 bool include_internal_row_id = true)
         {
+            // Convert map to vector for _schema_columns storage
+            _schema_columns.clear();
+            for (const auto& [pos, col] : columns) {
+                _schema_columns.push_back(col);
+            }
+
             if (include_internal_row_id) {
                 // Add internal_row_id to the extent_schema
                 auto next_key = columns.empty() ? 0 : columns.rbegin()->first + 1;
                 SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, next_key, SchemaType::UINT64, 0, false);
                 columns.try_emplace(next_key, internal_row_id);
+                // Also add to _schema_columns so accessors see it
+                _schema_columns.push_back(internal_row_id);
             }
+
+            // Build name-to-position lookup map
+            _build_name_lookup();
 
             _populate(columns, extension_callback, allow_undefined);
         }
@@ -416,6 +446,36 @@ namespace springtail {
         std::vector<std::string> column_order() const override {
             return _column_order;
         }
+
+        /**
+         * Get the SchemaColumn for a specific column by name.
+         * @param name The column name
+         * @return Optional SchemaColumn if found, empty otherwise
+         */
+        std::optional<std::reference_wrapper<const SchemaColumn>> get_schema_column(const std::string &name) const;
+
+        /**
+         * Get all SchemaColumns in position order.
+         * @return Vector of SchemaColumns as they were provided at construction
+         */
+        const std::vector<SchemaColumn>& get_schema_columns() const {
+            return _schema_columns;
+        }
+
+        /**
+         * Get column position by name.
+         * @param name The column name
+         * @return Optional column position if found, empty otherwise
+         */
+        std::optional<uint32_t> get_column_position_by_name(const std::string &name) const;
+
+        /**
+         * Convert SchemaColumns to a map indexed by column position.
+         * This is equivalent to what TableMgrClient::get_columns() returns,
+         * but from the cached ExtentSchema without an RPC call.
+         * @return Map from column position to SchemaColumn
+         */
+        std::map<uint32_t, SchemaColumn> get_column_map() const;
     };
     using ExtentSchemaPtr = std::shared_ptr<ExtentSchema>;
 
