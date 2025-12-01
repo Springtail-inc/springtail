@@ -75,7 +75,7 @@ namespace {
         // wait for PgXidSubscriberMgr to create the cache
         for (size_t i = 0; i != 100; ++i) {
             try {
-                cache = std::make_unique<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
+                cache = std::make_unique<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, true);
                 break;
             } catch (...) {
             }

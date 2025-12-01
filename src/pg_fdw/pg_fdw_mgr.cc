@@ -564,6 +564,7 @@ namespace springtail::pg_fdw {
         {
             std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
             if (_tabld_ids_cache) {
+                // The table ids cache keeps track of recorded xids not just real committed xids
                 auto cached_xid = _tabld_ids_cache->get_committed_xid(_db_id, schema_xid);
                 if (cached_xid.has_value()) {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found pending table mutations cached xid = {}", *cached_xid);
@@ -572,6 +573,7 @@ namespace springtail::pg_fdw {
             }
 
             if (_roots_cache) {
+                // The roots cache keeps track of real committed xid only
                 auto cached_xid = _roots_cache->get_committed_xid(_db_id, schema_xid);
                 if (cached_xid.has_value()) {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Use cached xid = {}", *cached_xid);

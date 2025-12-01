@@ -49,7 +49,7 @@ TEST(ShmTest, Basic) {
 
     if (fork() == 0) {
 
-        sys_tbl_mgr::ShmCache child_cache{CACHE_NAME};
+        sys_tbl_mgr::ShmCache child_cache{CACHE_NAME, true};
 
         for (uint64_t i = 0; i != 100; ++i) {
             std::ostringstream os;
@@ -82,7 +82,7 @@ TEST(ShmTest, Lifecycle) {
 
     // try to open a cache that hasn't been created, it must throw.
     try {
-        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME); 
+        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME, true); 
         // must not come here
         ASSERT_TRUE(false);
     } catch (const boost::interprocess::interprocess_exception&) {
@@ -110,7 +110,7 @@ TEST(ShmTest, Lifecycle) {
 
     // open the cache
     {
-        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME); 
+        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME, true); 
         // read it
         for (uint64_t i = 0; i != 100; ++i) {
             std::ostringstream os;

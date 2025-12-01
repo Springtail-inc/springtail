@@ -1959,7 +1959,7 @@ namespace springtail::pg_fdw {
         // helper to delete xid history from shm caches
         auto delete_history =[](auto cache_name, uint64_t db_id) {
             try {
-                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(cache_name);
+                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(cache_name, false);
                 if (cache) {
                     cache->delete_xid_history(db_id);
                 } else {
@@ -1973,6 +1973,7 @@ namespace springtail::pg_fdw {
             }
         };
 
+        // we only record XID histories for the roots and table ids caches
         delete_history(sys_tbl_mgr::SHM_CACHE_ROOTS, db_id);
         delete_history(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, db_id);
 
