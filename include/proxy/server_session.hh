@@ -11,8 +11,9 @@ namespace springtail::pg_proxy {
 
     /**
      * @brief Internal state for a query that is being processed.
-     * A query may have multiple dependencies, and may have multiple
-     * simple queries. This object tracks the completion state of the query.
+     * A query may be either a query message or a dependency message.
+     * Either may have multiple simple queries (children).
+     * This object tracks the completion state of the query (and its children).
      *
      * NOTE: once added the message itself doesn't track if it is a dependency
      * message; that is tracked here in the QueryStatus object.
@@ -73,17 +74,16 @@ namespace springtail::pg_proxy {
          *    - Triggers client notification when message completes
          *
          * 2. ReadyForQuery completion (for batch phase transitions)
-         *    - Tracked at batch level via ready_for_query counters
          *    - Triggers state transitions between dependency and query phases
          *
          * Processing phases:
          * 1. Dependency phase: All messages that contain dependencies are sent and completed
          *    - Dependencies never send responses to client
-         *    - Wait for all dependency ReadyForQuery before proceeding
+         *    - Wait for all dependency msg completions before proceeding
          *
          * 2. Query phase: All regular query messages are sent and completed
          *    - Send responses to client as each message completes
-         *    - Wait for all query ReadyForQuery before batch completes
+         *    - Wait for all query msg completions before batch completes
          */
         struct Batch {
 
@@ -404,8 +404,7 @@ namespace springtail::pg_proxy {
          * 1. Load next batch from _batch_queue
          * 2. Create Batch structure with QueryStatus queue and counters
          * 3. Determine if batch has dependencies
-         * 4. Set initial state (DEPENDENCIES or QUERY)
-         * 5. Send appropriate messages (all dependencies or all queries)
+         * 4. Send appropriate messages (all dependencies or all queries)
          *
          * Dependencies and queries are pipelined within their respective phases.
          * All dependencies must complete before any queries are sent.
@@ -493,8 +492,8 @@ namespace springtail::pg_proxy {
          *
          * Processing:
          * 1. Get current QueryStatus from front of batch queue
-         * 2. Increment query_complete_count
-         * 3. If all statements in message complete, call _client_msg_response()
+         * 2. Mark QueryStatus statement as complete
+         * 3. If all statements in message complete, notify client session
          * 4. Remove completed QueryStatus from queue
          *
          * Note: This is separate from ReadyForQuery handling.
@@ -507,8 +506,8 @@ namespace springtail::pg_proxy {
          * @brief Route ReadyForQuery to appropriate handler based on current state
          *
          * ReadyForQuery can arrive during different states:
-         * - DEPENDENCIES: Count toward dependency completion
-         * - QUERY: Count toward query completion, send to client
+         * - DEPENDENCIES: transition to QUERY phase when all dependencies complete
+         * - QUERY: complete current batch when all queries complete
          * - EXTENDED_ERROR: Special error recovery handling
          *
          * This function routes to the appropriate handler based on current state.
@@ -524,13 +523,12 @@ namespace springtail::pg_proxy {
          * @brief Handle ReadyForQuery response during dependency phase
          *
          * ReadyForQuery indicates the server has completed processing and is ready
-         * for the next message. During dependency phase, we count these responses
-         * to determine when all dependencies have completed.
+         * for the next message. During dependency phase, once all dependencies
+         * have completed, we transition to query phase.
          *
          * Processing:
-         * 1. Increment dependency ReadyForQuery counter in batch
-         * 2. Do NOT send ReadyForQuery to client (dependencies never respond)
-         * 3. If all dependency ReadyForQuery received, transition to query phase
+         * 1. Do NOT send ReadyForQuery to client (dependencies never respond)
+         * 2. If all dependency ReadyForQuery received, transition to query phase
          *
          * Note: One ReadyForQuery may correspond to multiple dependency messages
          * if they are extended protocol (Parse/Bind/Sync).
@@ -540,22 +538,14 @@ namespace springtail::pg_proxy {
         void _handle_dependency_ready_for_query(char transaction_status);
 
         /**
-         * @brief Handle ReadyForQuery response.
+         * @brief Handle ReadyForQuery response during query phase
          *
          * ReadyForQuery indicates the server has completed processing and is ready
-         * for the next message. During query phase, we send this to the client and
-         * count responses to determine when all queries have completed.
-         * During dependency phase, we count responses to determine when all dependencies
-         * have completed and we can transition to query phase.
+         * for the next message. During query phase, we send this to the client.
          *
          * Processing:
-         * 1. Increment query ReadyForQuery counter in batch
-         * 2. Send ReadyForQuery to client (client session callback: server_ready_msg)
-         * 3. If all query ReadyForQuery received, batch is complete
-         * 4. Clean up batch and process next batch if available
-         *
-         * Note: One ReadyForQuery may correspond to multiple query messages
-         * if they are extended protocol (Parse/Bind/Execute/Sync).
+         * 1. Send ReadyForQuery to client (client session callback: server_ready_msg)
+         * 2. If batch is complete, clean up batch and process next batch if available
          *
          * @param transaction_status Transaction status character from ReadyForQuery (I/T/E)
          */
@@ -580,11 +570,13 @@ namespace springtail::pg_proxy {
          * Dependency messages restore session state.
          * They must complete before any regular queries are sent.
          *
+         * Set state to DEPENDENCIES or QUERY accordingly.
+         *
          * All messages are sent to the server without waiting for responses
          * (pipelined). This includes both simple query and extended protocol messages.
          *
          * For Query msgs: We send responses to client as each query completes.
-         * For Dependency msgs: We wait for all ReadyForQuery responses before transitioning to query phase.
+         * For Dependency msgs: We wait for all messages to complete before transitioning to query phase.
          */
         void _send_all_messages();
 
