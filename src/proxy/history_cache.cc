@@ -39,7 +39,7 @@ namespace pg_proxy {
     };
 
     std::string
-    QueryStmt::type_string(QueryStmt::Type type_param) const
+    QueryStmt::type_string(QueryStmt::Type type_param)
     {
         auto it = query_type_names.find(type_param);
         if (it != query_type_names.end()) {
@@ -68,6 +68,11 @@ namespace pg_proxy {
                 entry->data = query;
             }
         }
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                  "Adding statement to history: idx={}, type={}",
+                  entry->replay_id,
+                  QueryStmt::type_string(entry->type));
 
         _history[entry->replay_id] = entry;
     }
@@ -115,9 +120,9 @@ namespace pg_proxy {
         std::map<uint64_t, QueryStmtPtr> new_history; // hold new compacted history
 
         // Map to track the latest state of statements up to replay_idx
-        // query type -> name -> (index, QueryStmtPtr)
+        // query type -> name -> QueryStmtPtr
         std::unordered_map<QueryStmt::Type,
-            std::unordered_map<std::string, std::pair<uint64_t, QueryStmtPtr>>> statement_map;
+            std::unordered_map<std::string, QueryStmtPtr>> statement_map;
 
         // Flag to indicate if we are still processing entries up to replay_idx
         // After we pass replay_idx, we cannot be sure about the state of statements
@@ -126,33 +131,35 @@ namespace pg_proxy {
 
         // --- Phase 1: Scan up to replay_idx ---
         for (auto const& [idx, stmt] : history) {
+            DCHECK_EQ(stmt->replay_id, idx);
+
             if (idx > replay_idx) {
                 replayed = false;
             }
 
             switch (stmt->type) {
                 case QueryStmt::Type::SET: // set variable
-                    statement_map[QueryStmt::Type::SET][stmt->name] = {idx, stmt};
+                    statement_map[QueryStmt::Type::SET][stmt->name] = stmt;
                     break;
 
                 case QueryStmt::Type::PREPARE: // add prepared statement
                     DCHECK(!stmt->name.empty()); // unnamed prepares not cached, only within transaction
-                    statement_map[QueryStmt::Type::PREPARE][stmt->name] = {idx, stmt};
+                    statement_map[QueryStmt::Type::PREPARE][stmt->name] = stmt;
                     break;
 
                 case QueryStmt::Type::DECLARE_HOLD: // add cursor/portal
-                    statement_map[QueryStmt::Type::DECLARE_HOLD][stmt->name] = {idx, stmt};
+                    statement_map[QueryStmt::Type::DECLARE_HOLD][stmt->name] = stmt;
                     break;
 
                 case QueryStmt::Type::FETCH: // cursor/portal use
                     // no need to track usage, just ensure it exists
                     if (statement_map[QueryStmt::Type::DECLARE_HOLD].contains(stmt->name)) {
-                        statement_map[QueryStmt::Type::FETCH][stmt->name] = {idx, stmt};
+                        statement_map[QueryStmt::Type::FETCH][stmt->name] = stmt;
                     }
                     break;
 
                 case QueryStmt::Type::LISTEN: // add listen
-                    statement_map[QueryStmt::Type::LISTEN][stmt->name] = {idx, stmt};
+                    statement_map[QueryStmt::Type::LISTEN][stmt->name] = stmt;
                     break;
 
                 case QueryStmt::Type::RESET: // remove variable(s)
@@ -242,35 +249,9 @@ namespace pg_proxy {
         // --- Phase 2: Rebuild compacted history
         // Add retained statements from the statement_map
         for (const auto& [type, name_map] : statement_map) {
-            for (const auto& [name, idx_stmt_pair] : name_map) {
-                new_history[idx_stmt_pair.first] = idx_stmt_pair.second;
+            for (const auto& [name, stmt] : name_map) {
+                new_history[stmt->replay_id] = stmt;
             }
-        }
-
-        // --- Phase 3: optimize by removing empty transaction blocks ---
-        QueryStmt::Type last_type = QueryStmt::Type::NONE;
-        for (auto it = new_history.begin(); it != new_history.end(); ) {
-            if (it->second->type == QueryStmt::Type::COMMIT &&
-                       last_type == QueryStmt::Type::BEGIN) {
-                // remove both BEGIN and COMMIT as they are empty
-                auto begin_it = std::prev(it);
-                new_history.erase(begin_it);
-                it = new_history.erase(it);
-
-                // set last type based on new iterator position
-                last_type = (it == new_history.begin()) ? QueryStmt::Type::NONE : std::prev(it)->second->type;
-                continue;
-            }
-
-            // remove multiple sync statements in a row
-            if (it->second->type == QueryStmt::Type::SYNC && last_type == QueryStmt::Type::SYNC) {
-                // remove the current SYNC statement
-                it = new_history.erase(it);
-                continue;
-            }
-
-            last_type = it->second->type;
-            ++it;
         }
 
         return new_history;
@@ -281,10 +262,37 @@ namespace pg_proxy {
     {
         std::vector<QueryStmtPtr> replay_history;
 
+        QueryStmt::Type last_type = QueryStmt::Type::NONE;
         for (const auto& [idx, stmt] : _history) {
-            if (idx > replay_idx && (!read_only || stmt->is_read_safe)) {
-                replay_history.push_back(stmt);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3,
+                      "Evaluating for replay: replay_idx={}, idx={}, stmt_type={}, read_safe={}",
+                      replay_idx, idx, stmt->type_string(), stmt->is_read_safe);
+
+            DCHECK(stmt->replay_id == idx);
+
+            if (idx <= replay_idx || (read_only && !stmt->is_read_safe)) {
+                // skip statements already replayed or not read-safe
+                continue;
             }
+
+            // skip empty transaction blocks
+            if (stmt->type == QueryStmt::Type::COMMIT &&
+                last_type == QueryStmt::Type::BEGIN) {
+                last_type = QueryStmt::Type::NONE;
+                // remove the begin from replay history
+                replay_history.pop_back();
+                continue;
+            }
+
+            if (stmt->type == QueryStmt::Type::SYNC &&
+                last_type == QueryStmt::Type::SYNC) {
+                // skip this SYNC statement
+                continue;
+            }
+
+            // add statement to replay history
+            replay_history.push_back(stmt);
+            last_type = stmt->type;
         }
 
         return replay_history;
@@ -294,25 +302,23 @@ namespace pg_proxy {
     StatementCache::_get_replay_history(uint64_t session_id,
         bool read_only,
         bool session_history,
-        bool transaction_history,
-        bool statement_history) const
+        bool transaction_history)
     {
         std::vector<QueryStmtPtr> statements_to_replay;
+        uint64_t starting_replay_index = 0;
 
         // find the starting replay index for this session
         auto itr = _session_replay_map.find(session_id);
-        if (itr == _session_replay_map.end()) {
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
-                    "No replay index found for session {}, returning empty replay history",
-                    session_id);
-            return statements_to_replay;
+        if (itr != _session_replay_map.end()) {
+            starting_replay_index = itr->second;
+        } else {
+            // if not there add it with starting index of 0
+            _session_replay_map[session_id] = 0;
         }
 
-        auto starting_replay_index = itr->second;
-
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
-                "Replaying session history for session {} starting from index {}",
-                session_id, starting_replay_index);
+                "Replaying session history for session {} starting from index {}, read-only={}",
+                session_id, starting_replay_index, read_only);
 
         if (session_history) {
             return _session_history.get_replay_history(starting_replay_index, read_only);
@@ -322,24 +328,14 @@ namespace pg_proxy {
             return _transaction_history.get_replay_history(starting_replay_index, read_only);
         }
 
-        if (statement_history) {
-            return _statement_history.get_replay_history(starting_replay_index, read_only);
-        }
-
         return statements_to_replay;
     }
 
     std::pair<QueryStmtPtr, bool>
     StatementCache::_lookup(const std::string_view name, QueryStmt::Type type)
     {
-        // check statement history first
-        QueryStmtPtr qs = _statement_history.lookup(name, type);
-        if (qs) {
-            return {qs, true};
-        }
-
-        // then check transaction history
-        qs = _transaction_history.lookup(name, type);
+        // check transaction history
+        auto qs = _transaction_history.lookup(name, type);
         if (qs) {
             return {qs, true};
         }
@@ -412,75 +408,49 @@ namespace pg_proxy {
         // then either we saw a commit earlier and are done, or were in a
         // simple query which implicitly commits at the end
         if (xact_status == 'I') {
-            // handle implicit rollback or commit
-            if (_in_error) {
-                // clear transaction history, rollback anything not committed
-                _rollback_transaction();
-            } else {
-                // merge transaction history into session history
-                _commit_transaction();
-            }
+            // if in an implicit transation, any commands that successfully
+            // completed are now committed and moved to the session history
+            // those commands that failed or not executed are discarded, as
+            // they wouldn't have been inserted into the transaction history
+            _commit_transaction();
         }
 
-        if (xact_status != 'E') {
-            _in_error = false;
-        } else {
-            _in_error = true;
-        }
+        // update transaction state
+        _in_transaction = (xact_status == 'T' || xact_status == 'E');
 
-        _statement_history.clear();
+        // update error state
+        _in_error = (xact_status == 'E');  // XXX not currently used
     }
 
     void
     StatementCache::commit_statement(QueryStmtPtr stmt, int completed, uint64_t session_id, bool success)
     {
-        // these statements have successfully completed, but not yet committed
+        // these statements have completed, but not yet committed
         // they could still be rolled back
+        // we assign the replay id and add to transaction history here
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Committing statement: stmt_type: {}, completed: {}, children: {}, in_error: {}, success: {}",
-                    (uint8_t)stmt->type, completed, stmt->children.size(), _in_error, success);
-
-        if (!success) {
-            _in_error = true;
-        } else {
-            // update replay idx for this session; marks previous history as replayed
-            set_session_replay_idx(session_id, stmt->replay_id);
-        }
+                    stmt->type_string(), completed, stmt->children.size(), _in_error, success);
 
         // if this is not a simple query statement process directly; should be only 1
         if (stmt->type != QueryStmt::Type::SIMPLE_QUERY) {
             if (completed == 1) {
                 // process this single statement
-                _commit_single_stmt(stmt);
-            } else {
-                DCHECK_EQ(completed, 0) <<
-                       "Completed statements for non-simple query should be either 0 or 1";
-                // no completed statements, error
-                _in_error = true;
+                _commit_single_stmt(stmt, session_id);
             }
             return;
         }
 
         // this is a simple query, we need to process each child statement
-        if (stmt->children.size() == 0) {
-            // no children, nothing to do (empty query)
-            return;
-        }
-
-        DCHECK_GT(stmt->children.size(), 0);
         DCHECK_LE(completed, stmt->children.size());
         for (int i = 0; i < completed; i++) {
             auto qs = stmt->children[i];
+            // each statement may have a set of set_config function calls to process first
             // commit any set_config function calls SELECT stmts
             for (auto &set_config_stmt : qs->set_config_calls) {
-                _commit_single_stmt(set_config_stmt);
+                _commit_single_stmt(set_config_stmt, session_id);
             }
-            _commit_single_stmt(qs);
-        }
-
-        if (completed != stmt->children.size()) {
-            // not all statements are completed
-            _in_error = true;
+            _commit_single_stmt(qs, session_id);
         }
 
         // simple query removes unamed prepared statement from cache
@@ -488,10 +458,20 @@ namespace pg_proxy {
     }
 
     void
-    StatementCache::_commit_single_stmt(QueryStmtPtr entry)
+    StatementCache::_commit_single_stmt(QueryStmtPtr entry, uint64_t session_id)
     {
         // these statements have successfully completed, but not yet committed
         // they could still be rolled back
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3,
+                  "Committing single statement: stmt_type: {}, name: '{}', in_error: {}",
+                  entry->type_string(), entry->name, _in_error);
+
+        // assign a replay id to this statement
+        entry->replay_id = _current_replay_id++;
+
+        // update replay idx for this session; marks previous history as replayed
+        set_session_replay_idx(session_id, entry->replay_id);
 
         switch (entry->type) {
             case QueryStmt::Type::PREPARE:
@@ -569,6 +549,10 @@ namespace pg_proxy {
                 break;
         }
 
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3,
+                  "Adding to transaction history: stmt_type: {}, name: '{}', in_error: {}",
+                  entry->type_string(), entry->name, _in_error);
+
         // if we got here we can add this statement to the transaction history
         _transaction_history.add(entry);
     }
@@ -611,7 +595,8 @@ namespace pg_proxy {
 
         // merge transaction history to session history
         for (auto it = _transaction_history._history.begin(); it != _transaction_history._history.end(); ++it) {
-            switch (it->second->type) {
+            auto entry = it->second;
+            switch (entry->type) {
                 // ignore certain transaction level statements; don't merge
                 case QueryStmt::Type::SET_LOCAL:
                 case QueryStmt::Type::SAVEPOINT:
@@ -664,7 +649,12 @@ namespace pg_proxy {
                     // compacting state from other removal statements is handled in compact()
                     break;
             }
-            _session_history.add(it->second);
+
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3,
+                  "Adding to session history: stmt_type: {}, name: '{}', in_error: {}",
+                  entry->type_string(), entry->name, _in_error);
+
+            _session_history.add(entry);
         }
 
         _transaction_history.clear();

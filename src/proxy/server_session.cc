@@ -180,7 +180,7 @@ namespace springtail::pg_proxy {
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server {}{}; message: type: {}, seq_id: {}", _id,
                     (_is_shadow ? "Shadow " : ""), (_type == Type::REPLICA ? "Replica" : "Primary"),
-                    msg->type_str(), msg->seq_id());
+                    msg->type_string(), msg->seq_id());
 
         // wrap in error handler to catch any exceptions
         _wrap_error_handler([this, msg] {
@@ -562,11 +562,14 @@ namespace springtail::pg_proxy {
 
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
 
+                // save current state as handling the ready for query may change it
+                auto state = _state;
+
                 // handle the ready for query response
                 // regardless of state
                 _handle_ready_for_query_response(status);
 
-                if (_state == State::DEPENDENCIES) {
+                if (state == State::DEPENDENCIES) {
                     return;
                 }
 
@@ -587,6 +590,8 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_send_simple_query(const std::string &query, uint64_t seq_id)
     {
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Sending simple query MESSAGE: {}", _id, query);
+
         // Send simple query to server
         BufferPtr write_buffer = BufferPool::get_instance()->get(4 + query.size() + 2);
         write_buffer->put('Q');
@@ -644,12 +649,13 @@ namespace springtail::pg_proxy {
 
         SessionMsgPtr msg = query_status->msg;
 
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
-                "[S:{}] Query error for message seq_id: {}, query_stmt: {}, state: {}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] Error response MESSAGE from {}: seq_id: {}, type: {}, is_dependency: {}",
                 _id,
-                msg->seq_id(),
-                static_cast<int8_t>(msg->data()->type),
-                static_cast<int>(_state));
+                _type == Type::REPLICA ? "REPLICA" : "PRIMARY",
+                query_status->msg->seq_id(),
+                query_status->msg->type_string(),
+                query_status->is_dependency() ? "true" : "false");
 
         // Check if this is a dependency error
         if (query_status->is_dependency()) {
@@ -920,6 +926,14 @@ namespace springtail::pg_proxy {
         SessionMsgPtr msg = query_status->msg;
         DCHECK(_state == State::QUERY || _state == State::DEPENDENCIES);
 
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] Sending MESSAGE to {}: seq_id: {}, type: {}, is_dependency: {}",
+                _id,
+                _type == Type::REPLICA ? "REPLICA" : "PRIMARY",
+                msg->seq_id(),
+                msg->type_string(),
+                query_status->is_dependency() ? "true" : "false");
+
         QueryStmtPtr qs = msg->data();
         if (qs->data_type == QueryStmt::DataType::SIMPLE) {
             // send the simple query using the query string
@@ -945,11 +959,13 @@ namespace springtail::pg_proxy {
         // This is always at the front of the queue due to in-order processing
         QueryStatusPtr query_status = _current_batch->get_current_query_status();
 
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
-                "[S:{}] Query statement complete: state: {}, query_stmt: {}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                "[S:{}] Response MESSAGE from {}: seq_id: {}, type: {}, is_dependency: {}",
                 _id,
-                (_state == State::QUERY) ? "QUERY" : "DEPENDENCIES",
-                static_cast<int8_t>(query_status->msg->data()->type));
+                _type == Type::REPLICA ? "REPLICA" : "PRIMARY",
+                query_status->msg->seq_id(),
+                query_status->msg->type_string(),
+                query_status->is_dependency() ? "true" : "false");
 
         bool query_complete = _current_batch->mark_message_complete();
         if (!query_complete) {
@@ -981,8 +997,9 @@ namespace springtail::pg_proxy {
         }
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
-                "[S:{}] ReadyForQuery received, transaction_status: {}",
+                "[S:{}] ReadyForQuery MESSAGE from {}, transaction_status: {}",
                 _id,
+                _type == Type::REPLICA ? "REPLICA" : "PRIMARY",
                 transaction_status);
 
         // Check if current message is a Sync message

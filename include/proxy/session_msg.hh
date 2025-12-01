@@ -55,8 +55,15 @@ namespace springtail::pg_proxy {
         /** Get type */
         Type type() const { return _type; }
 
-        std::string const type_str() const {
-            return type_map.at(_type);
+        std::string const type_string() const {
+            auto msg_type = type_map.at(_type);
+            if (_data != nullptr) {
+                if (_data->children.size() > 0) {
+                    return std::format("{} ({})", msg_type, _data->children[0]->type_string());
+                }
+                return std::format("{} ({})", msg_type, _data->type_string());
+            }
+            return msg_type;
         }
 
         const QueryStmtPtr data() const {

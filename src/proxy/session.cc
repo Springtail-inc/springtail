@@ -228,23 +228,29 @@ namespace springtail::pg_proxy {
     void
     Session::_send_to_remote_session(char code, const BufferPtr buffer, uint64_t seq_id)
     {
-        if (_state == State::RESET_SESSION) {
-            // if we are in reset session state, we don't send any data
+        if (_state == State::RESET_SESSION || _state == State::DEPENDENCIES) {
+            // if we are in reset session state or dependency state, we don't send any data
             return;
         }
 
-        assert(_is_shadow || _associated_session != nullptr);
-
-        if (!_is_shadow) {
-            // send data
-            ssize_t n = _associated_session->get_connection()->write(buffer->data(), buffer->size());
-            CHECK_EQ(n, buffer->size());
-
-            // log the buffer as outgoing from associated session
-            // adjust buffer size and data to remove code and length (5B)
-            assert(buffer->size() >= 5);
-            _associated_session->_log_buffer(false, code, buffer->size() - 5, buffer->data() + 5, seq_id, true);
+        if (_is_shadow) {
+            // shadow session, do nothing
+            CHECK(!_is_shadow);
+            return;
         }
+
+        CHECK_NE(_associated_session, nullptr);
+
+        // send data
+        ssize_t n = _associated_session->get_connection()->write(buffer->data(), buffer->size());
+        CHECK_EQ(n, buffer->size());
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Sent MESSAGE to remote session: code={}, length={}", _id, code, buffer->size());
+
+        // log the buffer as outgoing from associated session
+        // adjust buffer size and data to remove code and length (5B)
+        assert(buffer->size() >= 5);
+        _associated_session->_log_buffer(false, code, buffer->size() - 5, buffer->data() + 5, seq_id, true);
     }
 
     void
