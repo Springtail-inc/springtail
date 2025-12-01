@@ -2243,6 +2243,7 @@ namespace springtail::pg_fdw {
             XidLsn xidlsn{xid};
             utp = sys_tbl_mgr::Client::get_instance()->get_usertype(db_id, oid, xidlsn);
             CHECK_NE(utp, nullptr);
+            CHECK(utp->exists);
             _user_type_cache.insert(oid, utp);
         }
 

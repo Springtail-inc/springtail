@@ -71,6 +71,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     // Client should cache get_roots() responses now
     client->use_roots_cache(_roots_cache);
     client->use_schema_cache(_schema_cache);
+    client->use_usertype_cache(_usertype_cache);
 
     // Flag indicating the connection status of XidMgrSubscriber
     // to the XidMgr server.
@@ -211,7 +212,10 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
         auto type_ids = _usertype_cache->get_db_objects(db);
         for (auto tid: type_ids) {
             XidLsn x{xid};
-            client->get_usertype(db, tid, x);
+            auto utp = client->get_usertype(db, tid, x);
+            if (!utp->exists) {
+                _usertype_cache->mark_dropped(db, tid, x);
+            }
             if (st.stop_requested()) {
                 break;
             }

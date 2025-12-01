@@ -494,15 +494,22 @@ namespace springtail {
     }
 
     std::vector<std::string>
-    Properties::get_include_schemas(uint64_t db_id)
+    Properties::get_include_schemas(uint64_t db_id, bool with_pending)
     {
         std::vector<std::string> include_schemas;
+        auto pending_include_schemas = Properties::get_instance()->get_pending_include_schemas(db_id);
 
-        auto db_config = Properties::get_db_config(db_id);
-        auto include_json = db_config["include"];
-        if (include_json.contains("schemas") && include_json["schemas"].is_array()) {
-            include_schemas = include_json["schemas"];
+        if (with_pending && !pending_include_schemas.is_null()) {
+            DCHECK(pending_include_schemas.is_array());
+            include_schemas = pending_include_schemas;
+        } else {
+            auto db_config = Properties::get_db_config(db_id);
+            auto include_json = db_config["include"];
+            if (include_json.contains("schemas") && include_json["schemas"].is_array()) {
+                include_schemas = include_json["schemas"];
+            }
         }
+
         if (std::ranges::find(include_schemas, "*") != include_schemas.end()) {
             // empty means include all schemas
             return {};
@@ -706,4 +713,41 @@ namespace springtail {
         DCHECK(db == 0);
         client->hset(key, fdw_id, json_db_ids.dump());
     }
+
+    void
+    Properties::set_db_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json)
+    {
+        _cache->set_value(fmt::format("db_config/{}/include/schemas", db_id), schemas_json);
+    }
+
+    void
+    Properties::set_pending_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json)
+    {
+        std::unique_lock lock(_pending_schema_include_mutex);
+        _pending_schema_include[db_id] = schemas_json;
+    }
+
+    void
+    Properties::clear_pending_include_schemas(uint64_t db_id)
+    {
+        std::unique_lock lock(_pending_schema_include_mutex);
+        _pending_schema_include.erase(db_id);
+    }
+
+    nlohmann::json
+    Properties::get_pending_include_schemas(uint64_t db_id)
+    {
+        std::shared_lock lock(_pending_schema_include_mutex);
+        auto it = _pending_schema_include.find(db_id);
+        if (it == _pending_schema_include.end()) {
+            return nlohmann::json();
+        }
+        auto &include_schemas = it->second;
+        DCHECK(include_schemas.is_array());
+        if (std::ranges::find(include_schemas, "*") != include_schemas.end()) {
+            return nlohmann::json::array();
+        }
+        return it->second;
+    }
+
 }

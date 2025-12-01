@@ -95,6 +95,7 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
     CHECK(lock.owns());
+
     check_free_space_locked();
 
     *_xid_commit_time = std::chrono::high_resolution_clock::now();
@@ -229,6 +230,13 @@ void ShmCache::cleanup_xid_history()
 }
 
 void
+ShmCache::check_free_space()
+{
+    ipc::scoped_lock<Mutex> lock(_mutex);
+    check_free_space_locked();
+}
+
+void
 ShmCache::check_free_space_locked()
 {
     auto free_size = _shm.get_free_memory();
@@ -241,8 +249,7 @@ ShmCache::check_free_space_locked()
         if (static_cast<double>(free_size) > static_cast<double>(_shm.get_size())*FREE_MEM_WATERMARK) {
             break;
         }
-
-        _msg_cache.evict();
+        _msg_cache.evict_locked();
     }
 }
 
