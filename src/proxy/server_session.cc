@@ -767,28 +767,7 @@ namespace springtail::pg_proxy {
 
         // Check if batch is complete
         if (_current_batch->is_complete()) {
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
-                    "[S:{}] Batch complete after extended error recovery", _id);
-
-            // Clean up current batch
-            _current_batch = nullptr;
-
-            // Reset state to ready
-            _state = State::READY;
-            _seq_id = 0;
-
-            // Check for deferred shadow shutdown
-            if (_defer_shadow_shutdown && _batch_queue.empty()) {
-                CHECK(_is_shadow);
-                reset_session();
-                _state = State::RESET_SESSION;
-                _send_reset();
-                return;
-            }
-
-            // Process next batch if available
-            _process_next_batch();
-            return;
+            _complete_batch();
         }
     }
 
