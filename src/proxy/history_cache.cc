@@ -5,7 +5,7 @@
 namespace springtail {
 namespace pg_proxy {
 
-    static std::unordered_map<QueryStmt::Type, std::string> query_type_names = {
+    static const std::unordered_map<QueryStmt::Type, std::string> query_type_names = {
         {QueryStmt::Type::NONE, "NONE"},
         {QueryStmt::Type::SET, "SET"},
         {QueryStmt::Type::SET_LOCAL, "SET_LOCAL"},
