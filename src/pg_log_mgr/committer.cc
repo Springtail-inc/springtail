@@ -110,6 +110,7 @@ namespace springtail::committer {
     Committer::remove_db(uint64_t db_id)
     {
         _indexer->remove_db(db_id);
+        _table_copy_tracker->remove_db(db_id);
         std::unique_lock lock(_main_mutex);
         _completed_xids.erase(db_id);
     }
@@ -589,6 +590,7 @@ namespace springtail::committer {
                 _has_ddl_precommit = false;
             }
 
+            _table_copy_tracker->notify(db_id, swapped_tids);
             for (const auto swapped_tid: swapped_tids) {
                 // Notify vacuumer to expire old table snapshot
                 // Send completed_xid - 1 to get the previous old snapshot dir
@@ -1016,7 +1018,7 @@ namespace springtail::committer {
     }
 
     // ---------------- TableSyncProcessor ----------------
-    void 
+    void
     Committer::TableSyncProcessor::add(uint64_t xid, const std::vector<MutableTablePtr>& tables)
     {
         DCHECK(!tables.empty());
@@ -1038,11 +1040,11 @@ namespace springtail::committer {
         }
     }
 
-    void 
+    void
     Committer::TableSyncProcessor::task(std::stop_token st)
     {
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Thread started, interval: {}ms",
-                std::chrono::duration_cast<std::chrono::milliseconds>(_sync_interval).count()); 
+                std::chrono::duration_cast<std::chrono::milliseconds>(_sync_interval).count());
 
         while(!st.stop_requested()) {
             uint64_t db_id;

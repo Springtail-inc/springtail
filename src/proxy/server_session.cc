@@ -59,16 +59,16 @@ namespace springtail::pg_proxy {
         });
     }
 
-    void
+    bool
     ServerSession::_release_session(bool deallocate)
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Server type={}; releasing session", _id,
                     (_type == Type::REPLICA ? "Replica" : "Primary"));
 
         if (_type == Type::PRIMARY) {
-            DatabaseMgr::get_instance()->primary_set()->release_session(shared_from_this(), deallocate);
+            return DatabaseMgr::get_instance()->primary_set()->release_session(shared_from_this(), deallocate);
         } else {
-            DatabaseMgr::get_instance()->replica_set()->release_session(shared_from_this(), deallocate);
+            return DatabaseMgr::get_instance()->replica_set()->release_session(shared_from_this(), deallocate);
         }
     }
 
@@ -419,7 +419,9 @@ namespace springtail::pg_proxy {
                     DCHECK_EQ(status, 'I');
                     _seq_id = 0;
                     _state = State::RESET_SESSION_READY;
-                    _release_session(false);
+                    if (_release_session(false)) {
+                        _session_cleanup();
+                    }
                     return;
                 }
 
@@ -1066,11 +1068,8 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::shutdown_session()
+    ServerSession::_session_cleanup()
     {
-        // callback from Session::_handle_error()
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session is shutting down, socket={}", _id, _connection->get_socket());
-
         // grab a shared pointer to self, to avoid losing the reference during cleanup
         ServerSessionPtr self = shared_from_this();
 
@@ -1083,6 +1082,15 @@ namespace springtail::pg_proxy {
 
         // clear all internal data structures
         reset_session();
+    }
+
+    void
+    ServerSession::shutdown_session()
+    {
+        // callback from Session::_handle_error()
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session is shutting down, socket={}", _id, _connection->get_socket());
+
+        _session_cleanup();
 
         // release the session, and deallocate it
         _release_session(true);
@@ -1106,7 +1114,7 @@ namespace springtail::pg_proxy {
         }
 
         ServerSessionPtr session = std::make_shared<ServerSession>(connection, user, database, prefix, instance, params, type);
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}{}", session->id(), prefix, database);
 
         ProxyServer::get_instance()->log_connect(session);
 

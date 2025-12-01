@@ -92,11 +92,11 @@ namespace {
         }
 
         /** override abstract method */
-        void
+        bool
         release_session(ServerSessionPtr session, bool deallocate) override
         {
             std::shared_lock lock(_base_mutex);
-            DatabaseInstanceSet::_release_session(session, deallocate);
+            return DatabaseInstanceSet::_release_session(session, deallocate);
         }
 
         /** make public for testing */

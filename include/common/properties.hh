@@ -61,6 +61,8 @@ namespace springtail {
         static inline constexpr char FDW_CONFIG_PATH[] = "fdw";
         /** Redis notification path for the list of FDW databases */
         static inline constexpr char FDW_DBS_PATH[] = "fdw_dbs";
+        /** Redis notification path for database schema changes */
+        static inline constexpr char INCLUDE_CHANGES_PATH[] = "include_changes";
 
         /* Secrets mgr roles */
         /** FDW secrets mgr role */
@@ -233,8 +235,15 @@ namespace springtail {
          */
         static std::vector<uint64_t> get_database_ids(const nlohmann::json &json_db_ids);
 
-        /** Helper to get included schemas */
-        static std::vector<std::string> get_include_schemas(uint64_t db_id);
+        /** @brief Helper to get included schemas. When with_pending flag is set, we will get
+         *  include schemas list from the pending changes if those are set. Otherwise,
+         *  the data will come from redis db_config hash.
+         * @param db_id - database id for include schemas
+         * @param with_pending - flag indicating if we need to check pending changes to
+         *                       include schemas first
+         * @return std::vector<std::string> - vector with database ids
+         */
+        static std::vector<std::string> get_include_schemas(uint64_t db_id, bool with_pending);
 
         /**
          * @brief Helper to get system role from map based on role name
@@ -267,6 +276,39 @@ namespace springtail {
         std::set<uint64_t> get_fdw_db_ids(const std::string &fdw_id);
         void set_fdw_db_ids(const std::string &fdw_id, const std::set<uint64_t> &db_ids);
 
+        /**
+         * @brief Set the db include schemas in properties
+         *
+         * @param db_id - database that this include schemas belong to
+         * @param schemas_json - json object representing schema included
+         */
+        void set_db_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json);
+
+        /**
+         * @brief Set the list of schemas that are pending to be made available for query
+         *          while the underlying tables are being copied.
+         *
+         * @param db_id - database that this include schemas belong to
+         * @param schemas_json - json object representing schema included
+         */
+        void set_pending_include_schemas(uint64_t db_id, const nlohmann::json &schemas_json);
+
+        /**
+         * @brief Clear the pending include schemas in properties. This function will be used
+         *        after include schema are updated in Redis with pending value.
+         *
+         * @param db_id - database that this include schemas belong to
+         */
+        void clear_pending_include_schemas(uint64_t db_id);
+
+        /**
+         * @brief Get the pending include schemas for the given database
+         *
+         * @param db_id - database id
+         * @return nlohmann::json - json object representing pending include schemas
+         */
+        nlohmann::json get_pending_include_schemas(uint64_t db_id);
+
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;
@@ -279,6 +321,12 @@ namespace springtail {
 
         /** Cache of system roles: role_name -> (db_user, db_password) */
         std::unordered_map<std::string, std::tuple<std::string, std::string>> _system_roles;
+
+        /** Pending include schemas map per database */
+        std::unordered_map<uint64_t, nlohmann::json> _pending_schema_include;
+
+        /** Mutex protecting access to pending include schemas map */
+        std::shared_mutex _pending_schema_include_mutex;
 
         /**
          * @brief Construct a new Properties object
