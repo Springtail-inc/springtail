@@ -6,6 +6,8 @@ import yaml
 import subprocess
 import signal
 import logging
+from typing import Any
+from psycopg2.extensions import connection as psycopg2_connection
 
 def parse_sql_commands(sql_content: str) -> str:
     """Parse and process SQL commands marked with ##"""
@@ -55,7 +57,7 @@ def parse_sql_commands(sql_content: str) -> str:
 class BenchCase:
     """Class to run a single benchmark case"""
 
-    def __init__(self, props: springtail.Properties, name: str, filename: str, test_sql: str, build_dir: str, enable_perf: bool = False):
+    def __init__(self, props: springtail.Properties, name: str, filename: str, test_sql: str, build_dir: str, enable_perf: bool = False) -> None:
         self.filename = filename
         self.name = filename
         self.build_dir = build_dir
@@ -72,7 +74,7 @@ class BenchCase:
         else:
             self.replica_name = self.primary_name
 
-    def _start_perf(self, replica_conn) -> tuple:
+    def _start_perf(self, replica_conn: psycopg2_connection) -> tuple[subprocess.Popen[bytes] | None, str | None, int | None]:
         """Start perf profiling on the replica postgres backend.
 
         Returns:
@@ -150,7 +152,7 @@ class BenchCase:
             logging.error(f"Failed to start perf: {e}")
             return None, None, None
 
-    def _stop_perf(self, perf_process, perf_output, backend_pid) -> None:
+    def _stop_perf(self, perf_process: subprocess.Popen[bytes] | None, perf_output: str | None, backend_pid: int | None) -> None:
         """Stop perf profiling and finalize the output file."""
         if perf_process is None:
             return
@@ -175,13 +177,13 @@ class BenchCase:
             except:
                 pass
 
-    def _run_benchmark(self, primary_conn, replica_conn, setup_timeout) -> dict:
+    def _run_benchmark(self, primary_conn: psycopg2_connection, replica_conn: psycopg2_connection, setup_timeout: int | float) -> dict[str, Any]:
         """Run the benchmark with given connections"""
 
         # test root
         root = os.path.dirname(self.filename)
 
-        def get_sql(n):
+        def get_sql(n: str) -> str | None:
             p = config.get(n)
             if not p:
                 return None
@@ -291,7 +293,7 @@ class BenchCase:
 
         return result
 
-    def run(self, setup_timeout) -> dict:
+    def run(self, setup_timeout: int | float) -> dict[str, Any]:
         """Run the benchmark and return timing results"""
         # Connect to databases
         primary_conn = springtail.connect_db_instance(self.props, self.primary_name)

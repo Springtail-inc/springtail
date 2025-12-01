@@ -273,7 +273,7 @@ namespace {
             int width;
             mgr->fdw_get_rel_size(&plan, qual_list, NIL, &rows, &width);
 
-            PgFdwState *state = mgr->create_scan_state(&plan, qual_list, NIL);
+            PgFdwState *state = mgr->create_scan_state(&plan);
 
             // this should setup the sortgroup index
             mgr->fdw_can_sort(&plan, state, sortgroup, qual_list, true);

@@ -178,8 +178,8 @@ namespace springtail::pg_fdw {
             // scan direction
             SCAN_DIRECTION,
             // cached planning metadata
-            CACHED_QUAL_INDEXES,
-            CACHED_JOIN_INDEXES,
+            QUAL_INDEXES,
+            JOIN_INDEXES,
 
             LAST
         };

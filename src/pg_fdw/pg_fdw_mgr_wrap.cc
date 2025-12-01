@@ -163,7 +163,7 @@ extern "C" {
     fdw_create_scan_state(List* planstate, List *qual_list, List* join_quals)
     {
         SpringtailPlanState ps{planstate};
-        return get_fdw_mgr()->create_scan_state(&ps, qual_list, join_quals);
+        return get_fdw_mgr()->create_scan_state(&ps);
     }
 
     void 

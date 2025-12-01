@@ -73,7 +73,7 @@ void fdw_set_qual_state(List* state, int i, bool ignore);
 bool fdw_is_qual_ignored(List* state, int i);
 
 /** Returns PgFdwState */
-void* fdw_create_scan_state(List* planstate, List *qual_list, List* join_quals);
+void* fdw_create_scan_state(List* planstate);
 
 /** state is PgFdwState */
 void fdw_delete_scan_state(void *state);

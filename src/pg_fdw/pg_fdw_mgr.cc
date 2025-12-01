@@ -466,7 +466,7 @@ namespace springtail::pg_fdw {
     }
 
     std::unique_ptr<PgFdwState>
-    PgFdwMgr::_create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows)
+    PgFdwMgr::_create_scan_state(const SpringtailPlanState *planstate, double *rows)
     {
         // we create a temporary scan state here because for historical reasons
         // it has some API's needed by this function. The state will be deleted
@@ -755,10 +755,10 @@ namespace springtail::pg_fdw {
     }
 
     PgFdwState*
-    PgFdwMgr::create_scan_state(const SpringtailPlanState *planstate, const List* quals, const List* join_quals)
+    PgFdwMgr::create_scan_state(const SpringtailPlanState *planstate)
     {
         double dummy = 0;
-        auto state = _create_scan_state(planstate, quals, join_quals, &dummy);
+        auto state = _create_scan_state(planstate, &dummy);
         return state.release();
     }
 
@@ -772,7 +772,7 @@ namespace springtail::pg_fdw {
         // it has some API's need by this function. The state will be deleted
         // when the function exist.
         double dummy = 0;
-        auto state = _create_scan_state(planstate, quals, NIL, &dummy);
+        auto state = _create_scan_state(planstate, &dummy);
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
 
         for (size_t i = 0; i != num_attrs; ++i) {

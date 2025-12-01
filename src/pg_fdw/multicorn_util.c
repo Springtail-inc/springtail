@@ -1038,7 +1038,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
         if (deparsed)
         {
             // Need PgFdwState for sort pushdown analysis
-            state = fdw_create_scan_state(baserel->fdw_private, quals, join_quals);
+            state = fdw_create_scan_state(baserel->fdw_private);
             /* Update the sort_*_pathkeys lists if needed */
             computeDeparsedSortGroup(deparsed, baserel->fdw_private, state,
                     quals,

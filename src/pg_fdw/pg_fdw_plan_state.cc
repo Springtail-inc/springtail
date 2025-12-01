@@ -173,7 +173,7 @@ uint64_t SpringtailPlanState::get_rel_width() const
 
 void SpringtailPlanState::set_cached_qual_indexes(const std::vector<uint64_t>& indexes)
 {
-    constexpr auto ind = RootIndex::CACHED_QUAL_INDEXES;
+    constexpr auto ind = RootIndex::QUAL_INDEXES;
     PgVector<ListValueType<ind>::type> v{_state[ind]};
     v._l = NIL;  // clear existing
     for (uint64_t idx : indexes) {
@@ -184,13 +184,13 @@ void SpringtailPlanState::set_cached_qual_indexes(const std::vector<uint64_t>& i
 
 PgVector<uint64_t> SpringtailPlanState::get_cached_qual_indexes() const
 {
-    constexpr auto ind = RootIndex::CACHED_QUAL_INDEXES;
+    constexpr auto ind = RootIndex::QUAL_INDEXES;
     return PgVector<uint64_t>{_state[ind]};
 }
 
 void SpringtailPlanState::set_cached_join_indexes(const std::vector<uint64_t>& indexes)
 {
-    constexpr auto ind = RootIndex::CACHED_JOIN_INDEXES;
+    constexpr auto ind = RootIndex::JOIN_INDEXES;
     PgVector<ListValueType<ind>::type> v{_state[ind]};
     v._l = NIL;  // clear existing
     for (uint64_t idx : indexes) {
@@ -201,6 +201,6 @@ void SpringtailPlanState::set_cached_join_indexes(const std::vector<uint64_t>& i
 
 PgVector<uint64_t> SpringtailPlanState::get_cached_join_indexes() const
 {
-    constexpr auto ind = RootIndex::CACHED_JOIN_INDEXES;
+    constexpr auto ind = RootIndex::JOIN_INDEXES;
     return PgVector<uint64_t>{_state[ind]};
 }

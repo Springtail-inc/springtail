@@ -213,7 +213,7 @@ namespace springtail::pg_fdw {
 
         /**
          */
-        PgFdwState* create_scan_state(const SpringtailPlanState *state, const List* qual_indexes, const List* join_quals);
+        PgFdwState* create_scan_state(const SpringtailPlanState *state);
 
         /** Get estimate of row width/number of rows
          * @param planstate Plan state
@@ -439,8 +439,6 @@ namespace springtail::pg_fdw {
                                        double *rows);
 
         std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate,
-                                                       const List *qual_list,
-                                                       const List* join_quals,
                                                        double *rows);
     };
 } // namespace springtail::pg_fdw
