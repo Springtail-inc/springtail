@@ -451,12 +451,44 @@ namespace springtail::pg_proxy {
         _stmt_cache.sync_transaction(xact_status);
 
         if (!_stmt_cache.in_transaction()) {
+            // replay any pending state to other server sessions
+            _replay_pending_state();
+
             // clear associated session if we are not in a transaction
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Clearing associate server session", _id);
             clear_associated_session();
         }
     }
 
+    void
+    ClientSession::_replay_pending_state()
+    {
+        // determine which server session to replay msgs to (other than associated session)
+        ServerSessionPtr session = nullptr;
+        if (_primary_session != nullptr && _primary_session != get_associated_session()) {
+            session = _primary_session;
+        } else if (_replica_session != nullptr && _replica_session != get_associated_session()) {
+            session = _replica_session;
+        }
+
+        if (session == nullptr) {
+            // no other session to replay to
+            return;
+        }
+
+        // generate set of dependency messages and queue them to the server session
+        std::deque<SessionMsgPtr> msg_queue;
+        _add_dependencies(msg_queue, session, false);
+
+        if (msg_queue.empty()) {
+            // nothing to replay; common case
+            return;
+        }
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Replaying pending state to other server session (S:{})", _id, session->id());
+
+        session->queue_msg_batch(std::move(msg_queue));
+    }
 
     void
     ClientSession::server_shutdown(ServerSessionPtr session)
@@ -666,6 +698,7 @@ namespace springtail::pg_proxy {
                                      bool replay_transaction_history)
     {
         // add any dependencies for the message; get replay history from statement cache
+        // start with session state and add transaction history if needed
         auto is_read_only = server_session->type() == Type::REPLICA;
         auto session_id = server_session->id();
         auto replay_stmts = _stmt_cache.get_session_history(session_id, is_read_only);
@@ -677,8 +710,13 @@ namespace springtail::pg_proxy {
         }
 
         SessionMsgPtr msg{nullptr};
+        uint64_t seq_id;
+        if (msg_queue.empty()) {
+            seq_id = _gen_seq_id();
+        } else {
+            seq_id = msg_queue.front()->seq_id();
+        }
 
-        uint64_t seq_id = msg_queue.front()->seq_id();
         if (!replay_stmts.empty()) {
             msg = std::make_shared<SessionMsg>(SessionMsg::Type::MSG_CLIENT_SERVER_STATE_REPLAY, seq_id);
             msg->set_dependencies(std::move(replay_stmts));
@@ -701,10 +739,10 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        // debugging
+        // XXX debugging
         auto qs_deps = msg->qs_dependencies();
         for (const auto& qs : qs_deps) {
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Query dependency: {}", _id, qs->to_string());
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Query dependency: {}", _id, qs->to_string());
         }
 
         // add message to front of queue

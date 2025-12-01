@@ -844,7 +844,9 @@ namespace springtail::pg_proxy {
 
         auto front_query_status = _current_batch->get_current_query_status();
         if (!front_query_status) {
-            LOG_ERROR("[S:{}] Cannot send messages: current batch has no messages", _id);
+            // no messages to send, can complete batch
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Cannot send messages: current batch has no messages", _id);
+            _complete_batch();
             return;
         }
 
@@ -909,9 +911,7 @@ namespace springtail::pg_proxy {
         if (flush_messages == messages_sent) {
             // All messages were flush messages, can complete batch
             // no responses expected, transition to READY state
-            _state = State::READY;
-            _current_batch = nullptr;
-            _seq_id = 0;
+            _complete_batch();
         }
     }
 
@@ -1059,9 +1059,18 @@ namespace springtail::pg_proxy {
             return;
         }
 
+        _complete_batch();
+    }
+
+    void
+    ServerSession::_complete_batch()
+    {
         // All queries in this batch are complete
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
-                    "[S:{}] All queries complete, batch finished", _id);
+                  "[S:{}] All queries complete, batch finished", _id);
+
+        DCHECK_NE(_current_batch, nullptr);
+        DCHECK_EQ(_current_batch->is_complete(), true);
 
         // Reset state
         _current_batch = nullptr;

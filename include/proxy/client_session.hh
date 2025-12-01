@@ -184,6 +184,9 @@ namespace springtail::pg_proxy {
         /** Helper to send message queue to server */
         void _send_msg_queue();
 
+        /** Helper to replay pending state to (non-associated) server session */
+        void _replay_pending_state();
+
         /**
          * @brief Check for pending data on any associated connections
          * @param fds set of fds; set socket if socket has data

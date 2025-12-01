@@ -561,6 +561,9 @@ namespace springtail::pg_proxy {
          */
         void _handle_query_ready_for_query(char transaction_status);
 
+        /** Complete the current batch of messages, reset to READY state */
+        void _complete_batch();
+
         /** Process response from server in reset session state */
         void _handle_reset_session_message();
 

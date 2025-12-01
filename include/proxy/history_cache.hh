@@ -339,7 +339,7 @@ namespace springtail::pg_proxy {
          * @return A vector of QueryStmtPtr representing the session history
          */
         std::vector<QueryStmtPtr> get_session_history(uint64_t session_id, bool read_only) {
-            return _get_replay_history(session_id, read_only, true, false);
+            return _get_replay_history(session_id, read_only, true);
         }
 
         /**
@@ -349,7 +349,7 @@ namespace springtail::pg_proxy {
          * @return std::vector<QueryStmtPtr>
          */
         std::vector<QueryStmtPtr> get_transaction_history(uint64_t session_id, bool read_only) {
-            return _get_replay_history(session_id, read_only, false, true);
+            return _get_replay_history(session_id, read_only, false);
         }
 
         /**
@@ -427,17 +427,16 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Get query statements to replay from the session history based on last replay index
+         * @brief Get query statements to replay from the statement history based on last replay index
+         * Also increments the session replay index to current max replay idx returned.
          * @param session_id The session id
          * @param read_only If true, only return read-only statements (for replica replay)
-         * @param session_history If true, include session history
-         * @param transaction_history If true, include transaction history
+         * @param session_history If true, include session history, if false include transaction history
          * @return vector of QueryStmtPtr to replay
          */
         std::vector<QueryStmtPtr> _get_replay_history(
             uint64_t session_id, bool read_only,
-            bool session_history=true,
-            bool transaction_history=false);
+            bool session_history=true);
     };
 
 } // namespace springtail::pg_proxy

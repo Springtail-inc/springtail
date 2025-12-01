@@ -301,10 +301,8 @@ namespace pg_proxy {
     std::vector<QueryStmtPtr>
     StatementCache::_get_replay_history(uint64_t session_id,
         bool read_only,
-        bool session_history,
-        bool transaction_history)
+        bool session_history)
     {
-        std::vector<QueryStmtPtr> statements_to_replay;
         uint64_t starting_replay_index = 0;
 
         // find the starting replay index for this session
@@ -320,12 +318,21 @@ namespace pg_proxy {
                 "Replaying session history for session {} starting from index {}, read-only={}",
                 session_id, starting_replay_index, read_only);
 
+        // get the statements to replay from either session or transaction history
+        std::vector<QueryStmtPtr> statements_to_replay;
         if (session_history) {
-            return _session_history.get_replay_history(starting_replay_index, read_only);
+            statements_to_replay = _session_history.get_replay_history(starting_replay_index, read_only);
+        } else {
+            statements_to_replay = _transaction_history.get_replay_history(starting_replay_index, read_only);
         }
 
-        if (transaction_history) {
-            return _transaction_history.get_replay_history(starting_replay_index, read_only);
+        // update the session replay index to the max replay id in the history
+        // get idx of back statement if any
+        if (!statements_to_replay.empty()) {
+            uint64_t max_replay_idx = statements_to_replay.back()->replay_id;
+            _session_replay_map[session_id] = max_replay_idx;
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2,
+                    "Updated session {} replay index to {}", session_id, max_replay_idx);
         }
 
         return statements_to_replay;
