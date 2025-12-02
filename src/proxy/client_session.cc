@@ -218,6 +218,13 @@ namespace springtail::pg_proxy {
         if (session == nullptr) {
             LOG_ERROR("[C:{}] Client session failed to create failover replica session", _id);
             // we stay in ready state, and continue to use the primary session
+            if (_replica_session != nullptr) {
+                // release the old replica session
+                DCHECK(_replica_session->is_pinned());
+                _replica_session->unpin_client_session();
+                _replica_session->shutdown_session();
+                _replica_session = nullptr;
+            }
             return;
         }
     }
@@ -467,7 +474,7 @@ namespace springtail::pg_proxy {
 
 
     void
-    ClientSession::server_shutdown(ServerSessionPtr session)
+    ClientSession::server_shutdown(ServerSessionPtr session, bool fatal)
     {
         // server session is shutting down; called from ServerSession::reset_session()
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Server session shutting down", _id);
@@ -480,9 +487,7 @@ namespace springtail::pg_proxy {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Primary session shutting down", _id);
             _primary_session = nullptr;
 
-            if (get_associated_session()) {
-                clear_associated_session();
-            }
+            clear_associated_session();
 
             _state = State::ERROR;
             return;
@@ -499,6 +504,13 @@ namespace springtail::pg_proxy {
 
         DCHECK_EQ(_replica_session, session);
         _replica_session = nullptr;
+
+        if (fatal) {
+            clear_associated_session();
+
+            _state = State::ERROR;
+            return;
+        }
 
         if (_in_transaction && get_associated_session() == session) {
             // replica going away during a transaction and it is the associated session
@@ -1049,8 +1061,17 @@ namespace springtail::pg_proxy {
         //// Shouldn't get here in common case; only if we need to allocate a new session
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Creating new server session: type={}", _id, type == Type::PRIMARY ? "PRIMARY" : "REPLICA");
         session = _create_server_session(type, seq_id);
-        DCHECK_NE(session, nullptr);
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Created new server session: id={}", _id, session->id());
+        if (session == nullptr) {
+            if (type == Type::REPLICA) {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Failed to create REPLICA session, will use primary session", _id);
+                session = _primary_session;
+            } else {
+                _state = State::ERROR;
+                throw ProxyIOConnectionError();
+            }
+        } else {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Created new server session: id={}", _id, session->id());
+        }
 
         // set associated session
         set_associated_session(session);
@@ -1083,7 +1104,6 @@ namespace springtail::pg_proxy {
 
             if ((session = db_mgr->allocate_session(type, _db_id, _user, _parameters, _database)) == nullptr) {
                 LOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
-                assert(0);
                 return nullptr;
             }
         }

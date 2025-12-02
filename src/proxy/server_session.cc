@@ -561,13 +561,19 @@ namespace springtail::pg_proxy {
                 // Error response
                 // handle the error code, this determines if error is fatal
                 // it also sends the error response to the client
-                _decode_error_buffer(buffer, _seq_id);
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] error", _id);
-                if (_state == State::ERROR) {
-                    // TODO: possible this is a dependency error, which for now will be fatal
-                    // fatal error, send error to client
-                    _send_to_remote_session(code, buffer, _seq_id);
-                    return;
+                {
+                    State old_state = _state;
+                    _decode_error_buffer(buffer, _seq_id);
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] error", _id);
+                    if (_state == State::ERROR) {
+                        // TODO: possible this is a dependency error, which for now will be fatal
+                        // fatal error, send error to client
+                        if (old_state == State::QUERY) {
+                            _send_to_remote_session(code, buffer, _seq_id);
+                            _fatal_error = true;
+                        }
+                        return;
+                    }
                 }
 
                 // non-fatal error -- check which state we are in
@@ -610,6 +616,9 @@ namespace springtail::pg_proxy {
             }
             default:
                 LOG_ERROR("Unknown message: {}", code);
+                if (_state == State::QUERY) {
+                    _fatal_error = true;
+                }
                 _state = State::ERROR;
                 break;
         }
@@ -1093,7 +1102,7 @@ namespace springtail::pg_proxy {
         auto connection = instance->create_connection();
         if (connection == nullptr) {
             LOG_ERROR("Failed to create connection for server db");
-            throw ProxyIOConnectionError();
+            return nullptr;
         }
 
         ServerSessionPtr session = std::make_shared<ServerSession>(connection, user, database, prefix, instance, params, type);

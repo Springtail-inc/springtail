@@ -125,7 +125,7 @@ namespace springtail::pg_proxy {
         void reset_session() override {
             auto client_session = get_client_session();
             if (client_session != nullptr) {
-                client_session->server_shutdown(shared_from_this());
+                client_session->server_shutdown(shared_from_this(), _fatal_error);
             }
             unpin_client_session();
             _defer_shadow_shutdown = false;
@@ -216,6 +216,8 @@ namespace springtail::pg_proxy {
         ServerAuthorizationPtr _auth;        ///< authorization object
 
         bool _defer_shadow_shutdown = false; ///< defer shutdown until all messages processed
+
+        bool _fatal_error = false;           ///< flag indicating fatal error
 
         /** Process next batch of processing messages from _batch_queue */
         void _process_next_batch();
