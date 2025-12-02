@@ -46,7 +46,7 @@ ClientAuthorization::process_auth_data(uint64_t seq_id)
 
         default:
             // do nothing
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Client auth invalid state: {}", _id, to_string(_state));
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Client auth invalid state: {}", _id, state_to_string(_state, authorization_state_names));
             break;
     }
 
@@ -605,7 +605,7 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
 
     LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
                 "[S:{}] Server authorization message: code={}, length={}, state={}", _id, code,
-                msg_length, to_string(_state));
+                msg_length, state_to_string(_state, authorization_state_names));
 
     switch (code) {
         case 'R': {

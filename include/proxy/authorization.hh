@@ -39,18 +39,6 @@ const static inline std::unordered_map<AuthorizationState, std::string_view> aut
     { AuthorizationState::ERROR,           "ERROR" }
 };
 
-/**
- * @brief Convert state to state name
- *
- * @param s - state
- * @return std::string - state name
- */
-static inline std::string
-to_string(AuthorizationState s)
-{
-    return state_to_string(s, authorization_state_names);
-}
-
 class ClientAuthorization {
 public:
     ClientAuthorization(ProxyConnectionPtr connection,
