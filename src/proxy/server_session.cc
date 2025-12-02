@@ -567,7 +567,7 @@ namespace springtail::pg_proxy {
                     LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] error", _id);
                     if (_state == State::ERROR) {
                         // Errors in query state will be fatal and are reported to client
-                        // Errors in dependency state will close this session (and are only fatal if this is a primary)                        if (old_state == State::QUERY) {
+                        // Errors in dependency state will close this session (and are only fatal if this is a primary)
                         if (old_state == State::QUERY) {
                             _send_to_remote_session(code, buffer, _seq_id);
                             _fatal_error = true;
