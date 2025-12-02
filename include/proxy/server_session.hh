@@ -197,6 +197,9 @@ namespace springtail::pg_proxy {
         /** send cancel request to Postgres */
         void send_cancel();
 
+        /** transfer batch queue from session to the current session */
+        void transfer_batch_queue(ServerSessionPtr session);
+
     private:
 
         bool _is_pinned = false;

@@ -19,13 +19,33 @@ constexpr static int8_t MSG_AUTH_SASL = 10;
 constexpr static int8_t MSG_AUTH_SASL_CONTINUE = 11;
 constexpr static int8_t MSG_AUTH_SASL_COMPLETE = 12;
 
+/** internal server auth state */
+enum class AuthorizationState : int8_t {
+    STARTUP = 0,
+    SSL_HANDSHAKE = 1,
+    AUTH = 2,
+    AUTH_DONE = 3,
+    READY = 4,
+    ERROR = 99
+};
+
+/** Map of state to state names */
+const static inline std::unordered_map<AuthorizationState, std::string_view> authorization_state_names{
+    { AuthorizationState::STARTUP,         "STARTUP" },
+    { AuthorizationState::SSL_HANDSHAKE,   "SSL_HANDSHAKE" },
+    { AuthorizationState::AUTH,            "AUTH" },
+    { AuthorizationState::AUTH_DONE,       "AUTH_DONE" },
+    { AuthorizationState::READY,           "READY" },
+    { AuthorizationState::ERROR,           "ERROR" }
+};
+
 class ClientAuthorization {
 public:
     ClientAuthorization(ProxyConnectionPtr connection,
                         uint64_t id,
                         int32_t pid,
                         const std::vector<uint8_t> &cancel_key)
-        : _state(STARTUP), _connection(connection), _id(id), _pid(pid), _cancel_key(cancel_key)
+        : _connection(connection), _id(id), _pid(pid), _cancel_key(cancel_key)
     {
     }
 
@@ -88,9 +108,7 @@ public:
     bool is_cancel() const { return _is_cancel; }
 
 private:
-    enum State : int8_t { STARTUP = 0, SSL_HANDSHAKE = 1, AUTH = 2, READY = 3, ERROR = 99 };
-
-    State _state;
+    AuthorizationState _state{AuthorizationState::STARTUP};
     ProxyConnectionPtr _connection;
     uint64_t _id;
     int32_t _pid;
@@ -148,8 +166,7 @@ public:
                         const std::string &db_prefix,
                         Session::Type type,
                         const std::unordered_map<std::string, std::string> &parameters)
-        : _state(STARTUP),
-          _connection(connection),
+        : _connection(connection),
           _id(id),
           _user(user),
           _database(database),
@@ -210,17 +227,7 @@ public:
     }
 
 private:
-    /** internal server auth state */
-    enum State : int8_t {
-        STARTUP = 0,
-        SSL_HANDSHAKE = 1,
-        AUTH = 2,
-        AUTH_DONE = 3,
-        READY = 4,
-        ERROR = 99
-    };
-
-    State _state;
+    AuthorizationState _state{AuthorizationState::STARTUP};
     ProxyConnectionPtr _connection;
     uint64_t _id;
 
