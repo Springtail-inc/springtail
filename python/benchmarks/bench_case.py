@@ -3,6 +3,11 @@ import springtail
 import time
 import common
 import yaml
+import subprocess
+import signal
+import logging
+from typing import Any
+from psycopg2.extensions import connection as psycopg2_connection
 
 def parse_sql_commands(sql_content: str) -> str:
     """Parse and process SQL commands marked with ##"""
@@ -52,12 +57,13 @@ def parse_sql_commands(sql_content: str) -> str:
 class BenchCase:
     """Class to run a single benchmark case"""
 
-    def __init__(self, props: springtail.Properties, name: str, filename: str, test_sql: str, build_dir: str):
+    def __init__(self, props: springtail.Properties, name: str, filename: str, test_sql: str, build_dir: str, enable_perf: bool = False) -> None:
         self.filename = filename
         self.name = filename
         self.build_dir = build_dir
-        self.props = props 
+        self.props = props
         self.test_sql = test_sql
+        self.enable_perf = enable_perf
 
         # Get database names
         db_configs = self.props.get_db_configs()
@@ -68,13 +74,116 @@ class BenchCase:
         else:
             self.replica_name = self.primary_name
 
-    def _run_benchmark(self, primary_conn, replica_conn, setup_timeout) -> dict:
+    def _start_perf(self, replica_conn: psycopg2_connection) -> tuple[subprocess.Popen[bytes] | None, str | None, int | None]:
+        """Start perf profiling on the replica postgres backend.
+
+        Returns:
+            tuple: (perf_process, perf_output_file, backend_pid) or (None, None, None) if perf cannot be started
+        """
+        if not self.enable_perf:
+            return None, None, None
+
+        logging.info("=" * 60)
+        logging.info("PERF PROFILING ENABLED")
+        logging.info("=" * 60)
+
+        try:
+            # Get the backend PID for the replica connection
+            with replica_conn.cursor() as cursor:
+                cursor.execute("SELECT pg_backend_pid()")
+                result = cursor.fetchone()
+                if not result:
+                    logging.error("Could not get backend PID for replica connection")
+                    return None, None, None
+                backend_pid = result[0]
+
+            logging.info(f"Replica postgres backend PID: {backend_pid}")
+
+            # Generate output filename with timestamp
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            # Use benchmark name from filename (directory name)
+            bench_name = os.path.basename(os.path.dirname(self.filename))
+            perf_output = f"perf-{bench_name}-{timestamp}.data"
+
+            logging.info(f"Perf output file: {perf_output}")
+
+            # Start perf recording with sudo
+            perf_cmd = [
+                "sudo", "perf", "record",
+                "-p", str(backend_pid),
+                "-g",  # Enable call graph recording
+                "-o", perf_output,
+                "--", "sleep", "999999"  # Sleep indefinitely until we stop it
+            ]
+
+            logging.info(f"Perf command: {' '.join(perf_cmd)}")
+
+            perf_process = subprocess.Popen(
+                perf_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+
+            logging.info(f"Perf process started with PID: {perf_process.pid}")
+
+            # Give perf a moment to initialize
+            time.sleep(0.5)
+
+            # Check if perf started successfully
+            if perf_process.poll() is not None:
+                stdout = perf_process.stdout.read().decode()
+                stderr = perf_process.stderr.read().decode()
+                logging.error(f"perf failed to start (exit code: {perf_process.returncode})")
+                if stdout:
+                    logging.error(f"STDOUT: {stdout}")
+                if stderr:
+                    logging.error(f"STDERR: {stderr}")
+                return None, None, None
+
+            logging.info("Perf is running and attached to postgres backend")
+            logging.info("=" * 60)
+
+            return perf_process, perf_output, backend_pid
+
+        except FileNotFoundError as e:
+            logging.error(f"Command not found: {e}")
+            return None, None, None
+        except Exception as e:
+            logging.error(f"Failed to start perf: {e}")
+            return None, None, None
+
+    def _stop_perf(self, perf_process: subprocess.Popen[bytes] | None, perf_output: str | None, backend_pid: int | None) -> None:
+        """Stop perf profiling and finalize the output file."""
+        if perf_process is None:
+            return
+
+        try:
+            # Send SIGINT to gracefully stop perf and finalize the data file
+            perf_process.send_signal(signal.SIGINT)
+
+            # Wait for perf to finish (with timeout)
+            try:
+                perf_process.wait(timeout=5)
+                logging.info(f"perf profiling complete: {perf_output}")
+                print(f"  Perf data saved to: {perf_output}")
+            except subprocess.TimeoutExpired:
+                logging.warning("perf did not terminate gracefully, killing it")
+                perf_process.kill()
+                perf_process.wait()
+        except Exception as e:
+            logging.warning(f"Error stopping perf: {e}")
+            try:
+                perf_process.kill()
+            except:
+                pass
+
+    def _run_benchmark(self, primary_conn: psycopg2_connection, replica_conn: psycopg2_connection, setup_timeout: int | float) -> dict[str, Any]:
         """Run the benchmark with given connections"""
 
         # test root
         root = os.path.dirname(self.filename)
 
-        def get_sql(n):
+        def get_sql(n: str) -> str | None:
             p = config.get(n)
             if not p:
                 return None
@@ -139,26 +248,34 @@ class BenchCase:
             primary_conn.commit()
             postgres_time = time.time() - start
 
-            with replica_conn.cursor() as cursor:
-                cursor.execute("DISCARD ALL")
+            # Start perf profiling before replica queries
+            perf_process, perf_output, backend_pid = self._start_perf(replica_conn)
 
-            start = time.time()
-            with replica_conn.cursor() as cursor:
-                cursor.execute(self.test_sql)
-            replica_conn.commit()
-            replica_time = time.time() - start
+            try:
+                with replica_conn.cursor() as cursor:
+                    cursor.execute("DISCARD ALL")
 
-            result["First run: primary test time"] = postgres_time
-            result["First run: replica test time"] = replica_time
+                start = time.time()
+                with replica_conn.cursor() as cursor:
+                    cursor.execute(self.test_sql)
+                replica_conn.commit()
+                replica_time = time.time() - start
 
-            start = time.time()
-            with replica_conn.cursor() as cursor:
-                cursor.execute(self.test_sql)
-            replica_conn.commit()
-            replica_time = time.time() - start
+                result["First run: primary test time"] = postgres_time
+                result["First run: replica test time"] = replica_time
 
-            result["Second run: primary test time"] = postgres_time
-            result["Second run: replica test time"] = replica_time
+                start = time.time()
+                with replica_conn.cursor() as cursor:
+                    cursor.execute(self.test_sql)
+                replica_conn.commit()
+                replica_time = time.time() - start
+
+                result["Second run: primary test time"] = postgres_time
+                result["Second run: replica test time"] = replica_time
+
+            finally:
+                # Stop perf profiling after replica queries complete
+                self._stop_perf(perf_process, perf_output, backend_pid)
 
         # Clean up after benchmark (outside of timing)
         cleanup_path = os.path.join(os.path.dirname(__file__), "benchmark_cleanup.sql")
@@ -176,7 +293,7 @@ class BenchCase:
 
         return result
 
-    def run(self, setup_timeout) -> dict:
+    def run(self, setup_timeout: int | float) -> dict[str, Any]:
         """Run the benchmark and return timing results"""
         # Connect to databases
         primary_conn = springtail.connect_db_instance(self.props, self.primary_name)
