@@ -45,7 +45,7 @@ public:
                         uint64_t id,
                         int32_t pid,
                         const std::vector<uint8_t> &cancel_key)
-        : _state(AuthorizationState::STARTUP), _connection(connection), _id(id), _pid(pid), _cancel_key(cancel_key)
+        : _connection(connection), _id(id), _pid(pid), _cancel_key(cancel_key)
     {
     }
 
@@ -108,7 +108,7 @@ public:
     bool is_cancel() const { return _is_cancel; }
 
 private:
-    AuthorizationState _state;
+    AuthorizationState _state{AuthorizationState::STARTUP};
     ProxyConnectionPtr _connection;
     uint64_t _id;
     int32_t _pid;
@@ -166,8 +166,7 @@ public:
                         const std::string &db_prefix,
                         Session::Type type,
                         const std::unordered_map<std::string, std::string> &parameters)
-        : _state(AuthorizationState::STARTUP),
-          _connection(connection),
+        : _connection(connection),
           _id(id),
           _user(user),
           _database(database),
@@ -228,7 +227,7 @@ public:
     }
 
 private:
-    AuthorizationState _state;
+    AuthorizationState _state{AuthorizationState::STARTUP};
     ProxyConnectionPtr _connection;
     uint64_t _id;
 

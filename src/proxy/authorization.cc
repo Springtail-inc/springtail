@@ -31,16 +31,17 @@ get_or_default(const std::unordered_map<std::string, std::string>& m, const std:
 bool
 ClientAuthorization::process_auth_data(uint64_t seq_id)
 {
+    using enum springtail::pg_proxy::AuthorizationState;
     switch (_state) {
-        case AuthorizationState::STARTUP:
+        case STARTUP:
             _handle_startup(seq_id);
             break;
 
-        case AuthorizationState::SSL_HANDSHAKE:
+        case SSL_HANDSHAKE:
             _handle_ssl_handshake();
             break;
 
-        case AuthorizationState::AUTH:
+        case AUTH:
             _handle_auth(seq_id);
             break;
 
@@ -50,11 +51,11 @@ ClientAuthorization::process_auth_data(uint64_t seq_id)
             break;
     }
 
-    if (_state == AuthorizationState::ERROR) {
+    if (_state == ERROR) {
         throw ProxyAuthError();
     }
 
-    return (_state == AuthorizationState::READY);
+    return (_state == READY);
 }
 
 void
@@ -567,29 +568,30 @@ ClientAuthorization::_encode_parameter_status(BufferPtr buffer,
 bool
 ServerAuthorization::process_auth_data(uint64_t seq_id)
 {
+    using enum springtail::pg_proxy::AuthorizationState;
     switch (_state) {
-        case AuthorizationState::STARTUP:
+        case STARTUP:
             _handle_ssl_response(seq_id);
             break;
-        case AuthorizationState::SSL_HANDSHAKE:
+        case SSL_HANDSHAKE:
             _handle_ssl_handshake(seq_id);
             break;
-        case AuthorizationState::AUTH:
-        case AuthorizationState::AUTH_DONE:
+        case AUTH:
+        case AUTH_DONE:
             _handle_message(seq_id);
             break;
-        case AuthorizationState::READY:
-            CHECK(_state != AuthorizationState::READY);
+        case READY:
+            CHECK(_state != READY);
             break;
-        case AuthorizationState::ERROR:
+        case ERROR:
             throw ProxyAuthError();
     }
 
-    if (_state == AuthorizationState::ERROR) {
+    if (_state == ERROR) {
         throw ProxyAuthError();
     }
 
-    return (_state == AuthorizationState::READY);
+    return (_state == READY);
 }
 
 void
