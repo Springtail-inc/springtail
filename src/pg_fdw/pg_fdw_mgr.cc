@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <stdlib.h>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <sstream>
 
@@ -411,7 +412,7 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
+        auto table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback);
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
@@ -547,8 +548,7 @@ namespace springtail::pg_fdw {
             //      from the thread to begin with. Maybe a better place would be to call
             //      it once from init() function.
             // _try_create_cache();
-            auto xid_info = _get_xid_info(schema_xid);
-            uint64_t xid = xid_info.last_real_xid;
+            uint64_t xid = _update_last_xid(schema_xid);
             if (xid > _last_xid) {
                 _last_xid = xid;
                 _xid_collector_client.send_data(_db_id, xid);
@@ -556,36 +556,56 @@ namespace springtail::pg_fdw {
         }
     }
 
-    PgFdwMgr::XidCommitInfo
-    PgFdwMgr::_get_xid_info(uint64_t schema_xid)
+    uint64_t
+    PgFdwMgr::_update_last_xid(uint64_t schema_xid)
     {
-        PgFdwMgr::XidCommitInfo result;
-        result.schema_xid = schema_xid;
         {
             std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
-            if (_tabld_ids_cache) {
-                // The table ids cache keeps track of recorded xids not just real committed xids
-                auto cached_xid = _tabld_ids_cache->get_committed_xid(_db_id, schema_xid);
-                if (cached_xid.has_value()) {
-                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found pending table mutations cached xid = {}", *cached_xid);
-                    result.last_recored_xid = *cached_xid;
-                }
-            }
-
             if (_roots_cache) {
-                // The roots cache keeps track of real committed xid only
                 auto cached_xid = _roots_cache->get_committed_xid(_db_id, schema_xid);
                 if (cached_xid.has_value()) {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Use cached xid = {}", *cached_xid);
-                    result.last_real_xid = *cached_xid;
-                    return result;
+                    return *cached_xid;
                 }
             }
         }
 
-        result.last_real_xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "XidMgrClient returned xid = {}", result.last_real_xid);
-        return result;
+        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "XidMgrClient returned xid = {}", xid);
+        return xid;
+    }
+
+    TablePtr PgFdwMgr::_get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid, const ExtensionCallback& extension_callback)
+    {
+        // check for pending mutations cache first
+        std::optional<uint64_t> pending_xid;
+        {
+            std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
+            if (_tabld_ids_cache) {
+                // The table ids cache keeps track of recorded xid's too
+                pending_xid = _tabld_ids_cache->get_committed_xid(_db_id, schema_xid);
+                if (pending_xid.has_value() && *pending_xid > xid) {
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found pending table mutations: db={}, tid={}, xid = {}, pending_xid = {}", db_id, tid, xid, *pending_xid);
+                } else {
+                    pending_xid.reset();
+                }
+            }
+        }
+        auto table = TableMgrClient::get_instance()->get_table(db_id, tid, xid, extension_callback);
+        if (pending_xid.has_value()) {
+
+            uint64_t extent_cursor = 0;
+            PostgresTimestamp ts;
+            while(true) {
+                auto &&extent_list = WriteCacheClient::get_instance()->get_extents(db_id, tid, *pending_xid, 1000, extent_cursor, ts);
+                if (extent_list.empty()) {
+                    break;
+                }
+                // ... apply mutations
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Applying pending table mutations for xid = {}, pending_xid = {}", xid, *pending_xid);
+            }
+        }
+        return table;
     }
 
     // called from the PG exit callback
@@ -698,9 +718,7 @@ namespace springtail::pg_fdw {
         if (_trans_pg_xid != pg_xid) {
             rd_lock.unlock();
 
-            auto xid_info = _get_xid_info(schema_xid);
-            xid = xid_info.last_real_xid;
-
+            xid = _update_last_xid(schema_xid);
             std::unique_lock<std::shared_mutex> lock(_mutex);
             _trans_pg_xid = pg_xid;
             _trans_xid = xid;
@@ -713,8 +731,7 @@ namespace springtail::pg_fdw {
             while (xid < _last_xid) {
                 LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Trying to get valid xid, current xid = {}, _last_xid = {}", xid, _last_xid);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                auto xid_info = _get_xid_info(schema_xid);
-                xid = xid_info.last_real_xid;
+                xid = _update_last_xid(schema_xid);
             }
             if (xid > _last_xid) {
                 _last_xid = xid;
@@ -734,7 +751,7 @@ namespace springtail::pg_fdw {
         // by the PG executor. fdw_private() return the List pointer
         // that we can pass around FDW callbacks as a collection of
         // our private data.
-        SpringtailPlanState ps{db_id, tid, xid};
+        SpringtailPlanState ps{db_id, tid, xid, schema_xid};
         return ps.fdw_private();
     }
 

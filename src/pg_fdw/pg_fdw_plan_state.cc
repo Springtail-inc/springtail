@@ -9,7 +9,7 @@ extern "C" {
 using namespace springtail::pg_fdw;
 
 
-SpringtailPlanState::SpringtailPlanState(uint64_t db_id, uint64_t tid, uint64_t xid)
+SpringtailPlanState::SpringtailPlanState(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid)
 {
     // init state List's
     for (int i = 0; i != RootIndex::LAST; ++i) {
@@ -34,6 +34,7 @@ SpringtailPlanState::SpringtailPlanState(uint64_t db_id, uint64_t tid, uint64_t 
         t.push_back(db_id);
         t.push_back(tid);
         t.push_back(xid);
+        t.push_back(schema_xid);
         _state.replace(ind, t);
     }
 
@@ -54,7 +55,8 @@ SpringtailPlanState::get_table_ref() const
 
     return TableRef{t[TableIdIndex::DB_ID],
         t[TableIdIndex::TID],
-        t[TableIdIndex::XID]};
+        t[TableIdIndex::XID],
+        t[TableIdIndex::SCHEMA_XID]};
 
 }
 
