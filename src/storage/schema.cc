@@ -387,4 +387,41 @@ namespace springtail {
 
         return fields;
     }
+
+    void ExtentSchema::_build_name_lookup()
+    {
+        _column_name_to_position.clear();
+        for (const auto& col : _schema_columns) {
+            _column_name_to_position[col.name] = col.position;
+        }
+    }
+
+    std::optional<std::reference_wrapper<const SchemaColumn>> ExtentSchema::get_schema_column(const std::string &name) const
+    {
+        // Find the SchemaColumn with matching name
+        for (const auto& col : _schema_columns) {
+            if (col.name == name) {
+                return std::cref(col);
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<uint32_t> ExtentSchema::get_column_position_by_name(const std::string &name) const
+    {
+        auto it = _column_name_to_position.find(name);
+        if (it == _column_name_to_position.end()) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+
+    std::map<uint32_t, SchemaColumn> ExtentSchema::get_column_map() const
+    {
+        std::map<uint32_t, SchemaColumn> result;
+        for (const auto& col : _schema_columns) {
+            result.emplace(col.position, col);
+        }
+        return result;
+    }
 }

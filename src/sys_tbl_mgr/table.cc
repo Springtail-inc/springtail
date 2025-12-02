@@ -141,6 +141,9 @@ get_table_dir(const std::filesystem::path &base,
             }
             assert(idx.id != constant::INDEX_PRIMARY);
 
+            // Cache the READY index metadata for later retrieval without RPC calls
+            _ready_indexes.push_back(idx);
+
             // work with the index
             std::vector<uint32_t> idx_cols;
             idx_cols.reserve(idx_cols.size());
@@ -606,6 +609,33 @@ get_table_dir(const std::filesystem::path &base,
             auto index_schema = schema_helpers::create_index_schema(table->_schema, cols, index_id, table->_extension_callback);
             _tracker.emplace<Secondary>(table, btree,
                     btree->end(), index_schema );
+        }
+    }
+
+    void Table::advance_to_xid(uint64_t new_xid, const std::vector<TableRoot> &new_roots)
+    {
+        // Update the table's XID
+        _xid = new_xid;
+
+        // Update each index based on its root in new_roots
+        for (const auto &root : new_roots) {
+            if (root.index_id == constant::INDEX_PRIMARY) {
+                // Update primary index if it exists
+                if (_primary_index != nullptr) {
+                    _primary_index->set_root_and_xid(new_xid, root.extent_id);
+                }
+            } else if (root.index_id == constant::INDEX_LOOK_ASIDE) {
+                // Update look-aside index if it exists
+                if (_look_aside_index != nullptr) {
+                    _look_aside_index->set_root_and_xid(new_xid, root.extent_id);
+                }
+            } else {
+                // Update secondary index if it exists
+                auto it = _secondary_indexes.find(root.index_id);
+                if (it != _secondary_indexes.end()) {
+                    it->second.first->set_root_and_xid(new_xid, root.extent_id);
+                }
+            }
         }
     }
 }

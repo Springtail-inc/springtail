@@ -354,13 +354,13 @@ namespace springtail::pg_fdw {
     // The intersection must start at the first index column and be
     // continuous.
     std::vector<ConstQualPtr>
-    _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list)
+    PgFdwMgr::_get_index_quals(const std::map<uint32_t, SchemaColumn>& columns, Index const& idx, List const* qual_list)
     {
         if (!qual_list) {
             return {};
         }
 
-        auto find_qual = [&state, &qual_list](auto pos) -> ConstQualPtr {
+        auto find_qual = [&columns, &qual_list](auto pos) -> ConstQualPtr {
             const ListCell *lc{};
             foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
@@ -374,7 +374,7 @@ namespace springtail::pg_fdw {
                 }
 
                 // must be of the same internal type
-                auto column = state->columns.at(pos);
+                auto column = columns.at(pos);
                 LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Checking qual {}:{} against column {} {}:{}, for op {}",
                          qual->base.typeoid, to_string(convert_pg_type(qual->base.typeoid, 'N')),
                          column.name, column.pg_type, to_string(column.type), (int)qual->base.op);
@@ -390,7 +390,7 @@ namespace springtail::pg_fdw {
 
         for (auto const& c: idx.columns) {
             auto qual = find_qual(c.position);
-            if (find_qual(c.position)) {
+            if (qual) {
                 quals.push_back(qual);
             } else {
                 break;
@@ -400,8 +400,73 @@ namespace springtail::pg_fdw {
         return quals;
     }
 
+    void PgFdwMgr::_compute_planning_metadata(SpringtailPlanState *planstate,
+                                              const List *qual_list,
+                                              const List* join_quals,
+                                              double *rows)
+    {
+        // Extract expensive metadata without constructing full PgFdwState.
+        // This avoids redundant lookups in subsequent planning callbacks.
+        SpringtailPlanState::TableRef tr = planstate->get_table_ref();
+
+        ExtensionContext extension_context = {tr.db_id, tr.xid};
+        ExtensionCallback extension_callback = {_comparator_function, extension_context};
+
+        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
+
+        // Get stats for row count
+        *rows = table->get_stats().row_count;
+
+        // Get columns and build name_map
+        auto columns = table->extent_schema()->get_column_map();
+
+        // Get indexes
+        auto indexes = table->get_ready_indexes();
+
+        // Compute qual_indexes
+        std::vector<uint64_t> qual_indexes;
+        for (auto const& idx: indexes) {
+            auto index_quals = _get_index_quals(columns, idx, qual_list);
+            // check for the full match
+            if (index_quals.size() == idx.columns.size() &&
+                    // ... and all must be EQUALS
+                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
+                qual_indexes.push_back(idx.id);
+
+                if (!idx.is_unique) {
+                    if (*rows >= table->get_stats().row_count) {
+                        // We don't know cardinality stats. Just set to a number that
+                        // is less than the total rows.
+                        *rows = *rows/10;
+                        if (*rows == 0) {
+                            *rows = 2;
+                        }
+                    }
+                } else {
+                    *rows = 1;
+                }
+            }
+        }
+
+        // Compute join_indexes
+        std::vector<uint64_t> join_indexes;
+        for (auto const& idx: indexes) {
+            auto index_quals = _get_index_quals(columns, idx, join_quals);
+            // check for the full match
+            if (index_quals.size() == idx.columns.size() &&
+                    // ... and all must be EQUALS
+                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
+                join_indexes.push_back(idx.id);
+            }
+        }
+
+        // Cache the results in SpringtailPlanState for reuse by subsequent planning callbacks
+        planstate->set_cached_qual_indexes(qual_indexes);
+        planstate->set_cached_join_indexes(join_indexes);
+    }
+
     std::unique_ptr<PgFdwState>
-    PgFdwMgr::_create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows)
+    PgFdwMgr::_create_scan_state(const SpringtailPlanState *planstate, double *rows)
     {
         // we create a temporary scan state here because for historical reasons
         // it has some API's needed by this function. The state will be deleted
@@ -418,42 +483,16 @@ namespace springtail::pg_fdw {
         // fetch stats from state for row count
         *rows = state->stats.row_count;
 
-        // let's see if we have an unique index in qual_list
-        for (auto const& idx: state->indexes) {
-            // primary indexes could have no user columns
-            DCHECK(idx.columns.size() || idx.id == constant::INDEX_PRIMARY);
-            auto index_quals = _get_index_quals(state.get(), idx, qual_list);
-            // check for the full match
-            if (index_quals.size() == idx.columns.size() &&
-                    // ... and all must be EQUALS
-                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
-                state->qual_indexes.push_back(idx.id);
-
-                if (!idx.is_unique) {
-                    if (*rows >= state->stats.row_count) {
-                        // We don't know cardinality stats. Just set to a number that
-                        // is less than the total rows.
-                        *rows = *rows/10;
-                        if (*rows == 0) {
-                            *rows = 2;
-                        }
-                    }
-                } else {
-                    *rows = 1;
-                }
-            }
+        // Reuse qual_indexes and join_indexes cached during planning phase
+        // (populated by _compute_planning_metadata called from fdw_get_rel_size)
+        auto cached_qual_indexes = planstate->get_cached_qual_indexes();
+        for (size_t i = 0; i < cached_qual_indexes.size(); ++i) {
+            state->qual_indexes.push_back(cached_qual_indexes[i]);
         }
 
-        // Now let's see if we have joinable indexes, that are delayed.
-        for (auto const& idx: state->indexes) {
-            auto index_quals = _get_index_quals(state.get(), idx, join_quals);
-            // check for the full match
-            if (index_quals.size() == idx.columns.size() &&
-                    // ... and all must be EQUALS
-                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
-
-                state->join_indexes.push_back(idx.id);
-            }
+        auto cached_join_indexes = planstate->get_cached_join_indexes();
+        for (size_t i = 0; i < cached_join_indexes.size(); ++i) {
+            state->join_indexes.push_back(cached_join_indexes[i]);
         }
 
         for (size_t i = 0; i != planstate->count_target_columns(); ++i) {
@@ -667,6 +706,8 @@ namespace springtail::pg_fdw {
         if (schema_xid > _schema_xid) {
             _schema_xid = schema_xid;
             sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
+            // Also invalidate the Table cache since table structures may have changed
+            TableMgrClient::get_instance()->invalidate_table_cache_on_schema_change();
         }
 
         // lookup pg_xid in xid_map;
@@ -714,10 +755,10 @@ namespace springtail::pg_fdw {
     }
 
     PgFdwState*
-    PgFdwMgr::create_scan_state(const SpringtailPlanState *planstate, const List* quals, const List* join_quals)
+    PgFdwMgr::create_scan_state(const SpringtailPlanState *planstate)
     {
         double dummy = 0;
-        auto state = _create_scan_state(planstate, quals, join_quals, &dummy);
+        auto state = _create_scan_state(planstate, &dummy);
         return state.release();
     }
 
@@ -731,7 +772,7 @@ namespace springtail::pg_fdw {
         // it has some API's need by this function. The state will be deleted
         // when the function exist.
         double dummy = 0;
-        auto state = _create_scan_state(planstate, quals, NIL, &dummy);
+        auto state = _create_scan_state(planstate, &dummy);
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
 
         for (size_t i = 0; i != num_attrs; ++i) {
@@ -940,7 +981,7 @@ namespace springtail::pg_fdw {
 
             for (auto const& idx: state->indexes) {
                 CHECK(static_cast<sys_tbl::IndexNames::State>(idx.state) == sys_tbl::IndexNames::State::READY);
-                auto index_quals = _get_index_quals(state, idx, qual_list);
+                auto index_quals = _get_index_quals(state->columns, idx, qual_list);
                 if (index_quals.empty()) {
                     continue;
                 }
@@ -960,7 +1001,7 @@ namespace springtail::pg_fdw {
             state->filtered_quals = std::move(best);
         } else {
             state->index = *state->sortgroup_index;
-            auto index_quals = _get_index_quals(state, *state->sortgroup_index, qual_list);
+            auto index_quals = _get_index_quals(state->columns, *state->sortgroup_index, qual_list);
             state->filtered_quals = std::move(index_quals);
         }
 
@@ -1317,13 +1358,24 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_get_path_keys(const SpringtailPlanState *planstate, PgFdwState* state)
+    PgFdwMgr::fdw_get_path_keys(const SpringtailPlanState *planstate)
     {
         List* result = NULL;
         uint64_t rel_rows = planstate->get_rel_rows();
 
-        for (auto const& idx: state->indexes) {
-            // note: state->rows has taken quals into account in fdw_get_rel_size
+        // Get table to retrieve indexes (table is cached)
+        SpringtailPlanState::TableRef tr = planstate->get_table_ref();
+        ExtensionContext extension_context = {tr.db_id, tr.xid};
+        ExtensionCallback extension_callback = {_comparator_function, extension_context};
+        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
+        auto indexes = table->get_ready_indexes();
+
+        // Get cached indexes from planstate
+        auto qual_indexes = planstate->get_cached_qual_indexes();
+        auto join_indexes = planstate->get_cached_join_indexes();
+
+        for (auto const& idx: indexes) {
+            // note: rel_rows has taken quals into account in fdw_get_rel_size
             auto rows = rel_rows;
 
             // The paths related to join clauses seem to be handled by PG
@@ -1334,8 +1386,23 @@ namespace springtail::pg_fdw {
             // from fdw_get_path_keys.
             //
             // Only check the index to be join_indexes if it isn't already in quals
-            if (std::ranges::find(state->qual_indexes, idx.id) == state->qual_indexes.end() &&
-                std::ranges::find(state->join_indexes, idx.id) != state->join_indexes.end()) {
+            bool in_qual_indexes = false;
+            for (size_t i = 0; i < qual_indexes.size(); ++i) {
+                if (qual_indexes[i] == idx.id) {
+                    in_qual_indexes = true;
+                    break;
+                }
+            }
+
+            bool in_join_indexes = false;
+            for (size_t i = 0; i < join_indexes.size(); ++i) {
+                if (join_indexes[i] == idx.id) {
+                    in_join_indexes = true;
+                    break;
+                }
+            }
+
+            if (!in_qual_indexes && in_join_indexes) {
                 if (idx.is_unique) {
                     rows = 1;
                 } else {
@@ -1377,24 +1444,36 @@ namespace springtail::pg_fdw {
 
     void PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows, int *width)
     {
-        // TODO: we create a temporary scan state here because for historical reasons
-        // it has some API's needed by this function. The state will be deleted
-        // when the function exits
-        //
-        auto state = _create_scan_state(planstate, qual_list, join_quals, rows);
+        // Compute planning metadata (indexes, row estimates) without constructing PgFdwState.
+        // Results are cached in SpringtailPlanState for reuse by subsequent planning callbacks.
+        _compute_planning_metadata(planstate, qual_list, join_quals, rows);
+
+        // For width calculation, we need the columns. Get them from the table directly.
+        SpringtailPlanState::TableRef &&tr = planstate->get_table_ref();
+        ExtensionContext extension_context = {tr.db_id, tr.xid};
+        ExtensionCallback extension_callback = {_comparator_function, extension_context};
+        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
+        auto columns = table->extent_schema()->get_column_map();
+
+        // Build name_map for column name lookup
+        std::unordered_map<std::string, uint32_t> name_map;
+        for (const auto &entry : columns) {
+            name_map[entry.second.name] = entry.second.position;
+        }
+
         // estimate width based on target list using most common types
         *width = 0;
         for (size_t i = 0; i != planstate->count_target_columns(); ++i) {
             auto column = planstate->get_target_column(i);
 
-            auto name_i = state->name_map.find(column.name);
-            if (name_i == state->name_map.end()) {
+            auto name_i = name_map.find(column.name);
+            if (name_i == name_map.end()) {
                 LOG_WARN("Couldn't find column: {}", column.name);
                 continue;
             }
 
-            auto col_i = state->columns.find(name_i->second);
-            if (col_i == state->columns.end()) {
+            auto col_i = columns.find(name_i->second);
+            if (col_i == columns.end()) {
                 LOG_ERROR("Couldn't find column position: {}", name_i->second);
                 continue;
             }
@@ -2230,20 +2309,45 @@ namespace springtail::pg_fdw {
     PgFdwState::PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid)
             : table(table), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
-        columns = TableMgrClient::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
+        // Get columns from cached ExtentSchema instead of RPC
+        columns = table->extent_schema()->get_column_map();
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Received columns, column count: {}", columns.size());
 
         for (const auto &entry : columns) {
             name_map[entry.second.name] = entry.second.position;
         }
 
+        // Only populate indexes for user tables, not system tables
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
-            auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
-            for (auto& v: meta->indexes) {
-                if (static_cast<sys_tbl::IndexNames::State>(v.state) != sys_tbl::IndexNames::State::READY) {
-                    continue;
+            // Add primary index if the table has one (identified by primary key columns)
+            auto &&sort_keys = table->extent_schema()->get_sort_keys();
+            if (!sort_keys.empty()) {
+                // Construct the primary index from the primary key information
+                Index primary_idx;
+                primary_idx.id = constant::INDEX_PRIMARY;
+                primary_idx.schema = "";  // primary key doesn't have a schema name
+                primary_idx.name = "PRIMARY";
+                primary_idx.table_id = tid;
+                primary_idx.is_unique = true;  // primary keys are always unique
+                primary_idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+
+                // Map primary key column names to their positions
+                for (size_t i = 0; i < sort_keys.size(); ++i) {
+                    auto col_it = name_map.find(sort_keys[i]);
+                    if (col_it != name_map.end()) {
+                        Index::Column col;
+                        col.idx_position = i;  // position within the index (0-based)
+                        col.position = col_it->second;  // position in the table schema
+                        primary_idx.columns.push_back(col);
+                    }
                 }
-                indexes.push_back(v);
+                indexes.push_back(primary_idx);
+            }
+
+            // Get secondary indexes from cached Table
+            auto secondary_indexes = table->get_ready_indexes();
+            for (const auto &idx : secondary_indexes) {
+                indexes.push_back(idx);
             }
         }
     }
