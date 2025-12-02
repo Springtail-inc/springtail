@@ -20,7 +20,7 @@ constexpr static int8_t MSG_AUTH_SASL_CONTINUE = 11;
 constexpr static int8_t MSG_AUTH_SASL_COMPLETE = 12;
 
 /** internal server auth state */
-enum AuthorizationState : int8_t {
+enum class AuthorizationState : int8_t {
     STARTUP = 0,
     SSL_HANDSHAKE = 1,
     AUTH = 2,
@@ -45,7 +45,7 @@ public:
                         uint64_t id,
                         int32_t pid,
                         const std::vector<uint8_t> &cancel_key)
-        : _state(STARTUP), _connection(connection), _id(id), _pid(pid), _cancel_key(cancel_key)
+        : _state(AuthorizationState::STARTUP), _connection(connection), _id(id), _pid(pid), _cancel_key(cancel_key)
     {
     }
 
@@ -166,7 +166,7 @@ public:
                         const std::string &db_prefix,
                         Session::Type type,
                         const std::unordered_map<std::string, std::string> &parameters)
-        : _state(STARTUP),
+        : _state(AuthorizationState::STARTUP),
           _connection(connection),
           _id(id),
           _user(user),
