@@ -19,6 +19,38 @@ constexpr static int8_t MSG_AUTH_SASL = 10;
 constexpr static int8_t MSG_AUTH_SASL_CONTINUE = 11;
 constexpr static int8_t MSG_AUTH_SASL_COMPLETE = 12;
 
+/** internal server auth state */
+enum AuthorizationState : int8_t {
+    STARTUP = 0,
+    SSL_HANDSHAKE = 1,
+    AUTH = 2,
+    AUTH_DONE = 3,
+    READY = 4,
+    ERROR = 99
+};
+
+/** Map of state to state names */
+const static inline std::unordered_map<AuthorizationState, std::string_view> authorization_state_names{
+    { AuthorizationState::STARTUP,         "STARTUP" },
+    { AuthorizationState::SSL_HANDSHAKE,   "SSL_HANDSHAKE" },
+    { AuthorizationState::AUTH,            "AUTH" },
+    { AuthorizationState::AUTH_DONE,       "AUTH_DONE" },
+    { AuthorizationState::READY,           "READY" },
+    { AuthorizationState::ERROR,           "ERROR" }
+};
+
+/**
+ * @brief Convert state to state name
+ *
+ * @param s - state
+ * @return std::string - state name
+ */
+static inline std::string
+to_string(AuthorizationState s)
+{
+    return state_to_string(s, authorization_state_names);
+}
+
 class ClientAuthorization {
 public:
     ClientAuthorization(ProxyConnectionPtr connection,
@@ -88,30 +120,7 @@ public:
     bool is_cancel() const { return _is_cancel; }
 
 private:
-    enum State : int8_t { STARTUP = 0, SSL_HANDSHAKE = 1, AUTH = 2, READY = 3, ERROR = 99 };
-
-    /** Map of state to state names */
-    const static inline std::unordered_map<State, std::string_view> _state_names{
-        { State::STARTUP,         "STARTUP" },
-        { State::SSL_HANDSHAKE,   "SSL_HANDSHAKE" },
-        { State::AUTH,            "AUTH" },
-        { State::READY,           "READY" },
-        { State::ERROR,           "ERROR" }
-    };
-
-    /**
-     * @brief Convert state to state name
-     *
-     * @param s - state
-     * @return std::string - state name
-     */
-    static inline std::string
-    _to_string(State s)
-    {
-        return state_to_string(s, _state_names);
-    }
-
-    State _state;
+    AuthorizationState _state;
     ProxyConnectionPtr _connection;
     uint64_t _id;
     int32_t _pid;
@@ -231,39 +240,7 @@ public:
     }
 
 private:
-    /** internal server auth state */
-    enum State : int8_t {
-        STARTUP = 0,
-        SSL_HANDSHAKE = 1,
-        AUTH = 2,
-        AUTH_DONE = 3,
-        READY = 4,
-        ERROR = 99
-    };
-
-    /** Map of state to state names */
-    const static inline std::unordered_map<State, std::string_view> _state_names{
-        { State::STARTUP,         "STARTUP" },
-        { State::SSL_HANDSHAKE,   "SSL_HANDSHAKE" },
-        { State::AUTH,            "AUTH" },
-        { State::AUTH_DONE,       "AUTH_DONE" },
-        { State::READY,           "READY" },
-        { State::ERROR,           "ERROR" }
-    };
-
-    /**
-     * @brief Convert state to state name
-     *
-     * @param s - state
-     * @return std::string - state name
-     */
-    static inline std::string
-    _to_string(State s)
-    {
-        return state_to_string(s, _state_names);
-    }
-
-    State _state;
+    AuthorizationState _state;
     ProxyConnectionPtr _connection;
     uint64_t _id;
 

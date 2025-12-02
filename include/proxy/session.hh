@@ -87,9 +87,20 @@ namespace springtail::pg_proxy {
             return os << "Session::State(" << static_cast<int>(state) << ")";
         }
 
-        /** Convert state to string */
-        static std::string
-        to_string(State s);
+        static inline const std::unordered_map<Session::State, std::string_view>
+        state_names {
+            { Session::State::STARTUP,               "STARTUP" },
+            { Session::State::AUTH_SERVER,           "AUTH_SERVER" },
+            { Session::State::AUTH_DONE,             "AUTH_DONE" },
+            { Session::State::READY,                 "READY" },
+            { Session::State::DEPENDENCIES,          "DEPENDENCIES" },
+            { Session::State::QUERY,                 "QUERY" },
+            { Session::State::EXTENDED_ERROR,        "EXTENDED_ERROR" },
+            { Session::State::RESET_SESSION,         "RESET_SESSION" },
+            { Session::State::RESET_SESSION_READY,   "RESET_SESSION_READY" },
+            { Session::State::RESET_SESSION_PARAMS,  "RESET_SESSION_PARAMS" },
+            { Session::State::ERROR,                 "ERROR" }
+        };
 
         /** Out-of-band notification message sent to a session via the server */
         struct NotificationMsg {

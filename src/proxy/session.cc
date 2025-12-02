@@ -26,26 +26,6 @@ namespace springtail::pg_proxy {
             {MSG_SERVER_CLIENT_FATAL_ERROR, "MSG_SERVER_CLIENT_FATAL_ERROR"}
     };
 
-    static const std::unordered_map<Session::State, std::string_view> state_names{
-        { Session::State::STARTUP,               "STARTUP" },
-        { Session::State::AUTH_SERVER,           "AUTH_SERVER" },
-        { Session::State::AUTH_DONE,             "AUTH_DONE" },
-        { Session::State::READY,                 "READY" },
-        { Session::State::DEPENDENCIES,          "DEPENDENCIES" },
-        { Session::State::QUERY,                 "QUERY" },
-        { Session::State::EXTENDED_ERROR,        "EXTENDED_ERROR" },
-        { Session::State::RESET_SESSION,         "RESET_SESSION" },
-        { Session::State::RESET_SESSION_READY,   "RESET_SESSION_READY" },
-        { Session::State::RESET_SESSION_PARAMS,  "RESET_SESSION_PARAMS" },
-        { Session::State::ERROR,                 "ERROR" }
-    };
-
-    std::string
-    Session::to_string(Session::State s)
-    {
-        return state_to_string(s, state_names);
-    }
-
     Session::Session(ProxyConnectionPtr connection)
         : _connection(connection),
           _state(State::STARTUP),
@@ -322,7 +302,7 @@ namespace springtail::pg_proxy {
             {"id", id()},
             {"type", (type() == Type::CLIENT ? "CLIENT" : (type() == Type::PRIMARY ? "PRIMARY" : "REPLICA"))},
             {"instance_hostname", _instance ? nlohmann::json(_instance->hostname()) : nlohmann::json(nullptr)},
-            {"state", std::format("{}", to_string(_state))}
+            {"state", std::format("{}", state_to_string(_state, state_names))}
         });
 
         return j;

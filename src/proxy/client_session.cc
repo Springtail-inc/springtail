@@ -185,7 +185,8 @@ namespace springtail::pg_proxy {
     ClientSession::_process_connection()
     {
         // entry point for network connection message
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Processing packet, client session: state={}", _id, to_string(_state));
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Processing packet, client session: state={}",
+                _id, state_to_string(_state, state_names));
 
         // main entry point for thread processing
         // resume from where we left off
@@ -206,7 +207,7 @@ namespace springtail::pg_proxy {
                 break;
 
             default:
-                LOG_ERROR("Invalid state: {}", to_string(_state));
+                LOG_ERROR("Invalid state: {}", state_to_string(_state, state_names));
                 _state = State::ERROR;
                 break;
         }
@@ -513,6 +514,7 @@ namespace springtail::pg_proxy {
             LOG_ERROR("[C:{}] Replica session shut down during transaction, cannot failover", _id);
             clear_associated_session();
 
+            // there was authorization error in a replica session, switching to primary session
             _primary_mode = true;
             set_associated_session(_primary_session);
             _primary_session->transfer_batch_queue(session);
