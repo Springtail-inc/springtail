@@ -222,7 +222,9 @@ namespace springtail::pg_proxy {
 
         /** Clear associated session from this session, leaves any association on remote session */
         void clear_associated_session() {
-            assert(_associated_session != nullptr);
+            if (_associated_session == nullptr) {
+                return;
+            }
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == Type::CLIENT ? 'C': 'S'), _id);
             _associated_session = nullptr;
         }
