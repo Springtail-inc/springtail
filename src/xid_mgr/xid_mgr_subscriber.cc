@@ -59,13 +59,7 @@ void XidMgrSubscriber::OnReadDone(bool ok)
 {
     LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "OnReadDone");
     if (ok) {
-        std::vector<uint64_t> table_ids;
-        table_ids.reserve(_push_response.table_ids_size());
-        for (auto tid : _push_response.table_ids()) {
-            table_ids.push_back(tid);
-        }
-        _cb->push(_push_response.db_id(), _push_response.xid(), _push_response.has_schema_changes(),
-                  _push_response.real_commit(), std::move(table_ids));
+        _cb->push(std::move(_push_response));
         StartRead(&_push_response);
         return;
     }

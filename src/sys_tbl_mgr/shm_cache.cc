@@ -17,6 +17,7 @@ ShmCache::ShmCache(std::string name, size_t size, bool enable_xid_history)
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()},
     _msg_cache(_mutex, _messages_alloc, _string_alloc),
+    _xid_vector_alloc{_shm.get_segment_manager()},
     _history_alloc{_shm.get_segment_manager()}
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {} - {}", _name, size);
@@ -34,6 +35,7 @@ ShmCache::ShmCache(std::string name, bool enable_xid_history)
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()},
     _msg_cache(_mutex, _messages_alloc, _string_alloc),
+    _xid_vector_alloc{_shm.get_segment_manager()},
     _history_alloc{_shm.get_segment_manager()}
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {}", _name);
@@ -89,8 +91,10 @@ ShmCache::remove(const std::string& name)
 }
 
 void
-ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
+ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool real_commit)
 {
+    CHECK(_enable_xid_history);
+
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
@@ -99,10 +103,25 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
     check_free_space_locked();
 
     *_xid_commit_time = std::chrono::high_resolution_clock::now();
+    auto it_db = _committed_xid_map->find(db);
+
     if (has_schema_changes) {
+
+        if (!real_commit) {
+            LOG_WARN("Schema change xid {} for db {} but it's not real commit", xid, db);
+            if (it_db != _committed_xid_map->end()) {
+                // rollback pending xids
+                it_db->second.pending_xid.clear();
+                // and stop recording not real commits
+                // unti we get another real commit
+                it_db->second.record_pending = false;
+                return;
+            }
+        }
+
         Xid last_xid = 0;
-        if (_committed_xid_map->find(db) != _committed_xid_map->end()) {
-            last_xid = (*_committed_xid_map)[db];
+        if (it_db != _committed_xid_map->end()) {
+            last_xid = it_db->second.commited_xid;
         }
         // put the schema change xid and last committed xid into history
         auto it = _xid_history_map->find(db);
@@ -111,7 +130,23 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
         }
         it->second.emplace_back(xid, last_xid);
     }
-    (*_committed_xid_map)[db] = xid;
+
+    if (real_commit) {
+        XidVector empty_vector(_xid_vector_alloc);
+        if (it_db == _committed_xid_map->end()) {
+            _committed_xid_map->emplace(db, XidRecord{xid, empty_vector, true});
+        } else {
+            it_db->second.commited_xid = xid;
+            it_db->second.pending_xid = empty_vector;
+            it_db->second.record_pending = true;
+        }
+    } else {
+        // add to pending xids
+        if (it_db != _committed_xid_map->end() && it_db->second.record_pending) {
+            DCHECK(xid > it_db->second.commited_xid);
+            it_db->second.pending_xid.push_back(xid);
+        }
+    }
 }
 
 void
@@ -138,6 +173,27 @@ ShmCache::is_alive()
     return true;
 }
 
+std::vector<Xid> ShmCache::get_pending_xids(DbId db, Xid last_committed_xid)
+{
+    CHECK(_enable_xid_history);
+
+    std::vector<Xid> result;
+
+    auto it = _committed_xid_map->find(db);
+    if (it == _committed_xid_map->end()) {
+        return result;
+    }
+
+    if (it->second.commited_xid != last_committed_xid) {
+        return result;
+    }
+
+    for (auto xid : it->second.pending_xid) {
+        result.push_back(xid);
+    }
+    return result;
+}
+
 std::optional<Xid>
 ShmCache::get_committed_xid(DbId db, Xid schema_xid)
 {
@@ -161,7 +217,7 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
         if (it == _committed_xid_map->end()) {
             return std::nullopt;
         }
-        last_xid = it->second;
+        last_xid = it->second.commited_xid;
     }
 
     // Look up history if the history is ahead of the commit, return the committed xid

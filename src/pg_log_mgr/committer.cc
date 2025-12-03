@@ -113,6 +113,14 @@ namespace springtail::committer {
         _table_copy_tracker->remove_db(db_id);
         std::unique_lock lock(_main_mutex);
         _completed_xids.erase(db_id);
+
+        auto it = _write_cache_evictions.find(db_id);
+        if (it != _write_cache_evictions.end()) {
+            for (auto xid: it->second) {
+                WriteCacheServer::get_instance()->evict_xid(db_id, xid);
+            }
+            _write_cache_evictions.erase(it);
+        }
     }
 
     void
@@ -295,6 +303,22 @@ namespace springtail::committer {
             for (auto& [db_id, batch] : batches_to_commit) {
                 uint64_t completed_xid = _completed_xids[db_id];
                 _commit_batch(db_id, batch, completed_xid);
+
+                // evict any write cache XIDs that are below the vacuum cutoff XID
+                auto it = _write_cache_evictions.find(db_id);
+                if (it != _write_cache_evictions.end()) {
+                    auto cutoff_xid = Vacuumer::get_instance()->get_vacuum_cutoff_xid(db_id);
+                    DCHECK(std::is_sorted(it->second.begin(), it->second.end()));
+                    auto xid_it = it->second.begin();
+                    for (; xid_it != it->second.end(); ++xid_it) {
+                        if (*xid_it > cutoff_xid) {
+                            break;
+                        }
+                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Evicting XID {}@{} from write cache", db_id, *xid_it);
+                        WriteCacheServer::get_instance()->evict_xid(db_id, *xid_it);
+                    }
+                    it->second.erase(it->second.begin(), xid_it);
+                }
             }
         }
 
@@ -464,8 +488,7 @@ namespace springtail::committer {
 
             _completed_xids[db_id] = xid;
 
-            // evict from write cache
-            WriteCacheServer::get_instance()->evict_xid(db_id, xid);
+            _write_cache_evictions[db_id].push_back(xid);
 
             // Record per-transaction latency metrics for this XID
             // Note: xid_metadata() is not thread-safe, but safe here since all workers are done

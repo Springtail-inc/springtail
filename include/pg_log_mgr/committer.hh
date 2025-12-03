@@ -338,6 +338,8 @@ namespace springtail::committer {
          */
         std::shared_ptr<pg_log_mgr::IndexRequestsManager> _index_requests_mgr;
 
+        std::map<uint64_t, std::vector<uint64_t>> _write_cache_evictions; ///< db_id -> list of xids to evict from write cache
+
         /**
          * @brief Table sync processor to handle fsync operations in the background
          */

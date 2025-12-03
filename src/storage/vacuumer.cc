@@ -428,7 +428,7 @@ Vacuumer::_save_last_seen_cutoff_xid(uint64_t db_id, uint64_t cutoff_xid)
 }
 
 uint64_t
-Vacuumer::_get_vacuum_cutoff_xid(uint64_t db_id)
+Vacuumer::get_vacuum_cutoff_xid(uint64_t db_id)
 {
     // Cutoff XID for Vacuum = Minimum XID from (fdw, last_committed, index-build/drop)
     uint64_t min_fdw_xid = RedisDDL::get_instance()->min_fdw_xid(db_id);
@@ -920,7 +920,7 @@ Vacuumer::_do_vacuum_run()
 
             // Get safest XID to vacuum till that point
             // and save in the redis for stats
-            auto cutoff_xid = _get_vacuum_cutoff_xid(db_id);
+            auto cutoff_xid = get_vacuum_cutoff_xid(db_id);
             if (cutoff_xid > 0) {
                 _save_last_seen_cutoff_xid(db_id, cutoff_xid);
             }
@@ -1002,7 +1002,7 @@ Vacuumer::_do_vacuum_run()
         for (auto db_it = expired_snapshots_map.begin(); db_it != expired_snapshots_map.end(); ) {
             // Get safest XID to vacuum till that point
             // and save in redis for stats
-            uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_it->first);
+            uint64_t cutoff_xid = get_vacuum_cutoff_xid(db_it->first);
             if (cutoff_xid > 0) {
                 _save_last_seen_cutoff_xid(db_it->first, cutoff_xid);
             }
@@ -1078,7 +1078,7 @@ Vacuumer::_do_vacuum_run()
         // For each active database, clean up old roots files in all system tables
         for (const auto& [db_id, db_name] : databases) {
             // Get cutoff_xid for this database
-            uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_id);
+            uint64_t cutoff_xid = get_vacuum_cutoff_xid(db_id);
             if (cutoff_xid == 0) {
                 continue;
             }

@@ -413,7 +413,7 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback);
+        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
 
         // Get stats for row count
         *rows = table->get_stats().row_count;
@@ -477,7 +477,7 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        auto table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback);
+        auto table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, true);
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
@@ -614,36 +614,76 @@ namespace springtail::pg_fdw {
         return xid;
     }
 
-    TablePtr PgFdwMgr::_get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid, const ExtensionCallback& extension_callback)
+    TablePtr PgFdwMgr::_get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid,
+            const ExtensionCallback& extension_callback, bool enable_write_cache_lookup)
     {
-        // check for pending mutations cache first
-        std::optional<uint64_t> pending_xid;
+        auto table = TableMgrClient::get_instance()->get_table(db_id, tid, xid, extension_callback);
+        if (!enable_write_cache_lookup) {
+            return table;
+        }
+
+        //now collect xid that have mutations for this table
+        //note: if any of the operations fail, we just return the base table
+        std::vector<uint64_t> xids_with_mutations;
+
         {
             std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
-            if (_tabld_ids_cache) {
-                // The table ids cache keeps track of recorded xid's too
-                pending_xid = _tabld_ids_cache->get_committed_xid(_db_id, schema_xid);
-                if (pending_xid.has_value() && *pending_xid > xid) {
-                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found pending table mutations: db={}, tid={}, xid = {}, pending_xid = {}", db_id, tid, xid, *pending_xid);
-                } else {
-                    pending_xid.reset();
+            if (!_table_ids_cache) {
+                return table;
+            }
+
+            // check for pending mutations cache first
+            // The table ids cache keeps track of recorded xid's too
+
+            auto pending_xids = _table_ids_cache->get_pending_xids(db_id, xid);
+            if (pending_xids.empty()) {
+                return table;
+            }
+
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found pending mutations: db={}, xid = {}, xids={}",
+                    db_id, xid, pending_xids.size());   
+
+            for (auto pxid : pending_xids) {
+                auto msg = _table_ids_cache->find(db_id, 0, pxid);
+                if (!msg.has_value()) {
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Missing XidPushResponse for pending xid: {}", pxid);
+                    return table;
+                }
+                proto::XidPushResponse r;
+                if (!r.ParseFromString(*msg)) {
+                    LOG_ERROR("Failed to parse XidPushResponse for xid: {}", pxid);
+                    return table;
+                }
+                if (std::ranges::find(r.table_ids(), tid) != r.table_ids().end()) {
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Pending mutation found for table id: {}, xid: {}", tid, pxid);
+                    xids_with_mutations.push_back(pxid);
                 }
             }
+
+            DCHECK(std::is_sorted(xids_with_mutations.begin(), xids_with_mutations.end())); 
         }
-        auto table = TableMgrClient::get_instance()->get_table(db_id, tid, xid, extension_callback);
-        if (pending_xid.has_value()) {
+
+        for (auto pxid : xids_with_mutations) {
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Applying pending table mutations for xid = {}", pxid); 
 
             uint64_t extent_cursor = 0;
             PostgresTimestamp ts;
+            bool found = false;
             while(true) {
-                auto &&extent_list = WriteCacheClient::get_instance()->get_extents(db_id, tid, *pending_xid, 1000, extent_cursor, ts);
+                auto &&extent_list = WriteCacheClient::get_instance()->get_extents(db_id, tid, pxid, 1000, extent_cursor, ts);
                 if (extent_list.empty()) {
+                    if (!found) {
+                        // unexpected, log an error and fallback to base table
+                        LOG_ERROR("No extents found in WriteCache for tid={}, xid = {}", tid, pxid); 
+                    }
                     break;
                 }
+                found = true;
                 // ... apply mutations
-                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Applying pending table mutations for xid = {}, pending_xid = {}", xid, *pending_xid);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found extents for xid = {}, size = {}", pxid, extent_list.size()); 
             }
         }
+
         return table;
     }
 
@@ -723,8 +763,8 @@ namespace springtail::pg_fdw {
             _extents_cache = create_cache(sys_tbl_mgr::SHM_CACHE_EXTENTS, false);
         }
 
-        if (!_tabld_ids_cache || !_tabld_ids_cache->is_alive()) {
-            _tabld_ids_cache = create_cache(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, true);
+        if (!_table_ids_cache || !_table_ids_cache->is_alive()) {
+            _table_ids_cache = create_cache(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, true);
         }
     }
 
@@ -1409,7 +1449,7 @@ namespace springtail::pg_fdw {
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback);
+        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
         auto indexes = table->get_ready_indexes();
 
         // Get cached indexes from planstate
@@ -1492,7 +1532,7 @@ namespace springtail::pg_fdw {
 
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback);
+        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
 
         auto columns = table->extent_schema()->get_column_map();
 

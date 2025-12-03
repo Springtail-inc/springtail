@@ -247,7 +247,7 @@ TEST(ShmTest, XidUpdates) {
     ASSERT_FALSE(result.has_value());
 
     // Update committed XID without schema changes
-    c.update_committed_xid(db, xid, true);
+    c.update_committed_xid(db, xid, true, true);
 
     // Now should get the XID back
     result = c.get_committed_xid(db, xid);
@@ -256,7 +256,7 @@ TEST(ShmTest, XidUpdates) {
 
     // Update to a higher XID
     uint64_t xid2 = 200;
-    c.update_committed_xid(db, xid2, false);
+    c.update_committed_xid(db, xid2, false, true);
 
     result = c.get_committed_xid(db, xid);
     ASSERT_TRUE(result.has_value());
@@ -264,7 +264,7 @@ TEST(ShmTest, XidUpdates) {
 
     // Update to a higher XID
     uint64_t xid3 = 300;
-    c.update_committed_xid(db, xid3, true);
+    c.update_committed_xid(db, xid3, true, true);
 
     result = c.get_committed_xid(db, xid);
     ASSERT_TRUE(result.has_value());
@@ -273,4 +273,51 @@ TEST(ShmTest, XidUpdates) {
     result = c.get_committed_xid(db, xid3);
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(result.value(), xid3);
+}
+
+TEST(ShmTest, PendingXids) {
+    sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE, true};
+
+    uint64_t db = 1;
+
+    // Initially, no pending xids
+    auto pending = c.get_pending_xids(db, 0);
+    ASSERT_EQ(pending.size(), 0);
+
+    // Add a real commit
+    c.update_committed_xid(db, 100, true, true);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 0);  // Real commits are not pending
+
+    // Add a pending commit
+    c.update_committed_xid(db, 200, false, false);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 1);
+    ASSERT_EQ(pending[0], 200);
+
+    // Add another pending commit
+    c.update_committed_xid(db, 300, false, false);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 2);
+    ASSERT_EQ(pending[0], 200);
+    ASSERT_EQ(pending[1], 300);
+
+    // not real commit with schema change, should be ignored
+    // and reset and disable pending xids until the next real commit
+    c.update_committed_xid(db, 200, true, false);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 0);
+
+    c.update_committed_xid(db, 210, false, false);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 0); // should still be ignored
+
+    // Add another real commit
+    c.update_committed_xid(db, 400, true, true);
+    pending = c.get_pending_xids(db, 400);
+    ASSERT_EQ(pending.size(), 0);  // should reset pending xids
+
+    pending = c.get_pending_xids(db, 100); // older xid
+    ASSERT_EQ(pending.size(), 0);
 }

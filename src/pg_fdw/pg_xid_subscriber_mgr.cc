@@ -78,31 +78,37 @@ PgXidSubscriberMgr::task(std::stop_token st)
     std::atomic<bool> connected = false;
 
     // XID subscriber callbacks
-    auto on_push = [this](DbId db, uint64_t xid, bool has_schema_changes, bool real_commit, std::vector<uint64_t> table_ids) {
+    auto on_push = [this](proto::XidPushResponse response) { 
+        auto db = response.db_id();
+        auto has_schema_changes = response.has_schema_changes();
+        auto xid = response.xid();
+        auto real_commit = response.real_commit();
+
         if (real_commit) {
             // when we get an XID push notification with real commit, we pass it to the workers
             // and return immediately. A worker calls get_roots() and get_schema() that will
             // attempt to populate the caches proactively.
-            LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {} real_commit={} with {} tables",
-                      db, xid, real_commit, table_ids.size());
+            LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XID push notification {} - {} real_commit={}",
+                      db, xid, real_commit);
             // we use roots cache to track real committed XIDs
-            _roots_cache->update_committed_xid(db, xid, has_schema_changes);
+            _roots_cache->update_committed_xid(db, xid, has_schema_changes, true);
             // for real commits, enqueue a job to populate caches proactively
             _enqueue_populate_job(db, xid);
         } else {
+            
             // Store table IDs associated with the XID to be used later for
             // requesting mutation records from WriteCache for recorded XIDs.
-            DCHECK(!table_ids.empty());
-            std::string_view data(reinterpret_cast<const char*>(table_ids.data()),
-                                           table_ids.size() * sizeof(table_ids[0]));
+            DCHECK(response.table_ids_size() != 0);
+
             // 0 as the object ID to indicate transaction-level data not object-level.
-            _table_ids_cache->insert(db, 0, xid, data);
-            LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Record table IDs: {} db: {} xid: {}", table_ids.size(), db, xid);
+            std::string msg = response.SerializeAsString();
+            // cache the table IDs for this XID
+            _table_ids_cache->insert(db, 0, xid, msg);
+            LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Record table IDs: {} db: {} xid: {}", response.table_ids_size(), db, xid);
         }
         // always update the committed XID in the table IDs cache
         // we use the table ids cache to apply mutations from WriteCache
-        _table_ids_cache->update_committed_xid(db, xid, has_schema_changes);
-
+        _table_ids_cache->update_committed_xid(db, xid, has_schema_changes, real_commit);
     };
     auto on_disconnect = [&connected]() {
         LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber disconnected");

@@ -160,6 +160,14 @@ public:
      */
     void cleanup_db(uint64_t cleanup_db_id);
 
+    /**
+     * @brief Get vacuum-safe XID for a DB
+     *
+     * @param db_id Database ID
+     * @return XID until which vacuum can run
+     */
+    uint64_t get_vacuum_cutoff_xid(uint64_t db_id);
+
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
@@ -292,14 +300,6 @@ private:
      */
     std::vector<HoleInfo> _hole_punch_file(const std::string& file,
                                            const std::vector<HoleInfo>& input_extents);
-
-    /**
-     * @brief Get vacuum-safe XID for a DB
-     *
-     * @param db_id Database ID
-     * @return XID until which vacuum can run
-     */
-    uint64_t _get_vacuum_cutoff_xid(uint64_t db_id);
 
     /**
      * @brief Returns db_id following a keyword in a filesystem path.

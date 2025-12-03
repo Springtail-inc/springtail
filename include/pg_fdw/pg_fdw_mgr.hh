@@ -286,7 +286,7 @@ namespace springtail::pg_fdw {
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
         std::shared_ptr<sys_tbl_mgr::ShmCache> _schema_shm_cache; ///< An IPC schema cache shared by pg_xid_subscriber_daemon
         std::shared_ptr<sys_tbl_mgr::ShmCache> _usertype_shm_cache; ///< An IPC usertype cache shared by pg_xid_subscriber_daemon
-        std::shared_ptr<sys_tbl_mgr::ShmCache> _tabld_ids_cache; ///< An IPC cache for table IDs with mutations
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _table_ids_cache; ///< An IPC cache for table IDs with mutations
         std::shared_ptr<sys_tbl_mgr::ShmCache> _extents_cache; ///< An IPC cache for extents with table mutations from WriteCacheClient
 
         LruObjectCache<int32_t, UserType> _user_type_cache; ///< cache of user types
@@ -430,7 +430,7 @@ namespace springtail::pg_fdw {
         uint64_t _update_last_xid(uint64_t schema_xid);
 
         /** Helper to get table ptr for given table id and xid info */
-        TablePtr _get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid, const ExtensionCallback &extenstion_callbaks);
+        TablePtr _get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid, const ExtensionCallback &extenstion_callbaks, bool enable_write_cache_lookup);
 
         /** Helper to compute planning metadata (indexes, row estimates) without constructing PgFdwState.
          *  Stores results in SpringtailPlanState for reuse by subsequent planning callbacks.
