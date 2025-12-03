@@ -137,14 +137,20 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool r
             _committed_xid_map->emplace(db, XidRecord{xid, empty_vector, true});
         } else {
             it_db->second.commited_xid = xid;
+            // reset pending xids
             it_db->second.pending_xid = empty_vector;
             it_db->second.record_pending = true;
         }
     } else {
         // add to pending xids
         if (it_db != _committed_xid_map->end() && it_db->second.record_pending) {
-            DCHECK(xid > it_db->second.commited_xid);
-            it_db->second.pending_xid.push_back(xid);
+            DCHECK(xid > it_db->second.commited_xid) << "Pending xid must be greater than last committed xid";
+            try {
+                it_db->second.pending_xid.push_back(xid);
+            } catch (const std::exception& e) {
+                LOG_ERROR("Failed to add xid {} for db {}: {}", xid, db, e.what());
+                it_db->second.pending_xid.clear();
+            }
         }
     }
 }
