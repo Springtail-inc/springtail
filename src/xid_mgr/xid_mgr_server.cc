@@ -109,7 +109,7 @@ XidMgrServer::commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit, timestamp, tracker, false);
     if (!real_commit && table_ids.empty()) {
-        // notify subscribers about not real xid's only if there are table IDs
+        // notify subscribers about not real xids only if there are table IDs
         return;
     }
     _service->notify_subscriber(db_id, xid, has_schema_changes, real_commit, table_ids);
