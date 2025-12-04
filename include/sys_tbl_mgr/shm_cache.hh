@@ -330,10 +330,10 @@ private:
     using XidVector = ipc::vector<Xid, Alloc<Xid>>;
     struct XidRecord {
         // The last real committed XID.
-        Xid commited_xid;
+        Xid committed_xid;
 
         // A list of pending (not real commit) XIDs after
-        // the last commited_xid.
+        // the last committed_xid.
         // The mutations are still in the write cache.
         XidVector pending_xid;
 
