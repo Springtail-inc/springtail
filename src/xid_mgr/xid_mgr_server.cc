@@ -128,7 +128,7 @@ XidMgrServer::record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool
         uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker, const std::vector<uint64_t>& table_ids)
 {
     _record_xid_change(db_id, pg_xid, xid, has_schema_changes, false, timestamp, tracker);
-    // notify subscribers about not real xid's  only if there are table IDs
+    // notify subscribers about not real xids only if there are table IDs
     if (!table_ids.empty()) {
         _service->notify_subscriber(db_id, xid, has_schema_changes, false, table_ids);
     }
