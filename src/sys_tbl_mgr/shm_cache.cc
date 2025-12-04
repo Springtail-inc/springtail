@@ -132,13 +132,13 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool r
     }
 
     if (real_commit) {
-        XidVector empty_vector(_xid_vector_alloc);
         if (it_db == _committed_xid_map->end()) {
+            XidVector empty_vector(_xid_vector_alloc);
             _committed_xid_map->emplace(db, XidRecord{xid, empty_vector, true});
         } else {
             it_db->second.commited_xid = xid;
             // reset pending xids
-            it_db->second.pending_xid = empty_vector;
+            it_db->second.pending_xid.clear();
             it_db->second.record_pending = true;
         }
     } else {

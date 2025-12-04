@@ -787,7 +787,9 @@ namespace springtail::pg_fdw {
 
         if (!_extents_cache || !_extents_cache->is_alive()) {
             _extents_cache = create_cache(sys_tbl_mgr::SHM_CACHE_EXTENTS, false);
-            WriteCacheClient::get_instance()->use_extents_cache(_extents_cache);
+            if (_extents_cache) {
+                WriteCacheClient::get_instance()->use_extents_cache(_extents_cache);
+            }
         }
 
         if (!_table_ids_cache || !_table_ids_cache->is_alive()) {
