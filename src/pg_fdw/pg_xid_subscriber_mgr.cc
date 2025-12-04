@@ -107,7 +107,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
             LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Record table IDs: {} db: {} xid: {}", response.table_ids_size(), db, xid);
         }
         // always update the committed XID in the table IDs cache
-        // we use the table ids cache to apply mutations from WriteCache
+        // Update the table_ids_cache with this XID so the FDW can look up pending mutations from WriteCache
         _table_ids_cache->update_committed_xid(db, xid, has_schema_changes, real_commit);
     };
     auto on_disconnect = [&connected]() {
