@@ -41,8 +41,8 @@ public:
      * @param real_commit true if this is a real commit
      * @param timestamp commit timestamp
      * @param tracker WAL progress tracker, this is to synchronize xlog and wal progress
-     * @param table_ids list of table IDs mutated in the transaction, used in push notifications. 
-     *                      It is applicable only when real_commit is false.
+     * @param table_ids list of table IDs mutated in the transaction, used in push notifications.
+     * It is applicable only when real_commit is false.
      */
     void commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit,
             uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker,
