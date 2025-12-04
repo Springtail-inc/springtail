@@ -261,6 +261,9 @@ public:
      */
     std::vector<Xid> get_pending_xids(DbId db, Xid last_committed_xid);
 
+    //** Reset pending XIDs for a DB. */
+    void reset_pending_xids(DbId db);
+
     /**
      * Return all objects that are tracked by the cache.
      * The least used objects will be at the front.

@@ -61,6 +61,9 @@ extern "C" {
 }
 
 namespace springtail::pg_fdw {
+    // max number of extents to fetch from write cache
+    constexpr size_t MAX_WRITE_CACHE_EXTENTS = 10;
+
     using springtail::Index;
 
     static std::string
@@ -413,7 +416,7 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
+        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false).first;
 
         // Get stats for row count
         *rows = table->get_stats().row_count;
@@ -477,7 +480,7 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        auto table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, true);
+        auto table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, true).first;
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
@@ -614,12 +617,13 @@ namespace springtail::pg_fdw {
         return xid;
     }
 
-    TablePtr PgFdwMgr::_get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid,
+    std::pair<TablePtr, std::optional<ChangeSetPtr>> 
+    PgFdwMgr::_get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid,
             const ExtensionCallback& extension_callback, bool enable_write_cache_lookup)
     {
         auto table = TableMgrClient::get_instance()->get_table(db_id, tid, xid, extension_callback);
         if (!enable_write_cache_lookup) {
-            return table;
+            return {table, std::nullopt};
         }
 
         //now collect xid that have mutations for this table
@@ -629,7 +633,7 @@ namespace springtail::pg_fdw {
         {
             std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
             if (!_table_ids_cache) {
-                return table;
+                return {table, std::nullopt};
             }
 
             // check for pending mutations cache first
@@ -637,7 +641,7 @@ namespace springtail::pg_fdw {
 
             auto pending_xids = _table_ids_cache->get_pending_xids(db_id, xid);
             if (pending_xids.empty()) {
-                return table;
+                return {table, std::nullopt};
             }
 
             LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found pending mutations: db={}, xid = {}, xids={}",
@@ -647,12 +651,12 @@ namespace springtail::pg_fdw {
                 auto msg = _table_ids_cache->find(db_id, 0, pxid);
                 if (!msg.has_value()) {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Missing XidPushResponse for pending xid: {}", pxid);
-                    return table;
+                    return {table, std::nullopt};
                 }
                 proto::XidPushResponse r;
                 if (!r.ParseFromString(*msg)) {
                     LOG_ERROR("Failed to parse XidPushResponse for xid: {}", pxid);
-                    return table;
+                    return {table, std::nullopt};
                 }
                 if (std::ranges::find(r.table_ids(), tid) != r.table_ids().end()) {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Pending mutation found for table id: {}, xid: {}", tid, pxid);
@@ -663,28 +667,50 @@ namespace springtail::pg_fdw {
             DCHECK(std::is_sorted(xids_with_mutations.begin(), xids_with_mutations.end())); 
         }
 
+        std::vector<ChangeSet::Txn> changes;
+
         for (auto pxid : xids_with_mutations) {
             LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Applying pending table mutations for xid = {}", pxid); 
 
             uint64_t extent_cursor = 0;
             PostgresTimestamp ts;
-            bool found = false;
-            while(true) {
-                auto &&extent_list = WriteCacheClient::get_instance()->get_extents(db_id, tid, pxid, 1000, extent_cursor, ts);
-                if (extent_list.empty()) {
-                    if (!found) {
-                        // unexpected, log an error and fallback to base table
-                        LOG_ERROR("No extents found in WriteCache for tid={}, xid = {}", tid, pxid); 
-                    }
-                    break;
-                }
-                found = true;
-                // ... apply mutations
-                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found extents for xid = {}, size = {}", pxid, extent_list.size()); 
-            }
-        }
 
-        return table;
+            auto extent_list = WriteCacheClient::get_instance()->get_extents(db_id, tid, pxid, MAX_WRITE_CACHE_EXTENTS, extent_cursor, ts);
+            if (extent_list.size() == MAX_WRITE_CACHE_EXTENTS) {
+                LOG_WARN("Too many extents in WriteCache for tid={}, xid = {}", tid, pxid); 
+                // reset pending xids to avoid repeatedly hitting this condition
+                _extents_cache->reset_pending_xids(db_id);
+                // return base table without mutations
+                return {table, std::nullopt};
+            }
+
+            if (extent_list.empty()) {
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "No extents found tid={}, xid = {}", tid, pxid); 
+                continue;
+            }
+
+            std::vector<ExtentPtr> extents;
+            for (auto &wc_extent : extent_list) {
+                DCHECK_EQ(wc_extent.xid, pxid);
+
+                ExtentPtr pe = std::make_shared<Extent>(
+                        ExtentType{false}, wc_extent.xid, 
+                        table->extent_schema()->row_size(),
+                        table->extent_schema()->field_types());
+
+                pe->deserialize(wc_extent.data);
+                extents.push_back(pe);
+            }
+
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Extents fetched from WriteCache: xid={}, extents={}", pxid, extents.size());
+
+            changes.emplace_back(ChangeSet::Txn{std::move(extents)});
+        }
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Total transactions to apply: {}", changes.size());
+
+        ChangeSetPtr change_set = std::make_shared<ChangeSet>(std::move(changes));
+
+        return {table, change_set};
     }
 
     // called from the PG exit callback
@@ -1450,7 +1476,7 @@ namespace springtail::pg_fdw {
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
+        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false).first;
         auto indexes = table->get_ready_indexes();
 
         // Get cached indexes from planstate
@@ -1533,7 +1559,7 @@ namespace springtail::pg_fdw {
 
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
+        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false).first;
 
         auto columns = table->extent_schema()->get_column_map();
 

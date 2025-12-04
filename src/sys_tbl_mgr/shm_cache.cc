@@ -179,7 +179,8 @@ ShmCache::is_alive()
     return true;
 }
 
-std::vector<Xid> ShmCache::get_pending_xids(DbId db, Xid last_committed_xid)
+std::vector<Xid> 
+ShmCache::get_pending_xids(DbId db, Xid last_committed_xid)
 {
     CHECK(_enable_xid_history);
 
@@ -198,6 +199,22 @@ std::vector<Xid> ShmCache::get_pending_xids(DbId db, Xid last_committed_xid)
         result.push_back(xid);
     }
     return result;
+}
+
+void 
+ShmCache::reset_pending_xids(DbId db)
+{
+    CHECK(_enable_xid_history);
+
+    ipc::scoped_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    auto it = _committed_xid_map->find(db);
+    if (it != _committed_xid_map->end()) {
+        it->second.pending_xid.clear();
+    }
 }
 
 std::optional<Xid>

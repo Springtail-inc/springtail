@@ -21,6 +21,7 @@
 #include <pg_fdw/pg_fdw_ddl_common.hh>
 #include <pg_fdw/pg_fdw_plan_state.hh>
 #include <pg_fdw/pg_xid_collector_client.hh>
+#include <sys_tbl_mgr/merge_table.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -430,7 +431,11 @@ namespace springtail::pg_fdw {
         uint64_t _update_last_xid(uint64_t schema_xid);
 
         /** Helper to get table ptr for given table id and xid info */
-        TablePtr _get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid, const ExtensionCallback &extenstion_callbaks, bool enable_write_cache_lookup);
+        std::pair<TablePtr, std::optional<ChangeSetPtr>> 
+            _get_table(uint64_t db_id, uint64_t tid, uint64_t xid,
+                    uint64_t schema_xid,
+                    const ExtensionCallback &extenstion_callbaks,
+                    bool enable_write_cache_lookup);
 
         /** Helper to compute planning metadata (indexes, row estimates) without constructing PgFdwState.
          *  Stores results in SpringtailPlanState for reuse by subsequent planning callbacks.
