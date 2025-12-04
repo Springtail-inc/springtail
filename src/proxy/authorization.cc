@@ -31,6 +31,7 @@ get_or_default(const std::unordered_map<std::string, std::string>& m, const std:
 bool
 ClientAuthorization::process_auth_data(uint64_t seq_id)
 {
+    using enum springtail::pg_proxy::AuthorizationState;
     switch (_state) {
         case STARTUP:
             _handle_startup(seq_id);
@@ -46,7 +47,7 @@ ClientAuthorization::process_auth_data(uint64_t seq_id)
 
         default:
             // do nothing
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Client auth invalid state: {}", _id, (int8_t)_state);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Client auth invalid state: {}", _id, state_to_string(_state, authorization_state_names));
             break;
     }
 
@@ -80,7 +81,7 @@ ClientAuthorization::_handle_startup(uint64_t seq_id)
         case MSG_STARTUP_V2:
             LOG_ERROR("Startup message version 2.0, not supported");
             // not supported
-            _state = ERROR;
+            _state = AuthorizationState::ERROR;
             break;
 
         case MSG_STARTUP_V3:
@@ -93,7 +94,7 @@ ClientAuthorization::_handle_startup(uint64_t seq_id)
 
         default:
             LOG_ERROR("Invalid startup message code: {}", code);
-            _state = ERROR;
+            _state = AuthorizationState::ERROR;
             break;
     }
 }
@@ -112,7 +113,7 @@ ClientAuthorization::_handle_ssl_handshake()
 
     LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] SSL client handshake complete", _id);
 
-    _state = STARTUP;
+    _state = AuthorizationState::STARTUP;
 }
 
 void
@@ -159,7 +160,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     _user = UserMgr::get_instance()->get_user(username, database);
     if (_user == nullptr) {
         LOG_ERROR("User {} not found for database {}", username, database);
-        _state = ERROR;
+        _state = AuthorizationState::ERROR;
         _error_code = ProxyProtoError::INVALID_PASSWORD;
         return;
     }
@@ -192,7 +193,7 @@ ClientAuthorization::_process_cancel(int32_t remaining)
     _cancel_key.resize(remaining - sizeof(_pid));
     std::memcpy(reinterpret_cast<char *>(_cancel_key.data()), buffer + sizeof(_pid), _cancel_key.size());
     _is_cancel = true;
-    _state = READY;
+    _state = AuthorizationState::READY;
 }
 
 void
@@ -214,7 +215,7 @@ ClientAuthorization::_process_ssl_request()
     SSL *ssl = ProxyServer::get_instance()->SSL_new(true);
     if (ssl == nullptr) {
         LOG_ERROR("Failed to create SSL context");
-        _state = ERROR;
+        _state = AuthorizationState::ERROR;
         _error_code = ProxyProtoError::CONNECTION_FAILURE;
         return;
     }
@@ -223,7 +224,7 @@ ClientAuthorization::_process_ssl_request()
     _connection->setup_SSL(ssl);
 
     // set state to SSL Handshake
-    _state = SSL_HANDSHAKE;
+    _state = AuthorizationState::SSL_HANDSHAKE;
 
     // start handshake; starts ssl_accept()
     _handle_ssl_handshake();
@@ -232,7 +233,7 @@ ClientAuthorization::_process_ssl_request()
 void
 ClientAuthorization::_send_auth_req(uint64_t seq_id)
 {
-    _state = AUTH;
+    _state = AuthorizationState::AUTH;
 
     BufferPtr buffer = BufferPool::get_instance()->get(128);
 
@@ -253,7 +254,7 @@ ClientAuthorization::_send_auth_req(uint64_t seq_id)
         default:
             LOG_ERROR("User {} not found", _user->username());
             _error_code = ProxyProtoError::INVALID_PASSWORD;
-            _state = ERROR;
+            _state = AuthorizationState::ERROR;
             break;
     }
 
@@ -324,7 +325,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] MD5 password match", _id);
 
                 // auth successful on client side
-                _state = READY;
+                _state = AuthorizationState::READY;
 
                 return;
             }
@@ -463,7 +464,7 @@ ClientAuthorization::_handle_scram_auth_continue(const std::string_view data, ui
     Session::log_buffer(Session::Type::CLIENT, _id, false, '\0', write_buffer->size(),
                         write_buffer->data(), seq_id);
 
-    _state = READY;
+    _state = AuthorizationState::READY;
 }
 
 void
@@ -567,6 +568,7 @@ ClientAuthorization::_encode_parameter_status(BufferPtr buffer,
 bool
 ServerAuthorization::process_auth_data(uint64_t seq_id)
 {
+    using enum springtail::pg_proxy::AuthorizationState;
     switch (_state) {
         case STARTUP:
             _handle_ssl_response(seq_id);
@@ -579,7 +581,7 @@ ServerAuthorization::process_auth_data(uint64_t seq_id)
             _handle_message(seq_id);
             break;
         case READY:
-            CHECK_NE(_state, READY);
+            CHECK(_state != READY);
             break;
         case ERROR:
             throw ProxyAuthError();
@@ -605,18 +607,18 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
 
     LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
                 "[S:{}] Server authorization message: code={}, length={}, state={}", _id, code,
-                msg_length, (int8)_state);
+                msg_length, state_to_string(_state, authorization_state_names));
 
     switch (code) {
         case 'R': {
             // authentication request
-            if (_state == AUTH) {
+            if (_state == AuthorizationState::AUTH) {
                 // still in auth negotiation state
                 _handle_auth(buffer, seq_id);
                 break;
             }
             // done with auth, this should be last message
-            CHECK_EQ(_state, AUTH_DONE);
+            CHECK(_state == AuthorizationState::AUTH_DONE);
 
             // auth response, at this point should be AUTH_OK
             int32_t status = buffer->get32();
@@ -639,7 +641,7 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}", _id, key,
                         value);
 
-            if (_state <= AUTH_DONE) {
+            if (_state <= AuthorizationState::AUTH_DONE) {
                 // still in auth negotiation state, save these for the client
                 _server_parameters.emplace(key, value);
             }
@@ -648,7 +650,7 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
 
         case 'K':
             // backend key data
-            CHECK_EQ(_state, AUTH_DONE);
+            CHECK(_state == AuthorizationState::AUTH_DONE);
             // get the backend pid and key for cancel
             _pid = buffer->get32();
             _cancel_key.resize(buffer->remaining());
@@ -662,9 +664,9 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id,
                         status);
 
-            CHECK_EQ(_state, AUTH_DONE);
+            CHECK(_state == AuthorizationState::AUTH_DONE);
             CHECK_EQ(status, 'I');
-            _state = READY;
+            _state = AuthorizationState::READY;
 
             break;
         }
@@ -672,12 +674,12 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
         case 'E':
             // Error response
             decode_error(buffer, _error_code, _error_message);
-            _state = ERROR;
+            _state = AuthorizationState::ERROR;
             break;
 
         default:
             LOG_ERROR("Unknown message: {}", code);
-            _state = ERROR;
+            _state = AuthorizationState::ERROR;
             break;
     }
 }
@@ -734,7 +736,7 @@ ServerAuthorization::_send_ssl_handshake(uint64_t seq_id)
     SSL *ssl = ProxyServer::get_instance()->SSL_new(false);
     if (ssl == nullptr) {
         LOG_ERROR("Failed to create SSL object");
-        _state = ERROR;
+        _state = AuthorizationState::ERROR;
         return;
     }
 
@@ -742,7 +744,7 @@ ServerAuthorization::_send_ssl_handshake(uint64_t seq_id)
     _connection->setup_SSL(ssl);
 
     // do the SSL handshake
-    _state = SSL_HANDSHAKE;
+    _state = AuthorizationState::SSL_HANDSHAKE;
 
     _handle_ssl_handshake(seq_id);
 }
@@ -802,7 +804,7 @@ ServerAuthorization::_send_startup_msg(uint64_t seq_id)
 
     _send_buffer(buffer, seq_id, '?');
 
-    _state = AUTH;
+    _state = AuthorizationState::AUTH;
 }
 
 void
@@ -816,14 +818,14 @@ ServerAuthorization::_handle_auth(BufferPtr buffer, uint64_t seq_id)
     switch (auth_type) {
         case MSG_AUTH_OK:
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Auth type: OK", _id);
-            _state = AUTH_DONE;
+            _state = AuthorizationState::AUTH_DONE;
             break;
 
         case MSG_AUTH_MD5:
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Auth type: MD5", _id);
             _handle_auth_md5(buffer, seq_id);
             // set state to auth done
-            _state = AUTH_DONE;
+            _state = AuthorizationState::AUTH_DONE;
             break;
 
         case MSG_AUTH_SASL:
@@ -845,7 +847,7 @@ ServerAuthorization::_handle_auth(BufferPtr buffer, uint64_t seq_id)
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL complete", _id);
             // verify the server signature
             _handle_auth_scram_complete(buffer);
-            _state = AUTH_DONE;
+            _state = AuthorizationState::AUTH_DONE;
             break;
 
         default:

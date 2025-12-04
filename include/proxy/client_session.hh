@@ -132,8 +132,9 @@ namespace springtail::pg_proxy {
         /**
          * @brief Callback from Server indicating that it is shutting down
          * @param session session that is shutting down
+         * @param fatal boolean flag indicating fatal error
          */
-        void server_shutdown(ServerSessionPtr session);
+        void server_shutdown(ServerSessionPtr session, bool fatal);
 
         /**
          * @brief Enqueue a failover notification message to this session

@@ -14,6 +14,28 @@ namespace springtail::pg_proxy {
     using DatabaseInstancePtr = std::shared_ptr<DatabaseInstance>;
 
     /**
+     * @brief Help function to help convert the state to its string representation
+     *
+     * @tparam T - state enum type
+     * @param value - state value
+     * @param state_to_name - the mapping from state to name
+     * @return std::string - string representing the given state
+     */
+    template <typename T> std::string
+    state_to_string(T value, const std::unordered_map<T, std::string_view> &state_to_name)
+    {
+        static_assert(std::is_enum_v<T>, "T must be an enum or enum class");
+
+        auto it = state_to_name.find(value);
+        std::string_view name = (it != state_to_name.end()) ? it->second : "UNKNOWN";
+
+        // convert enum to its underlying integer
+        auto int_value = static_cast<std::underlying_type_t<T>>(value);
+
+        return fmt::format("{}({})", name, int_value);
+    }
+
+    /**
      * @brief Session base class.  Derived classes  include:
      * - ClientSession -- client session client connects to proxy
      * - ServerSession -- proxy connects to the server; either a replica or primary
@@ -64,6 +86,21 @@ namespace springtail::pg_proxy {
         friend std::ostream& operator<<(std::ostream& os, State state) {
             return os << "Session::State(" << static_cast<int>(state) << ")";
         }
+
+        static inline const std::unordered_map<Session::State, std::string_view>
+        state_names {
+            { Session::State::STARTUP,               "STARTUP" },
+            { Session::State::AUTH_SERVER,           "AUTH_SERVER" },
+            { Session::State::AUTH_DONE,             "AUTH_DONE" },
+            { Session::State::READY,                 "READY" },
+            { Session::State::DEPENDENCIES,          "DEPENDENCIES" },
+            { Session::State::QUERY,                 "QUERY" },
+            { Session::State::EXTENDED_ERROR,        "EXTENDED_ERROR" },
+            { Session::State::RESET_SESSION,         "RESET_SESSION" },
+            { Session::State::RESET_SESSION_READY,   "RESET_SESSION_READY" },
+            { Session::State::RESET_SESSION_PARAMS,  "RESET_SESSION_PARAMS" },
+            { Session::State::ERROR,                 "ERROR" }
+        };
 
         /** Out-of-band notification message sent to a session via the server */
         struct NotificationMsg {
@@ -185,7 +222,9 @@ namespace springtail::pg_proxy {
 
         /** Clear associated session from this session, leaves any association on remote session */
         void clear_associated_session() {
-            assert(_associated_session != nullptr);
+            if (_associated_session == nullptr) {
+                return;
+            }
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == Type::CLIENT ? 'C': 'S'), _id);
             _associated_session = nullptr;
         }

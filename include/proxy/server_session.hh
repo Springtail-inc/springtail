@@ -301,7 +301,7 @@ namespace springtail::pg_proxy {
         void reset_session() override {
             auto client_session = get_client_session();
             if (client_session != nullptr) {
-                client_session->server_shutdown(shared_from_this());
+                client_session->server_shutdown(shared_from_this(), _fatal_error);
             }
             unpin_client_session();
             _defer_shadow_shutdown = false;
@@ -372,6 +372,9 @@ namespace springtail::pg_proxy {
         /** send cancel request to Postgres */
         void send_cancel();
 
+        /** transfer batch queue from session to the current session */
+        void transfer_batch_queue(ServerSessionPtr session);
+
     private:
 
         bool _is_pinned = false;
@@ -391,6 +394,8 @@ namespace springtail::pg_proxy {
         bool _defer_shadow_shutdown = false; ///< defer shutdown until all messages processed
 
         BatchPtr _current_batch;             ///< current batch being processed
+
+        bool _fatal_error = false;           ///< flag indicating fatal error
 
         /**
          * @brief Process next batch of messages from _batch_queue
