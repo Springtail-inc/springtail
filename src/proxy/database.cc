@@ -668,7 +668,9 @@ namespace springtail::pg_proxy
         auto session = ServerSession::create(user, db_name.value_or(database), prefix(), shared_from_this(), _type, parameters);
 
         // add to active sessions map; removed in ServerSession destructor
-        _add_session(session);
+        if (session != nullptr) {
+            _add_session(session);
+        }
 
         return session;
     }
