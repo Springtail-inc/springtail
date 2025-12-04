@@ -121,7 +121,7 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool r
 
         Xid last_xid = 0;
         if (it_db != _committed_xid_map->end()) {
-            last_xid = it_db->second.commited_xid;
+            last_xid = it_db->second.committed_xid;
         }
         // put the schema change xid and last committed xid into history
         auto it = _xid_history_map->find(db);
@@ -136,7 +136,7 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool r
             XidVector empty_vector(_xid_vector_alloc);
             _committed_xid_map->emplace(db, XidRecord{xid, empty_vector, true});
         } else {
-            it_db->second.commited_xid = xid;
+            it_db->second.committed_xid = xid;
             // reset pending xids
             it_db->second.pending_xid.clear();
             it_db->second.record_pending = true;
@@ -144,7 +144,7 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool r
     } else {
         // add to pending xids
         if (it_db != _committed_xid_map->end() && it_db->second.record_pending) {
-            DCHECK(xid > it_db->second.commited_xid) << "Pending xid must be greater than last committed xid";
+            DCHECK(xid > it_db->second.committed_xid) << "Pending xid must be greater than last committed xid";
             try {
                 it_db->second.pending_xid.push_back(xid);
             } catch (const std::exception& e) {
@@ -191,7 +191,7 @@ ShmCache::get_pending_xids(DbId db, Xid last_committed_xid)
         return result;
     }
 
-    if (it->second.commited_xid != last_committed_xid) {
+    if (it->second.committed_xid != last_committed_xid) {
         return result;
     }
 
@@ -240,7 +240,7 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
         if (it == _committed_xid_map->end()) {
             return std::nullopt;
         }
-        last_xid = it->second.commited_xid;
+        last_xid = it->second.committed_xid;
     }
 
     // Look up history if the history is ahead of the commit, return the committed xid
