@@ -261,7 +261,7 @@ public:
      */
     std::vector<Xid> get_pending_xids(DbId db, Xid last_committed_xid);
 
-    //** Reset pending XIDs for a DB. */
+    /** Reset pending XIDs for a DB. */
     void reset_pending_xids(DbId db);
 
     /**
@@ -329,7 +329,7 @@ private:
 
     using XidVector = ipc::vector<Xid, Alloc<Xid>>;
     struct XidRecord {
-        // The last real commited XID.
+        // The last real committed XID.
         Xid commited_xid;
 
         // A list of pending (not real commit) XIDs after

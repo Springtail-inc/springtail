@@ -434,7 +434,7 @@ namespace springtail::pg_fdw {
         std::pair<TablePtr, std::optional<ChangeSetPtr>> 
             _get_table(uint64_t db_id, uint64_t tid, uint64_t xid,
                     uint64_t schema_xid,
-                    const ExtensionCallback &extenstion_callbaks,
+                    const ExtensionCallback &extenstion_callbacks,
                     bool enable_write_cache_lookup);
 
         /** Helper to compute planning metadata (indexes, row estimates) without constructing PgFdwState.

@@ -113,7 +113,7 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool r
                 // rollback pending xids
                 it_db->second.pending_xid.clear();
                 // and stop recording not real commits
-                // unti we get another real commit
+                // until we get another real commit
                 it_db->second.record_pending = false;
                 return;
             }
@@ -259,6 +259,8 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
 
 void ShmCache::delete_xid_history(DbId db)
 {
+    CHECK(_enable_xid_history);
+
     LOG_INFO("Delete db history: {}", db);
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)

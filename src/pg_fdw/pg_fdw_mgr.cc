@@ -416,7 +416,7 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false).first;
+        auto [table, _] = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
 
         // Get stats for row count
         *rows = table->get_stats().row_count;
@@ -480,7 +480,7 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        auto table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, true).first;
+        auto [table, _] = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, true);
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
@@ -679,7 +679,7 @@ namespace springtail::pg_fdw {
             if (extent_list.size() == MAX_WRITE_CACHE_EXTENTS) {
                 LOG_WARN("Too many extents in WriteCache for tid={}, xid = {}", tid, pxid); 
                 // reset pending xids to avoid repeatedly hitting this condition
-                _extents_cache->reset_pending_xids(db_id);
+                _table_ids_cache->reset_pending_xids(db_id);
                 // return base table without mutations
                 return {table, std::nullopt};
             }
@@ -1476,7 +1476,7 @@ namespace springtail::pg_fdw {
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false).first;
+        auto [table, _] = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
         auto indexes = table->get_ready_indexes();
 
         // Get cached indexes from planstate
@@ -1559,7 +1559,7 @@ namespace springtail::pg_fdw {
 
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
-        TablePtr table = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false).first;
+        auto [table, _]  = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
 
         auto columns = table->extent_schema()->get_column_map();
 

@@ -36,7 +36,9 @@ namespace {
                 client->ping();
 
                 XidMgrSubscriber::Callbacks cb{
-                    [this](uint64_t db, uint64_t xid, bool has_schema_changes, bool real_commit, std::vector<uint64_t> table_ids){ on_push(db, xid); },
+                    [this](proto::XidPushResponse resp){ 
+                        on_push(resp.db_id(), resp.xid()); 
+                    },
                     [this](){on_disconnect();}
                 };
                 _s = std::make_unique<XidMgrSubscriber>(client->get_channel(), cb);
