@@ -137,8 +137,6 @@ namespace springtail {
      */
     class UserTable : public Table, public std::enable_shared_from_this<UserTable> {
     public:
-        using Table::schema;
-
         /**
          * UserTable constructor.
          */
@@ -152,22 +150,6 @@ namespace springtail {
                   ExtentSchemaPtr schema,
                   const ExtensionCallback &extension_callback = {}) :
             Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, extension_callback) {}
-
-        /**
-         * Retrieves the schema for the table at a given XID.
-         */
-        virtual ExtentSchemaPtr extent_schema() const override
-        {
-            return TableMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid));
-        }
-
-        /**
-         * Get a schema for accessing an extent from this table that was written at the provided XID.
-         */
-        virtual SchemaPtr schema(uint64_t extent_xid) const override
-        {
-            return TableMgr::get_instance()->get_schema(_db_id, _id, XidLsn(extent_xid), XidLsn(_xid));
-        }
 
     };
 

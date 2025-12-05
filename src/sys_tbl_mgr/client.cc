@@ -263,13 +263,16 @@ Client::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
         shm_cache->insert(db_id, type_id, xid, msg);
     }
 
-    auto user_type = std::make_shared<UserType>(response.type_id(),
+    if (!response.exists()) {
+        return std::make_shared<UserType>(response.type_id(), false);
+    }
+
+    return std::make_shared<UserType>(response.type_id(),
                                                 response.namespace_id(),
                                                 response.type(),
                                                 response.name(),
                                                 response.value_json(),
                                                 response.exists());
-    return user_type;
 }
 
 }  // namespace springtail::sys_tbl_mgr

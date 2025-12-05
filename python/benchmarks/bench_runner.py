@@ -71,6 +71,7 @@ def run_benchmark(
     start_only: bool = False,
     stop_only: bool = False,
     nostartstop: bool = False,
+    enable_perf: bool = False,
 ) -> None:
     """Run benchmarks from the specified directory.
 
@@ -82,6 +83,7 @@ def run_benchmark(
         start_only: Only start Springtail and wait for ready
         stop_only: Only stop Springtail
         nostartstop: Don't start/stop Springtail
+        enable_perf: Enable perf profiling of replica postgres processes
     """
     logging.info(f"Running benchmarks from: {bench_dir}")
 
@@ -135,12 +137,12 @@ def run_benchmark(
                         with open(sql_path) as sql_f:
                             sql_content = sql_f.read()
                         print(f"  Benchmark: {test}")
-                        bench = BenchCase(props, n, f, sql_content, build_dir)
+                        bench = BenchCase(props, n, f, sql_content, build_dir, enable_perf)
                         result = bench.run(setup_timeout)
                         for d, t in result.items():
                             print(f"    {d}: {t}")
                 else:
-                    bench = BenchCase(props, n, f, None, build_dir)
+                    bench = BenchCase(props, n, f, None, build_dir, enable_perf)
                     result = bench.run(setup_timeout)
                     for d, t in result.items():
                         print(f"    {d}: {t}")
@@ -171,6 +173,11 @@ def parse_args():
         "--nostartstop",
         action="store_true",
         help="Don't start/stop Springtail (assume it's already running)",
+    )
+    parser.add_argument(
+        "--perf",
+        action="store_true",
+        help="Enable perf profiling of replica postgres processes during benchmarks",
     )
     return parser.parse_args()
 
@@ -204,4 +211,5 @@ if __name__ == "__main__":
         args.start_only,
         args.stop_only,
         args.nostartstop,
+        args.perf,
     )

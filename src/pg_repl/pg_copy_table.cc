@@ -172,18 +172,6 @@ namespace springtail
         "AND nspname in ({}) "
         "ORDER BY relkind, pg_class.oid";      // have partitioned tables first
 
-    /** Get table name, schema name, oid for a single table given oid */
-    static constexpr char TABLE_QUERY[] =
-        "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
-        "FROM pg_catalog.pg_class "
-        "JOIN pg_catalog.pg_namespace "
-        "ON relnamespace=pg_namespace.oid "
-        "WHERE relkind IN ('r','p') "         // regular tables, partitioned tables
-        "AND nspname NOT LIKE 'pg_%' "        // exclude system schemas
-        "AND nspname NOT IN ('information_schema', '__pg_springtail_triggers') "
-        "AND pg_class.oid::integer in ({}) "
-        "ORDER BY relkind, pg_class.oid";     // have partitioned tables first
-
     static constexpr char TABLE_SCHEMA_PAIR_QUERY[] =
         "SELECT "
         "    v.table_name, "
@@ -225,6 +213,9 @@ namespace springtail
 
     /** Lock a table in ACCESS SHARE mode */
     static constexpr char TABLE_LOCK_QUERY[] = "LOCK TABLE {}.{} IN ACCESS SHARE MODE";
+
+    /** Call trigger function that sends drop schema ddl request */
+    static constexpr char DROP_NAMESPACE_QUERY[] = "SELECT __pg_springtail_triggers.send_drop_schema_msg({})";
 
     /**
      * @brief Connect to database
@@ -303,7 +294,7 @@ namespace springtail
         for (int i = 0; i < _connection.ntuples(); i++) {
             std::uint32_t index_id = _connection.get_int32(i, 0);
             std::string index_name = _connection.get_string(i, 1);
-            std::string column_name = _connection.get_string(i, 2);
+            // std::string column_name = _connection.get_string(i, 2); // unused
             std::uint32_t secondary_index_num = _connection.get_int32(i, 3);
             std::uint32_t column_attnum = _connection.get_int32(i, 4);
             bool is_unique = _connection.get_boolean(i, 5);
@@ -597,7 +588,7 @@ namespace springtail
 
         // validate the columns to see if there are invalid columns
         auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns,
-                Properties::get_include_schemas(db_id));
+                Properties::get_include_schemas(db_id, true));
         if (invalid_columns.size() > 0) {
             LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
             nlohmann::json table_info = {
@@ -1075,6 +1066,7 @@ namespace springtail
 
                 // construct query by joining schema names
                 std::vector<std::string> schema_names;
+                schema_names.reserve(schemas.size());
                 for (const auto &schema : schemas) {
                     schema_names.push_back(fmt::format("'{}'", _connection.escape_string(schema)));
                 }
@@ -1149,6 +1141,72 @@ namespace springtail
                             const nlohmann::json &include_json)
     {
         return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, std::optional{include_json});
+    }
+
+    std::vector<std::string>
+    PgCopyTable::get_schema_list(uint64_t db_id)
+    {
+        std::vector<std::string> namespaces;
+        PgCopyTable copy_table;
+        copy_table.connect(db_id);
+
+        copy_table._connection.exec(fmt::format(NAMESPACE_QUERY, ""));
+
+        if (copy_table._connection.ntuples() == 0) {
+            // Technically this should never happen, but keep this here just in case
+            copy_table._connection.clear();
+            LOG_ERROR("Error while getting namespaces");
+            return {};
+        }
+
+        // iterate through the results and get the namespaces
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            std::string namespace_name = copy_table._connection.get_string(i, 1);
+            namespaces.push_back(namespace_name);
+        }
+
+        copy_table._connection.clear();
+        copy_table.disconnect();
+
+        return namespaces;
+    }
+
+    std::unordered_map<std::string, std::unordered_set<uint32_t>>
+    PgCopyTable::get_table_oids_for_schemas(uint64_t db_id, const nlohmann::json &schema_list)
+    {
+        std::unordered_map<std::string, std::unordered_set<uint32_t>> result;
+        result.reserve(schema_list.size());
+
+        PgCopyTable copy_table;
+        copy_table.connect(db_id);
+
+        auto&& schemas = Json::get_vector<std::string>(schema_list);
+        for (const auto &schema : schemas) {
+            auto schema_name = fmt::format("'{}'", copy_table._connection.escape_string(schema));
+            std::set<uint32_t> table_oids;
+            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema_name),
+                                        table_oids);
+            result.emplace(schema, std::unordered_set<uint32_t>(table_oids.begin(), table_oids.end()));
+        }
+
+        copy_table.disconnect();
+        return result;
+    }
+
+    void
+    PgCopyTable::drop_schemas(uint64_t db_id, const nlohmann::json &schema_list)
+    {
+        PgCopyTable copy_table;
+        copy_table.connect(db_id);
+
+        auto&& schemas = Json::get_vector<std::string>(schema_list);
+        for (const auto &schema : schemas) {
+            auto schema_name = fmt::format("'{}'", copy_table._connection.escape_string(schema));
+            copy_table._connection.exec(fmt::format(DROP_NAMESPACE_QUERY, schema_name));
+            copy_table._connection.clear();
+        }
+
+        copy_table.disconnect();
     }
 
     void
@@ -1395,7 +1453,7 @@ namespace springtail
         // iterate through the results and get the user defined types
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t enum_type_oid = copy_table._connection.get_int32(i, 0);
-            std::string extension_name = copy_table._connection.get_string(i, 1);
+            // std::string extension_name = copy_table._connection.get_string(i, 1); // unused
             uint32_t namespace_oid = copy_table._connection.get_int32(i, 2);
             std::string namespace_name = copy_table._connection.get_string(i, 3);
             std::string extn_type_name = copy_table._connection.get_string(i, 4);
@@ -1458,7 +1516,7 @@ namespace springtail
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t oper_oid = copy_table._connection.get_int32(i, 0);
             std::string oper_name = copy_table._connection.get_string(i, 1);
-            std::string oper_proc = copy_table._connection.get_string(i, 2);
+            // std::string oper_proc = copy_table._connection.get_string(i, 2); // unused
             std::string proc_name = copy_table._connection.get_string(i, 3);
 
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Adding operator: {}, name: {}, proc: {} for extension: {}", oper_oid, oper_name, proc_name, extension);
@@ -1480,7 +1538,7 @@ namespace springtail
         copy_table._connection.exec(fmt::format(PgExtnRegistry::OPCLASS_QUERY, extension));
 
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
-            std::string extname = copy_table._connection.get_string(i, 0);
+            // std::string extname = copy_table._connection.get_string(i, 0);       // unused
             std::string access_method = copy_table._connection.get_string(i, 1);
             uint32_t opclass_oid = copy_table._connection.get_int32(i, 2);
             std::string opclass_name = copy_table._connection.get_string(i, 3);
