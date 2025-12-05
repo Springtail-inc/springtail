@@ -537,23 +537,33 @@ namespace springtail::pg_proxy {
 
         DCHECK_EQ(_replica_session, session);
         _replica_session = nullptr;
+        clear_associated_session();
 
         if (fatal) {
-            clear_associated_session();
-
             _state = State::ERROR;
             return;
         }
 
+        // if we are in a transaction and this is the associated session
+        // and the replica failed, then failover to the primary session
+        // and switch to primary mode
+        // XXX in future could try and failover to another replica
         if (_stmt_cache.in_transaction() && get_associated_session() == session) {
             // replica going away during a transaction and it is the associated session
             LOG_ERROR("[C:{}] Replica session shut down during transaction, cannot failover", _id);
-            clear_associated_session();
 
             // there was authorization error in a replica session, switching to primary session
             _primary_mode = true;
             set_associated_session(_primary_session);
+
+            // transfer any pending batch messages to primary session
+            // including dependency messages
+            std::deque<SessionMsgPtr> msg_queue;
+            _add_dependencies(msg_queue, _primary_session, true);
+            _primary_session->queue_msg_batch(std::move(msg_queue));
+            
             _primary_session->transfer_batch_queue(session);
+
             return;
         }
 

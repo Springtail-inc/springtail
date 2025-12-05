@@ -366,6 +366,7 @@ namespace pg_proxy {
                 // want to keep these in the transaction history
                 rollback_list.push_front(it->second);
             }
+
             if (it->second->type == QueryStmt::Type::SAVEPOINT && it->second->name == name) {
                 // remove all statements after this savepoint (using reverse iterator)
                 _transaction_history._history.erase(std::next(it).base(), _transaction_history._history.end());
@@ -374,6 +375,9 @@ namespace pg_proxy {
                 for (auto rit = rollback_list.begin(); rit != rollback_list.end(); ++rit) {
                     _transaction_history.add(*rit);
                 }
+
+                // stop iteration since the underlying container has been modified
+                return;
             }
         }
     }

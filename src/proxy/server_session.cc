@@ -181,14 +181,25 @@ namespace springtail::pg_proxy {
         _wrap_error_handler([this, &session] {
             // called by client session to transfer work from one server session to another
             DCHECK_NE(session.get(), this);
-            DCHECK_EQ(session->type(), this->type());
-            DCHECK_EQ(session->type(), Session::Type::REPLICA);
 
+            // iterate through the other session's batch queue and transfer messages
+            // excluding dependency messages
+            // XXX we are not transferring non-completed message from the current batch
             while (!session->_batch_queue.empty()) {
-                // XXX need to exclude dependencies?
-                _batch_queue.push_batch(session->_batch_queue.pop_batch());
+                auto batch = session->_batch_queue.pop_batch();
+
+                // go through batch and exclude dependency messages
+                std::deque<SessionMsgPtr> filtered_batch;
+                for (const auto &msg : batch) {
+                    if (msg->type() != SessionMsg::MSG_CLIENT_SERVER_STATE_REPLAY) {
+                        filtered_batch.push_back(msg);
+                    }
+                }
+
+                _batch_queue.push_batch(std::move(filtered_batch));
             }
 
+            // if not processing anything, start processing this batch
             _process_next_batch();
         });
     }
