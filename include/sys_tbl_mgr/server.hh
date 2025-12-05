@@ -604,6 +604,16 @@ private:
      */
     bool _check_index_columns(uint64_t db_id, const proto::IndexInfo & index_info, const std::map<uint32_t, uint32_t> & keys, XidLsn xid);
 
+
+    /**
+     * @brief Check the columns of an GIN index to ensure they have supported opclass
+     *
+     * @param db_id - database id
+     * @param index_info - index information
+     * @return false - some index keys have unsupported opclass
+     */
+    bool _check_gin_index_columns(uint64_t db_id, const proto::IndexInfo & index_info);
+
     /**
      * Performs a drop_index() assuming that the correct locks are already held.
      * @param xid The XID/LSN at which the transaction occurred.

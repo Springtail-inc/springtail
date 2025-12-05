@@ -52,6 +52,11 @@ namespace springtail {
     constexpr int GIN_COMPARE_PARTIAL = 5;
     constexpr int GIN_TRICONSISTENT = 6;
     constexpr int GIN_OPTIONS = 7;
+
+    // Allowed GIN ops
+    constexpr auto ALLOWED_GIN_OPS = std::to_array<std::string_view>({
+            "gin_trgm_ops"
+            });
 }
 
 namespace springtail::constant {

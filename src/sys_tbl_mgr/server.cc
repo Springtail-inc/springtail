@@ -1427,12 +1427,36 @@ Server::_create_index(const proto::IndexRequest& request, bool &created)
     // Set namespace ID for the requested index
     mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
 
-    if (request.index().index_type() == constant::INDEX_TYPE_GIN ||
-        request.index().index_type() == constant::INDEX_TYPE_GIST ||
-        _check_index_columns(request.db_id(), mutable_index_request.index(), keys, xid)) {
+    auto valid_index = false;
+
+    if (request.index().index_type() == constant::INDEX_TYPE_GIN) {
+        valid_index = _check_gin_index_columns(request.db_id(), mutable_index_request.index())
+            && _check_index_columns(request.db_id(), mutable_index_request.index(), keys, xid);
+    } else {
+        valid_index = _check_index_columns(request.db_id(), mutable_index_request.index(), keys, xid);
+    }
+
+    if (valid_index) {
         created = _upsert_index_name(request.db_id(), mutable_index_request.index(), xid, keys, op_classes);
     }
     return mutable_index_request.index();
+}
+
+bool
+Server::_check_gin_index_columns(uint64_t db_id, const proto::IndexInfo & index_info)
+{
+    for (auto& idx_column : index_info.columns()) {
+        if (std::ranges::find(ALLOWED_GIN_OPS,
+                    idx_column.opclass())
+                == std::end(ALLOWED_GIN_OPS))
+        {
+            LOG_ERROR("Unsupported opclass '{}' for GIN index column: {}, table {}, index {}",
+                    idx_column.opclass(),idx_column.name(),
+                    index_info.table_id(), index_info.name());
+            return false;
+        }
+    }
+    return true;
 }
 
 bool
