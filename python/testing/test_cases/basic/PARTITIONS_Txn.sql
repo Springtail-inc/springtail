@@ -40,7 +40,7 @@ COMMIT;
 ### schema_check public animals
 ### schema_check public animals_carnivore
 ### schema_check public animals_herbivore
-SELECT * FROM animals ORDER BY id;
+SELECT * FROM animals ORDER BY id, name;
 
 ## cleanup
 SELECT 1;

@@ -305,7 +305,7 @@ namespace springtail::pg_proxy
         }
     }
 
-    void
+    bool
     DatabaseInstanceSet::_release_session(ServerSessionPtr session,
                                           bool deallocate)
     {
@@ -321,9 +321,7 @@ namespace springtail::pg_proxy
         }
 
         LOG_INFO("Session being released: [S:{:d}], deallocate: {}", session->id(), deallocate);
-        instance->release_session(session, deallocate);
-
-        return;
+        return instance->release_session(session, deallocate);
     }
 
     ServerSessionPtr
@@ -502,13 +500,13 @@ namespace springtail::pg_proxy
         DatabaseInstanceSet::_add_instance(instance, lock);
     }
 
-    void
+    bool
     DatabaseReplicaSet::release_session(ServerSessionPtr session, bool deallocate)
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Replica session released: [S:{:d}]", session->id());
         assert(session->type() == Session::Type::REPLICA);
 
-        DatabaseInstanceSet::_release_session(session, deallocate);
+        return DatabaseInstanceSet::_release_session(session, deallocate);
     }
 
     void
@@ -609,7 +607,7 @@ namespace springtail::pg_proxy
 
     /*********** Database Primary Set *************/
 
-    void
+    bool
     DatabasePrimarySet::release_session(ServerSessionPtr session, bool deallocate)
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Primary Session released: [S:{:d}]", session->id());
@@ -622,7 +620,7 @@ namespace springtail::pg_proxy
             deallocate = true;
         }
 
-        _release_session(session, deallocate);
+        return _release_session(session, deallocate);
     }
 
     void
@@ -670,7 +668,9 @@ namespace springtail::pg_proxy
         auto session = ServerSession::create(user, db_name.value_or(database), prefix(), shared_from_this(), _type, parameters);
 
         // add to active sessions map; removed in ServerSession destructor
-        _add_session(session);
+        if (session != nullptr) {
+            _add_session(session);
+        }
 
         return session;
     }

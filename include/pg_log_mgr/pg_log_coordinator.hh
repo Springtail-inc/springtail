@@ -31,6 +31,14 @@ namespace springtail::pg_log_mgr {
          */
         nlohmann::json get_stats();
 
+        /**
+         * @brief Get the committer object
+         *
+         * @return std::shared_ptr<committer::Committer>
+         */
+        std::shared_ptr<committer::Committer>
+        get_committer() const { return _committer; }
+
     private:
         friend class Singleton<PgLogCoordinator>;
         PgLogCoordinator();

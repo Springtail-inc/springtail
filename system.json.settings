@@ -87,8 +87,8 @@
         "log_size_rollover_threshold": 134217728,
         "archive_logs": true,
         "indexer_worker_threads": 1,
-	"reader_queue_mem_high_watermark": 134217728,
-	"reader_queue_mem_low_watermark": 100663296,
+        "reader_queue_mem_high_watermark": 134217728,
+        "reader_queue_mem_low_watermark": 100663296,
         "committer_fsync_interval_ms": 500,
         "committer_fsync_worker_threads": 1,
         "rpc_config" : {
@@ -149,7 +149,7 @@
     "aws_users_override": [
         { "role": "replication", "username": "springtail", "password": "springtail", "type": "text" },
         { "role": "fdw_superuser", "username": "springtail", "password": "springtail", "type": "text" },
-        { "role": "proxy_to_fdw", "username": "springtail", "password": "springtail_proxy", "type": "text" },
+        { "role": "proxy_to_fdw", "username": "springtail", "password": "springtail", "type": "text" },
         { "role": "database", "username": "springtail", "password": "springtail", "type": "text" }
     ],
     "db_instances": {

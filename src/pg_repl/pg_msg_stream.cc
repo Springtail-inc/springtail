@@ -1296,11 +1296,7 @@ namespace springtail {
 
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded drop namespace: json: {}", json.dump());
 
-        //check include schemas
-        if (!_is_schema_included(ns_msg.name)) {
-            LOG_INFO("Drop namespace skipped: {}\n", ns_msg.name);
-            return {};
-        }
+        // NOTE: do not check include schemas, just attempt to drop everything that is being dropped
 
         return msg;
     }
@@ -1698,7 +1694,7 @@ namespace springtail {
         if (!_db_id.has_value()) {
             return true;
         }
-        auto included_schemas = Properties::get_include_schemas(*_db_id);
+        auto included_schemas = Properties::get_include_schemas(*_db_id, true);
         return included_schemas.empty() ||
            std::ranges::find(included_schemas, schema) != included_schemas.end();
     }
