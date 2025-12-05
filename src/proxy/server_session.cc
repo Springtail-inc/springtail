@@ -175,16 +175,37 @@ namespace springtail::pg_proxy {
         });
     }
 
-    void
+    bool
     ServerSession::transfer_batch_queue(ServerSessionPtr session)
     {
-        _wrap_error_handler([this, &session] {
+        // XXX NOTE: this recovery path is current untested
+        bool result = false;
+        _wrap_error_handler([this, &session, &result] {
             // called by client session to transfer work from one server session to another
             DCHECK_NE(session.get(), this);
 
+            // go through current batch and transfer messages
+            if (session->_current_batch != nullptr) {
+                // go through batch and exclude dependency messages
+                std::deque<SessionMsgPtr> filtered_batch;
+                for (const auto &query_status : session->_current_batch->query_status_queue) {
+                    if (!query_status->is_dependency()) {
+                        if (query_status->query_complete_count > 0) {
+                            // XXX can't handle this case right now as we can't requeue partially completed messages
+                            LOG_ERROR("Cannot transfer server session batch with partially completed messages");
+                            result = false;
+                            return;
+                        }
+                        filtered_batch.push_back(query_status->msg);
+                    }
+                }
+
+                _batch_queue.push_batch(std::move(filtered_batch));
+                session->_current_batch = nullptr;
+            }
+
             // iterate through the other session's batch queue and transfer messages
             // excluding dependency messages
-            // XXX we are not transferring non-completed message from the current batch
             while (!session->_batch_queue.empty()) {
                 auto batch = session->_batch_queue.pop_batch();
 
@@ -201,7 +222,11 @@ namespace springtail::pg_proxy {
 
             // if not processing anything, start processing this batch
             _process_next_batch();
+
+            result = true;
         });
+
+        return result;
     }
 
     void

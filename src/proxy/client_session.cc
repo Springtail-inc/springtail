@@ -547,7 +547,7 @@ namespace springtail::pg_proxy {
         // if we are in a transaction and this is the associated session
         // and the replica failed, then failover to the primary session
         // and switch to primary mode
-        // XXX in future could try and failover to another replica
+        // XXX in future could try and failover to another replica via server selection
         if (_stmt_cache.in_transaction() && get_associated_session() == session) {
             // replica going away during a transaction and it is the associated session
             LOG_ERROR("[C:{}] Replica session shut down during transaction, cannot failover", _id);
@@ -557,12 +557,16 @@ namespace springtail::pg_proxy {
             set_associated_session(_primary_session);
 
             // transfer any pending batch messages to primary session
-            // including dependency messages
+            // start with any dependencies
             std::deque<SessionMsgPtr> msg_queue;
             _add_dependencies(msg_queue, _primary_session, true);
             _primary_session->queue_msg_batch(std::move(msg_queue));
-            
-            _primary_session->transfer_batch_queue(session);
+
+            // then try to transfer the batch queue, if there is any issue fail
+            if (!_primary_session->transfer_batch_queue(session)) {
+                LOG_ERROR("[C:{}] Failed to transfer batch queue to primary session during failover", _id);
+                _state = State::ERROR;
+            }
 
             return;
         }

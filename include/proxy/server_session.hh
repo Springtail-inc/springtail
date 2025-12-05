@@ -372,8 +372,15 @@ namespace springtail::pg_proxy {
         /** send cancel request to Postgres */
         void send_cancel();
 
-        /** transfer batch queue from session to the current session */
-        void transfer_batch_queue(ServerSessionPtr session);
+        /**
+         * @brief Transfer batch queue from session in param to the current session
+         * This is called by the client session when trying to failover from one server session
+         * to another (e.g., from a failed replica to the primary).
+         * @param session server session to transfer from
+         * @return true if transfer successful
+         * @return false if transfer failed
+         */
+        bool transfer_batch_queue(ServerSessionPtr session);
 
     private:
 
