@@ -19,6 +19,7 @@ namespace springtail {
 
         // construct the table and return it
         auto schema = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN}, extension_callback);
+        auto schema_without_row_id = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN}, extension_callback, false, false);
 
         auto &&meta = sys_tbl_mgr::Server::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
@@ -28,7 +29,7 @@ namespace springtail {
 
         return std::make_shared<UserTable>(db_id, table_id, xid, _table_base,
                                         schema->get_sort_keys(), secondary_indexes,
-                                        *tbl_meta, schema, extension_callback);
+                                        *tbl_meta, schema, schema_without_row_id, extension_callback);
     }
 
     std::optional<std::filesystem::path>

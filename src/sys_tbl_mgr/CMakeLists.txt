@@ -29,6 +29,7 @@ set(SYS_TBL_MGR_CLIENT_SOURCES
     table.cc
     table_mgr_base.cc
     table_mgr_client.cc
+    merge_table.cc
 )
 
 set(SCH_MEM_CACHE_SOURCES

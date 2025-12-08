@@ -44,12 +44,14 @@ get_table_dir(const std::filesystem::path &base,
                  const std::vector<Index> &secondary,
                  const TableMetadata &metadata,
                  ExtentSchemaPtr schema,
+                 std::optional<ExtentSchemaPtr> schema_without_row_id,
                  const ExtensionCallback &extension_callback)
         : _db_id(db_id),
           _id(table_id),
           _xid(xid),
           _primary_key(primary_key),
           _schema(schema),
+          _schema_without_row_id(schema_without_row_id),
           _extension_callback(extension_callback)
     {
         std::vector<TableRoot> roots;

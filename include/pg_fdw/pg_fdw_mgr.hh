@@ -55,7 +55,21 @@ namespace springtail::pg_fdw {
 
     /** Internal state used to track table scan */
     struct PgFdwState {
-        TablePtr table;
+        using TableIterator = MergeTable::Iterator;
+
+        MergeTable merge_table; ///< Merge table for handling mutations
+
+        TablePtr table() 
+        {
+            return merge_table.table();
+        }
+
+        //merge table
+        MergeTable& mtable() 
+        {
+            return merge_table;
+        }
+
         uint64_t db_id;
         uint64_t tid;
         uint64_t xid;
@@ -68,9 +82,9 @@ namespace springtail::pg_fdw {
         bool scan_asc = true;                 ///< Scan direction for iterator as defined by ORDER BY <col> ASC/DESC
 
         ///< Start iterator for table scan
-        std::optional<Table::Iterator> iter_start = std::nullopt;
+        std::optional<TableIterator> iter_start = std::nullopt;
         ///< End iterator for table scan
-        std::optional<Table::Iterator> iter_end = std::nullopt;
+        std::optional<TableIterator> iter_end = std::nullopt;
 
         std::map<uint32_t, SchemaColumn> columns;     ///< Column map from ID to column metadata
         std::unordered_map<int, uint32_t> attr_map; ///< Map from FDW local attribute number to Springtail's column position
@@ -111,7 +125,7 @@ namespace springtail::pg_fdw {
         std::vector<uint64_t> qual_indexes; ///< List of table index ids that a present in restric clauses.
 
         /** Constructor */
-        PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid);
+        PgFdwState(TablePtr table, ChangeSet changeset, uint64_t db_id, uint64_t tid, uint64_t xid);
     };
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
 
@@ -431,7 +445,7 @@ namespace springtail::pg_fdw {
         uint64_t _update_last_xid(uint64_t schema_xid);
 
         /** Helper to get table ptr for given table id and xid info */
-        std::pair<TablePtr, std::optional<ChangeSetPtr>> 
+        std::pair<TablePtr, std::optional<ChangeSet>> 
             _get_table(uint64_t db_id, uint64_t tid, uint64_t xid,
                     uint64_t schema_xid,
                     const ExtensionCallback &extenstion_callbacks,

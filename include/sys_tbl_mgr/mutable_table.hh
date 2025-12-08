@@ -187,19 +187,19 @@ namespace springtail {
         void initialize_wc_schema(const ExtensionCallback& extension_callback);
 
         /** Returns the cached write cache schema, or nullptr if not initialized */
-        ExtentSchemaPtr wc_schema() const { return _wc_schema; }
+        ExtentSchemaPtr wc_schema() const { return _wc_shema_info._wc_schema; }
 
         /** Returns the cached op field accessor, or nullptr if not initialized */
-        FieldPtr wc_op_field() const { return _wc_op_field; }
+        FieldPtr wc_op_field() const { return _wc_shema_info._wc_op_field; }
 
         /** Returns the cached data fields, or nullptr if not initialized */
-        FieldArrayPtr wc_fields() const { return _wc_fields; }
+        FieldArrayPtr wc_fields() const { return _wc_shema_info._wc_fields; }
 
         /** Returns the cached data fields without internal_row_id */
-        FieldArrayPtr actual_table_fields() const { return _actual_table_fields; }
+        FieldArrayPtr actual_table_fields() const { return _wc_shema_info._actual_table_fields; }
 
         /** Returns the cached key fields, or nullptr if not initialized */
-        FieldArrayPtr wc_key_fields() const { return _wc_key_fields; }
+        FieldArrayPtr wc_key_fields() const { return _wc_shema_info._wc_key_fields; }
 
     protected:
         /**
@@ -382,11 +382,7 @@ namespace springtail {
         ExtensionCallback _extension_callback; ///< The extension callback for this table.
 
         // Cached write cache schema and fields for committer performance
-        ExtentSchemaPtr _wc_schema;           ///< Pre-computed write cache schema with op/lsn columns
-        FieldPtr _wc_op_field;                ///< Field accessor for __springtail_op
-        FieldArrayPtr _wc_fields;             ///< Field accessors for all data columns
-        FieldArrayPtr _actual_table_fields;   ///< Field accessors for all data columns without internal_row_id
-        FieldArrayPtr _wc_key_fields;         ///< Field accessors for primary key columns
+        WcSchemaInfo _wc_shema_info;    ///< Information about write cache schema
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 
