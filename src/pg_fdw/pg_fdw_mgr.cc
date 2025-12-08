@@ -980,6 +980,10 @@ namespace springtail::pg_fdw {
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
+                //XXX: Remove this when we want to support scan using GIN index
+                if (idx.index_type == constant::INDEX_TYPE_GIN) {
+                    continue;
+                }
                 CHECK(static_cast<sys_tbl::IndexNames::State>(idx.state) == sys_tbl::IndexNames::State::READY);
                 auto index_quals = _get_index_quals(state->columns, idx, qual_list);
                 if (index_quals.empty()) {
