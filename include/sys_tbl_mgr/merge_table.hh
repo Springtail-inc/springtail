@@ -52,20 +52,20 @@ public:
         friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
     private:
-        using MergeIterator = common::SortedMerge<Extent, std::function<bool(const Extent::Row&, const Extent::Row&)>>::iterator;
+        using MutationIterator = common::SortedMerge<Extent, std::function<bool(const Extent::Row&, const Extent::Row&)>>::iterator;
 
         /** For constructing an Iterator from the MergeTable functions. */
         Iterator(MergeTable* merge_table,
                  Table::Iterator table_iter,
                  Table::Iterator table_end,
-                 MergeIterator merge_iter,
-                 MergeIterator merge_end);
+                 MutationIterator merge_iter,
+                 MutationIterator merge_end);
 
         MergeTable* _merge_table;
         Table::Iterator _table_iter;
         Table::Iterator _table_end;
-        MergeIterator _mutation_iter;
-        MergeIterator _merge_end;
+        MutationIterator _mutation_iter;
+        MutationIterator _mutation_end;
 
         /** Helper to compare rows using the write cache schema */
         bool compare_rows(const Extent::Row& a, const Extent::Row& b) const;

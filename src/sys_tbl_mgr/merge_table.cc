@@ -28,14 +28,14 @@ MergeTable::MergeTable(TablePtr tbl, ChangeSet changeset) :
 MergeTable::Iterator::Iterator(MergeTable* merge_table,
         Table::Iterator table_iter,
         Table::Iterator table_end,
-        MergeIterator merge_iter,
-        MergeIterator merge_end)
+        MutationIterator mutation_iter,
+        MutationIterator mutation_end)
 
     : _merge_table(merge_table),
       _table_iter(std::move(table_iter)),
       _table_end(std::move(table_end)),
-      _mutation_iter(std::move(merge_iter)),
-      _merge_end(std::move(merge_end))
+      _mutation_iter(std::move(mutation_iter)),
+      _mutation_end(std::move(mutation_end))
 {}
 
 // Helper to compare rows
@@ -47,12 +47,12 @@ bool MergeTable::Iterator::compare_rows(const Extent::Row& table_row, const Exte
 
 // Iterator operators
 MergeTable::Iterator::reference MergeTable::Iterator::operator*() {
-    // If table iterator is at end, return from merge iterator
+    // If table iterator is at end, return from mutation iterator
     if (_table_iter == _table_end) {
         return *_mutation_iter;
     }
-    // If merge iterator is at end, return from table iterator
-    if (_mutation_iter == _merge_end) {
+    // If mutation iterator is at end, return from table iterator
+    if (_mutation_iter == _mutation_end) {
         return *_table_iter;
     }
     // Both iterators are valid, compare and return the smaller
@@ -66,13 +66,13 @@ MergeTable::Iterator::reference MergeTable::Iterator::operator*() {
 MergeTable::Iterator& MergeTable::Iterator::operator++() {
     // TODO: implement mutation handling (insert/update/delete) during iteration
 
-    // If table iterator is at end, advance merge iterator
+    // If table iterator is at end, advance mutation iterator
     if (_table_iter == _table_end) {
         ++_mutation_iter;
         return *this;
     }
-    // If merge iterator is at end, advance table iterator
-    if (_mutation_iter == _merge_end) {
+    // If mutation iterator is at end, advance table iterator
+    if (_mutation_iter == _mutation_end) {
         ++_table_iter;
         return *this;
     }
