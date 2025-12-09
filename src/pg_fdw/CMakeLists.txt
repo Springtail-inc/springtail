@@ -13,6 +13,7 @@ include(FdwTestSetup)
 set(PG_FDW_SOURCES
     pg_fdw.c
     multicorn_util.c
+    trgm_query_helpers.cc
     pg_fdw_mgr.cc
     pg_fdw_mgr_wrap.cc
     pg_fdw_ddl_common.cc

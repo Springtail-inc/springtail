@@ -944,6 +944,15 @@ namespace springtail::pg_fdw {
                 state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
                 state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
                 break;
+            case LIKE:
+            case ILIKE:
+                {
+                    auto search_key = tuple->to_string();
+                    auto tokens = extract_gin_keys_from_string(search_key, "gin_trgm_ops", 100, TRGM_LIKE_STRATEGY_NUMBER);
+                    state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan, tokens));
+                    state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
+                }
+                break;
             case NOT_EQUALS:
                 if (state->scan_asc) {
                     state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
@@ -980,10 +989,6 @@ namespace springtail::pg_fdw {
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
-                //XXX: Remove this when we want to support scan using GIN index
-                if (idx.index_type == constant::INDEX_TYPE_GIN) {
-                    continue;
-                }
                 CHECK(static_cast<sys_tbl::IndexNames::State>(idx.state) == sys_tbl::IndexNames::State::READY);
                 auto index_quals = _get_index_quals(state->columns, idx, qual_list);
                 if (index_quals.empty()) {
@@ -2148,7 +2153,7 @@ namespace springtail::pg_fdw {
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text
-                return (op == EQUALS || op == NOT_EQUALS);
+                return (op == EQUALS || op == NOT_EQUALS || op == LIKE || op == ILIKE);
             default:
                 if (pg_type >= FirstNormalObjectId) {
                     // enum type; ordering based on sort order, treat as float
@@ -2284,6 +2289,9 @@ namespace springtail::pg_fdw {
                         !key_field->equal(nullptr, val_field, row));
             case GREATER_THAN_EQUALS:
                 return !val_field->less_than(row, key_field, nullptr);
+            case LIKE:
+            case ILIKE:
+                return true;
             default:
                 return false;
         }

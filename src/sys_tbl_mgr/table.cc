@@ -6,7 +6,6 @@
 
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
-#include <sys_tbl_mgr/schema_helpers.hh>
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
@@ -158,6 +157,11 @@ get_table_dir(const std::filesystem::path &base,
                 assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
                 _secondary_indexes[idx.id] = {btree, idx_cols};
             }
+
+            // Push to GIN indexes if GIN
+            if (idx.index_type == constant::INDEX_TYPE_GIN) {
+                _gin_indexes_lookup.emplace(idx.id, idx);
+            }
         }
 
         // Get the singleton look-aside schema
@@ -214,17 +218,26 @@ get_table_dir(const std::filesystem::path &base,
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
 
-            // find the extent that could contain the lower_bound() key
-            auto &&i = btree->lower_bound(search_key);
-            if (i == btree->end()) {
-                return end(index_id, index_only);
-            }
-
-            if (!index_only) {
+            auto gin_idx_i = _gin_indexes_lookup.find(index_id);
+            auto search_key_str = search_key->to_string();
+            if (gin_idx_i != _gin_indexes_lookup.end()) {
+                auto gin_idx = gin_idx_i->second;
+                auto col = gin_idx.columns.front();
                 auto index_schema = schema_helpers::create_index_schema(_schema, cols, index_id, _extension_callback);
-                return Iterator(this, btree, i, index_schema);
+                return Iterator(this, btree, btree->begin(), index_schema, std::string(constant::INDEX_TYPE_GIN));
+            } else {
+                // find the extent that could contain the lower_bound() key
+                auto &&i = btree->lower_bound(search_key);
+                if (i == btree->end()) {
+                    return end(index_id, index_only);
+                }
+
+                if (!index_only) {
+                    auto index_schema = schema_helpers::create_index_schema(_schema, cols, index_id, _extension_callback);
+                    return Iterator(this, btree, i, index_schema);
+                }
+                return Iterator(this, btree, i);
             }
-            return Iterator(this, btree, i);
         }
 
         CHECK(!index_only);
@@ -260,17 +273,24 @@ get_table_dir(const std::filesystem::path &base,
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
 
-            // find the extent that could contain the lower_bound() key
-            auto &&i = btree->upper_bound(search_key);
-            if (i == btree->end()) {
-                return end(index_id, index_only);
-            }
+            auto gin_idx = _gin_indexes_lookup.find(index_id);
 
-            if (!index_only) {
+            if (gin_idx != _gin_indexes_lookup.end()) {
                 auto index_schema = schema_helpers::create_index_schema(_schema, cols, index_id, _extension_callback);
-                return Iterator(this, btree, i, index_schema);
+                return Iterator(this, btree, btree->begin(), index_schema, std::string(constant::INDEX_TYPE_GIN));
+            } else {
+                // find the extent that could contain the lower_bound() key
+                auto &&i = btree->upper_bound(search_key);
+                if (i == btree->end()) {
+                    return end(index_id, index_only);
+                }
+
+                if (!index_only) {
+                    auto index_schema = schema_helpers::create_index_schema(_schema, cols, index_id, _extension_callback);
+                    return Iterator(this, btree, i, index_schema);
+                }
+                return Iterator(this, btree, i);
             }
-            return Iterator(this, btree, i);
         }
 
         CHECK(!index_only);
@@ -374,7 +394,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     Table::Iterator
-    Table::begin(uint64_t index_id, bool index_only)
+    Table::begin(uint64_t index_id, bool index_only, std::vector<std::string> tokens)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -395,18 +415,25 @@ get_table_dir(const std::filesystem::path &base,
             return Iterator(this, _primary_index, index_i, std::move(page), begin);
         } else {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
-            // find the extent that could contain the lower_bound() key
-            auto i = btree->begin();
-            if (i == btree->end()) {
-                return end(index_id, index_only);
-            }
+            auto gin_idx = _gin_indexes_lookup.find(index_id);
 
-            if (index_only) {
-                return Iterator(this, btree, i);
-            }
+            if (gin_idx != _gin_indexes_lookup.end()) {
+                auto index_schema = schema_helpers::create_index_schema(_schema, cols, index_id, _extension_callback);
+                return Iterator(this, btree, btree->begin(), index_schema, std::string(constant::INDEX_TYPE_GIN), tokens);
+            } else {
+                // find the extent that could contain the lower_bound() key
+                auto i = btree->begin();
+                if (i == btree->end()) {
+                    return end(index_id, index_only);
+                }
 
-            auto index_schema = schema_helpers::create_index_schema(_schema, cols, index_id, _extension_callback);
-            return Iterator(this, btree, i, index_schema);
+                if (index_only) {
+                    return Iterator(this, btree, i);
+                }
+
+                auto index_schema = schema_helpers::create_index_schema(_schema, cols, index_id, _extension_callback);
+                return Iterator(this, btree, i, index_schema);
+            }
         }
     }
 
@@ -541,6 +568,76 @@ get_table_dir(const std::filesystem::path &base,
         }
     }
 
+    Table::Iterator::GINSecondary::GINSecondary(const Table *table,
+            BTreePtr btree, const BTree::Iterator &btree_i,
+            ExtentSchemaPtr schema, const std::vector<std::string> tokens)
+        :
+            Tracker{table, btree, btree_i},
+            _tokens(tokens)
+    {
+        _look_aside_key_fields = std::make_shared<FieldArray>(1);
+        _extent_id_f = table->look_aside_schema()->get_field(constant::INDEX_EID_FIELD);
+        _row_id_f = table->look_aside_schema()->get_field(constant::INDEX_RID_FIELD);
+        _internal_row_id_f = schema->get_field(constant::INTERNAL_ROW_ID);
+        if (_btree_i != btree->end()) {
+            update_page();
+        }
+    }
+
+    void Table::Iterator::GINSecondary::update_page(bool prev)
+    {
+        DCHECK(_btree_i != _btree->end());
+        uint64_t internal_row_id = 0;
+        while (true) {
+            auto &&index_row = *_btree_i;
+            internal_row_id = _internal_row_id_f->get_uint64(&index_row);
+
+            // Found an unvisited row: mark and keep iterator here.
+            if (!_visited_internal_row_ids.contains(internal_row_id)) {
+                _visited_internal_row_ids.emplace(internal_row_id);
+                break;
+            }
+
+            // Current row was already visited: move iterator.
+            if (prev) {
+                if (_btree_i == _btree->begin()) {
+                    // No more candidates in this direction.
+                    return;
+                }
+                --_btree_i;
+            } else {
+                ++_btree_i;
+                if (_btree_i == _btree->end()) {
+                    // No more candidates in this direction.
+                    return;
+                }
+            }
+        }
+
+        // Get the extent and row ids from the look_aside_index
+        // using the internal_row_id as the key
+        uint64_t eid, row_id;
+        auto &&look_aside_index = _table->look_aside_index();
+
+        // Construct and set the key for lookup
+        _look_aside_key_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+        auto lookup_tuple = std::make_shared<FieldTuple>(_look_aside_key_fields, nullptr);
+
+        // Look-aside entry must exist if entry exists in secondary index
+        auto &&lookup_i = look_aside_index->lower_bound(lookup_tuple);
+        DCHECK(lookup_i != look_aside_index->end());
+
+        // Get the extent and row id from the row
+        auto &&row = *lookup_i;
+        eid = _extent_id_f->get_uint64(&row);
+        row_id = _row_id_f->get_uint32(&row);
+
+        auto page = _table->_read_page(eid);
+        DCHECK(page->extent_count() == 1);
+        _page_i = page->begin();
+        _page_i += row_id;
+    }
+
     void Table::Iterator::Secondary::next()
     {
         ++_btree_i;
@@ -549,10 +646,26 @@ get_table_dir(const std::filesystem::path &base,
         }
         update_page();
     }
+
     void Table::Iterator::Secondary::prev()
     {
         --_btree_i;
         update_page();
+    }
+
+    void Table::Iterator::GINSecondary::next()
+    {
+        ++_btree_i;
+        if (_btree_i == _btree->end()) {
+            return;
+        }
+        update_page();
+    }
+
+    void Table::Iterator::GINSecondary::prev()
+    {
+        --_btree_i;
+        update_page(true);
     }
 
     void Table::Iterator::Secondary::update_page()
@@ -593,13 +706,19 @@ get_table_dir(const std::filesystem::path &base,
             Tracker{table, btree, btree_i}
     {}
 
-    Table::Iterator::Iterator(const Table *table, uint32_t index_id, bool index_only)
+    Table::Iterator::Iterator(const Table *table, uint32_t index_id, bool index_only, std::vector<std::string> tokens)
     {
+        auto gin_idx = table->_gin_indexes_lookup.find(index_id);
+
         if (index_id == constant::INDEX_PRIMARY) {
             _tracker.emplace<Primary>(table, table->_primary_index,
                     table->_primary_index->end(),
                     StorageCache::SafePagePtr{},
                     StorageCache::Page::Iterator{});
+        } else if (gin_idx != table->_gin_indexes_lookup.end()) {
+            auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
+            auto index_schema = schema_helpers::create_gin_index_schema(table->_schema, table->_extension_callback);
+            _tracker.emplace<GINSecondary>(table, btree, btree->end(), index_schema, tokens);
         } else if (index_only) {
             auto const& [btree, _] = table->_secondary_indexes.at(index_id);
             _tracker.emplace<SecondaryIndexOnly>(table, btree,

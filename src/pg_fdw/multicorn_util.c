@@ -389,6 +389,10 @@ getOpEnum(char *opname)
         return GREATER_THAN;
     } else if (strcmp(opname, ">=") == 0) {
         return GREATER_THAN_EQUALS;
+    } else if (strcmp(opname, "~~") == 0) {
+        return LIKE;
+    } else if (strcmp(opname, "~~*") == 0) {
+        return ILIKE;
     }
     return UNSUPPORTED;
 }

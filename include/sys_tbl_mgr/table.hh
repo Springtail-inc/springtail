@@ -7,6 +7,7 @@
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
+#include <sys_tbl_mgr/schema_helpers.hh>
 
 #include <thread>
 #include <variant>
@@ -257,7 +258,43 @@ namespace indexer_helpers {
             }
         };
 
-        std::variant<std::monostate, Primary, Secondary, SecondaryIndexOnly> _tracker;
+        /**
+         * This is to iterate using the GIN secondary index.
+         */
+        struct GINSecondary : Tracker
+        {
+            GINSecondary(const Table *table,
+                    BTreePtr btree, const BTree::Iterator &btree_i,
+                    ExtentSchemaPtr schema, std::vector<std::string> tokens);
+
+            GINSecondary(GINSecondary&&) = default;
+            virtual ~GINSecondary() = default;
+
+            void next();
+            void prev();
+            const Extent::Row& row() const {
+                return *_page_i;
+            }
+
+            friend bool operator==(const GINSecondary& a, const GINSecondary& b) {
+                const Tracker& ta = a;
+                const Tracker& tb = b;
+                return ta == tb;
+            }
+
+            FieldPtr _extent_id_f;
+            FieldPtr _row_id_f;
+            FieldPtr _internal_row_id_f;
+            FieldArrayPtr _look_aside_key_fields;
+
+            StorageCache::Page::Iterator _page_i;
+            std::vector<std::string> _tokens;
+            std::unordered_set<uint64_t> _visited_internal_row_ids;
+
+            void update_page(bool prev=false);
+        };
+
+        std::variant<std::monostate, Primary, Secondary, SecondaryIndexOnly, GINSecondary> _tracker;
 
     public:
         using iterator_category = std::bidirectional_iterator_tag;
@@ -276,6 +313,9 @@ namespace indexer_helpers {
                     return t.row();
                 }
                 reference operator()(const Secondary& t) const {
+                    return t.row();
+                }
+                reference operator()(const GINSecondary& t) const {
                     return t.row();
                 }
                 reference operator() [[noreturn]] (const std::monostate&) const {
@@ -302,6 +342,9 @@ namespace indexer_helpers {
                 void operator()(Secondary& t) const {
                     t.next();
                 }
+                void operator()(GINSecondary& t) const {
+                    t.next();
+                }
                 void operator()(const std::monostate&) const {
                     CHECK(false);
                 }
@@ -322,6 +365,9 @@ namespace indexer_helpers {
                     t.prev();
                 }
                 void operator()(Secondary& t) const {
+                    t.prev();
+                }
+                void operator()(GINSecondary& t) const {
                     t.prev();
                 }
                 void operator()(const std::monostate&) const {
@@ -347,6 +393,9 @@ namespace indexer_helpers {
                 }
                 bool operator()(const Secondary& t) const {
                     return t == std::get<Secondary>(_b._tracker);
+                }
+                bool operator()(const GINSecondary& t) const {
+                    return t == std::get<GINSecondary>(_b._tracker);
                 }
                 bool operator() [[noreturn]] (const std::monostate&) const {
                     CHECK(false);
@@ -374,6 +423,9 @@ namespace indexer_helpers {
                 uint64_t operator() [[noreturn]] (const Secondary&) const {
                     CHECK(false);
                 }
+                uint64_t operator() [[noreturn]] (const GINSecondary&) const {
+                    CHECK(false);
+                }
                 uint64_t operator() [[noreturn]] (const std::monostate&) const {
                     CHECK(false);
                 }
@@ -393,7 +445,7 @@ namespace indexer_helpers {
             }
 
             /** Specifically for the end() iterator. */
-            Iterator(const Table *table, uint32_t index_id, bool index_only);
+            Iterator(const Table *table, uint32_t index_id, bool index_only, std::vector<std::string> tokens = {});
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
@@ -411,6 +463,18 @@ namespace indexer_helpers {
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
             }
 
+            Iterator(const Table *table,
+                     BTreePtr btree, const BTree::Iterator &btree_i,
+                     ExtentSchemaPtr index_schema, const std::string index_type,
+                     std::vector<std::string> tokens = {})
+            {
+                if (index_type == constant::INDEX_TYPE_GIN) {
+                    auto gin_index_schema = schema_helpers::create_gin_index_schema(table->_schema, table->_extension_callback);
+                    _tracker.emplace<GINSecondary>(table, btree, btree_i, gin_index_schema, tokens);
+                } else {
+                    _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
+                }
+            }
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i)
             {
@@ -476,18 +540,18 @@ namespace indexer_helpers {
         /**
          * An iterator to the start of the table.
          */
-        Iterator begin(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
+        Iterator begin(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false, std::vector<std::string> tokens = {});
 
         /**
          * An iterator to the end of the table.
          */
-        Iterator end(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false)
+        Iterator end(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false, std::vector<std::string> tokens = {})
         {
             // check for vacant table
             if (index_id == constant::INDEX_PRIMARY && _primary_index == nullptr) {
                 return Iterator(this);
             }
-            return Iterator(this, index_id, index_only);
+            return Iterator(this, index_id, index_only, tokens);
         }
 
         /**
@@ -635,6 +699,10 @@ namespace indexer_helpers {
          * second.second are the index columns
          */
         std::map<uint64_t, std::pair<BTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The secondary indexes of the table..
+        /**
+         * A lookup map to hold GIN indexes
+         */
+        std::map<uint64_t, Index> _gin_indexes_lookup;
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.

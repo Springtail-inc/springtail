@@ -57,6 +57,10 @@ namespace springtail {
     constexpr auto ALLOWED_GIN_OPS = std::to_array<std::string_view>({
             "gin_trgm_ops"
             });
+
+    // Trgm Strategy numbers
+    constexpr int TRGM_LIKE_STRATEGY_NUMBER = 3;
+    constexpr int TRGM_ILIKE_STRATEGY_NUMBER = 4;
 }
 
 namespace springtail::constant {

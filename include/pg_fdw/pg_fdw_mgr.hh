@@ -20,11 +20,13 @@
 #include <pg_fdw/pg_fdw_ddl_common.hh>
 #include <pg_fdw/pg_fdw_plan_state.hh>
 #include <pg_fdw/pg_xid_collector_client.hh>
+#include <pg_fdw/trgm_query_helpers.hh>
 
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
     #include <catalog/pg_type.h>
+    #include <catalog/pg_am_d.h>
     #include <c.h>
     #include <utils/builtins.h>
     #include <libpq-fe.h>

@@ -41,6 +41,8 @@ typedef enum {
     LESS_THAN_EQUALS,
     GREATER_THAN,
     GREATER_THAN_EQUALS,
+    LIKE,
+    ILIKE
 } QualOpName;
 
 /** Base qual for predicates */
