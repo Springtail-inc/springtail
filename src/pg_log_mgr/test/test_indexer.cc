@@ -87,8 +87,6 @@ namespace {
 
         static constexpr uint32_t _secondary_index_id{1234};
 
-        static constexpr int32_t INT4OID = 23;
-
         inline static std::unique_ptr<Indexer> _indexer;
 
         inline static std::shared_ptr<springtail::pg_log_mgr::IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;

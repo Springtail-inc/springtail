@@ -141,16 +141,16 @@ namespace {
         }
 
         // secondary keys
-        std::vector<Index> _make_keys(uint64_t table_id, const std::vector<TableRoot> &roots)
+        std::vector<springtail::Index> _make_keys(uint64_t table_id, const std::vector<TableRoot> &roots)
         {
             int i = 0;
-            std::vector<Index> keys;
+            std::vector<springtail::Index> keys;
             for (auto const& v: roots) {
                 if (v.index_id == constant::INDEX_PRIMARY || v.index_id == constant::INDEX_LOOK_ASIDE) {
                     continue;
                 }
 
-                Index idx;
+                springtail::Index idx;
                 idx.id = v.index_id;
                 idx.table_id = table_id;
                 idx.name=_schema->column_order()[i];
