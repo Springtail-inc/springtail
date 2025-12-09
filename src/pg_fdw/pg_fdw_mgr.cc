@@ -690,22 +690,21 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            std::vector<ExtentPtr> extents;
+            //std::vector<ExtentPtr> extents;
+
             for (auto &wc_extent : extent_list) {
                 DCHECK_EQ(wc_extent.xid, pxid);
 
-                ExtentPtr pe = std::make_shared<Extent>(
+                Extent pe = Extent(
                         ExtentType{false}, wc_extent.xid, 
                         table->extent_schema()->row_size(),
                         table->extent_schema()->field_types());
 
-                pe->deserialize(wc_extent.data);
-                extents.push_back(pe);
+                pe.deserialize(wc_extent.data);
+                changes.push_back(std::move(pe));
             }
 
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Extents fetched from WriteCache: xid={}, extents={}", pxid, extents.size());
-
-            changes.emplace_back(std::move(extents));
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Extents fetched from WriteCache: xid={}, extents={}", pxid, extent_list.size());
         }
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Total transactions to apply: {}", changes.size());
 

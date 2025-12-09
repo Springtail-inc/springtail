@@ -2,11 +2,13 @@
 
 #include <sys_tbl_mgr/table.hh>
 #include <common/sorted_merge.hh>
+#include <storage/extent.hh>
+
 
 
 namespace springtail {
 
-using ChangeSet = std::vector<std::vector<ExtentPtr>>;
+using ChangeSet = std::vector<Extent>;
 
 class MergeTable {
 public:
@@ -56,7 +58,7 @@ public:
 
     private:
         /** For constructing an Iterator from the MergeTable functions. */
-        Iterator(Table::Iterator table_iter);
+        explicit Iterator(Table::Iterator table_iter);
         Table::Iterator _table_iter;
     };
 
@@ -95,7 +97,8 @@ public:
 
 private:
     TablePtr _table;
-    ChangeSet _changeset;
+    WcSchemaInfo _wc_schema_info;
+    common::SortedMerge<Extent, std::function<bool(const Extent::Row&, const Extent::Row&)>> _sorted_merge;
 };
 
 }; // namespace springtail

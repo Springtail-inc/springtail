@@ -35,7 +35,7 @@ private:
     template <typename Entry>
     struct ForwardHeapCompare {
         Compare comp;
-        ForwardHeapCompare(const Compare& c) : comp(c) {}
+        explicit ForwardHeapCompare(const Compare& c) : comp(c) {}
         bool operator()(const Entry& a, const Entry& b) const {
             return comp(*b.current, *a.current);
         }
@@ -44,7 +44,7 @@ private:
     template <typename Entry>
     struct ReverseHeapCompare {
         Compare comp;
-        ReverseHeapCompare(const Compare& c) : comp(c) {}
+        explicit ReverseHeapCompare(const Compare& c) : comp(c) {}
         bool operator()(const Entry& a, const Entry& b) const {
             return comp(*a.current, *b.current);
         }

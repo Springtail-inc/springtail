@@ -5,7 +5,13 @@ using namespace springtail;
 // MergeTable constructor
 MergeTable::MergeTable(TablePtr table, ChangeSet changeset) :
     _table(std::move(table)), 
-    _changeset(std::move(changeset))
+    _wc_schema_info(table->get_extent_schema_without_row_id(), table->get_extension_callback()),
+    _sorted_merge{std::move(changeset), 
+        [this](const Extent::Row& a, const Extent::Row& b) { 
+            // compare row keys using the write cache schema info
+            return FieldTuple(_wc_schema_info._wc_key_fields, &a).less_than(FieldTuple(_wc_schema_info._wc_key_fields, &b));
+        }
+    }
 {
 }
 
