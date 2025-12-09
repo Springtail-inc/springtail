@@ -43,7 +43,7 @@ public:
          */
         friend bool operator==(const Iterator& a, const Iterator& b)
         {
-            return a._table_iter == b._table_iter;
+            return a._table_iter == b._table_iter && a._mutation_iter == b._mutation_iter;
         }
 
         /**
@@ -51,15 +51,24 @@ public:
          */
         friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
-        /**
-         * Returns the current extent id of the iterator.
-         */
-        uint64_t extent_id() const;
-
     private:
+        using MergeIterator = common::SortedMerge<Extent, std::function<bool(const Extent::Row&, const Extent::Row&)>>::iterator;
+
         /** For constructing an Iterator from the MergeTable functions. */
-        explicit Iterator(Table::Iterator table_iter);
+        Iterator(MergeTable* merge_table,
+                 Table::Iterator table_iter,
+                 Table::Iterator table_end,
+                 MergeIterator merge_iter,
+                 MergeIterator merge_end);
+
+        MergeTable* _merge_table;
         Table::Iterator _table_iter;
+        Table::Iterator _table_end;
+        MergeIterator _mutation_iter;
+        MergeIterator _merge_end;
+
+        /** Helper to compare rows using the write cache schema */
+        bool compare_rows(const Extent::Row& a, const Extent::Row& b) const;
     };
 
 public:
@@ -97,8 +106,9 @@ public:
 
 private:
     TablePtr _table;
-    WcSchemaInfo _wc_schema_info;
-    common::SortedMerge<Extent, std::function<bool(const Extent::Row&, const Extent::Row&)>> _sorted_merge;
+    FieldArrayPtr _key_fields; // Key fields in the table extent schema
+    std::optional<WcSchemaInfo> _wc_schema_info;
+    common::SortedMerge<Extent, std::function<bool(const Extent::Row&, const Extent::Row&)>> _mutations;
 };
 
 }; // namespace springtail

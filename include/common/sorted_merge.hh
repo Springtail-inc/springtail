@@ -10,6 +10,7 @@
 namespace springtail {
 namespace common {
 
+    /** SortedMerge is a utility class that merges multiple sorted containers into a single sorted sequence, K-way merge style.  */
 template <typename Container, typename Compare = std::less<typename Container::value_type>>
 class SortedMerge {
 public:
@@ -97,7 +98,7 @@ public:
     public:
         Iterator() : _heap(nullptr), current_value_(nullptr), _is_end(true) {}
 
-        explicit Iterator(const std::vector<Container>& containers, const Compare& comp)
+        explicit Iterator(std::vector<Container>& containers, const Compare& comp)
             : _heap(std::make_shared<heap_type>(heap_compare_type(comp))),
               current_value_(nullptr),
               _is_end(false) {
@@ -123,7 +124,7 @@ public:
 
         // Constructor for lower_bound/upper_bound with custom starting positions
         template <typename IterType>
-        Iterator(const std::vector<Container>& containers,
+        Iterator(std::vector<Container>& containers,
                  const std::vector<std::pair<IterType, IterType>>& ranges,
                  const Compare& comp)
             : _heap(std::make_shared<heap_type>(heap_compare_type(comp))),
@@ -265,8 +266,12 @@ public:
         return total;
     }
 
+    void clear() {
+        _containers.clear();
+    }
+
 private:
-    std::vector<Container> _containers;
+    mutable std::vector<Container> _containers;
     Compare _comp;
 };
 

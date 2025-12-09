@@ -523,10 +523,10 @@ namespace indexer_helpers {
         /**
          * Returns the schema of the table without internal_row_id.
          */     
-        ExtentSchemaPtr get_extent_schema_without_row_id() const {
-            DCHECK(_schema_without_row_id.has_value());
-            return _schema_without_row_id.value();
+        std::optional<ExtentSchemaPtr> get_extent_schema_without_row_id() const {
+            return _schema_without_row_id;
         }
+
         /**
          * Get the secondary index column names in the order as they appear in the index.
          */

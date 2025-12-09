@@ -1,3 +1,8 @@
+        /**
+         * Returns the current extent id of the iterator.
+         */
+        //uint64_t extent_id() const;
+
 #include <storage/vacuumer.hh>
 #include <sys_tbl_mgr/schema_helpers.hh>
 #include <sys_tbl_mgr/server.hh>
