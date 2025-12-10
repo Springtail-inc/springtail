@@ -469,7 +469,10 @@ namespace springtail::pg_proxy {
         }
         LOG_INFO("Proxy server shutting down");
         notify_shutdown();
-        _proxy_thread.join();
+        // this check is to make unittest happy
+        if (_proxy_thread.joinable()) {
+            _proxy_thread.join();
+        }
     }
 
     void
@@ -712,6 +715,12 @@ namespace springtail::pg_proxy {
 
         // this is a secondary session, most likely a server session
         // need to remove its socket from the appropriate maps
+
+        // this check is to make unittest happy
+        if (session->get_connection() == nullptr) {
+            return;
+        }
+
         int socket = session->get_connection()->get_socket();
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Session not found in session sockets, removing socket: {}", socket);
@@ -785,6 +794,10 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::_wake_event_loop()
     {
+        // this check is to make unittest happy
+        if (_efd == -1) {
+            return;
+        }
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Waking up event loop");
         uint64_t val = 1;
         [[maybe_unused]] int ret = write(_efd, &val, sizeof(uint64_t));
