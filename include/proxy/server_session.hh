@@ -200,6 +200,29 @@ namespace springtail::pg_proxy {
         /** transfer batch queue from session to the current session */
         void transfer_batch_queue(ServerSessionPtr session);
 
+        /** set user valid flag to false */
+        void invalidate_db_user() { _is_user_valid = false; }
+
+        /** return the value of user valid flag */
+        bool is_user_valid() { return _is_user_valid; }
+
+        /**
+         * @brief Return JSON representation of the server session. It overrides base
+         *      class function with the same name and prints additional information
+         *      pertaining to server session objecct.
+         *
+         * @return nlohmann::json
+         */
+        nlohmann::json
+        to_json() const override
+        {
+            nlohmann::json j = Session::to_json();
+            j.update(nlohmann::json::object({
+                {"is_user_valid", _is_user_valid.load()}
+            }));
+            return j;
+        }
+
     private:
 
         bool _is_pinned = false;
@@ -221,6 +244,8 @@ namespace springtail::pg_proxy {
         bool _defer_shadow_shutdown = false; ///< defer shutdown until all messages processed
 
         bool _fatal_error = false;           ///< flag indicating fatal error
+
+        std::atomic<bool> _is_user_valid{true};     ///< atomic flag indicating if the user of the session is valid
 
         /** Process next batch of processing messages from _batch_queue */
         void _process_next_batch();

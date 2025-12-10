@@ -535,6 +535,9 @@ namespace springtail::pg_proxy {
                     int fd = fds[i].fd;
                     _add_runnable_fd(fd, true, runnable_sessions);
                     n--;
+                } else if ((fds[i].revents & ~POLLIN) == POLLNVAL) {
+                    LOG_ERROR("File descriptor (i = {}): {}, events 0x{:04x}", i, fds[i].fd, fds[i].revents);
+                    n--;
                 }
             }
             DCHECK_EQ(n, 0);

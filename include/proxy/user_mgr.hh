@@ -165,6 +165,16 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Get the set of databases
+         *
+         * @return std::set<std::string>
+         */
+        std::set<std::string> get_databases() {
+            std::shared_lock lock(_user_mutex);
+            return _connected_databases;
+        }
+
+        /**
          * @brief Change user password
          * @param password - password
          */

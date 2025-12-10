@@ -112,6 +112,9 @@ namespace springtail::pg_proxy
         lock.unlock();
 
         // release sessions after unlocking
+        for (auto &session: evicted_sessions) {
+            session->shutdown_session();
+        }
         evicted_sessions.clear();
     }
 
@@ -142,6 +145,9 @@ namespace springtail::pg_proxy
         lock.unlock();
 
         // release sessions after unlocking
+        for(auto &session: evicted_sessions) {
+            session->shutdown_session();
+        }
         evicted_sessions.clear();
     }
 
@@ -183,6 +189,7 @@ namespace springtail::pg_proxy
         lock.unlock();
 
         // release session after unlocking
+        session->shutdown_session();
         session.reset();
     }
 
@@ -276,6 +283,42 @@ namespace springtail::pg_proxy
             LOG_INFO("  Session[id={}, db_id={}, user={}, exp_time={}]",
                      entry.value->id(), entry.key.first, entry.key.second, entry.expiration_time);
         }
+    }
+
+    void
+    DatabasePool::evict_user(const uint64_t db_id, const std::string &username)
+    {
+        std::vector<ServerSessionPtr> evicted_sessions;
+        SessionKey key = std::make_pair(db_id, username);
+
+        {
+            std::unique_lock lock(_mutex);
+
+            // find queue for the key
+            auto it = _lookup.find(key);
+            if (it == _lookup.end()) {
+                return;
+            }
+
+            // walk through the queue elements, get session id for the given session,
+            // cleanup corresponding entry in _session_id_map, and
+            // cleanup session from LRU list
+            for (auto &queue_item: it->second) {
+                auto &session_entry = *queue_item;
+                uint64_t session_id = session_entry.value->id();
+                _session_id_map.erase(session_id);
+                evicted_sessions.push_back(session_entry.value);
+                _lru.erase(queue_item);
+            }
+
+            // remove the queue for the key
+            _lookup.erase(it);
+        }
+
+        for (auto &session: evicted_sessions) {
+            session->shutdown_session();
+        }
+        evicted_sessions.clear();
     }
 
     /*********** Database Instance Set *************/
@@ -417,6 +460,16 @@ namespace springtail::pg_proxy
         return nullptr;
     }
 
+    void
+    DatabaseInstanceSet::invalidate_user(const uint64_t db_id, const std::string &username)
+    {
+        for (auto &instance: _active_instances) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Invalidate user {} on db {} for replica {}:{}",
+                username, db_id, instance->hostname(), instance->port());
+            instance->invalidate_user(db_id, username);
+        }
+    }
+
     /*********** Database Replica Set *************/
 
     void
@@ -505,6 +558,12 @@ namespace springtail::pg_proxy
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Replica session released: [S:{:d}]", session->id());
         assert(session->type() == Session::Type::REPLICA);
+
+        // if the user is invalidated, then deallocate the session instead of putting it back into
+        // the pool
+        if (!session->is_user_valid()) {
+            deallocate = true;
+        }
 
         return DatabaseInstanceSet::_release_session(session, deallocate);
     }
@@ -616,7 +675,8 @@ namespace springtail::pg_proxy
         std::shared_lock lock(_base_mutex);
 
         // check if primary instance is still alive, if so try to add to pool
-        if (session->get_instance() != _primary) {
+        // also check if the user is no longer valid
+        if (session->get_instance() != _primary || !session->is_user_valid()) {
             deallocate = true;
         }
 
@@ -653,6 +713,15 @@ namespace springtail::pg_proxy
         auto session = _allocate_session(user, db_id, parameters, instance, database);
 
         return session;
+    }
+
+    void
+    DatabasePrimarySet::invalidate_user(const uint64_t db_id, const std::string &username)
+    {
+        _primary->invalidate_user(db_id, username);
+        if (_standby != nullptr) {
+            _standby->invalidate_user(db_id, username);
+        }
     }
 
     /*********** Database Instance *************/
@@ -758,6 +827,29 @@ namespace springtail::pg_proxy
             }
         }
         _pool->dump();
+    }
+
+    void
+    DatabaseInstance::invalidate_user(const uint64_t db_id, const std::string &username)
+    {
+        // clear out the pool
+        _pool->evict_user(db_id, username);
+
+        // mark the sessions in the active list as invalid, so that the sessions will get terminated
+        // as soon as it is released
+        std::shared_lock lock(_active_sessions_mutex);
+        for (auto it = _active_sessions.begin(); it != _active_sessions.end();) {
+            if (auto sp = it->second.lock()) {
+                // object is alive, use it
+                if (sp->database_id() == db_id && sp->username() == username) {
+                    sp->invalidate_db_user();
+                }
+                ++it;
+            } else {
+                // object already destroyed, remove expired weak_ptr
+                it = _active_sessions.erase(it);
+            }
+        }
     }
 
     /*********** Database *************/
@@ -1343,6 +1435,13 @@ namespace springtail::pg_proxy
                 return _is_shutting_down();
             });
         }
+    }
+
+    void
+    DatabaseMgr::invalidate_user_sessions(const uint64_t db_id, const std::string &username)
+    {
+        _primary_set->invalidate_user(db_id, username);
+        _replica_set->invalidate_user(db_id, username);
     }
 
 } // namespace springtail::pg_proxy

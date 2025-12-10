@@ -150,7 +150,7 @@
         { "role": "replication", "username": "springtail", "password": "springtail", "type": "text" },
         { "role": "fdw_superuser", "username": "springtail", "password": "springtail", "type": "text" },
         { "role": "proxy_to_fdw", "username": "springtail", "password": "springtail", "type": "text" },
-        { "role": "database", "username": "springtail", "password": "springtail", "type": "text" }
+        { "role": "database", "username": "springtail_proxy", "password": "springtail_proxy", "type": "text" }
     ],
     "db_instances": {
         "1234": {
