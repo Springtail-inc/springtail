@@ -48,6 +48,7 @@ class CoordinatorTester:
         coordinator_hash_name = f"{self.instance_id}:coordinator_state"
         coordinator_key = f"{self.container_name}:{self.instance_key}"
         state = self.redis.hget(coordinator_hash_name, coordinator_key)
+        print(f"Coordinator hash '{coordinator_hash_name}', coordinator_key '{coordinator_key}', state '{state}'")
         if state is not None:
             return CoordinatorState(state)
         return None
@@ -123,7 +124,10 @@ class CoordinatorTester:
             raise TimeoutError(f'Timed out waiting for container state: {state.value}')
 
     def _start_container(self):
-        out = self.docker_cli.exec_in_container(f'{self.container_name}', ['systemctl', 'start', 'springtail-coordinator'])
+        container_name = self.container_name
+        if self.instance_key != 'default':
+            container_name = self.instance_key
+        out = self.docker_cli.exec_in_container(container_name, ['systemctl', 'start', 'springtail-coordinator'])
         out = out.strip()
         if out != 'springtail-coordinator: started':
             raise SystemExit(f"Failed to start container '{self.container_name}': '{out}'")

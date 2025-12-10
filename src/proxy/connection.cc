@@ -318,7 +318,7 @@ namespace springtail::pg_proxy {
         int status = getaddrinfo(hostname.c_str(), port_str.c_str(), &hints, &res);
         if (status != 0) {
             LOG_ERROR("Error resolving hostname {}: {}", hostname, gai_strerror(status));
-            throw ProxyIOConnectionError();
+            return nullptr;
         }
 
         for (p = res; p != nullptr; p = p->ai_next) {
@@ -340,7 +340,7 @@ namespace springtail::pg_proxy {
 
         if (sock == -1) {
             LOG_ERROR("Error connecting to {}:{}", hostname, port);
-            throw ProxyIOConnectionError();
+            return nullptr;
         }
 
         return std::make_shared<ProxyConnection>(sock);
