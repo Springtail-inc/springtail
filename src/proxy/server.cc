@@ -539,6 +539,10 @@ namespace springtail::pg_proxy {
                     _add_runnable_fd(fd, true, runnable_sessions);
                     n--;
                 } else if ((fds[i].revents & ~POLLIN) == POLLNVAL) {
+                    // When the session is destroyed by another thread, the file descriptor will be closed and therefore
+                    // will become invalid. The reason we get POLLNVAL is because poll() detects that the file descriptor
+                    // it tries to use is no longer valid. So, at this point, the only meaningful thing we can do is
+                    // to handle this error and move on.
                     LOG_ERROR("File descriptor (i = {}): {}, events 0x{:04x}", i, fds[i].fd, fds[i].revents);
                     n--;
                 }

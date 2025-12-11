@@ -112,7 +112,7 @@ namespace springtail::pg_proxy
         lock.unlock();
 
         // release sessions after unlocking
-        for (auto &session: evicted_sessions) {
+        for (const auto &session: evicted_sessions) {
             session->shutdown_session();
         }
         evicted_sessions.clear();
@@ -145,7 +145,7 @@ namespace springtail::pg_proxy
         lock.unlock();
 
         // release sessions after unlocking
-        for(auto &session: evicted_sessions) {
+        for(const auto &session: evicted_sessions) {
             session->shutdown_session();
         }
         evicted_sessions.clear();
@@ -303,7 +303,7 @@ namespace springtail::pg_proxy
             // walk through the queue elements, get session id for the given session,
             // cleanup corresponding entry in _session_id_map, and
             // cleanup session from LRU list
-            for (auto &queue_item: it->second) {
+            for (const auto &queue_item: it->second) {
                 auto &session_entry = *queue_item;
                 uint64_t session_id = session_entry.value->id();
                 _session_id_map.erase(session_id);
@@ -315,7 +315,7 @@ namespace springtail::pg_proxy
             _lookup.erase(it);
         }
 
-        for (auto &session: evicted_sessions) {
+        for (const auto &session: evicted_sessions) {
             session->shutdown_session();
         }
         evicted_sessions.clear();
@@ -463,6 +463,7 @@ namespace springtail::pg_proxy
     void
     DatabaseInstanceSet::invalidate_user(const uint64_t db_id, const std::string &username)
     {
+        std::shared_lock lock(_base_mutex);
         for (auto &instance: _active_instances) {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Invalidate user {} on db {} for replica {}:{}",
                 username, db_id, instance->hostname(), instance->port());
