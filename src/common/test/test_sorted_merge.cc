@@ -6,12 +6,28 @@
 
 using namespace springtail;
 
+// Identity function for ValueToKey (value is the key)
+template<typename T>
+struct IdentityValueToKey {
+    using key_type = T;
+
+    key_type operator()(const T& value) const {
+        return value;
+    }
+};
+
+// Helper to create SortedMerge with identity key extraction
+template<typename T, typename Compare = std::less<T>>
+auto make_test_merge(const std::vector<std::vector<T>>& containers, Compare comp = Compare()) {
+    return common::make_sorted_merge(containers, IdentityValueToKey<T>(), comp);
+}
+
 TEST(SortedMergeTest, EmptyContainers) {
     std::vector<std::vector<int>> containers;
     containers.push_back({});
     containers.push_back({});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     ASSERT_TRUE(merger.empty());
     ASSERT_EQ(merger.size(), 0);
@@ -22,7 +38,7 @@ TEST(SortedMergeTest, SingleContainer) {
     std::vector<std::vector<int>> containers;
     containers.push_back({1, 3, 5, 7, 9});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     ASSERT_FALSE(merger.empty());
     ASSERT_EQ(merger.size(), 5);
@@ -46,7 +62,7 @@ TEST(SortedMergeTest, MultipleSortedContainers) {
     containers.push_back({2, 5, 8});
     containers.push_back({3, 6, 9, 11});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     ASSERT_FALSE(merger.empty());
     ASSERT_EQ(merger.size(), 11);
@@ -68,7 +84,7 @@ TEST(SortedMergeTest, DuplicateValues) {
     containers.push_back({1, 3, 5, 7});
     containers.push_back({2, 4, 6, 8});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     ASSERT_EQ(merger.size(), 12);
 
@@ -87,7 +103,7 @@ TEST(SortedMergeTest, ReverseIteration) {
     containers.push_back({2, 5, 8});
     containers.push_back({3, 6, 9});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     std::vector<int> result;
     for (auto it = merger.rbegin(); it != merger.rend(); ++it) {
@@ -106,7 +122,7 @@ TEST(SortedMergeTest, CustomComparator) {
     containers.push_back({9, 6, 3});
     containers.push_back({8, 5, 2});
 
-    auto merger = common::make_sorted_merge(containers, std::greater<int>());
+    auto merger = make_test_merge(containers, std::greater<int>());
 
     std::vector<int> result;
     for (auto val : merger) {
@@ -125,7 +141,7 @@ TEST(SortedMergeTest, LowerBound) {
     containers.push_back({2, 4, 6, 8, 10});
     containers.push_back({1, 5, 9});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     auto it = merger.lower_bound(5);
     ASSERT_NE(it, merger.end());
@@ -145,7 +161,7 @@ TEST(SortedMergeTest, LowerBoundNotFound) {
     containers.push_back({1, 2, 3});
     containers.push_back({4, 5, 6});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     auto it = merger.lower_bound(10);
     ASSERT_EQ(it, merger.end());
@@ -156,7 +172,7 @@ TEST(SortedMergeTest, UpperBound) {
     containers.push_back({1, 3, 5, 5, 7, 9});
     containers.push_back({2, 4, 5, 6, 8, 10});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     auto it = merger.upper_bound(5);
     ASSERT_NE(it, merger.end());
@@ -176,7 +192,7 @@ TEST(SortedMergeTest, UpperBoundNotFound) {
     containers.push_back({1, 2, 3});
     containers.push_back({4, 5, 6});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     auto it = merger.upper_bound(10);
     ASSERT_EQ(it, merger.end());
@@ -186,7 +202,7 @@ TEST(SortedMergeTest, IteratorEquality) {
     std::vector<std::vector<int>> containers;
     containers.push_back({1, 2, 3});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     auto it1 = merger.begin();
     auto it2 = merger.begin();
@@ -203,7 +219,7 @@ TEST(SortedMergeTest, IteratorPostIncrement) {
     std::vector<std::vector<int>> containers;
     containers.push_back({1, 2, 3});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     auto it = merger.begin();
     ASSERT_EQ(*it, 1);
@@ -218,7 +234,7 @@ TEST(SortedMergeTest, StringContainer) {
     containers.push_back({"apple", "cherry", "grape"});
     containers.push_back({"banana", "date", "fig"});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     std::vector<std::string> result;
     for (const auto& val : merger) {
@@ -234,7 +250,7 @@ TEST(SortedMergeTest, MoveConstructor) {
     containers.push_back({1, 3, 5});
     containers.push_back({2, 4, 6});
 
-    auto merger = common::make_sorted_merge(std::move(containers));
+    auto merger = make_test_merge(containers);
 
     std::vector<int> result;
     for (auto val : merger) {
@@ -251,7 +267,7 @@ TEST(SortedMergeTest, ConstIterators) {
     containers.push_back({1, 2, 3});
     containers.push_back({4, 5, 6});
 
-    const auto merger = common::make_sorted_merge(containers);
+    const auto merger = make_test_merge(containers);
 
     std::vector<int> result;
     for (auto it = merger.cbegin(); it != merger.cend(); ++it) {
@@ -268,7 +284,7 @@ TEST(SortedMergeTest, ConstReverseIterators) {
     containers.push_back({1, 2, 3});
     containers.push_back({4, 5, 6});
 
-    const auto merger = common::make_sorted_merge(containers);
+    const auto merger = make_test_merge(containers);
 
     std::vector<int> result;
     for (auto it = merger.crbegin(); it != merger.crend(); ++it) {
@@ -287,7 +303,7 @@ TEST(SortedMergeTest, SingleElementContainers) {
     containers.push_back({8});
     containers.push_back({1});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     std::vector<int> result;
     for (auto val : merger) {
@@ -306,7 +322,7 @@ TEST(SortedMergeTest, MixedEmptyAndNonEmptyContainers) {
     containers.push_back({2, 4, 6});
     containers.push_back({});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     ASSERT_FALSE(merger.empty());
     ASSERT_EQ(merger.size(), 6);
@@ -326,7 +342,7 @@ TEST(SortedMergeTest, LargeNumberOfContainers) {
         containers.push_back({i, i + 100, i + 200});
     }
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     ASSERT_EQ(merger.size(), 300);
 
@@ -352,7 +368,7 @@ TEST(SortedMergeTest, ArrowOperator) {
     containers.push_back({{1, 2}, {3, 4}});
     containers.push_back({{2, 3}, {4, 5}});
 
-    auto merger = common::make_sorted_merge(containers);
+    auto merger = make_test_merge(containers);
 
     auto it = merger.begin();
     ASSERT_EQ(it->x, 1);

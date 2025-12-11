@@ -10,11 +10,19 @@
 namespace springtail {
 namespace common {
 
-    /** SortedMerge is a utility class that merges multiple sorted containers into a single sorted sequence, K-way merge style.  */
-template <typename Container, typename Compare = std::less<typename Container::value_type>>
+    /** SortedMerge is a utility class that merges multiple sorted containers into a single sorted sequence, K-way merge style.
+     *
+     * Template parameters:
+     * - Container: must have value_type typedef
+     * - ValueToKey: function object that defines key_type and extracts key from value
+     *               Must have: typedef key_type; and key_type operator()(const value_type&) const;
+     * - Compare: function object that compares keys (signature: bool(const key_type&, const key_type&))
+     */
+template <typename Container, typename ValueToKey, typename Compare>
 class SortedMerge {
 public:
     using value_type = typename Container::value_type;
+    using key_type = typename ValueToKey::key_type;
     using container_iterator = typename Container::const_iterator;
     using container_reverse_iterator = typename Container::const_reverse_iterator;
     using size_type = std::size_t;
@@ -35,19 +43,21 @@ private:
 
     template <typename Entry>
     struct ForwardHeapCompare {
+        ValueToKey value_to_key;
         Compare comp;
-        explicit ForwardHeapCompare(const Compare& c) : comp(c) {}
+        ForwardHeapCompare(const ValueToKey& vtk, const Compare& c) : value_to_key(vtk), comp(c) {}
         bool operator()(const Entry& a, const Entry& b) const {
-            return comp(*b.current, *a.current);
+            return comp(value_to_key(*b.current), value_to_key(*a.current));
         }
     };
 
     template <typename Entry>
     struct ReverseHeapCompare {
+        ValueToKey value_to_key;
         Compare comp;
-        explicit ReverseHeapCompare(const Compare& c) : comp(c) {}
+        ReverseHeapCompare(const ValueToKey& vtk, const Compare& c) : value_to_key(vtk), comp(c) {}
         bool operator()(const Entry& a, const Entry& b) const {
-            return comp(*a.current, *b.current);
+            return comp(value_to_key(*a.current), value_to_key(*b.current));
         }
     };
 
@@ -98,8 +108,8 @@ public:
     public:
         Iterator() : _heap(nullptr), current_value_(nullptr), _is_end(true) {}
 
-        explicit Iterator(std::vector<Container>& containers, const Compare& comp)
-            : _heap(std::make_shared<heap_type>(heap_compare_type(comp))),
+        explicit Iterator(std::vector<Container>& containers, const ValueToKey& value_to_key, const Compare& comp)
+            : _heap(std::make_shared<heap_type>(heap_compare_type(value_to_key, comp))),
               current_value_(nullptr),
               _is_end(false) {
 
@@ -126,8 +136,9 @@ public:
         template <typename IterType>
         Iterator(std::vector<Container>& containers,
                  const std::vector<std::pair<IterType, IterType>>& ranges,
+                 const ValueToKey& value_to_key,
                  const Compare& comp)
-            : _heap(std::make_shared<heap_type>(heap_compare_type(comp))),
+            : _heap(std::make_shared<heap_type>(heap_compare_type(value_to_key, comp))),
               current_value_(nullptr),
               _is_end(false) {
 
@@ -187,14 +198,14 @@ public:
     using reverse_iterator = Iterator<true>;
     using const_reverse_iterator = Iterator<true>;
 
-    explicit SortedMerge(const std::vector<Container>& containers, const Compare& comp = Compare())
-        : _containers(containers), _comp(comp) {}
+    explicit SortedMerge(const std::vector<Container>& containers, const ValueToKey& value_to_key = ValueToKey(), const Compare& comp = Compare())
+        : _containers(containers), _value_to_key(value_to_key), _comp(comp) {}
 
-    explicit SortedMerge(std::vector<Container>&& containers, const Compare& comp = Compare())
-        : _containers(std::move(containers)), _comp(comp) {}
+    explicit SortedMerge(std::vector<Container>&& containers, const ValueToKey& value_to_key = ValueToKey(), const Compare& comp = Compare())
+        : _containers(std::move(containers)), _value_to_key(value_to_key), _comp(comp) {}
 
     iterator begin() const {
-        return iterator(_containers, _comp);
+        return iterator(_containers, _value_to_key, _comp);
     }
 
     iterator end() const {
@@ -202,7 +213,7 @@ public:
     }
 
     const_iterator cbegin() const {
-        return const_iterator(_containers, _comp);
+        return const_iterator(_containers, _value_to_key, _comp);
     }
 
     const_iterator cend() const {
@@ -210,7 +221,7 @@ public:
     }
 
     reverse_iterator rbegin() const {
-        return reverse_iterator(_containers, _comp);
+        return reverse_iterator(_containers, _value_to_key, _comp);
     }
 
     reverse_iterator rend() const {
@@ -218,35 +229,41 @@ public:
     }
 
     const_reverse_iterator crbegin() const {
-        return const_reverse_iterator(_containers, _comp);
+        return const_reverse_iterator(_containers, _value_to_key, _comp);
     }
 
     const_reverse_iterator crend() const {
         return const_reverse_iterator();
     }
 
-    iterator lower_bound(const value_type& value) const {
+    iterator lower_bound(const key_type& key) const {
         std::vector<std::pair<container_iterator, container_iterator>> ranges;
         ranges.reserve(_containers.size());
 
-        for (const auto& container : _containers) {
-            auto lb = std::lower_bound(container.begin(), container.end(), value, _comp);
+        for (auto& container : _containers) {
+            auto lb = std::lower_bound(container.begin(), container.end(), key,
+                [this](const value_type& val, const key_type& k) {
+                    return _comp(_value_to_key(val), k);
+                });
             ranges.emplace_back(lb, container.end());
         }
 
-        return iterator(_containers, ranges, _comp);
+        return iterator(_containers, ranges, _value_to_key, _comp);
     }
 
-    iterator upper_bound(const value_type& value) const {
+    iterator upper_bound(const key_type& key) const {
         std::vector<std::pair<container_iterator, container_iterator>> ranges;
         ranges.reserve(_containers.size());
 
-        for (const auto& container : _containers) {
-            auto ub = std::upper_bound(container.begin(), container.end(), value, _comp);
+        for (auto& container : _containers) {
+            auto ub = std::upper_bound(container.begin(), container.end(), key,
+                [this](const key_type& k, const value_type& val) {
+                    return _comp(k, _value_to_key(val));
+                });
             ranges.emplace_back(ub, container.end());
         }
 
-        return iterator(_containers, ranges, _comp);
+        return iterator(_containers, ranges, _value_to_key, _comp);
     }
 
     bool empty() const {
@@ -272,21 +289,24 @@ public:
 
 private:
     mutable std::vector<Container> _containers;
+    ValueToKey _value_to_key;
     Compare _comp;
 };
 
-template <typename Container, typename Compare = std::less<typename Container::value_type>>
-SortedMerge<Container, Compare> make_sorted_merge(
+template <typename Container, typename ValueToKey, typename Compare>
+SortedMerge<Container, ValueToKey, Compare> make_sorted_merge(
     const std::vector<Container>& containers,
-    const Compare& comp = Compare()) {
-    return SortedMerge<Container, Compare>(containers, comp);
+    const ValueToKey& value_to_key,
+    const Compare& comp) {
+    return SortedMerge<Container, ValueToKey, Compare>(containers, value_to_key, comp);
 }
 
-template <typename Container, typename Compare = std::less<typename Container::value_type>>
-SortedMerge<Container, Compare> make_sorted_merge(
+template <typename Container, typename ValueToKey, typename Compare>
+SortedMerge<Container, ValueToKey, Compare> make_sorted_merge(
     std::vector<Container>&& containers,
-    const Compare& comp = Compare()) {
-    return SortedMerge<Container, Compare>(std::move(containers), comp);
+    const ValueToKey& value_to_key,
+    const Compare& comp) {
+    return SortedMerge<Container, ValueToKey, Compare>(std::move(containers), value_to_key, comp);
 }
 
 }  // namespace common

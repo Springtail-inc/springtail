@@ -2,14 +2,29 @@
 
 using namespace springtail;
 
+// Implement WcRowToKey operator()
+TuplePtr WcRowToKey::operator()(const Extent::Row& row) const {
+    if (wc_schema_info && wc_schema_info->has_value()) {
+        return std::make_shared<FieldTuple>((*wc_schema_info)->_wc_key_fields, &row);
+    }
+    return nullptr;
+}
+
+// Implement TuplePtrCompare operator()
+bool TuplePtrCompare::operator()(const TuplePtr& a, const TuplePtr& b) const {
+    if (a && b) {
+        return a->less_than(*b);
+    }
+    return false;
+}
+
 // MergeTable constructor
 MergeTable::MergeTable(TablePtr tbl, ChangeSet changeset) :
-    _table(std::move(tbl)), 
-    _mutations{std::move(changeset), 
-        [this](const Extent::Row& a, const Extent::Row& b) { 
-            // compare row keys using the write cache schema info
-            return FieldTuple(_wc_schema_info->_wc_key_fields, &a).less_than(FieldTuple(_wc_schema_info->_wc_key_fields, &b));
-        }
+    _table(std::move(tbl)),
+    _mutations{
+        std::move(changeset),
+        WcRowToKey(&_wc_schema_info),
+        TuplePtrCompare()
     }
 {
     auto schema = _table->extent_schema();
@@ -27,14 +42,18 @@ MergeTable::MergeTable(TablePtr tbl, ChangeSet changeset) :
 // Iterator constructor
 MergeTable::Iterator::Iterator(MergeTable* merge_table,
         Table::Iterator table_iter,
+        Table::Iterator table_begin,
         Table::Iterator table_end,
         MutationIterator mutation_iter,
+        MutationIterator mutation_begin,
         MutationIterator mutation_end)
 
     : _merge_table(merge_table),
       _table_iter(std::move(table_iter)),
+      _table_begin(std::move(table_begin)),
       _table_end(std::move(table_end)),
       _mutation_iter(std::move(mutation_iter)),
+      _mutation_begin(std::move(mutation_begin)),
       _mutation_end(std::move(mutation_end))
 {}
 
@@ -86,35 +105,42 @@ MergeTable::Iterator& MergeTable::Iterator::operator++() {
 }
 
 MergeTable::Iterator& MergeTable::Iterator::operator--() {
-    // TODO: Implement backward iteration for 2-way merge.
-    --_table_iter;
+    // TODO: backward iteration is not supported when mutations are present
+    // because SortedMerge only supports forward iteration
+
+    CHECK(_mutation_begin == _mutation_end) << "Backward iteration with mutations is not supported";
+
+    // If no mutations, just decrement table iterator
+    if (_table_iter != _table_begin) {
+        --_table_iter;
+    }
     return *this;
 }
 
 // MergeTable methods
 MergeTable::Iterator MergeTable::lower_bound(TuplePtr search_key, uint64_t index_id, bool index_only) {
-    // TODO: Properly implement lower_bound with merge from both table and sorted_merge
+
     return Iterator(this,
                     _table->lower_bound(search_key, index_id, index_only),
+                    _table->begin(index_id, index_only),
                     _table->end(index_id, index_only),
+                    _mutations.lower_bound(search_key),
                     _mutations.begin(),
                     _mutations.end());
 }
 
 MergeTable::Iterator MergeTable::upper_bound(TuplePtr search_key, uint64_t index_id, bool index_only) {
-    // TODO: Properly implement upper_bound with merge from both table and sorted_merge
-    return Iterator(this,
-                    _table->upper_bound(search_key, index_id, index_only),
-                    _table->end(index_id, index_only),
-                    _mutations.begin(),
-                    _mutations.end());
-}
+    // Find upper bound in table
+    auto table_ub = _table->upper_bound(search_key, index_id, index_only);
 
-MergeTable::Iterator MergeTable::inverse_lower_bound(TuplePtr search_key, uint64_t index_id, bool index_only) {
-    // TODO: Properly implement inverse_lower_bound with merge from both table and sorted_merge.
+    // Find upper bound in mutations using the search_key directly
+    auto mutation_ub = _mutations.upper_bound(search_key);
+
     return Iterator(this,
-                    _table->inverse_lower_bound(search_key, index_id, index_only),
+                    std::move(table_ub),
+                    _table->begin(index_id, index_only),
                     _table->end(index_id, index_only),
+                    std::move(mutation_ub),
                     _mutations.begin(),
                     _mutations.end());
 }
@@ -122,7 +148,9 @@ MergeTable::Iterator MergeTable::inverse_lower_bound(TuplePtr search_key, uint64
 MergeTable::Iterator MergeTable::begin(uint64_t index_id, bool index_only) {
     return Iterator(this,
                     _table->begin(index_id, index_only),
+                    _table->begin(index_id, index_only),
                     _table->end(index_id, index_only),
+                    _mutations.begin(),
                     _mutations.begin(),
                     _mutations.end());
 }
@@ -130,7 +158,9 @@ MergeTable::Iterator MergeTable::begin(uint64_t index_id, bool index_only) {
 MergeTable::Iterator MergeTable::end(uint64_t index_id, bool index_only) {
     return Iterator(this,
                     _table->end(index_id, index_only),
+                    _table->begin(index_id, index_only),
                     _table->end(index_id, index_only),
                     _mutations.end(),
+                    _mutations.begin(),
                     _mutations.end());
 }
