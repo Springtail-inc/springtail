@@ -325,7 +325,7 @@ namespace springtail::pg_proxy {
          * @brief Get JSON representation of session; used by admin server
          * @return nlohmann::json JSON object representing session
          */
-        nlohmann::json to_json() const;
+        virtual nlohmann::json to_json() const;
 
         /**
          * @brief Get brief JSON representation of session; used by admin server
