@@ -209,16 +209,19 @@ namespace springtail::pg_proxy {
         /**
          * @brief Return JSON representation of the server session. It overrides base
          *      class function with the same name and prints additional information
-         *      pertaining to server session objecct.
+         *      pertaining to server session object in addition to the data returned from
+         *      the base class to_json() function.
          *
          * @return nlohmann::json
          */
         nlohmann::json
         to_json() const override
         {
+            auto session = _client_session.lock();
             nlohmann::json j = Session::to_json();
             j.update(nlohmann::json::object({
-                {"is_user_valid", _is_user_valid.load()}
+                {"is_user_valid", _is_user_valid.load()},
+                {"client_session", (session != nullptr)? session->id() : 0}
             }));
             return j;
         }
