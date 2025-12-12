@@ -1,4 +1,5 @@
 #include <sys_tbl_mgr/merge_table.hh>
+#include "common/constants.hh"
 
 using namespace springtail;
 
@@ -119,6 +120,11 @@ MergeTable::Iterator& MergeTable::Iterator::operator--() {
 
 // MergeTable methods
 MergeTable::Iterator MergeTable::lower_bound(TuplePtr search_key, uint64_t index_id, bool index_only) {
+    //TODO: secondary index support
+
+    if (index_id != constant::INDEX_PRIMARY) {
+        _mutations.clear();
+    }
 
     return Iterator(this,
                     _table->lower_bound(search_key, index_id, index_only),
@@ -130,6 +136,12 @@ MergeTable::Iterator MergeTable::lower_bound(TuplePtr search_key, uint64_t index
 }
 
 MergeTable::Iterator MergeTable::upper_bound(TuplePtr search_key, uint64_t index_id, bool index_only) {
+    //TODO: secondary index support
+
+    if (index_id != constant::INDEX_PRIMARY) {
+        _mutations.clear();
+    }
+
     // Find upper bound in table
     auto table_ub = _table->upper_bound(search_key, index_id, index_only);
 
@@ -146,6 +158,12 @@ MergeTable::Iterator MergeTable::upper_bound(TuplePtr search_key, uint64_t index
 }
 
 MergeTable::Iterator MergeTable::begin(uint64_t index_id, bool index_only) {
+    //TODO: secondary index support
+
+    if (index_id != constant::INDEX_PRIMARY) {
+        _mutations.clear();
+    }
+
     return Iterator(this,
                     _table->begin(index_id, index_only),
                     _table->begin(index_id, index_only),
@@ -156,6 +174,12 @@ MergeTable::Iterator MergeTable::begin(uint64_t index_id, bool index_only) {
 }
 
 MergeTable::Iterator MergeTable::end(uint64_t index_id, bool index_only) {
+    //TODO: secondary index support
+
+    if (index_id != constant::INDEX_PRIMARY) {
+        _mutations.clear();
+    }
+
     return Iterator(this,
                     _table->end(index_id, index_only),
                     _table->begin(index_id, index_only),
