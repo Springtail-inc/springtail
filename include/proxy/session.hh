@@ -356,7 +356,6 @@ namespace springtail::pg_proxy {
          */
         virtual void reset_session() {
             _is_shadow = false;
-            _in_transaction = false;
             _associated_session.reset();
             _state = State::RESET_SESSION;
         }
@@ -425,8 +424,6 @@ namespace springtail::pg_proxy {
         std::queue<NotificationMsg> _notification_queue;  ///< out-of-band notifications
 
         uint64_t _id;                      ///< unique id for session
-
-        bool _in_transaction = false;      ///< is this session in a transaction
 
         bool _is_shadow = false;           ///< is this a shadow session; replica shadowing primary
 

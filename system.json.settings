@@ -131,7 +131,7 @@
         "threads": 4,
         "cert_path": null,
         "key_path": null,
-        "mode": "primary",
+        "mode": "normal",
         "shadow_log_path": null,
         "pool_size_limit": 0,
         "pool_timeout_limit": 0,
