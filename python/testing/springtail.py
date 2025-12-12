@@ -187,6 +187,19 @@ def cleanup_database(props : Properties, db_config: Dict) -> None:
     execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
     conn.close()
 
+def create_roles(props: Properties) -> None:
+    conn = connect_db_instance(props)
+    users = [
+        props.get_role(props.DB_USER_ROLE_DATABASE),
+        props.get_role(props.DB_USER_ROLE_FDW),
+        props.get_role(props.DB_USER_ROLE_PROXY),
+    ]
+    for user in users:
+        user_exists = execute_sql_select(conn, "SELECT 1 FROM pg_roles WHERE rolname = %s;", user[0])
+        if not user_exists:
+            execute_sql(conn, f"CREATE ROLE {user[0]} WITH LOGIN PASSWORD '{user[1]}';")
+
+
 def drop_database(props : Properties, db_config: Dict) -> None:
     # connect to the db instance
     db_name = db_config['name']
@@ -761,6 +774,9 @@ def start(config_file: str,
             # install fdw
             print("\nInstalling foreign data wrapper...")
             install_fdw(props, build_dir)
+
+        # create users for different roles
+        create_roles(props)
 
         # start replication on db instance
         print("\nStarting replication on database instance...")

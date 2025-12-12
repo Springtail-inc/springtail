@@ -1281,7 +1281,11 @@ namespace springtail::pg_proxy {
 
         // do the disconnect
         ProxyServer::get_instance()->log_disconnect(self);
-        _connection->close();
+
+        // this check is to make unittest happy
+        if (_connection != nullptr) {
+            _connection->close();
+        }
 
         // clear all internal data structures
         reset_session();
@@ -1291,7 +1295,8 @@ namespace springtail::pg_proxy {
     ServerSession::shutdown_session()
     {
         // callback from Session::_handle_error()
-        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session is shutting down, socket={}", _id, _connection->get_socket());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[S:{}] Server session is shutting down, socket={}",
+            _id, (_connection != nullptr)? _connection->get_socket() : -1);
 
         _session_cleanup();
 

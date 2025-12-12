@@ -156,6 +156,7 @@ namespace springtail::pg_proxy {
             try {
                 // get the user credentials from AWS secrets manager
                 nlohmann::json secret = aws_helper->get_secret(key);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Secret key {}, secret {}", key, secret.dump(4));
                 CHECK(secret.is_array());
 
                 // try to connect to database, may block if db is down
@@ -171,7 +172,7 @@ namespace springtail::pg_proxy {
                     std::string role = user["role"];
                     std::string type = user["type"];
 
-                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Found user: {}, {}, {}", username, role, type);
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Found user: {}, {}, {}", username, role, type);
 
                     PasswordType password_type;
                     if (type == PASSWORD_STRING_TEXT) {
@@ -314,6 +315,7 @@ namespace springtail::pg_proxy {
     void
     UserMgr::_modify_users(std::vector<std::tuple<std::string, std::string, PasswordType, std::set<std::string>>> &users)
     {
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "modifying users");
         std::unique_lock lock(_mutex);
         // copy existing users set and clear out the set
         // we are going to move existing users back into the set
@@ -322,17 +324,41 @@ namespace springtail::pg_proxy {
         _users.clear();
 
         for (auto &[username, password, type, database_set]: users) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Processing user {}", username);
             // extract user from the list of existing users
             UserPtr user = std::make_shared<User>(username);
             auto user_node = old_users.extract(user);
             if (!user_node.empty()) {
+                // remove all databases that are no longer valid
+                std::set<std::string> old_user_databases = user_node.value()->get_databases();
+                for (auto it = old_user_databases.begin(); it != old_user_databases.end(); ) {
+                    if (database_set.contains(*it)) {
+                        it = old_user_databases.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+
                 // the user exists, therefore update password if changed and database set
                 if (user_node.value()->password() != password || user_node.value()->password_type() != type) {
                     user_node.value()->set_password(password, type);
+                    // if password changes, we will invalidate users for all previously known databases
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Password change detected for user {}", username);
+                    old_user_databases = user_node.value()->get_databases();
                 }
                 user_node.value()->set_databases(database_set);
                 _users.insert(std::move(user_node));
+
+                // invalidate users in database manager
+                for (auto &db: old_user_databases) {
+                    auto db_id = DatabaseMgr::get_instance()->get_database_id(db);
+                    if (db_id.has_value()) {
+                        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Invalidating user {} for database id {}", username, db_id.value());
+                        DatabaseMgr::get_instance()->invalidate_user_sessions(db_id.value(), username);
+                    }
+                }
             } else {
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Addign new user {} is new", username);
                 // the user does not exist, add new user
                 _add_user(username, password, type, database_set);
             }
