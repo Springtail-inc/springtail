@@ -700,7 +700,7 @@ namespace indexer_helpers {
         WcSchemaInfo(ExtentSchemaPtr schema, const ExtensionCallback& extension_callback) {
             // Build sort keys with __springtail_lsn
             auto sort_keys = schema->get_sort_keys();
-            sort_keys.push_back("__springtail_lsn");
+            sort_keys.emplace_back("__springtail_lsn");
 
             // Get column order
             auto columns = schema->column_order();

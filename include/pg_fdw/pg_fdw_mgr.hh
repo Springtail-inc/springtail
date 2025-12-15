@@ -59,7 +59,7 @@ namespace springtail::pg_fdw {
 
         MergeTable merge_table; ///< Merge table for handling mutations
 
-        TablePtr table() 
+        TablePtr table() const
         {
             return merge_table.table();
         }

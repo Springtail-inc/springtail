@@ -477,7 +477,7 @@ namespace springtail::committer {
                         // commit the completed XID without xlog update
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false,
                                 result->timestamp(), result->get_tracker(), table_ids);
-                        _table_sync_processor->add(batch->get_final_xid(), std::move(tables_to_sync));
+                        _table_sync_processor->add(batch->get_final_xid(), tables_to_sync);
                     }
                 } else {
                     // don't commit, but record any DDL changes to the history

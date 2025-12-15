@@ -7,8 +7,7 @@
 #include <queue>
 #include <vector>
 
-namespace springtail {
-namespace common {
+namespace springtail::common {
 
     /** SortedMerge is a utility class that merges multiple sorted containers into a single sorted sequence, K-way merge style.
      *
@@ -134,8 +133,7 @@ public:
 
         // Constructor for lower_bound/upper_bound with custom starting positions
         template <typename IterType>
-        Iterator(std::vector<Container>& containers,
-                 const std::vector<std::pair<IterType, IterType>>& ranges,
+        Iterator(const std::vector<std::pair<IterType, IterType>>& ranges,
                  const ValueToKey& value_to_key,
                  const Compare& comp)
             : _heap(std::make_shared<HeapType>(HeapCompareType(value_to_key, comp))),
@@ -186,10 +184,6 @@ public:
                 return false;
             }
             return _current_value == other._current_value;
-        }
-
-        bool operator!=(const Iterator& other) const {
-            return !(*this == other);
         }
     };
 
@@ -248,7 +242,7 @@ public:
             ranges.emplace_back(lb, container.end());
         }
 
-        return iterator(_containers, ranges, _value_to_key, _comp);
+        return iterator(ranges, _value_to_key, _comp);
     }
 
     iterator upper_bound(const key_type& key) const {
@@ -263,7 +257,7 @@ public:
             ranges.emplace_back(ub, container.end());
         }
 
-        return iterator(_containers, ranges, _value_to_key, _comp);
+        return iterator(ranges, _value_to_key, _comp);
     }
 
     bool empty() const {
@@ -309,5 +303,4 @@ SortedMerge<Container, ValueToKey, Compare> make_sorted_merge(
     return SortedMerge<Container, ValueToKey, Compare>(std::move(containers), value_to_key, comp);
 }
 
-}  // namespace common
-}  // namespace springtail
+}  // namespace springtail::common

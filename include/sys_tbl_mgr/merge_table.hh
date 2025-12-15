@@ -63,11 +63,6 @@ public:
             return a._table_iter == b._table_iter && a._mutation_iter == b._mutation_iter;
         }
 
-        /**
-         * Compares two iterators for inequality.
-         */
-        friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
-
     private:
         using MutationIterator = common::SortedMerge<Extent, WcRowToKey, TuplePtrCompare>::iterator;
 

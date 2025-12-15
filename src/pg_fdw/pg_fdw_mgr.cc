@@ -2414,7 +2414,7 @@ namespace springtail::pg_fdw {
     }
 
     PgFdwState::PgFdwState(TablePtr table, ChangeSet changeset, uint64_t db_id, uint64_t tid, uint64_t xid)
-            : merge_table(table, changeset), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
+            : merge_table(table, std::move(changeset)), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
         // Get columns from cached ExtentSchema instead of RPC
         columns = table->extent_schema()->get_column_map();
