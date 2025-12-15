@@ -469,7 +469,10 @@ namespace springtail::pg_proxy {
         }
         LOG_INFO("Proxy server shutting down");
         notify_shutdown();
-        _proxy_thread.join();
+        // this check is to make unittest happy
+        if (_proxy_thread.joinable()) {
+            _proxy_thread.join();
+        }
     }
 
     void
@@ -534,6 +537,13 @@ namespace springtail::pg_proxy {
                 if (fds[i].revents & POLLIN) {
                     int fd = fds[i].fd;
                     _add_runnable_fd(fd, true, runnable_sessions);
+                    n--;
+                } else if ((fds[i].revents & ~POLLIN) == POLLNVAL) {
+                    // When the session is destroyed by another thread, the file descriptor will be closed and therefore
+                    // will become invalid. The reason we get POLLNVAL is because poll() detects that the file descriptor
+                    // it tries to use is no longer valid. So, at this point, the only meaningful thing we can do is
+                    // to handle this error and move on.
+                    LOG_ERROR("File descriptor (i = {}): {}, events 0x{:04x}", i, fds[i].fd, fds[i].revents);
                     n--;
                 }
             }
@@ -709,6 +719,12 @@ namespace springtail::pg_proxy {
 
         // this is a secondary session, most likely a server session
         // need to remove its socket from the appropriate maps
+
+        // this check is to make unittest happy
+        if (session->get_connection() == nullptr) {
+            return;
+        }
+
         int socket = session->get_connection()->get_socket();
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Session not found in session sockets, removing socket: {}", socket);
@@ -782,6 +798,10 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::_wake_event_loop()
     {
+        // this check is to make unittest happy
+        if (_efd == -1) {
+            return;
+        }
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Waking up event loop");
         uint64_t val = 1;
         [[maybe_unused]] int ret = write(_efd, &val, sizeof(uint64_t));

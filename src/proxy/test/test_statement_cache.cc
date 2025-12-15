@@ -16,7 +16,7 @@ struct TraceEntry {
     };
 
     Type type;
-    QueryStmt::Type stmt_type = QueryStmt::NONE;
+    QueryStmt::Type stmt_type = QueryStmt::Type::NONE;
     std::string name;
     std::string data;
     bool is_read_safe = true;
@@ -109,7 +109,7 @@ protected:
 
             switch (entry.type) {
                 case TraceEntry::STATEMENT:
-                    current_stmt = cache->add(entry.stmt_type, entry.data, entry.is_read_safe, entry.name);
+                    current_stmt = std::make_shared<QueryStmt>(entry.stmt_type, entry.data, entry.is_read_safe, entry.name);
                     break;
 
                 case TraceEntry::SYNC:
@@ -160,7 +160,7 @@ protected:
                     << "Session history entry " << entry_index << " name mismatch: expected '"
                     << expected_session_entry.name << "', got '" << actual_session_statement->name << "'";
 
-                if (actual_session_statement->data_type == QueryStmt::SIMPLE && !expected_session_entry.data.empty()) {
+                if (actual_session_statement->data_type == QueryStmt::DataType::SIMPLE && !expected_session_entry.data.empty()) {
                     EXPECT_EQ(actual_session_statement->query(), expected_session_entry.data)
                         << "Session history entry " << entry_index << " data mismatch: expected '"
                         << expected_session_entry.data << "', got '" << actual_session_statement->query() << "'";
@@ -189,7 +189,7 @@ protected:
             const auto& session_statement = cache_state.session_history[entry_index];
             LOG_INFO("  [{}] type={}, name='{}', data='{}'",
                     entry_index, (int)session_statement->type, session_statement->name,
-                    session_statement->data_type == QueryStmt::SIMPLE ? session_statement->query() : "<packet>");
+                    session_statement->data_type == QueryStmt::DataType::SIMPLE ? session_statement->query() : "<packet>");
         }
 
         // dump expected state for comparison
@@ -231,15 +231,15 @@ protected:
 TEST_F(StatementCacheTest, BasicSetAndReset)
 {
     std::vector<TraceEntry> trace = {
-        TraceEntry::statement(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "work_mem", "SET work_mem = '256MB'"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I'),
 
-        TraceEntry::statement(QueryStmt::SET, "timezone", "SET timezone = 'UTC'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "timezone", "SET timezone = 'UTC'"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I'),
 
-        TraceEntry::statement(QueryStmt::RESET, "work_mem", "RESET work_mem"),
+        TraceEntry::statement(QueryStmt::Type::RESET, "work_mem", "RESET work_mem"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -247,8 +247,8 @@ TEST_F(StatementCacheTest, BasicSetAndReset)
     execute_trace(trace);
 
     ExpectedCacheState expected;
-    expected.add_session(QueryStmt::SET, "timezone", "SET timezone = 'UTC'");
-    expected.add_session(QueryStmt::RESET, "work_mem", "RESET work_mem");
+    expected.add_session(QueryStmt::Type::SET, "timezone", "SET timezone = 'UTC'");
+    expected.add_session(QueryStmt::Type::RESET, "work_mem", "RESET work_mem");
 
     verify_cache_state(expected);
     dump_cache_contents(expected);
@@ -261,15 +261,15 @@ TEST_F(StatementCacheTest, PreparedStatements)
 {
     std::vector<TraceEntry> trace = {
         // Prepare statement
-        TraceEntry::statement(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT * FROM users WHERE id = $1"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT * FROM users WHERE id = $1"),
         TraceEntry::commit_statement(),
 
         // Prepare another statement
-        TraceEntry::statement(QueryStmt::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT name FROM users"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT name FROM users"),
         TraceEntry::commit_statement(),
 
         // Deallocate one statement
-        TraceEntry::statement(QueryStmt::DEALLOCATE, "stmt1", "DEALLOCATE stmt1"),
+        TraceEntry::statement(QueryStmt::Type::DEALLOCATE, "stmt1", "DEALLOCATE stmt1"),
         TraceEntry::commit_statement(),
 
         TraceEntry::sync('I')
@@ -278,7 +278,7 @@ TEST_F(StatementCacheTest, PreparedStatements)
     execute_trace(trace);
 
     ExpectedCacheState expected;
-    expected.add_session(QueryStmt::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT name FROM users");
+    expected.add_session(QueryStmt::Type::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT name FROM users");
     // the deallocated statement should not be present due to full compaction of the history
 
     verify_cache_state(expected);
@@ -291,20 +291,20 @@ TEST_F(StatementCacheTest, PreparedStatements)
 TEST_F(StatementCacheTest, TransactionRollback) {
     std::vector<TraceEntry> trace = {
         // Start transaction
-        TraceEntry::statement(QueryStmt::BEGIN, "", "BEGIN"),
+        TraceEntry::statement(QueryStmt::Type::BEGIN, "", "BEGIN"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('T'),
 
         // Set variable in transaction
-        TraceEntry::statement(QueryStmt::SET, "statement_timeout", "SET statement_timeout = '30s'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "statement_timeout", "SET statement_timeout = '30s'"),
         TraceEntry::commit_statement(),
 
         // Prepare statement in transaction
-        TraceEntry::statement(QueryStmt::PREPARE, "tx_stmt", "PREPARE tx_stmt AS INSERT INTO logs VALUES ($1)"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "tx_stmt", "PREPARE tx_stmt AS INSERT INTO logs VALUES ($1)"),
         TraceEntry::commit_statement(),
 
         // Rollback transaction
-        TraceEntry::statement(QueryStmt::ROLLBACK, "", "ROLLBACK"),
+        TraceEntry::statement(QueryStmt::Type::ROLLBACK, "", "ROLLBACK"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -313,7 +313,7 @@ TEST_F(StatementCacheTest, TransactionRollback) {
 
     ExpectedCacheState expected;
     // Prepared statement should survive rollback
-    expected.add_session(QueryStmt::PREPARE, "tx_stmt", "PREPARE tx_stmt AS INSERT INTO logs VALUES ($1)");
+    expected.add_session(QueryStmt::Type::PREPARE, "tx_stmt", "PREPARE tx_stmt AS INSERT INTO logs VALUES ($1)");
     // SET should not survive rollback
 
     verify_cache_state(expected);
@@ -326,33 +326,33 @@ TEST_F(StatementCacheTest, TransactionRollback) {
 TEST_F(StatementCacheTest, SavepointOperations) {
     std::vector<TraceEntry> trace = {
         // Start transaction
-        TraceEntry::statement(QueryStmt::BEGIN, "", "BEGIN"),
+        TraceEntry::statement(QueryStmt::Type::BEGIN, "", "BEGIN"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('T'),
 
         // Set variable
-        TraceEntry::statement(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "work_mem", "SET work_mem = '128MB'"),
         TraceEntry::commit_statement(),
 
         // Create savepoint
-        TraceEntry::statement(QueryStmt::SAVEPOINT, "sp1", "SAVEPOINT sp1"),
+        TraceEntry::statement(QueryStmt::Type::SAVEPOINT, "sp1", "SAVEPOINT sp1"),
         TraceEntry::commit_statement(),
 
         // Set another variable after savepoint
-        TraceEntry::statement(QueryStmt::SET, "timezone", "SET timezone = 'PST'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "timezone", "SET timezone = 'PST'"),
         TraceEntry::commit_statement(),
 
         // Prepare statement after savepoint
-        TraceEntry::statement(QueryStmt::PREPARE, "sp_stmt", "PREPARE sp_stmt AS SELECT now()"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "sp_stmt", "PREPARE sp_stmt AS SELECT now()"),
         TraceEntry::commit_statement(),
 
         // Rollback to savepoint
-        TraceEntry::statement(QueryStmt::ROLLBACK_TO_SAVEPOINT, "sp1", "ROLLBACK TO SAVEPOINT sp1"),
+        TraceEntry::statement(QueryStmt::Type::ROLLBACK_TO_SAVEPOINT, "sp1", "ROLLBACK TO SAVEPOINT sp1"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('T'),
 
         // Commit transaction
-        TraceEntry::statement(QueryStmt::COMMIT, "", "COMMIT"),
+        TraceEntry::statement(QueryStmt::Type::COMMIT, "", "COMMIT"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -361,11 +361,13 @@ TEST_F(StatementCacheTest, SavepointOperations) {
 
     ExpectedCacheState expected;
 
+    expected.add_session(QueryStmt::Type::BEGIN, "", "BEGIN");
     // work_mem should survive (was set before savepoint)
-    expected.add_session(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'");
+    expected.add_session(QueryStmt::Type::SET, "work_mem", "SET work_mem = '128MB'");
     // PREPARE statements can't be rolled back
-    expected.add_session(QueryStmt::PREPARE, "sp_stmt", "PREPARE sp_stmt AS SELECT now()");
+    expected.add_session(QueryStmt::Type::PREPARE, "sp_stmt", "PREPARE sp_stmt AS SELECT now()");
     // timezone should be rolled back (was set after savepoint)
+    expected.add_session(QueryStmt::Type::COMMIT, "", "COMMIT");
 
     verify_cache_state(expected);
     dump_cache_contents(expected);
@@ -377,20 +379,20 @@ TEST_F(StatementCacheTest, SavepointOperations) {
 TEST_F(StatementCacheTest, DiscardAll) {
     std::vector<TraceEntry> trace = {
         // Set up some state
-        TraceEntry::statement(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "work_mem", "SET work_mem = '256MB'"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I'),
 
-        TraceEntry::statement(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT 1"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT 1"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I'),
 
-        TraceEntry::statement(QueryStmt::LISTEN, "channel1", "LISTEN channel1"),
+        TraceEntry::statement(QueryStmt::Type::LISTEN, "channel1", "LISTEN channel1"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I'),
 
         // Discard everything
-        TraceEntry::statement(QueryStmt::DISCARD_ALL, "", "DISCARD ALL"),
+        TraceEntry::statement(QueryStmt::Type::DISCARD_ALL, "", "DISCARD ALL"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -399,7 +401,7 @@ TEST_F(StatementCacheTest, DiscardAll) {
 
     ExpectedCacheState expected{};
     // Everything should be cleared except the DISCARD ALL itself
-    expected.add_session(QueryStmt::DISCARD_ALL, "", "DISCARD ALL");
+    expected.add_session(QueryStmt::Type::DISCARD_ALL, "", "DISCARD ALL");
 
     verify_cache_state(expected);
     dump_cache_contents(expected);
@@ -411,18 +413,22 @@ TEST_F(StatementCacheTest, DiscardAll) {
 TEST_F(StatementCacheTest, ErrorHandling) {
     std::vector<TraceEntry> trace = {
         // Start transaction
-        TraceEntry::statement(QueryStmt::BEGIN, "", "BEGIN"),
+        TraceEntry::statement(QueryStmt::Type::BEGIN, "", "BEGIN"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('T'),
 
         // Set variable
-        TraceEntry::statement(QueryStmt::SET, "work_mem", "SET work_mem = '128MB'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "work_mem", "SET work_mem = '128MB'"),
         TraceEntry::commit_statement(),
 
         // Simulate error
-        TraceEntry::statement(QueryStmt::SET, "invalid_var", "SET invalid_var = 'bad_value'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "invalid_var", "SET invalid_var = 'bad_value'"),
         TraceEntry::commit_statement(1, false),  // Statement failed
         TraceEntry::sync('E'),  // Transaction in error state
+
+        // rollback transaction
+        TraceEntry::statement(QueryStmt::Type::ROLLBACK, "", "ROLLBACK"),
+        TraceEntry::commit_statement(),
 
         // Transaction should be rolled back due to error
         TraceEntry::sync('I')  // Back to idle
@@ -444,20 +450,20 @@ TEST_F(StatementCacheTest, ErrorHandling) {
 TEST_F(StatementCacheTest, LocalVariables) {
     std::vector<TraceEntry> trace = {
         // Start transaction
-        TraceEntry::statement(QueryStmt::BEGIN, "", "BEGIN"),
+        TraceEntry::statement(QueryStmt::Type::BEGIN, "", "BEGIN"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('T'),
 
         // Set session variable
-        TraceEntry::statement(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "work_mem", "SET work_mem = '256MB'"),
         TraceEntry::commit_statement(),
 
         // Set local variable
-        TraceEntry::statement(QueryStmt::SET_LOCAL, "statement_timeout", "SET LOCAL statement_timeout = '10s'"),
+        TraceEntry::statement(QueryStmt::Type::SET_LOCAL, "statement_timeout", "SET LOCAL statement_timeout = '10s'"),
         TraceEntry::commit_statement(),
 
         // Commit transaction
-        TraceEntry::statement(QueryStmt::COMMIT, "", "COMMIT"),
+        TraceEntry::statement(QueryStmt::Type::COMMIT, "", "COMMIT"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -465,9 +471,11 @@ TEST_F(StatementCacheTest, LocalVariables) {
     execute_trace(trace);
 
     ExpectedCacheState expected;
+    expected.add_session(QueryStmt::Type::BEGIN, "", "BEGIN");
     // Session variable should survive
-    expected.add_session(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'");
+    expected.add_session(QueryStmt::Type::SET, "work_mem", "SET work_mem = '256MB'");
     // Local variable should not be in session history
+    expected.add_session(QueryStmt::Type::COMMIT, "", "COMMIT");
 
     verify_cache_state(expected);
     dump_cache_contents(expected);
@@ -479,24 +487,24 @@ TEST_F(StatementCacheTest, LocalVariables) {
 TEST_F(StatementCacheTest, CursorOperations) {
     std::vector<TraceEntry> trace = {
         // Start transaction
-        TraceEntry::statement(QueryStmt::BEGIN, "", "BEGIN"),
+        TraceEntry::statement(QueryStmt::Type::BEGIN, "", "BEGIN"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('T'),
 
         // Declare cursor
-        TraceEntry::statement(QueryStmt::DECLARE, "cursor1", "DECLARE cursor1 CURSOR FOR SELECT * FROM users"),
+        TraceEntry::statement(QueryStmt::Type::DECLARE, "cursor1", "DECLARE cursor1 CURSOR FOR SELECT * FROM users"),
         TraceEntry::commit_statement(),
 
         // Fetch from cursor
-        TraceEntry::statement(QueryStmt::FETCH, "cursor1", "FETCH 10 FROM cursor1"),
+        TraceEntry::statement(QueryStmt::Type::FETCH, "cursor1", "FETCH 10 FROM cursor1"),
         TraceEntry::commit_statement(),
 
         // Close cursor
-        TraceEntry::statement(QueryStmt::CLOSE, "cursor1", "CLOSE cursor1"),
+        TraceEntry::statement(QueryStmt::Type::CLOSE, "cursor1", "CLOSE cursor1"),
         TraceEntry::commit_statement(),
 
         // Commit transaction
-        TraceEntry::statement(QueryStmt::COMMIT, "", "COMMIT"),
+        TraceEntry::statement(QueryStmt::Type::COMMIT, "", "COMMIT"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -505,6 +513,9 @@ TEST_F(StatementCacheTest, CursorOperations) {
 
     ExpectedCacheState expected;
     // Cursors don't persist across transactions (unless WITH HOLD)
+    // BEGIN/COMMIT are preserved in session history but will be filtered when fetched for replay
+    expected.add_session(QueryStmt::Type::BEGIN, "", "BEGIN");
+    expected.add_session(QueryStmt::Type::COMMIT, "", "COMMIT");
 
     verify_cache_state(expected);
     dump_cache_contents(expected);
@@ -516,24 +527,24 @@ TEST_F(StatementCacheTest, CursorOperations) {
 TEST_F(StatementCacheTest, CursorDeclareHold) {
     std::vector<TraceEntry> trace = {
         // Start transaction
-        TraceEntry::statement(QueryStmt::BEGIN, "", "BEGIN"),
+        TraceEntry::statement(QueryStmt::Type::BEGIN, "", "BEGIN"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('T'),
 
         // Declare cursor
-        TraceEntry::statement(QueryStmt::DECLARE_HOLD, "cursor1", "DECLARE cursor1 CURSOR WITH HOLD FOR SELECT * FROM users"),
+        TraceEntry::statement(QueryStmt::Type::DECLARE_HOLD, "cursor1", "DECLARE cursor1 CURSOR WITH HOLD FOR SELECT * FROM users"),
         TraceEntry::commit_statement(),
 
         // Fetch from cursor
-        TraceEntry::statement(QueryStmt::FETCH, "cursor1", "FETCH 10 FROM cursor1"),
+        TraceEntry::statement(QueryStmt::Type::FETCH, "cursor1", "FETCH 10 FROM cursor1"),
         TraceEntry::commit_statement(),
 
         // Close cursor
-        TraceEntry::statement(QueryStmt::CLOSE, "cursor1", "CLOSE cursor1"),
+        TraceEntry::statement(QueryStmt::Type::CLOSE, "cursor1", "CLOSE cursor1"),
         TraceEntry::commit_statement(),
 
         // Commit transaction
-        TraceEntry::statement(QueryStmt::COMMIT, "", "COMMIT"),
+        TraceEntry::statement(QueryStmt::Type::COMMIT, "", "COMMIT"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -542,6 +553,10 @@ TEST_F(StatementCacheTest, CursorDeclareHold) {
 
     ExpectedCacheState expected{};
     // nothing expected since cursor is closed
+    // BEGIN/COMMIT are preserved in session history but will be filtered when fetched for replay
+    expected.add_session(QueryStmt::Type::BEGIN, "", "BEGIN");
+    expected.add_session(QueryStmt::Type::COMMIT, "", "COMMIT");
+
 
     verify_cache_state(expected);
     dump_cache_contents(expected);
@@ -553,38 +568,38 @@ TEST_F(StatementCacheTest, CursorDeclareHold) {
 TEST_F(StatementCacheTest, ComplexScenario) {
     std::vector<TraceEntry> trace = {
         // Session setup
-        TraceEntry::statement(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "work_mem", "SET work_mem = '256MB'"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I'),
 
-        TraceEntry::statement(QueryStmt::PREPARE, "user_query", "PREPARE user_query AS SELECT * FROM users WHERE id = $1"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "user_query", "PREPARE user_query AS SELECT * FROM users WHERE id = $1"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I'),
 
         // Start transaction
-        TraceEntry::statement(QueryStmt::BEGIN, "", "BEGIN"),
+        TraceEntry::statement(QueryStmt::Type::BEGIN, "", "BEGIN"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('T'),
 
         // Transaction operations
-        TraceEntry::statement(QueryStmt::SET_LOCAL, "statement_timeout", "SET LOCAL statement_timeout = '30s'"),
+        TraceEntry::statement(QueryStmt::Type::SET_LOCAL, "statement_timeout", "SET LOCAL statement_timeout = '30s'"),
         TraceEntry::commit_statement(),
 
-        TraceEntry::statement(QueryStmt::SAVEPOINT, "sp1", "SAVEPOINT sp1"),
+        TraceEntry::statement(QueryStmt::Type::SAVEPOINT, "sp1", "SAVEPOINT sp1"),
         TraceEntry::commit_statement(),
 
-        TraceEntry::statement(QueryStmt::SET, "timezone", "SET timezone = 'UTC'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "timezone", "SET timezone = 'UTC'"),
         TraceEntry::commit_statement(),
 
-        TraceEntry::statement(QueryStmt::PREPARE, "temp_stmt", "PREPARE temp_stmt AS SELECT count(*) FROM logs"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "temp_stmt", "PREPARE temp_stmt AS SELECT count(*) FROM logs"),
         TraceEntry::commit_statement(),
 
         // Release savepoint
-        TraceEntry::statement(QueryStmt::RELEASE_SAVEPOINT, "sp1", "RELEASE SAVEPOINT sp1"),
+        TraceEntry::statement(QueryStmt::Type::RELEASE_SAVEPOINT, "sp1", "RELEASE SAVEPOINT sp1"),
         TraceEntry::commit_statement(),
 
         // Commit transaction
-        TraceEntry::statement(QueryStmt::COMMIT, "", "COMMIT"),
+        TraceEntry::statement(QueryStmt::Type::COMMIT, "", "COMMIT"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -592,10 +607,12 @@ TEST_F(StatementCacheTest, ComplexScenario) {
     execute_trace(trace);
 
     ExpectedCacheState expected;
-    expected.add_session(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'");
-    expected.add_session(QueryStmt::PREPARE, "user_query", "PREPARE user_query AS SELECT * FROM users WHERE id = $1");
-    expected.add_session(QueryStmt::SET, "timezone", "SET timezone = 'UTC'");
-    expected.add_session(QueryStmt::PREPARE, "temp_stmt", "PREPARE temp_stmt AS SELECT count(*) FROM logs");
+    expected.add_session(QueryStmt::Type::SET, "work_mem", "SET work_mem = '256MB'");
+    expected.add_session(QueryStmt::Type::PREPARE, "user_query", "PREPARE user_query AS SELECT * FROM users WHERE id = $1");
+    expected.add_session(QueryStmt::Type::BEGIN, "", "BEGIN");
+    expected.add_session(QueryStmt::Type::SET, "timezone", "SET timezone = 'UTC'");
+    expected.add_session(QueryStmt::Type::PREPARE, "temp_stmt", "PREPARE temp_stmt AS SELECT count(*) FROM logs");
+    expected.add_session(QueryStmt::Type::COMMIT, "", "COMMIT");
 
     verify_cache_state(expected);
     dump_cache_contents(expected);
@@ -611,7 +628,7 @@ TEST_F(StatementCacheTest, CacheStateTransitions) {
 
     // Add a statement and commit it - should move to session history
     std::vector<TraceEntry> trace = {
-        TraceEntry::statement(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "work_mem", "SET work_mem = '256MB'"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
@@ -619,7 +636,7 @@ TEST_F(StatementCacheTest, CacheStateTransitions) {
     verify_cache_sizes(1);  // Set should be in session history
 
     ExpectedCacheState expected;
-    expected.add_session(QueryStmt::SET, "work_mem", "SET work_mem = '256MB'");
+    expected.add_session(QueryStmt::Type::SET, "work_mem", "SET work_mem = '256MB'");
 
     verify_cache_state(expected);
     dump_cache_contents(expected);
@@ -635,34 +652,34 @@ TEST_F(StatementCacheTest, DetailedPreparedStatementTest)
 
     std::vector<TraceEntry> trace = {
         // Prepare first statement
-        TraceEntry::statement(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT * FROM users"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT * FROM users"),
         TraceEntry::commit_statement(),
 
         // Prepare second statement
-        TraceEntry::statement(QueryStmt::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT count(*) FROM logs"),
+        TraceEntry::statement(QueryStmt::Type::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT count(*) FROM logs"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
     execute_trace(trace);
 
     ExpectedCacheState expected;
-    expected.add_session(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT * FROM users");
-    expected.add_session(QueryStmt::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT count(*) FROM logs");
+    expected.add_session(QueryStmt::Type::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT * FROM users");
+    expected.add_session(QueryStmt::Type::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT count(*) FROM logs");
 
     verify_cache_state(expected);
 
     // Now deallocate one
     trace = {
-        TraceEntry::statement(QueryStmt::DEALLOCATE, "stmt1", "DEALLOCATE stmt1"),
+        TraceEntry::statement(QueryStmt::Type::DEALLOCATE, "stmt1", "DEALLOCATE stmt1"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
     execute_trace(trace);
 
     expected = ExpectedCacheState{};
-    expected.add_session(QueryStmt::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT * FROM users");
-    expected.add_session(QueryStmt::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT count(*) FROM logs");
-    expected.add_session(QueryStmt::DEALLOCATE, "stmt1", "DEALLOCATE stmt1");
+    expected.add_session(QueryStmt::Type::PREPARE, "stmt1", "PREPARE stmt1 AS SELECT * FROM users");
+    expected.add_session(QueryStmt::Type::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT count(*) FROM logs");
+    expected.add_session(QueryStmt::Type::DEALLOCATE, "stmt1", "DEALLOCATE stmt1");
 
     verify_cache_state(expected);
 
@@ -671,14 +688,14 @@ TEST_F(StatementCacheTest, DetailedPreparedStatementTest)
     cache->set_session_replay_idx(0, 10);
 
     trace = {
-        TraceEntry::statement(QueryStmt::SET, "set1", "SET my.set1 = 'value1'"),
+        TraceEntry::statement(QueryStmt::Type::SET, "set1", "SET my.set1 = 'value1'"),
         TraceEntry::commit_statement(),
         TraceEntry::sync('I')
     };
     execute_trace(trace);
 
     expected = ExpectedCacheState{};
-    expected.add_session(QueryStmt::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT count(*) FROM logs");
+    expected.add_session(QueryStmt::Type::PREPARE, "stmt2", "PREPARE stmt2 AS SELECT count(*) FROM logs");
 
     dump_cache_contents(expected);
 }

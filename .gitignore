@@ -29,3 +29,6 @@ dist
 .certs
 .env.bak
 _temp
+.claude
+.terraform
+.terraform.tfstate.lock.info

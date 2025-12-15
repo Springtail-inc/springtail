@@ -225,8 +225,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSimpleSelectQueriesOnReplicatedTables) {
     QueryStmtPtr query_result = ClientSession::parse_simple_query(
         test_database_id, test_buffer, simple_select_query);
 
-    verify_query_statement_properties(query_result, QueryStmt::SIMPLE_QUERY, true, 1);
-    verify_child_statement_properties(query_result, 0, QueryStmt::ANONYMOUS, true);
+    verify_query_statement_properties(query_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+    verify_child_statement_properties(query_result, 0, QueryStmt::Type::ANONYMOUS, true);
 
     log_query_statement_details(query_result, "Simple SELECT on replicated table");
 }
@@ -245,8 +245,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectQueriesWithExplicitSchema) {
     QueryStmtPtr query_result = ClientSession::parse_simple_query(
         test_database_id, test_buffer, schema_qualified_query);
 
-    verify_query_statement_properties(query_result, QueryStmt::SIMPLE_QUERY, true, 1);
-    verify_child_statement_properties(query_result, 0, QueryStmt::ANONYMOUS, true);
+    verify_query_statement_properties(query_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+    verify_child_statement_properties(query_result, 0, QueryStmt::Type::ANONYMOUS, true);
 
     log_query_statement_details(query_result, "SELECT with explicit schema");
 }
@@ -265,8 +265,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseInsertQueriesWriteOperations) {
     QueryStmtPtr query_result = ClientSession::parse_simple_query(
         test_database_id, test_buffer, insert_query);
 
-    verify_query_statement_properties(query_result, QueryStmt::SIMPLE_QUERY, false, 1);
-    verify_child_statement_properties(query_result, 0, QueryStmt::ANONYMOUS, false);
+    verify_query_statement_properties(query_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+    verify_child_statement_properties(query_result, 0, QueryStmt::Type::ANONYMOUS, false);
 
     log_query_statement_details(query_result, "INSERT query (write operation)");
 }
@@ -285,8 +285,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseUpdateQueriesWriteOperations) {
     QueryStmtPtr query_result = ClientSession::parse_simple_query(
         test_database_id, test_buffer, update_query);
 
-    verify_query_statement_properties(query_result, QueryStmt::SIMPLE_QUERY, false, 1);
-    verify_child_statement_properties(query_result, 0, QueryStmt::ANONYMOUS, false);
+    verify_query_statement_properties(query_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+    verify_child_statement_properties(query_result, 0, QueryStmt::Type::ANONYMOUS, false);
 
     log_query_statement_details(query_result, "UPDATE query (write operation)");
 }
@@ -305,8 +305,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseDeleteQueriesWriteOperations) {
     QueryStmtPtr query_result = ClientSession::parse_simple_query(
         test_database_id, test_buffer, delete_query);
 
-    verify_query_statement_properties(query_result, QueryStmt::SIMPLE_QUERY, false, 1);
-    verify_child_statement_properties(query_result, 0, QueryStmt::ANONYMOUS, false);
+    verify_query_statement_properties(query_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+    verify_child_statement_properties(query_result, 0, QueryStmt::Type::ANONYMOUS, false);
 
     log_query_statement_details(query_result, "DELETE query (write operation)");
 }
@@ -324,8 +324,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseTransactionControlStatements) {
         QueryStmtPtr begin_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, begin_query);
 
-        verify_query_statement_properties(begin_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(begin_result, 0, QueryStmt::BEGIN, true);
+        verify_query_statement_properties(begin_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(begin_result, 0, QueryStmt::Type::BEGIN, true);
 
         log_query_statement_details(begin_result, "BEGIN transaction");
     }
@@ -337,8 +337,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseTransactionControlStatements) {
         QueryStmtPtr commit_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, commit_query);
 
-        verify_query_statement_properties(commit_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(commit_result, 0, QueryStmt::COMMIT, true);
+        verify_query_statement_properties(commit_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(commit_result, 0, QueryStmt::Type::COMMIT, true);
 
         log_query_statement_details(commit_result, "COMMIT transaction");
     }
@@ -350,8 +350,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseTransactionControlStatements) {
         QueryStmtPtr rollback_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, rollback_query);
 
-        verify_query_statement_properties(rollback_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(rollback_result, 0, QueryStmt::ROLLBACK, true);
+        verify_query_statement_properties(rollback_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(rollback_result, 0, QueryStmt::Type::ROLLBACK, true);
 
         log_query_statement_details(rollback_result, "ROLLBACK transaction");
     }
@@ -370,8 +370,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSetStatements) {
         QueryStmtPtr set_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, set_query);
 
-        verify_query_statement_properties(set_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_child_statement_properties(set_result, 0, QueryStmt::SET, false, "work_mem");
+        verify_query_statement_properties(set_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_child_statement_properties(set_result, 0, QueryStmt::Type::SET, false, "work_mem");
 
         log_query_statement_details(set_result, "SET statement");
     }
@@ -383,8 +383,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSetStatements) {
         QueryStmtPtr set_local_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, set_local_query);
 
-        verify_query_statement_properties(set_local_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(set_local_result, 0, QueryStmt::SET_LOCAL, true, "timezone");
+        verify_query_statement_properties(set_local_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(set_local_result, 0, QueryStmt::Type::SET_LOCAL, true, "timezone");
 
         log_query_statement_details(set_local_result, "SET LOCAL statement");
     }
@@ -403,8 +403,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseResetStatements) {
         QueryStmtPtr reset_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, reset_query);
 
-        verify_query_statement_properties(reset_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(reset_result, 0, QueryStmt::RESET, true, "work_mem");
+        verify_query_statement_properties(reset_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(reset_result, 0, QueryStmt::Type::RESET, true, "work_mem");
 
         log_query_statement_details(reset_result, "RESET specific variable");
     }
@@ -416,8 +416,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseResetStatements) {
         QueryStmtPtr reset_all_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, reset_all_query);
 
-        verify_query_statement_properties(reset_all_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(reset_all_result, 0, QueryStmt::RESET_ALL, true);
+        verify_query_statement_properties(reset_all_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(reset_all_result, 0, QueryStmt::Type::RESET_ALL, true);
 
         log_query_statement_details(reset_all_result, "RESET ALL");
     }
@@ -436,8 +436,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseCursorStatements) {
         QueryStmtPtr declare_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, declare_query);
 
-        verify_query_statement_properties(declare_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(declare_result, 0, QueryStmt::DECLARE, true, "user_cursor");
+        verify_query_statement_properties(declare_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(declare_result, 0, QueryStmt::Type::DECLARE, true, "user_cursor");
 
         log_query_statement_details(declare_result, "DECLARE cursor");
     }
@@ -449,8 +449,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseCursorStatements) {
         QueryStmtPtr declare_hold_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, declare_hold_query);
 
-        verify_query_statement_properties(declare_hold_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(declare_hold_result, 0, QueryStmt::DECLARE_HOLD, true, "persistent_cursor");
+        verify_query_statement_properties(declare_hold_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(declare_hold_result, 0, QueryStmt::Type::DECLARE_HOLD, true, "persistent_cursor");
 
         log_query_statement_details(declare_hold_result, "DECLARE cursor WITH HOLD");
     }
@@ -462,8 +462,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseCursorStatements) {
         QueryStmtPtr fetch_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, fetch_query);
 
-        verify_query_statement_properties(fetch_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(fetch_result, 0, QueryStmt::FETCH, true, "user_cursor");
+        verify_query_statement_properties(fetch_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(fetch_result, 0, QueryStmt::Type::FETCH, true, "user_cursor");
 
         log_query_statement_details(fetch_result, "FETCH from cursor");
     }
@@ -488,24 +488,24 @@ TEST_F(ClientParseSimpleQueryTest, ParseMultiStatementQueries) {
         test_database_id, test_buffer, multi_statement_query);
 
     // Should have 4 child statements and be marked as not read-safe (due to INSERT/UPDATE)
-    verify_query_statement_properties(multi_result, QueryStmt::SIMPLE_QUERY, false, 4);
+    verify_query_statement_properties(multi_result, QueryStmt::Type::SIMPLE_QUERY, false, 4);
 
     // Verify each child statement with individual scoped traces
     {
         SCOPED_TRACE("Verifying first child statement (BEGIN) in multi-statement query");
-        verify_child_statement_properties(multi_result, 0, QueryStmt::BEGIN, true);
+        verify_child_statement_properties(multi_result, 0, QueryStmt::Type::BEGIN, true);
     }
     {
         SCOPED_TRACE("Verifying second child statement (INSERT) in multi-statement query");
-        verify_child_statement_properties(multi_result, 1, QueryStmt::ANONYMOUS, false);
+        verify_child_statement_properties(multi_result, 1, QueryStmt::Type::ANONYMOUS, false);
     }
     {
         SCOPED_TRACE("Verifying third child statement (UPDATE) in multi-statement query");
-        verify_child_statement_properties(multi_result, 2, QueryStmt::ANONYMOUS, false);
+        verify_child_statement_properties(multi_result, 2, QueryStmt::Type::ANONYMOUS, false);
     }
     {
         SCOPED_TRACE("Verifying fourth child statement (COMMIT) in multi-statement query");
-        verify_child_statement_properties(multi_result, 3, QueryStmt::COMMIT, true);
+        verify_child_statement_properties(multi_result, 3, QueryStmt::Type::COMMIT, true);
     }
 
     log_query_statement_details(multi_result, "Multi-statement query");
@@ -524,8 +524,8 @@ TEST_F(ClientParseSimpleQueryTest, ParsePreparedStatementOperations) {
         QueryStmtPtr prepare_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, prepare_query);
 
-        verify_query_statement_properties(prepare_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(prepare_result, 0, QueryStmt::PREPARE, true, "user_select");
+        verify_query_statement_properties(prepare_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(prepare_result, 0, QueryStmt::Type::PREPARE, true, "user_select");
 
         log_query_statement_details(prepare_result, "PREPARE statement");
     }
@@ -537,8 +537,8 @@ TEST_F(ClientParseSimpleQueryTest, ParsePreparedStatementOperations) {
         QueryStmtPtr execute_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, execute_query);
 
-        verify_query_statement_properties(execute_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(execute_result, 0, QueryStmt::EXECUTE, true, "user_select");
+        verify_query_statement_properties(execute_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(execute_result, 0, QueryStmt::Type::EXECUTE, true, "user_select");
 
         log_query_statement_details(execute_result, "EXECUTE statement");
     }
@@ -550,8 +550,8 @@ TEST_F(ClientParseSimpleQueryTest, ParsePreparedStatementOperations) {
         QueryStmtPtr deallocate_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, deallocate_query);
 
-        verify_query_statement_properties(deallocate_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(deallocate_result, 0, QueryStmt::DEALLOCATE, true, "user_select");
+        verify_query_statement_properties(deallocate_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(deallocate_result, 0, QueryStmt::Type::DEALLOCATE, true, "user_select");
 
         log_query_statement_details(deallocate_result, "DEALLOCATE statement");
     }
@@ -570,8 +570,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseListenUnlistenStatements) {
         QueryStmtPtr listen_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, listen_query);
 
-        verify_query_statement_properties(listen_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_child_statement_properties(listen_result, 0, QueryStmt::LISTEN, false, "user_notifications");
+        verify_query_statement_properties(listen_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_child_statement_properties(listen_result, 0, QueryStmt::Type::LISTEN, false, "user_notifications");
 
         log_query_statement_details(listen_result, "LISTEN statement");
     }
@@ -583,8 +583,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseListenUnlistenStatements) {
         QueryStmtPtr unlisten_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, unlisten_query);
 
-        verify_query_statement_properties(unlisten_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_child_statement_properties(unlisten_result, 0, QueryStmt::UNLISTEN, false, "user_notifications");
+        verify_query_statement_properties(unlisten_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_child_statement_properties(unlisten_result, 0, QueryStmt::Type::UNLISTEN, false, "user_notifications");
 
         log_query_statement_details(unlisten_result, "UNLISTEN specific");
     }
@@ -596,8 +596,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseListenUnlistenStatements) {
         QueryStmtPtr unlisten_all_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, unlisten_all_query);
 
-        verify_query_statement_properties(unlisten_all_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_child_statement_properties(unlisten_all_result, 0, QueryStmt::UNLISTEN_ALL, false);
+        verify_query_statement_properties(unlisten_all_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_child_statement_properties(unlisten_all_result, 0, QueryStmt::Type::UNLISTEN_ALL, false);
 
         log_query_statement_details(unlisten_all_result, "UNLISTEN all");
     }
@@ -618,8 +618,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseQueriesOnNonReplicatedTables) {
         test_database_id, test_buffer, non_replicated_query);
 
     // Should still parse successfully, but if table is not found it should not be read-safe
-    verify_query_statement_properties(query_result, QueryStmt::SIMPLE_QUERY, false, 1);
-    verify_child_statement_properties(query_result, 0, QueryStmt::ANONYMOUS, false);
+    verify_query_statement_properties(query_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+    verify_child_statement_properties(query_result, 0, QueryStmt::Type::ANONYMOUS, false);
 
     log_query_statement_details(query_result, "Query on non-replicated table");
 }
@@ -637,8 +637,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSavepointOperations) {
         QueryStmtPtr savepoint_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, savepoint_query);
 
-        verify_query_statement_properties(savepoint_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(savepoint_result, 0, QueryStmt::SAVEPOINT, true, "sp1");
+        verify_query_statement_properties(savepoint_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(savepoint_result, 0, QueryStmt::Type::SAVEPOINT, true, "sp1");
 
         log_query_statement_details(savepoint_result, "SAVEPOINT");
     }
@@ -650,8 +650,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSavepointOperations) {
         QueryStmtPtr rollback_to_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, rollback_to_query);
 
-        verify_query_statement_properties(rollback_to_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(rollback_to_result, 0, QueryStmt::ROLLBACK_TO_SAVEPOINT, true, "sp1");
+        verify_query_statement_properties(rollback_to_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(rollback_to_result, 0, QueryStmt::Type::ROLLBACK_TO_SAVEPOINT, true, "sp1");
 
         log_query_statement_details(rollback_to_result, "ROLLBACK TO SAVEPOINT");
     }
@@ -663,8 +663,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSavepointOperations) {
         QueryStmtPtr release_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, release_query);
 
-        verify_query_statement_properties(release_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_child_statement_properties(release_result, 0, QueryStmt::RELEASE_SAVEPOINT, true, "sp1");
+        verify_query_statement_properties(release_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_child_statement_properties(release_result, 0, QueryStmt::Type::RELEASE_SAVEPOINT, true, "sp1");
 
         log_query_statement_details(release_result, "RELEASE SAVEPOINT");
     }
@@ -683,7 +683,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseEmptyAndWhitespaceQueries) {
         QueryStmtPtr empty_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, empty_query);
 
-        verify_query_statement_properties(empty_result, QueryStmt::SIMPLE_QUERY, true, 0);
+        verify_query_statement_properties(empty_result, QueryStmt::Type::SIMPLE_QUERY, true, 0);
 
         log_query_statement_details(empty_result, "Empty query");
     }
@@ -695,7 +695,7 @@ TEST_F(ClientParseSimpleQueryTest, ParseEmptyAndWhitespaceQueries) {
         QueryStmtPtr whitespace_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, whitespace_query);
 
-        verify_query_statement_properties(whitespace_result, QueryStmt::SIMPLE_QUERY, true, 0);
+        verify_query_statement_properties(whitespace_result, QueryStmt::Type::SIMPLE_QUERY, true, 0);
 
         log_query_statement_details(whitespace_result, "Whitespace-only query");
     }
@@ -716,8 +716,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr safe_session_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_safe_session_config_query);
 
-        verify_query_statement_properties(safe_session_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_set_config_properties(safe_session_config_result->children[0], 0, QueryStmt::SET, false, "work_mem");
+        verify_query_statement_properties(safe_session_config_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_set_config_properties(safe_session_config_result->children[0], 0, QueryStmt::Type::SET, false, "work_mem");
 
         log_query_statement_details(safe_session_config_result, "SELECT set_config() safe session variable");
     }
@@ -731,8 +731,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr unsafe_session_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_unsafe_session_config_query);
 
-        verify_query_statement_properties(unsafe_session_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_set_config_properties(unsafe_session_config_result->children[0], 0, QueryStmt::SET, false, "shared_preload_libraries");
+        verify_query_statement_properties(unsafe_session_config_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_set_config_properties(unsafe_session_config_result->children[0], 0, QueryStmt::Type::SET, false, "shared_preload_libraries");
 
         log_query_statement_details(unsafe_session_config_result, "SELECT set_config() unsafe session variable");
     }
@@ -746,8 +746,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr user_defined_session_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_user_defined_session_config_query);
 
-        verify_query_statement_properties(user_defined_session_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_set_config_properties(user_defined_session_config_result->children[0], 0, QueryStmt::SET, true, "myapp.cache_size");
+        verify_query_statement_properties(user_defined_session_config_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_set_config_properties(user_defined_session_config_result->children[0], 0, QueryStmt::Type::SET, true, "myapp.cache_size");
 
         log_query_statement_details(user_defined_session_config_result, "SELECT set_config() user-defined session variable");
     }
@@ -761,8 +761,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr safe_local_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_safe_local_config_query);
 
-        verify_query_statement_properties(safe_local_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_set_config_properties(safe_local_config_result->children[0], 0, QueryStmt::SET_LOCAL, true, "timezone");
+        verify_query_statement_properties(safe_local_config_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_set_config_properties(safe_local_config_result->children[0], 0, QueryStmt::Type::SET_LOCAL, true, "timezone");
 
         log_query_statement_details(safe_local_config_result, "SELECT set_config() safe local variable");
     }
@@ -776,8 +776,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr unsafe_local_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_unsafe_local_config_query);
 
-        verify_query_statement_properties(unsafe_local_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_set_config_properties(unsafe_local_config_result->children[0], 0, QueryStmt::SET_LOCAL, false, "max_connections");
+        verify_query_statement_properties(unsafe_local_config_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_set_config_properties(unsafe_local_config_result->children[0], 0, QueryStmt::Type::SET_LOCAL, false, "max_connections");
 
         log_query_statement_details(unsafe_local_config_result, "SELECT set_config() unsafe local variable");
     }
@@ -791,8 +791,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr user_defined_local_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_user_defined_local_config_query);
 
-        verify_query_statement_properties(user_defined_local_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_set_config_properties(user_defined_local_config_result->children[0], 0, QueryStmt::SET_LOCAL, true, "mycompany.debug_level");
+        verify_query_statement_properties(user_defined_local_config_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_set_config_properties(user_defined_local_config_result->children[0], 0, QueryStmt::Type::SET_LOCAL, true, "mycompany.debug_level");
 
         log_query_statement_details(user_defined_local_config_result, "SELECT set_config() user-defined local variable");
     }
@@ -806,9 +806,9 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr multiple_safe_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_multiple_safe_config_query);
 
-        verify_query_statement_properties(multiple_safe_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_set_config_properties(multiple_safe_config_result->children[0], 0, QueryStmt::SET, false, "work_mem");
-        verify_set_config_properties(multiple_safe_config_result->children[0], 1, QueryStmt::SET, true, "statement_timeout");
+        verify_query_statement_properties(multiple_safe_config_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_set_config_properties(multiple_safe_config_result->children[0], 0, QueryStmt::Type::SET, false, "work_mem");
+        verify_set_config_properties(multiple_safe_config_result->children[0], 1, QueryStmt::Type::SET, true, "statement_timeout");
 
         log_query_statement_details(multiple_safe_config_result, "SELECT multiple safe set_config() calls");
     }
@@ -822,8 +822,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr deep_namespace_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_deep_namespace_config_query);
 
-        verify_query_statement_properties(deep_namespace_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_set_config_properties(deep_namespace_config_result->children[0], 0, QueryStmt::SET, true, "myapp.module.subsystem.setting");
+        verify_query_statement_properties(deep_namespace_config_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_set_config_properties(deep_namespace_config_result->children[0], 0, QueryStmt::Type::SET, true, "myapp.module.subsystem.setting");
 
         log_query_statement_details(deep_namespace_config_result, "SELECT set_config() deep namespace variable");
     }
@@ -837,8 +837,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr invalid_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_invalid_set_config_query);
 
-        verify_query_statement_properties(invalid_config_result, QueryStmt::SIMPLE_QUERY, false, 1);
-        verify_child_statement_properties(invalid_config_result, 0, QueryStmt::ANONYMOUS, false);
+        verify_query_statement_properties(invalid_config_result, QueryStmt::Type::SIMPLE_QUERY, false, 1);
+        verify_child_statement_properties(invalid_config_result, 0, QueryStmt::Type::ANONYMOUS, false);
 
         log_query_statement_details(invalid_config_result, "SELECT set_config() insufficient args");
     }
@@ -852,8 +852,8 @@ TEST_F(ClientParseSimpleQueryTest, ParseSelectSetConfigFunctionCalls) {
         QueryStmtPtr case_sensitive_config_result = ClientSession::parse_simple_query(
             test_database_id, test_buffer, select_case_sensitive_config_query);
 
-        verify_query_statement_properties(case_sensitive_config_result, QueryStmt::SIMPLE_QUERY, true, 1);
-        verify_set_config_properties(case_sensitive_config_result->children[0], 0, QueryStmt::SET, true, "dateSTYLE");
+        verify_query_statement_properties(case_sensitive_config_result, QueryStmt::Type::SIMPLE_QUERY, true, 1);
+        verify_set_config_properties(case_sensitive_config_result->children[0], 0, QueryStmt::Type::SET, true, "dateSTYLE");
 
         log_query_statement_details(case_sensitive_config_result, "SELECT set_config() case-sensitive variable");
     }

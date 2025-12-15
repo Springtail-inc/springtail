@@ -15,16 +15,14 @@ namespace springtail::pg_proxy {
 
         /** message types -- add string defn to session.cc type_map */
         enum Type : int8_t {
+            NONE=0,                           ///< no message
             ///// client to server messages
             MSG_CLIENT_SERVER_SIMPLE_QUERY=1, ///< simple query; data str: query
-            MSG_CLIENT_SERVER_PARSE=2,        ///< parse packet; data buffer
-            MSG_CLIENT_SERVER_BIND=3,         ///< bind packet; data buffer
-            MSG_CLIENT_SERVER_DESCRIBE=4,     ///< describe packet; data buffer
-            MSG_CLIENT_SERVER_EXECUTE=5,      ///< execute packet; data buffer
-            MSG_CLIENT_SERVER_CLOSE=6,        ///< close packet; data buffer
-            MSG_CLIENT_SERVER_SYNC=7,         ///< sync packet; data buffer
-            MSG_CLIENT_SERVER_FUNCTION=8,     ///< function call; data buffer
-            MSG_CLIENT_SERVER_FORWARD=10,     ///< forward packet; data buffer
+            MSG_CLIENT_SERVER_EXTENDED=2,     ///< extended packet (parse/bind/describe/execute/close/sync/flush); data buffer
+            MSG_CLIENT_SERVER_FUNCTION=3,     ///< function call; data buffer
+            MSG_CLIENT_SERVER_FORWARD=4,      ///< forward packet; data buffer
+            MSG_CLIENT_SERVER_FLUSH=5,        ///< flush packet; data buffer
+            MSG_CLIENT_SERVER_STATE_REPLAY=6, ///< state replay packet; dependencies
 
             MSG_SERVER_CLIENT_FATAL_ERROR=99  ///< fatal error; no data
         };
@@ -57,8 +55,15 @@ namespace springtail::pg_proxy {
         /** Get type */
         Type type() const { return _type; }
 
-        std::string const type_str() const {
-            return type_map.at(_type);
+        std::string const type_string() const {
+            auto msg_type = type_map.at(_type);
+            if (_data != nullptr) {
+                if (_data->children.size() > 0) {
+                    return std::format("{} ({})", msg_type, _data->children[0]->type_string());
+                }
+                return std::format("{} ({})", msg_type, _data->type_string());
+            }
+            return msg_type;
         }
 
         const QueryStmtPtr data() const {
@@ -70,21 +75,34 @@ namespace springtail::pg_proxy {
             return _status;
         }
 
+        /** Get buffer */
         const BufferPtr buffer() const {
             return _buffer;
         }
 
-        /** Get query statement ptr from dependency queue; otherwise nullptr if none */
-        const QueryStmtPtr peek_dependency() const {
-            if (_dependencies.empty()) {
-                return nullptr;
-            }
-            return _dependencies.front();
+        /** Get dependencies as query statements */
+        const std::vector<QueryStmtPtr> &qs_dependencies() const {
+            return _dependencies;
         }
 
-        /** Get dependency at index */
-        QueryStmtPtr get_dependency(size_t idx) const {
-            return _dependencies.at(idx);
+        /** Convert dependencies to session messages and return as vector */
+        std::vector<std::shared_ptr<SessionMsg>> dependencies() const
+        {
+            std::vector<std::shared_ptr<SessionMsg>> deps;
+            for (const auto& qs : _dependencies) {
+                // For simple queries, create a simple query message
+                if (qs->data_type == QueryStmt::DataType::SIMPLE) {
+                    deps.emplace_back(std::make_shared<SessionMsg>(MSG_CLIENT_SERVER_SIMPLE_QUERY, qs, _seq_id));
+                } else if (qs->data_type == QueryStmt::DataType::PACKET) {
+                    deps.emplace_back(std::make_shared<SessionMsg>(MSG_CLIENT_SERVER_EXTENDED, qs->buffer(), _seq_id));
+                } else {
+                    // should not happen; other types not valid for dependencies
+                    LOG_ERROR("Invalid dependency data type in session message");
+                    DCHECK(false) << "Invalid dependency data type in session message";
+                }
+            }
+
+            return deps;
         }
 
         /** Number of dependencies */
@@ -95,6 +113,13 @@ namespace springtail::pg_proxy {
         /** Add a query statement to dependency queue */
         void add_dependency(QueryStmtPtr stmt) {
             _dependencies.push_back(stmt);
+        }
+
+        /** Add dependencies by moving from input vector */
+        void add_dependencies(std::vector<QueryStmtPtr> &&dependencies) {
+            _dependencies.insert(_dependencies.end(),
+                                 std::make_move_iterator(dependencies.begin()),
+                                 std::make_move_iterator(dependencies.end()));
         }
 
         /** Set dependencies by moving from input vector */
@@ -130,6 +155,42 @@ namespace springtail::pg_proxy {
             return msg;
         }
 
+        /**
+         * @brief Check if message is a replay message
+         *
+         * messages that contain dependencies that must be replayed
+         * to restore session and transaction state before executing queries.
+         * @returns true if message is a replay message, false otherwise
+         */
+        bool is_dependency_message() const {
+            return _type == MSG_CLIENT_SERVER_STATE_REPLAY;
+        }
+
+        /**
+         * @brief Check if message is a simple query
+         * @return true if message is a simple query, false otherwise
+         */
+        bool is_simple_query_message() const {
+            return _type == MSG_CLIENT_SERVER_SIMPLE_QUERY;
+        }
+
+        /**
+         * @brief Check if message is a sync message
+         * @return true if message is a sync message, false otherwise
+         */
+        bool is_sync_message() const {
+            return _type == MSG_CLIENT_SERVER_EXTENDED && _data != nullptr &&
+                   _data->type == QueryStmt::Type::SYNC;
+        }
+
+        /**
+         * @brief Check if message is a flush message
+         * @return true if message is a flush message, false otherwise
+         */
+        bool is_flush_message() const {
+            return _type == MSG_CLIENT_SERVER_FLUSH;
+        }
+
         /** Helper to create a session message */
         static std::shared_ptr<SessionMsg> create(Type type, QueryStmtPtr data=nullptr, uint64_t seq_id=-1) {
             return std::make_shared<SessionMsg>(type, data, seq_id);
@@ -151,7 +212,7 @@ namespace springtail::pg_proxy {
         int _completed=0;                        ///< number of completed queries (for multi-statement queries)
         std::vector<QueryStmtPtr> _dependencies; ///< query statements
         uint64_t _seq_id=0;                      ///< sequence id for this message
-        bool _is_read_safe=false;                 ///< is read-only
+        bool _is_read_safe=false;                ///< is read-only
     };
     using SessionMsgPtr = std::shared_ptr<SessionMsg>;
 
@@ -168,7 +229,8 @@ namespace springtail::pg_proxy {
         SessionMsgQueue() = default;
 
         /**
-         * @brief Add a new batch to the queue
+         * @brief Add a new batch to the queue, maintains batch boundaries
+         * @param new_batch New batch of messages to add to the queue
          */
         void push_batch(std::deque<T> new_batch) {
             std::unique_lock lock(_mutex);
@@ -179,87 +241,10 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Pop the next batch off the queue
-         *
-         * @return std::deque<T> - first deq
-         */
-        std::deque<T> pop_batch() {
-            std::unique_lock lock(_mutex);
-            if (!_msg_queue.empty()) {
-                auto next_batch = std::move(_msg_queue.front());
-                _msg_queue.pop();
-                return next_batch;
-            }
-            return {};
-        }
-
-        /**
-         * @brief Load the next processing batch if current one is empty
-         * @return true if one was loaded, or false if queue is empty
-         */
-        bool load_processing_batch() {
-            std::unique_lock lock(_mutex);
-            if (_processing_batch.empty()) {
-                if (_msg_queue.empty()) {
-                    return false;
-                }
-                _processing_batch = std::move(_msg_queue.front());
-                _msg_queue.pop();
-            }
-            return true;
-        }
-
-        /** Get iterator to start of processing batch -- not thread safe */
-        auto processing_batch_start() {
-            return _processing_batch.begin();
-        }
-
-        /** Get iterator to end of processing batch -- not thread safe */
-        auto processing_batch_end() {
-            return _processing_batch.end();
-        }
-
-        /**
-         * @brief Get first message from processing batch; without removing it
-         * @return first message or nullopt if empty
-         */
-        std::optional<T> front_processing_msg() {
-            std::shared_lock lock(_mutex);
-            if (_processing_batch.empty()) {
-                return std::nullopt;
-            }
-            return _processing_batch.front();
-        }
-
-        /**
-         * @brief Pop/remove first message from processing batch
-         * @return first message or nullopt if empty
-         */
-        std::optional<T> pop_processing_msg() {
-            std::unique_lock lock(_mutex);
-            if (_processing_batch.empty()) {
-                return std::nullopt;
-            }
-            auto msg = _processing_batch.front();
-            _processing_batch.pop_front();
-            return msg;
-        }
-
-        /**
-         * Check if batch being processed has more message
-         * @returns true if processing batch is not empty, false if empty
-         */
-        bool processing_empty() {
-            std::shared_lock lock(_mutex);
-            return _processing_batch.empty();
-        }
-
-        /**
          * Reset the queue to empty state
          */
         void reset() {
             std::unique_lock lock(_mutex);
-            _processing_batch.clear();
             while (!_msg_queue.empty()) {
                 _msg_queue.pop();
             }
@@ -271,6 +256,28 @@ namespace springtail::pg_proxy {
         bool empty() {
             std::shared_lock lock(_mutex);
             return _msg_queue.empty();
+        }
+
+        /**
+         * Get size of msg queue
+         */
+        size_t size() {
+            std::shared_lock lock(_mutex);
+            return _msg_queue.size();
+        }
+
+        /**
+         * Pop the next batch from the queue for processing
+         * Returns the batch by value (moved) to avoid dangling references.
+         */
+        std::deque<T> pop_batch() {
+            std::unique_lock lock(_mutex);
+            if (_msg_queue.empty()) {
+                return {};
+            }
+            auto front = std::move(_msg_queue.front());
+            _msg_queue.pop();
+            return front;
         }
 
     private:

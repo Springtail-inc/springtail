@@ -136,6 +136,34 @@ namespace springtail::pg_proxy {
          */
         void dump();
 
+        /**
+         * @brief Evict user for specific database and username
+         *
+         * @param db_id - database id
+         * @param username - name of the user
+         */
+        void evict_user(const uint64_t db_id, const std::string &username);
+
+        /**
+         * @brief Return list of sessions stored in the pool in JSON format
+         *
+         * @return nlohmann::json
+         */
+        nlohmann::json to_json()
+        {
+            nlohmann::json j = nlohmann::json::array();
+
+            for (const auto& entry : _lru) {
+                nlohmann::json item;
+                item["db_id"]          = entry.key.first;       // adapt to your SessionKey fields
+                item["username"]       = entry.key.second;
+                item["session"]        = entry.value->id();
+                j.push_back(std::move(item));
+            }
+
+            return j;
+        }
+
     private:
         mutable std::shared_mutex _mutex;                       ///< mutex for pool
         using SessionKey = std::pair<uint64_t, std::string>;    ///< typedef for session key, that is database id and user name pair
@@ -254,7 +282,8 @@ namespace springtail::pg_proxy {
                 {"port", _port},
                 {"replica_id", _replica_id},
                 {"active_sessions", static_cast<int>(_active_sessions.size())},
-                {"pooled_sessions", static_cast<int>(_pool->size())}
+                {"pooled_sessions", static_cast<int>(_pool->size())},
+                {"sessions", _pool->to_json()}
             };
             return j;
         }
@@ -408,6 +437,14 @@ namespace springtail::pg_proxy {
             return _state.load();
         }
 
+        /**
+         * @brief Invalidate user for the given database
+         *
+         * @param db_id - database id
+         * @param username - user name
+         */
+        void invalidate_user(const uint64_t db_id, const std::string &username);
+
     protected: // for testing
         /** map of active sessions by id, includes all allocated sessions (incl. pooled) */
         std::unordered_map<uint64_t, ServerSessionWeakPtr> _active_sessions;
@@ -526,6 +563,14 @@ namespace springtail::pg_proxy {
             std::unique_lock lock(_base_mutex);
             _shutdown_instance(instance, lock);
         }
+
+        /**
+         * @brief Invalidate user for the given database
+         *
+         * @param db_id - database id
+         * @param username - user name
+         */
+        virtual void invalidate_user(const uint64_t db_id, const std::string &username);
 
     protected:
         /**
@@ -781,6 +826,14 @@ namespace springtail::pg_proxy {
         nlohmann::json to_json() const override {
             return _primary->to_json();
         }
+
+        /**
+         * @brief Invalidate user for the given database
+         *
+         * @param db_id - database id
+         * @param username - user name
+         */
+        void invalidate_user(const uint64_t db_id, const std::string &username) override;
 
     private:
         DatabaseInstancePtr _primary{nullptr}; ///< primary instance
@@ -1051,6 +1104,14 @@ namespace springtail::pg_proxy {
             _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_object->get_db_name(), db_object));
             _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_object->get_db_id(), db_object));
         }
+
+        /**
+         * @brief Invalidate user sessions for the given database and username
+         *
+         * @param db_id - database id
+         * @param username - user name
+         */
+        void invalidate_user_sessions(const uint64_t db_id, const std::string &username);
 
     protected:
         /**

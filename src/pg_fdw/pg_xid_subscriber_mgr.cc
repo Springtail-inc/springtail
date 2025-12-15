@@ -238,6 +238,12 @@ PgXidSubscriberMgr::start()
 {
     nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
 
+    if (json.is_null() || !json.contains("roots_shm_cache_size") ||
+        !json.contains("schema_shm_cache_size") || !json.contains("usertype_shm_cache_size")) {
+        LOG_ERROR("SysTblMgr configuration is missing required cache size properties");
+        CHECK(false) << "Bad SysTblMgr configuration, terminating PgXidSubscriberRunner";
+    }
+
     size_t roots_cache_size = 0;
     Json::get_to<size_t>(json, "roots_shm_cache_size", roots_cache_size);
 
