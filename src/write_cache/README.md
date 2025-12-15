@@ -74,8 +74,8 @@ The write cache exposes its functionality through a gRPC service with the follow
 ### Service: WriteCache
 
 #### Ping
-**Request**: Empty  
-**Response**: Empty  
+**Request**: Empty
+**Response**: Empty
 **Purpose**: Health check to verify service availability
 
 #### GetExtents
@@ -90,7 +90,7 @@ The write cache exposes its functionality through a gRPC service with the follow
 - `table_id`: Table identifier
 - `cursor`: Updated cursor for next iteration
 - `extents`: Array of extent objects
-- `commit_ts`: Postgres commit timestamp in microseconds since 2000-01-01
+- `commit_ts`: Postgres commit timestamp in microseconds since January 1, 2000 00:00:00 UTC
 
 **Purpose**: Retrieve extents for a specific table and transaction with pagination support
 
@@ -142,7 +142,7 @@ The write cache is configured through the system settings JSON file under the `w
 - `server_port`: Port number for the gRPC server
 - `server_worker_threads`: Number of worker threads for request processing
 - `ssl`: Enable/disable SSL/TLS encryption
-- `client_connections`: Number of client connection pool size
+- `client_connections`: Client connection pool size
 - Certificate paths for SSL/TLS when enabled
 
 ### Storage Configuration
