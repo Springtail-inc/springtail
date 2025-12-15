@@ -298,11 +298,11 @@ namespace springtail::pg_fdw {
         std::shared_mutex _mutex;               ///< Mutex for xid map
 
         std::shared_mutex _shm_cache_mutex;    ///< Mutex for shm caches
-        std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_shm_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
         std::shared_ptr<sys_tbl_mgr::ShmCache> _schema_shm_cache; ///< An IPC schema cache shared by pg_xid_subscriber_daemon
         std::shared_ptr<sys_tbl_mgr::ShmCache> _usertype_shm_cache; ///< An IPC usertype cache shared by pg_xid_subscriber_daemon
-        std::shared_ptr<sys_tbl_mgr::ShmCache> _table_ids_cache; ///< An IPC cache for table IDs with mutations
-        std::shared_ptr<sys_tbl_mgr::ShmCache> _extents_cache; ///< An IPC cache for extents with table mutations from WriteCacheClient
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _table_ids_shm_cache; ///< An IPC cache for table IDs with mutations
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _extents_shm_cache; ///< An IPC cache for extents with table mutations from WriteCacheClient
 
         LruObjectCache<int32_t, UserType> _user_type_cache; ///< cache of user types
 

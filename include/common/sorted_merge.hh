@@ -72,24 +72,24 @@ public:
         using reference = const value_type&;
 
     private:
-        using entry_type = std::conditional_t<Reverse, ReverseIteratorEntry, IteratorEntry>;
-        using heap_compare_type = std::conditional_t<Reverse,
-            ReverseHeapCompare<entry_type>,
-            ForwardHeapCompare<entry_type>>;
-        using heap_type = std::priority_queue<entry_type, std::vector<entry_type>, heap_compare_type>;
+        using EntryType = std::conditional_t<Reverse, ReverseIteratorEntry, IteratorEntry>;
+        using HeapCompareType = std::conditional_t<Reverse,
+            ReverseHeapCompare<EntryType>,
+            ForwardHeapCompare<EntryType>>;
+        using HeapType = std::priority_queue<EntryType, std::vector<EntryType>, HeapCompareType>;
 
-        std::shared_ptr<heap_type> _heap;
-        const value_type* current_value_;
+        std::shared_ptr<HeapType> _heap;
+        const value_type* _current_value;
         bool _is_end;
 
         void advance() {
             if (!_heap || _heap->empty()) {
                 _is_end = true;
-                current_value_ = nullptr;
+                _current_value = nullptr;
                 return;
             }
 
-            entry_type top = _heap->top();
+            EntryType top = _heap->top();
             _heap->pop();
             ++top.current;
 
@@ -99,28 +99,28 @@ public:
 
             if (_heap->empty()) {
                 _is_end = true;
-                current_value_ = nullptr;
+                _current_value = nullptr;
             } else {
-                current_value_ = &(*_heap->top().current);
+                _current_value = &(*_heap->top().current);
             }
         }
 
     public:
-        Iterator() : _heap(nullptr), current_value_(nullptr), _is_end(true) {}
+        Iterator() : _heap(nullptr), _current_value(nullptr), _is_end(true) {}
 
         explicit Iterator(std::vector<Container>& containers, const ValueToKey& value_to_key, const Compare& comp)
-            : _heap(std::make_shared<heap_type>(heap_compare_type(value_to_key, comp))),
-              current_value_(nullptr),
+            : _heap(std::make_shared<HeapType>(HeapCompareType(value_to_key, comp))),
+              _current_value(nullptr),
               _is_end(false) {
 
             for (size_type i = 0; i < containers.size(); ++i) {
                 if constexpr (Reverse) {
                     if (containers[i].rbegin() != containers[i].rend()) {
-                        _heap->push(entry_type(containers[i].rbegin(), containers[i].rend(), i));
+                        _heap->push(EntryType(containers[i].rbegin(), containers[i].rend(), i));
                     }
                 } else {
                     if (containers[i].begin() != containers[i].end()) {
-                        _heap->push(entry_type(containers[i].begin(), containers[i].end(), i));
+                        _heap->push(EntryType(containers[i].begin(), containers[i].end(), i));
                     }
                 }
             }
@@ -128,7 +128,7 @@ public:
             if (_heap->empty()) {
                 _is_end = true;
             } else {
-                current_value_ = &(*_heap->top().current);
+                _current_value = &(*_heap->top().current);
             }
         }
 
@@ -138,16 +138,16 @@ public:
                  const std::vector<std::pair<IterType, IterType>>& ranges,
                  const ValueToKey& value_to_key,
                  const Compare& comp)
-            : _heap(std::make_shared<heap_type>(heap_compare_type(value_to_key, comp))),
-              current_value_(nullptr),
+            : _heap(std::make_shared<HeapType>(HeapCompareType(value_to_key, comp))),
+              _current_value(nullptr),
               _is_end(false) {
 
             for (size_type i = 0; i < ranges.size(); ++i) {
                 if (ranges[i].first != ranges[i].second) {
                     if constexpr (Reverse) {
-                        _heap->push(entry_type(ranges[i].first, ranges[i].second, i));
+                        _heap->push(EntryType(ranges[i].first, ranges[i].second, i));
                     } else {
-                        _heap->push(entry_type(ranges[i].first, ranges[i].second, i));
+                        _heap->push(EntryType(ranges[i].first, ranges[i].second, i));
                     }
                 }
             }
@@ -155,16 +155,16 @@ public:
             if (_heap->empty()) {
                 _is_end = true;
             } else {
-                current_value_ = &(*_heap->top().current);
+                _current_value = &(*_heap->top().current);
             }
         }
 
         reference operator*() const {
-            return *current_value_;
+            return *_current_value;
         }
 
         pointer operator->() const {
-            return current_value_;
+            return _current_value;
         }
 
         Iterator& operator++() {
@@ -185,7 +185,7 @@ public:
             if (_is_end != other._is_end) {
                 return false;
             }
-            return current_value_ == other.current_value_;
+            return _current_value == other._current_value;
         }
 
         bool operator!=(const Iterator& other) const {

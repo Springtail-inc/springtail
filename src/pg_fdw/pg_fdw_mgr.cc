@@ -603,8 +603,8 @@ namespace springtail::pg_fdw {
     {
         {
             std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
-            if (_roots_cache) {
-                auto cached_xid = _roots_cache->get_committed_xid(_db_id, schema_xid);
+            if (_roots_shm_cache) {
+                auto cached_xid = _roots_shm_cache->get_committed_xid(_db_id, schema_xid);
                 if (cached_xid.has_value()) {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Use cached xid = {}", *cached_xid);
                     return *cached_xid;
@@ -635,14 +635,14 @@ namespace springtail::pg_fdw {
 
         {
             std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
-            if (!_table_ids_cache) {
+            if (!_table_ids_shm_cache) {
                 return {table, changes};
             }
 
             // check for pending mutations cache first
             // The table ids cache keeps track of recorded xid's too
 
-            auto pending_xids = _table_ids_cache->get_pending_xids(db_id, xid);
+            auto pending_xids = _table_ids_shm_cache->get_pending_xids(db_id, xid);
             if (pending_xids.empty()) {
                 return {table, changes};
             }
@@ -651,7 +651,7 @@ namespace springtail::pg_fdw {
                     db_id, xid, pending_xids.size());   
 
             for (auto pxid : pending_xids) {
-                auto msg = _table_ids_cache->find(db_id, 0, pxid);
+                auto msg = _table_ids_shm_cache->find(db_id, 0, pxid);
                 if (!msg.has_value()) {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Missing XidPushResponse for pending xid: {}", pxid);
                     return {table, changes};
@@ -680,7 +680,7 @@ namespace springtail::pg_fdw {
             if (extent_list.size() == MAX_WRITE_CACHE_EXTENTS) {
                 LOG_WARN("Too many extents in WriteCache for tid={}, xid = {}", tid, pxid); 
                 // reset pending xids to avoid repeatedly hitting this condition
-                _table_ids_cache->reset_pending_xids(db_id);
+                _table_ids_shm_cache->reset_pending_xids(db_id);
                 // return base table without mutations
                 return {table, changes};
             }
@@ -690,8 +690,6 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            //std::vector<ExtentPtr> extents;
-
             for (auto &wc_extent : extent_list) {
                 DCHECK_EQ(wc_extent.xid, pxid);
 
@@ -700,6 +698,7 @@ namespace springtail::pg_fdw {
                         table->extent_schema()->row_size(),
                         table->extent_schema()->field_types());
 
+                //TODO: optimize to avoid copy by using the data directly from shared memory
                 pe.deserialize(wc_extent.data);
                 changes.push_back(std::move(pe));
             }
@@ -759,11 +758,11 @@ namespace springtail::pg_fdw {
             return nullptr;
         };
 
-        if (!_roots_cache || !_roots_cache->is_alive()) {
-            _roots_cache = create_cache(sys_tbl_mgr::SHM_CACHE_ROOTS, true);
-            if (_roots_cache) {
+        if (!_roots_shm_cache || !_roots_shm_cache->is_alive()) {
+            _roots_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_ROOTS, true);
+            if (_roots_shm_cache) {
                 // start using the new cache
-                sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
+                sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_shm_cache);
             }
         }
 
@@ -783,15 +782,15 @@ namespace springtail::pg_fdw {
             }
         }
 
-        if (!_extents_cache || !_extents_cache->is_alive()) {
-            _extents_cache = create_cache(sys_tbl_mgr::SHM_CACHE_EXTENTS, false);
-            if (_extents_cache) {
-                WriteCacheClient::get_instance()->use_extents_cache(_extents_cache);
+        if (!_extents_shm_cache || !_extents_shm_cache->is_alive()) {
+            _extents_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_EXTENTS, false);
+            if (_extents_shm_cache) {
+                WriteCacheClient::get_instance()->use_extents_cache(_extents_shm_cache);
             }
         }
 
-        if (!_table_ids_cache || !_table_ids_cache->is_alive()) {
-            _table_ids_cache = create_cache(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, true);
+        if (!_table_ids_shm_cache || !_table_ids_shm_cache->is_alive()) {
+            _table_ids_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, true);
         }
     }
 
