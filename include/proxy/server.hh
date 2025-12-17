@@ -121,8 +121,8 @@ namespace springtail::pg_proxy {
         void _internal_shutdown() override;
 
     private:
-        int _socket;   ///< server socket
-        int _efd;      ///< eventfd for signaling
+        int _socket{-1};   ///< server socket
+        int _efd{-1};      ///< eventfd for signaling
 
         uint32_t _id;  ///< unique id for this proxy server
         std::shared_ptr<ThreadPool<Session>> _thread_pool;    ///< thread pool for handling incoming session data

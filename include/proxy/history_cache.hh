@@ -19,7 +19,7 @@ namespace springtail::pg_proxy {
      */
     struct QueryStmt {
         /** Type of statement */
-        enum Type : int8_t {
+        enum class Type : int8_t {
             NONE = 0,           ///< no statement
             SET = 1,            ///< set variable name
             SET_LOCAL = 2,      ///< set local variable name (transaction scope)
@@ -51,9 +51,10 @@ namespace springtail::pg_proxy {
             FUNCTION = 28,      ///< function call
             ANONYMOUS = 29,     ///< anonymous statement (no name)
         };
+        // for type changes update query_type_names in history_cache.cc
 
         /** Type of cached query string */
-        enum DataType : int8_t {
+        enum class DataType : int8_t {
             SIMPLE = 0,     ///< Simple query string
             PACKET = 1,     ///< Packet data, e.g., bind or parse
             NOT_CACHED = 2  ///< Empty query string, execute against primary
@@ -65,64 +66,63 @@ namespace springtail::pg_proxy {
             : type(type), data(data), name(name), is_read_safe(is_read_safe)
         {
             if (std::holds_alternative<std::string>(data)) {
-                data_type = SIMPLE;
+                data_type = DataType::SIMPLE;
             } else if (std::holds_alternative<BufferPtr>(data)) {
-                data_type = PACKET;
+                data_type = DataType::PACKET;
             }
         }
 
         QueryStmt(Type type, bool is_read_safe, const std::string &name = {})
-            : type(type), data_type(NOT_CACHED), name(name), is_read_safe(is_read_safe)
+            : type(type), data_type(DataType::NOT_CACHED), name(name), is_read_safe(is_read_safe)
         {}
 
         /** Get buffer */
         const BufferPtr buffer() const {
-            CHECK_EQ(data_type, PACKET);
+            CHECK(data_type == DataType::PACKET);
             return std::get<BufferPtr>(data);
         }
 
         /** Get query string */
         const std::string &query() const {
-            CHECK_EQ(data_type, SIMPLE);
+            CHECK(data_type == DataType::SIMPLE);
             return std::get<std::string>(data);
         }
 
-        /** Get hash of data */
-        uint64_t hash() const {
-            if (data_type == SIMPLE) {
-                return XXH64(query().data(), query().size(), 0);
-            } else if (data_type == PACKET) {
-                return XXH64(buffer()->data(), buffer()->size(), 0);
-            }
-            return 0;
-        }
-
-        /** Generate a hashed name for statement */
-        const std::string &get_hashed_name()
-        {
-            if (!hashed_name.empty()) {
-                return hashed_name;
-            }
-            hashed_name = name + ":" + std::to_string(hash());
-            return hashed_name;
-        }
-
+        /** Is this an extended query type? */
         bool is_extended() const {
-            if (type == SIMPLE_QUERY || data_type == SIMPLE) {
-                assert (extended_type == NONE);
+            if (type == Type::SIMPLE_QUERY || data_type == DataType::SIMPLE) {
+                assert (extended_type == Type::NONE);
                 return false;
             }
             return true;
         }
 
+        /** Get type as string */
+        static std::string type_string(QueryStmt::Type type_param);
+
+        /** Get type as string */
+        std::string type_string() const { return type_string(type); }
+
+        /** Convert to string */
+        std::string to_string() const {
+            std::string str_type = type_string(type);
+            std::string extended_type_str = type_string(extended_type);
+            if (children.size() > 0) {
+                str_type += " -> " + children[0]->type_string();
+            }
+            return fmt::format("Type: {}, Name: '{}', ReplayID: {}, ReadSafe: {}, ExtType: {}",
+                               str_type, name, replay_id, is_read_safe, extended_type_str);
+        }
+
+        uint64_t     replay_id{0};  ///< replay id for history cache
         Type         type;          ///< type of query string
-        Type         extended_type=NONE; ///< type of extended query
+        Type         extended_type=Type::NONE; ///< type of extended query;
+                                               // e.g., if this is a PARSE command, what is the underlying query type
         DataType     data_type;     ///< type of data
         Data         data;          ///< query string or packet data
         std::string  name;          ///< name of the statement (if named, e.g., prepared, portal, savepoint)
-        std::string  hashed_name;   ///< hashed name of the statement
-        bool         is_read_safe;   ///< is associated query read-only
-        std::shared_ptr<QueryStmt> dependency;  ///< dependent statement (e.g., bind depends on prepare)
+        bool         is_read_safe;  ///< is associated query read-only
+
         std::vector<std::shared_ptr<QueryStmt>> children; ///< children statements (e.g., of a simple query)
         std::vector<std::shared_ptr<QueryStmt>> set_config_calls; ///< set_config function calls
     };
@@ -154,7 +154,6 @@ namespace springtail::pg_proxy {
          */
         void clear() {
             _history.clear();
-            _current_idx = 1;
         }
 
         /**
@@ -207,10 +206,17 @@ namespace springtail::pg_proxy {
             return _history.empty();
         }
 
+        /**
+         * @brief Get the replay history statements above a given replay id
+         * @param replay_id replay id to get statements above
+         * @param read_only if true, only return read-safe statements
+         * @return std::vector<QueryStmtPtr>
+         */
+        std::vector<QueryStmtPtr> get_replay_history(uint64_t replay_id, bool read_only) const;
+
     private:
         friend class StatementCache;
 
-        uint64_t _current_idx{1};                      ///< current index of the history cache
         std::map<uint64_t, QueryStmtPtr> _history;     ///< history cache, map from idx to entry
 
         /**
@@ -246,32 +252,6 @@ namespace springtail::pg_proxy {
         StatementCache() = default;
 
         /**
-         * @brief Add a statement to the cache.
-         * @param name The name of the statement.
-         * @param type The type of the statement.
-         * @param value The actual statement.
-         * @param is_read_safe Indicates if the statement is read-safe.
-         * @return A pointer to the QueryStmt object.
-         */
-        QueryStmtPtr add(QueryStmt::Type type,
-                         const QueryStmt::Data &data,
-                         bool is_read_safe,
-                         const std::string &name={})
-        {
-            QueryStmtPtr entry = std::make_shared<QueryStmt>(type, data, is_read_safe, name);
-            _statement_history.add(entry);
-            return entry;
-        }
-
-        /**
-         * @brief Add a query statement to the cache.
-         * @param entry The statement to add.
-         */
-        void add(QueryStmtPtr entry) {
-            _statement_history.add(entry);
-        }
-
-        /**
          * @brief Lookup a prepared statement in the cache.
          * @param name The name of the prepared statement.
          * @return A pointer to the QueryStmt object if found, nullptr otherwise;
@@ -279,7 +259,7 @@ namespace springtail::pg_proxy {
          *         or in the session history (false).
          */
         std::pair<QueryStmtPtr,bool> lookup_prepared(const std::string_view name) {
-            return _lookup(name, QueryStmt::PREPARE);
+            return _lookup(name, QueryStmt::Type::PREPARE);
         }
 
         /**
@@ -290,7 +270,7 @@ namespace springtail::pg_proxy {
          *         or in the session history (false).
          */
         std::pair<QueryStmtPtr,bool> lookup_portal(const std::string_view name) {
-            return _lookup(name, QueryStmt::DECLARE);
+            return _lookup(name, QueryStmt::Type::DECLARE);
         }
 
         /**
@@ -299,8 +279,10 @@ namespace springtail::pg_proxy {
          * statement has completed.
          * @param stmt The statement to commit
          * @param completed The number of completed sub statements
+         * @param session_id The session id of the server session
+         * @param success true if statement completed successfully, false if error occurred
          */
-        void commit_statement(QueryStmtPtr stmt, int completed, bool success=true);
+        void commit_statement(QueryStmtPtr stmt, int completed, uint64_t session_id, bool success=true);
 
         /**
          * @brief Reached a sync point; READY FOR QUERY, if not in xact then implicitly commit or rollback
@@ -338,15 +320,49 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Set the session replay idx object; for testing
+         * @brief Update the session replay idx object
          * @param session_id The session id
          * @param idx The replay index
          */
         void set_session_replay_idx(uint64_t session_id, uint64_t idx) {
-            _session_replay_map[session_id] = idx;
+            // make sure idx is > existing idx
+            auto [it, inserted] = _session_replay_map.try_emplace(session_id, idx);
+            if (!inserted && idx > it->second) {
+                it->second = idx;
+            }
+        }
+
+        /**
+         * @brief Get the session history for a specific session
+         * @param session_id The session id
+         * @param read_only If true, only return read-only statements
+         * @return A vector of QueryStmtPtr representing the session history
+         */
+        std::vector<QueryStmtPtr> get_session_history(uint64_t session_id, bool read_only) {
+            return _get_replay_history(session_id, read_only, true);
+        }
+
+        /**
+         * @brief Get the transaction history for a specific session
+         * @param session_id The session id
+         * @param read_only If true, only return read-only statements
+         * @return std::vector<QueryStmtPtr>
+         */
+        std::vector<QueryStmtPtr> get_transaction_history(uint64_t session_id, bool read_only) {
+            return _get_replay_history(session_id, read_only, false);
+        }
+
+        /**
+         * @brief Are we currently in a transaction (or error state)?
+         * @return true if in transaction, false otherwise
+         */
+        bool in_transaction() const {
+            return _in_transaction;
         }
 
     private:
+        uint64_t _current_replay_id{1};    ///< current replay id; ordering across all caches
+
         HistoryCache _session_history;     ///< session history cache
         HistoryCache _transaction_history; ///< transaction history cache
         HistoryCache _statement_history;   ///< statement history cache
@@ -354,7 +370,8 @@ namespace springtail::pg_proxy {
         /** Map of session id to statement index for replay; maps session id to idx */
         std::unordered_map<uint64_t, uint64_t> _session_replay_map;
 
-        bool _in_error = false;
+        bool _in_error = false;       ///< is the current transaction in error state 'E'
+        bool _in_transaction = false; ///< is the current transaction active: 'T'
 
         /**
          * @brief Lookup a statement in the cache.
@@ -369,8 +386,9 @@ namespace springtail::pg_proxy {
         /**
          * @brief Commit a single statement to the transaction history if no error occurred.
          * @param stmt The statement to commit.
+         * @param session_id The session id of the server session.
          */
-        void _commit_single_stmt(QueryStmtPtr stmt);
+        void _commit_single_stmt(QueryStmtPtr stmt, uint64_t session_id);
 
         /**
          * @brief Commit the transaction; merge with session history.
@@ -398,7 +416,7 @@ namespace springtail::pg_proxy {
          * @brief Get the min replay index across all sessions
          * @return uint64_t min replay index
          */
-        uint64_t _get_replay_idx(void) const {
+        uint64_t _get_min_replay_idx(void) const {
             uint64_t min_idx = UINT64_MAX;
             for (const auto &pair : _session_replay_map) {
                 if (pair.second < min_idx) {
@@ -407,6 +425,18 @@ namespace springtail::pg_proxy {
             }
             return min_idx;
         }
+
+        /**
+         * @brief Get query statements to replay from the statement history based on last replay index
+         * Also increments the session replay index to current max replay idx returned.
+         * @param session_id The session id
+         * @param read_only If true, only return read-only statements (for replica replay)
+         * @param session_history If true, include session history, if false include transaction history
+         * @return vector of QueryStmtPtr to replay
+         */
+        std::vector<QueryStmtPtr> _get_replay_history(
+            uint64_t session_id, bool read_only,
+            bool session_history=true);
     };
 
 } // namespace springtail::pg_proxy

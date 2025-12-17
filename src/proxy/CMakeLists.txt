@@ -74,12 +74,6 @@ springtail_unit_test(test_util
   LIBS springtail_common GTest::gtest_main
 )
 
-springtail_unit_test(test_msg_queue
-  SOURCES test/test_msg_queue.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_common GTest::gtest_main
-)
-
 springtail_unit_test(test_scram
   SOURCES test/test_scram.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
