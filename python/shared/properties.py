@@ -24,6 +24,7 @@ class Properties:
     DB_USER_ROLE_REPLICATION = "replication"
     DB_USER_ROLE_PROXY = "proxy_to_fdw"
     DB_USER_ROLE_FDW = "fdw_superuser"
+    DB_USER_ROLE_DATABASE = "database"
 
     def __init__(self, config_file=None, load_redis=False) -> None:
         """Initialize the properties object."""
@@ -151,7 +152,7 @@ class Properties:
         result = {}
 
         for user in user_json:
-            if self.DB_USER_ROLE_FDW == user['role'] or self.DB_USER_ROLE_REPLICATION == user['role'] or self.DB_USER_ROLE_PROXY == user['role']:
+            if user['role'] in [self.DB_USER_ROLE_FDW, self.DB_USER_ROLE_REPLICATION, self.DB_USER_ROLE_PROXY, self.DB_USER_ROLE_DATABASE]:
                 result[user['role']] = (user['username'], user['password'])
 
         if not result[self.DB_USER_ROLE_REPLICATION]:

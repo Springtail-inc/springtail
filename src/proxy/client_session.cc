@@ -56,7 +56,7 @@ namespace springtail::pg_proxy {
 
                 // handle any pending notifications
                 // NOTE: notifications may not be processed right away if we are not in READY state or
-                // in the midst of a transaction (_in_transaction is true).
+                // in the midst of a transaction.
                 // So we process any data in the hopes that we will complete the transaction after that
                 // we then check again (at end of loop) to see if we can handle remaining notifications.
                 _process_notifications();
@@ -267,7 +267,7 @@ namespace springtail::pg_proxy {
             return true;
         }
 
-        if (_state != State::READY || _in_transaction) {
+        if (_state != State::READY || _stmt_cache.in_transaction()) {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1,
                       "[C:{}] Client session not ready yet, queuing failover ready notification", _id);
 
@@ -450,10 +450,10 @@ namespace springtail::pg_proxy {
 
 
     void
-    ClientSession::server_msg_response(SessionMsgPtr msg, bool success)
+    ClientSession::server_msg_response(SessionMsgPtr msg, uint64_t session_id, bool success)
     {
         // update statement cache with msg completion
-        _stmt_cache.commit_statement(msg->data(), msg->completed(), success);
+        _stmt_cache.commit_statement(msg->data(), msg->completed(), session_id, success);
     }
 
 
@@ -463,24 +463,48 @@ namespace springtail::pg_proxy {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Client session got ready from server session: status={}",
                     _id, xact_status);
 
-        // check if we are in/still in a transaction
-        if (xact_status == 'I') {
-            _in_transaction = false;
+        // update transaction status in statement cache, it tracks it internally
+        _stmt_cache.sync_transaction(xact_status);
 
-            // clear associated session
+        if (!_stmt_cache.in_transaction()) {
+            // replay any pending state to other server sessions
+            _replay_pending_state();
+
+            // clear associated session if we are not in a transaction
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Clearing associate server session", _id);
             clear_associated_session();
-        } else {
-            CHECK(xact_status == 'E' || xact_status == 'T');
-            // either 'E' or 'T' -- error requiring rollback or in transaction.
-            // could track transaction error state and avoid server round trips
-            // until we get a rollback...
-            _in_transaction = true;
         }
-
-        _stmt_cache.sync_transaction(xact_status);
     }
 
+    void
+    ClientSession::_replay_pending_state()
+    {
+        // determine which server session to replay msgs to (other than associated session)
+        ServerSessionPtr session = nullptr;
+        if (_primary_session != nullptr && _primary_session != get_associated_session()) {
+            session = _primary_session;
+        } else if (_replica_session != nullptr && _replica_session != get_associated_session()) {
+            session = _replica_session;
+        }
+
+        if (session == nullptr) {
+            // no other session to replay to
+            return;
+        }
+
+        // generate set of dependency messages and queue them to the server session
+        std::deque<SessionMsgPtr> msg_queue;
+        _add_dependencies(msg_queue, session, false);
+
+        if (msg_queue.empty()) {
+            // nothing to replay; common case
+            return;
+        }
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Replaying pending state to other server session (S:{})", _id, session->id());
+
+        session->queue_msg_batch(std::move(msg_queue));
+    }
 
     void
     ClientSession::server_shutdown(ServerSessionPtr session, bool fatal)
@@ -513,23 +537,37 @@ namespace springtail::pg_proxy {
 
         DCHECK_EQ(_replica_session, session);
         _replica_session = nullptr;
+        clear_associated_session();
 
         if (fatal) {
-            clear_associated_session();
-
             _state = State::ERROR;
             return;
         }
 
-        if (_in_transaction && get_associated_session() == session) {
+        // if we are in a transaction and this is the associated session
+        // and the replica failed, then failover to the primary session
+        // and switch to primary mode
+        // XXX in future could try and failover to another replica via server selection
+        if (_stmt_cache.in_transaction() && get_associated_session() == session) {
             // replica going away during a transaction and it is the associated session
             LOG_ERROR("[C:{}] Replica session shut down during transaction, cannot failover", _id);
-            clear_associated_session();
 
             // there was authorization error in a replica session, switching to primary session
             _primary_mode = true;
             set_associated_session(_primary_session);
-            _primary_session->transfer_batch_queue(session);
+
+            // transfer any pending batch messages to primary session
+            // start with any dependencies
+            std::deque<SessionMsgPtr> msg_queue;
+            _add_dependencies(msg_queue, _primary_session, true);
+            _primary_session->queue_msg_batch(std::move(msg_queue));
+
+            // then try to transfer the batch queue, if there is any issue fail
+            if (!_primary_session->transfer_batch_queue(session)) {
+                LOG_ERROR("[C:{}] Failed to transfer batch queue to primary session during failover", _id);
+                _state = State::ERROR;
+            }
+
             return;
         }
 
@@ -674,13 +712,13 @@ namespace springtail::pg_proxy {
                 // forward message bypassing the batch queue
                 DCHECK(_msg_queue.empty());
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Forwarding to server: code={}, len={}", _id, code, len);
-                session->process_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer, seq_id));
+                session->forward_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer, seq_id));
                 break;
             }
 
             case 'H':   // flush (extended protocol)
                 LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Forwarding to server: code={}, len={}", _id, code, len);
-                _queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer, seq_id));
+                _queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FLUSH, buffer, seq_id));
                 break;
 
             default:
@@ -691,6 +729,63 @@ namespace springtail::pg_proxy {
 
         // go through msg queue and send batch to server
         _send_msg_queue();
+    }
+
+    void
+    ClientSession::_add_dependencies(std::deque<SessionMsgPtr> &msg_queue,
+                                     ServerSessionPtr server_session,
+                                     bool replay_transaction_history)
+    {
+        // add any dependencies for the message; get replay history from statement cache
+        // start with session state and add transaction history if needed
+        auto is_read_only = server_session->type() == Type::REPLICA;
+        auto session_id = server_session->id();
+        auto replay_stmts = _stmt_cache.get_session_history(session_id, is_read_only);
+
+        if (replay_stmts.empty() && !replay_transaction_history) {
+            // no dependencies to add; common case
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] No dependencies to add for server session [S:{}]", _id, session_id);
+            return;
+        }
+
+        SessionMsgPtr msg{nullptr};
+        uint64_t seq_id;
+        if (msg_queue.empty()) {
+            seq_id = _gen_seq_id();
+        } else {
+            seq_id = msg_queue.front()->seq_id();
+        }
+
+        if (!replay_stmts.empty()) {
+            msg = std::make_shared<SessionMsg>(SessionMsg::Type::MSG_CLIENT_SERVER_STATE_REPLAY, seq_id);
+            msg->set_dependencies(std::move(replay_stmts));
+        }
+
+        if (replay_transaction_history) {
+            // add any transaction history statements to back of dependencies
+            auto tx_stmts = _stmt_cache.get_transaction_history(session_id, is_read_only);
+            if (!tx_stmts.empty()) {
+                if (msg == nullptr) {
+                    msg = std::make_shared<SessionMsg>(SessionMsg::Type::MSG_CLIENT_SERVER_STATE_REPLAY, seq_id);
+                }
+                msg->add_dependencies(std::move(tx_stmts));
+            }
+        }
+
+        if (msg == nullptr) {
+            // no dependencies to add
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] No dependencies to add for server session [S:{}]", _id, session_id);
+            return;
+        }
+
+        // XXX debugging
+        auto qs_deps = msg->qs_dependencies();
+        for (const auto& qs : qs_deps) {
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Query dependency: {}", _id, qs->to_string());
+        }
+
+        // add message to front of queue
+        msg_queue.push_front(msg);
     }
 
     void
@@ -713,23 +808,36 @@ namespace springtail::pg_proxy {
             }
         }
 
+        // This logic selects which server session(s) to send the message batch to
+        // based on shadow mode and read-safe status.
+        // Steps:
+        // 1. Select the server session(s) to send to
+        //    a. If the server hasn't been connected yet, create the session
+        // 2. Add any dependencies to the first message in the batch
+        // 3. Queue the message batch to the selected server session(s)
+
         ServerSessionPtr server_session;
         uint64_t seq_id = _msg_queue.front()->seq_id();
 
+        bool replay_transaction_history = false;
+
         // not in shadow mode or not readonly, send to single server
+        // this is the normal case path
         if (!_shadow_mode || !is_read_safe) {
             // select a server session and notify it of this message
-            server_session = _select_session(is_read_safe ? Type::REPLICA : Type::PRIMARY, seq_id);
+            server_session = _select_session(is_read_safe ? Type::REPLICA : Type::PRIMARY, seq_id, replay_transaction_history);
+            _add_dependencies(_msg_queue, server_session, replay_transaction_history);
             server_session->queue_msg_batch(std::move(_msg_queue));
             _msg_queue.clear();
             return;
         }
 
+        // --- SHADOW MODE RO path ---
         // both shadow mode and readonly; we send to both primary and replica
         CHECK(_shadow_mode && is_read_safe);
 
         // make sure to send to primary first; so get PRIMARY session
-        server_session = _select_session(Type::PRIMARY, seq_id);
+        server_session = _select_session(Type::PRIMARY, seq_id, replay_transaction_history);
 
         // clone the message queue
         std::deque<SessionMsgPtr> clone_queue;
@@ -737,6 +845,8 @@ namespace springtail::pg_proxy {
             clone_queue.push_back(msg->clone());
         }
 
+        // add dependencies to original messages
+        _add_dependencies(_msg_queue, server_session, false);
         server_session->queue_msg_batch(std::move(_msg_queue));
         _msg_queue.clear();
 
@@ -752,6 +862,8 @@ namespace springtail::pg_proxy {
         }
 
         DCHECK(server_session != nullptr);
+        // add dependencies to cloned messages for replica session
+        _add_dependencies(clone_queue, server_session, false);
         server_session->queue_msg_batch(std::move(clone_queue));
 
         return;
@@ -764,7 +876,7 @@ namespace springtail::pg_proxy {
         // instead clients should use a prepared statement
 
         // send to primary server session
-        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::FUNCTION, buffer, false);
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::Type::FUNCTION, buffer, false);
 
         SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FUNCTION, qs, seq_id);
 
@@ -795,16 +907,8 @@ namespace springtail::pg_proxy {
         QueryStmtPtr query_stmt = std::make_shared<QueryStmt>(QueryStmt::Type::PREPARE, buffer, is_read_safe, stmt.data());
         query_stmt->extended_type = qs_type;
 
-        // cache the parse packet for the server session
-        if (!_in_transaction) {
-            // not in a transaction, clear the cache
-            _stmt_cache.clear_statement();
-            _in_transaction = true; // implicit transaction
-        }
-        _stmt_cache.add(query_stmt);
-
         // create the server message
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_PARSE, query_stmt, seq_id);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXTENDED, query_stmt, seq_id);
 
         // select a server session and queue message
         _queue_msg(msg);
@@ -827,21 +931,13 @@ namespace springtail::pg_proxy {
         QueryStmtPtr prepared_stmt = lookup_result.first;
         if (prepared_stmt == nullptr) {
             LOG_ERROR("Prepared statement not found: {}", stmt);
-            throw ProxyMessagePreparedError();
+            DCHECK(false) << "Prepared statement not found";
         }
 
-        // cache the bind packet for the server session
-        if (!_in_transaction) {
-            // not in a transaction, clear the cache
-            _stmt_cache.clear_statement();
-            _in_transaction = true; // implicit transaction
-        }
-
-        QueryStmtPtr qs = _stmt_cache.add(QueryStmt::DECLARE, buffer, prepared_stmt->is_read_safe, portal.data());
-        // qs->dependency = prepared_stmt;
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::Type::DECLARE, buffer, prepared_stmt->is_read_safe, portal.data());
 
         // create message with dependencies/provides
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_BIND, qs, seq_id);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXTENDED, qs, seq_id);
 
         // queue message to server session
         _queue_msg(msg);
@@ -871,25 +967,13 @@ namespace springtail::pg_proxy {
         QueryStmtPtr query_stmt = lookup_result.first;
         if (query_stmt == nullptr) {
             LOG_ERROR("Statement not found: {}", name);
-            throw ProxyMessagePreparedError();
+            DCHECK(false) << "Describe statement not found";
         }
 
-        // cache the describe packet for the transaction
-        if (!_in_transaction) {
-            // not in a transaction, clear the cache
-            _stmt_cache.clear_statement();
-            _in_transaction = true; // implicit transaction
-        }
-
-        QueryStmtPtr qs = _stmt_cache.add(QueryStmt::DESCRIBE, buffer, query_stmt->is_read_safe);
-        qs->dependency = query_stmt;
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::Type::DESCRIBE, buffer, query_stmt->is_read_safe);
 
         // create message with dependencies/provides
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_DESCRIBE, qs, seq_id);
-        if (!lookup_result.second) {
-            // add dependency if not in current transaction
-            msg->add_dependency(query_stmt);
-        }
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXTENDED, qs, seq_id);
 
         // queue message to server session
         _queue_msg(msg);
@@ -905,38 +989,19 @@ namespace springtail::pg_proxy {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Execute request: name={}", _id, name);
 
         // find the dependency
-        QueryStmt::Type qs_type = QueryStmt::ANONYMOUS;
+        QueryStmt::Type qs_type = QueryStmt::Type::ANONYMOUS;
 
         std::pair<QueryStmtPtr, bool> lookup_result = _stmt_cache.lookup_portal(name);
         QueryStmtPtr query_stmt = lookup_result.first;
-        if (query_stmt != nullptr) {
-            // found the portal statement, trace it back looking
-            // for a prepare (PARSE) statement to determine the
-            // real type of the query
-            QueryStmtPtr dep_stmt = query_stmt;
-            while (dep_stmt->dependency != nullptr) {
-                dep_stmt = dep_stmt->dependency;
-            }
-            if (dep_stmt != query_stmt &&
-                dep_stmt->type == QueryStmt::PREPARE &&
-                dep_stmt->extended_type != QueryStmt::NONE) {
-                qs_type = dep_stmt->extended_type;
-            }
-        } else {
+        if (query_stmt == nullptr) {
             LOG_ERROR("Portal not found: {}", name);
+            DCHECK(false) << "Portal not found";
         }
 
-        // cache the execute packet for the transaction
-        if (!_in_transaction) {
-            // not in a transaction, clear the cache
-            _stmt_cache.clear_statement();
-            _in_transaction = true; // implicit transaction
-        }
-
-        QueryStmtPtr qs = _stmt_cache.add(qs_type, buffer, query_stmt->is_read_safe);
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(qs_type, buffer, query_stmt->is_read_safe);
 
         // create message with dependencies/provides
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXECUTE, qs, seq_id);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXTENDED, qs, seq_id);
 
         // select a server session and notify it of this message
         _queue_msg(msg);
@@ -954,13 +1019,6 @@ namespace springtail::pg_proxy {
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Close request: type={}, name={}", _id, stmt_type, name);
 
-        // cache the close packet for the transaction
-        if (!_in_transaction) {
-            // not in a transaction, clear the cache
-            _stmt_cache.clear_statement();
-            _in_transaction = true; // implicit transaction
-        }
-
         QueryStmtPtr dep_stmt = nullptr;
         QueryStmtPtr qs;
 
@@ -972,29 +1030,24 @@ namespace springtail::pg_proxy {
                 throw ProxyMessagePreparedError();
             }
 
-            qs = _stmt_cache.add(QueryStmt::DEALLOCATE, buffer, dep_stmt->is_read_safe, name.data());
+            qs = std::make_shared<QueryStmt>(QueryStmt::Type::DEALLOCATE, buffer, dep_stmt->is_read_safe, name.data());
         } else {
             std::tie(dep_stmt, std::ignore) = _stmt_cache.lookup_portal(name);
-            qs = _stmt_cache.add(QueryStmt::CLOSE, buffer, dep_stmt->is_read_safe, name.data());
+            qs = std::make_shared<QueryStmt>(QueryStmt::Type::CLOSE, buffer, dep_stmt->is_read_safe, name.data());
         }
 
         // create message with dependencies/provides
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_CLOSE, qs, seq_id);
-        if (dep_stmt != nullptr) {
-            msg->add_dependency(dep_stmt);
-        }
-
-        // notify server session
-        _queue_msg(msg);
+        _queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXTENDED, qs, seq_id));
     }
 
     void
     ClientSession::_handle_sync(BufferPtr buffer, uint64_t seq_id)
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Sync request", _id);
-        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::SYNC, buffer, true);
 
-        _queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, qs, seq_id));
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::Type::SYNC, buffer, true);
+
+        _queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXTENDED, qs, seq_id));
     }
 
     void
@@ -1004,30 +1057,18 @@ namespace springtail::pg_proxy {
 
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Simple Query: {}", _id, query);
 
-        // parse the query and determine if it is a read or write query
-        if (!_in_transaction) {
-            // not in a transaction, clear the cache
-            _stmt_cache.clear_statement();
-            _in_transaction = true; // implicit transaction
-        }
-
-        // select a server session and notify it of this message
-        // if no server is available a new server session will be connected
-        // and this message will be delayed until after the session is ready
-        std::vector<QueryStmtPtr> dependencies;
+        // parse the simple query; the individual statements will be stored in
+        // the query stmt as children.  The individual statements will be cached
+        // in the statement cache when the message is processed.
         QueryStmtPtr qs = parse_simple_query(_db_id, buffer, query);
 
-        // create message for server for query
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, qs, seq_id);
-        msg->set_dependencies(std::move(dependencies));
-
-        // select session and queue msg
-        _queue_msg(msg);
+        // create message for server for query and queue it
+        _queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, qs, seq_id));
     }
 
 
     ServerSessionPtr
-    ClientSession::_select_session(Session::Type type, uint64_t seq_id)
+    ClientSession::_select_session(Session::Type type, uint64_t seq_id, bool &replay_transaction_history)
     {
         LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "[C:{}] Selecting server session: type={}", _id, type == Type::PRIMARY ? "PRIMARY" : "REPLICA");
 
@@ -1040,11 +1081,27 @@ namespace springtail::pg_proxy {
             type = Type::PRIMARY;
         }
 
+        replay_transaction_history = false;
+
         // if we have an associated session use it (typically in a transaction)
         if (get_associated_session() != nullptr) {
             if (type == Type::PRIMARY && type != associated_session_type()) {
-                // TODO: handle change of associated session type
+                // Handle change of associated session type
+                // Need to:
+                // 1. Clear associated session
+                // 2. Set associated session to primary session
+                // 3. End transaction on replica session if in transaction
+                // 4. Find transaction level statements for replay
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Changing associated session to PRIMARY", _id);
+                clear_associated_session();
+                set_associated_session(_primary_session);
+
+                // XXX in transaction, need to end transaction on replica
+
+                // mark for transaction replay
+                replay_transaction_history = true;
             }
+
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Using associated session: id={}", _id, session->id());
             return session;
@@ -1184,86 +1241,86 @@ namespace springtail::pg_proxy {
         switch(context->type) {
             // statements explicitly tracked in session history
             case Parser::StmtContext::Type::PREPARE_STMT:
-                return QueryStmt::PREPARE;
+                return QueryStmt::Type::PREPARE;
 
             case Parser::StmtContext::Type::DECLARE_STMT:
                 if (context->has_declare_hold) {
-                    return QueryStmt::DECLARE_HOLD;
+                    return QueryStmt::Type::DECLARE_HOLD;
                 } else {
-                    return QueryStmt::DECLARE;
+                    return QueryStmt::Type::DECLARE;
                 }
 
             case Parser::StmtContext::Type::DISCARD_ALL_STMT:
-                return QueryStmt::DISCARD_ALL;
+                return QueryStmt::Type::DISCARD_ALL;
 
             case Parser::StmtContext::Type::DISCARD_STMT:
-                return QueryStmt::DISCARD;
+                return QueryStmt::Type::DISCARD;
 
             case Parser::StmtContext::Type::VAR_SET_STMT:
                 if (context->has_is_local) {
-                    return QueryStmt::SET_LOCAL;
+                    return QueryStmt::Type::SET_LOCAL;
                 } else {
-                    return QueryStmt::SET;
+                    return QueryStmt::Type::SET;
                 }
 
             case Parser::StmtContext::Type::VAR_RESET_STMT:
                 if (context->name.empty()) {
-                    return QueryStmt::RESET_ALL;
+                    return QueryStmt::Type::RESET_ALL;
                 }
-                return QueryStmt::RESET;
+                return QueryStmt::Type::RESET;
 
             case Parser::StmtContext::Type::FETCH_STMT:
-                return QueryStmt::FETCH;
+                return QueryStmt::Type::FETCH;
 
             case Parser::StmtContext::Type::LISTEN_STMT:
-                return QueryStmt::LISTEN;
+                return QueryStmt::Type::LISTEN;
 
             case Parser::StmtContext::Type::UNLISTEN_STMT:
                 if (context->name.empty()) {
-                    return QueryStmt::UNLISTEN_ALL;
+                    return QueryStmt::Type::UNLISTEN_ALL;
                 }
-                return QueryStmt::UNLISTEN;
+                return QueryStmt::Type::UNLISTEN;
 
             case Parser::StmtContext::Type::SAVEPOINT_STMT:
-                return QueryStmt::SAVEPOINT;
+                return QueryStmt::Type::SAVEPOINT;
 
             case Parser::StmtContext::Type::ROLLBACK_TO_SAVEPOINT_STMT:
-                return QueryStmt::ROLLBACK_TO_SAVEPOINT;
+                return QueryStmt::Type::ROLLBACK_TO_SAVEPOINT;
 
             case Parser::StmtContext::Type::RELEASE_SAVEPOINT_STMT:
-                return QueryStmt::RELEASE_SAVEPOINT;
+                return QueryStmt::Type::RELEASE_SAVEPOINT;
 
             case Parser::StmtContext::Type::TRANSACTION_BEGIN_STMT:
-                return QueryStmt::BEGIN;
+                return QueryStmt::Type::BEGIN;
 
             case Parser::StmtContext::Type::TRANSACTION_COMMIT_STMT:
-                return QueryStmt::COMMIT;
+                return QueryStmt::Type::COMMIT;
 
             case Parser::StmtContext::Type::TRANSACTION_ROLLBACK_STMT:
-                return QueryStmt::ROLLBACK;
+                return QueryStmt::Type::ROLLBACK;
 
             // statements with dependencies
             case Parser::StmtContext::Type::CLOSE_STMT:
                 if (context->name.empty()) {
-                    return QueryStmt::CLOSE_ALL;
+                    return QueryStmt::Type::CLOSE_ALL;
                 } else {
-                    return QueryStmt::CLOSE;
+                    return QueryStmt::Type::CLOSE;
                 }
 
             case Parser::StmtContext::Type::DEALLOCATE_STMT:
                 if (context->name.empty()) {
                     // deallocate all prepared statements
-                    return QueryStmt::DEALLOCATE_ALL;
+                    return QueryStmt::Type::DEALLOCATE_ALL;
                 } else {
-                    return QueryStmt::DEALLOCATE;
+                    return QueryStmt::Type::DEALLOCATE;
                 }
 
             case Parser::StmtContext::Type::EXECUTE_STMT:
-                return QueryStmt::EXECUTE;
+                return QueryStmt::Type::EXECUTE;
 
             // those that have no affect on session history and no dependencies
             default:
-                return QueryStmt::ANONYMOUS;
+                return QueryStmt::Type::ANONYMOUS;
         }
     }
 
@@ -1286,13 +1343,15 @@ namespace springtail::pg_proxy {
         for (auto &context : parse_contexts) {
             QueryStmt::Type stmt_type = _remap_parse_type(context);
             auto p_query = query.substr(context->stmt_location, context->stmt_length);
+
+            // create query statement and add it to the statement cache
             QueryStmtPtr stmt = std::make_shared<QueryStmt>(stmt_type, p_query.data(), context->is_read_safe, context->name.data());
 
             // construct a set of set_config SELECT calls from set_config functions
             if (context->set_config_functions.size() > 0) {
                 for (const auto &set_func : context->set_config_functions) {
                     // construct set_config SELECT statement and add it to the list of calls
-                    QueryStmtPtr set_stmt = std::make_shared<QueryStmt>((set_func->is_local ? QueryStmt::SET_LOCAL : QueryStmt::SET),
+                    QueryStmtPtr set_stmt = std::make_shared<QueryStmt>((set_func->is_local ? QueryStmt::Type::SET_LOCAL : QueryStmt::Type::SET),
                         // XXX might need to escape these, but not sure, might come escaped already
                         std::format("SELECT set_config('{}', '{}', {})",
                                     set_func->name, set_func->value, (set_func->is_local ? "true" : "false")),
@@ -1310,6 +1369,9 @@ namespace springtail::pg_proxy {
                 is_read_safe = false;
             }
         }
+
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "[C:{}] Simple Query parsed, is_read_safe={}, children: {}",
+                  qs->to_string(), is_read_safe, qs->children.size());
 
         qs->is_read_safe = is_read_safe;
         return qs;
