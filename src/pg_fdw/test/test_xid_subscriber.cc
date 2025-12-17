@@ -29,8 +29,8 @@ namespace {
     protected:
         static void SetUpTestSuite() {
             std::string overrides = std::format(
-                "sys_tbl_mgr.roots_shm_cache_size={};sys_tbl_mgr.schema_shm_cache_size={};sys_tbl_mgr.rpc_config.server_worker_threads={}",
-                10*1024, 10*1024, 4);
+                "sys_tbl_mgr.roots_shm_cache_size={};sys_tbl_mgr.schema_shm_cache_size={};sys_tbl_mgr.usertype_shm_cache_size={};sys_tbl_mgr.table_ids_shm_cache_size={};sys_tbl_mgr.extents_shm_cache_size={};sys_tbl_mgr.rpc_config.server_worker_threads={}",
+                10*1024, 10*1024, 10*1024, 10*1024, 10*1024, 4);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
             springtail_init_test(LOG_ALL ^ LOG_STORAGE);
@@ -75,7 +75,7 @@ namespace {
         // wait for PgXidSubscriberMgr to create the cache
         for (size_t i = 0; i != 100; ++i) {
             try {
-                cache = std::make_unique<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
+                cache = std::make_unique<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, true);
                 break;
             } catch (...) {
             }

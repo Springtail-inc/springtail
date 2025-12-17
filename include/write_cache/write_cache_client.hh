@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -10,6 +11,7 @@
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/grpcpp.h>
 #include <proto/write_cache.grpc.pb.h>
+#include <sys_tbl_mgr/shm_cache.hh>
 
 namespace springtail {
 
@@ -134,12 +136,18 @@ public:
      */
     void expire_map(uint64_t db_id, uint64_t tid, uint64_t commit_xid);
 
+    /**
+     * Provide the shared memory cache of extents for this client to use.
+     */
+    void use_extents_cache(std::shared_ptr<sys_tbl_mgr::ShmCache> c);
+
 private:
     WriteCacheClient();
     ~WriteCacheClient() override = default;
 
     std::unique_ptr<proto::WriteCache::Stub> _stub;
     std::shared_ptr<grpc::Channel> _channel;
+    std::atomic<std::shared_ptr<sys_tbl_mgr::ShmCache>> _extents_cache;
 };
 
 }  // namespace springtail

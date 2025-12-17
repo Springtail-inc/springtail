@@ -137,3 +137,9 @@ springtail_unit_test(test_time_trace
   INCLUDES ${PROJECT_SOURCE_DIR}/include
   LIBS springtail_common GTest::gtest_main
 )
+
+springtail_unit_test(test_sorted_merge
+  SOURCES test/test_sorted_merge.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS GTest::gtest_main
+)

@@ -28,6 +28,8 @@ namespace ipc = boost::interprocess;
 static constexpr char SHM_CACHE_ROOTS[] = "springtail.roots";
 static constexpr char SHM_CACHE_SCHEMAS[] = "springtail.schemas";
 static constexpr char SHM_CACHE_USERTYPES[] = "springtail.usertypes";
+static constexpr char SHM_CACHE_TABLE_IDS[] = "springtail.table_ids";
+static constexpr char SHM_CACHE_EXTENTS[] = "springtail.extents";
 
 /**
  * Find XID from history using schema XID as the key.
@@ -113,15 +115,19 @@ public:
      * the name already exists, it will throw.
      * @param name The global cache name.
      * @param size The cache size in bytes.
+     * @param enable_xid_history If true, enable XID history. If disabled, update_committed_xid(),
+     *        get_committed_xid() will have undefined behavior.
      */
 
-    ShmCache(std::string name, size_t size);
+    ShmCache(std::string name, size_t size, bool enable_xid_history);
     /*
      * Open a cache with the give name. If the cache hasn't been created,
      * it will throw.
      * @param name The global cache name.
+     * @param enable_xid_history If true, enable XID history. If disabled, update_committed_xid(),
+     *        get_committed_xid() will have undefined behavior.
      */
-    explicit ShmCache(std::string name);
+    explicit ShmCache(std::string name, bool enable_xid_history);
 
     ~ShmCache();
 
@@ -216,7 +222,7 @@ public:
      * @param xid The XID.
      * @param has_schema_changes Indicates if the XID includes schema changes. 
      */
-    void update_committed_xid(DbId db, Xid xid, bool has_schema_changes);
+    void update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool real_commit);
 
     /** 
      * Cleanup committed history of schema changes
@@ -248,6 +254,15 @@ public:
      */
     std::optional<Xid> get_committed_xid(DbId db, Xid schema_xid);
 
+    /**
+     * Return all pending XIDs that are greater than last_committed_xid.
+     * @param db The DB ID.
+     * @param last_committed_xid The last committed XID.
+     */
+    std::vector<Xid> get_pending_xids(DbId db, Xid last_committed_xid);
+
+    /** Reset pending XIDs for a DB. */
+    void reset_pending_xids(DbId db);
 
     /**
      * Return all objects that are tracked by the cache.
@@ -295,6 +310,7 @@ private:
     using CacheContainer = GenericCache::Cache;
 
     std::string _name;
+    bool _enable_xid_history;
     bool _created;
     ipc::managed_shared_memory _shm;
     Mutex _mutex;
@@ -310,9 +326,24 @@ private:
 
     // Xid updates
     using Time = std::chrono::time_point<std::chrono::high_resolution_clock>;
-    using XidMap = ipc::map<DbId, Xid, std::less<DbId>, Alloc<std::pair<const DbId, Xid>>>;
+
+    using XidVector = ipc::vector<Xid, Alloc<Xid>>;
+    struct XidRecord {
+        // The last real committed XID.
+        Xid committed_xid;
+
+        // A list of pending (not real commit) XIDs after
+        // the last committed_xid.
+        // The mutations are still in the write cache.
+        XidVector pending_xid;
+
+        // Indicates whether to record pending XIDs or ignore them.
+        bool record_pending = true;
+    };
+    using XidMap = ipc::map<DbId, XidRecord, std::less<DbId>, Alloc<std::pair<const DbId, XidRecord>>>;
     Time* _xid_commit_time;
     XidMap* _committed_xid_map;
+    Alloc<Xid> _xid_vector_alloc;
 
     struct XidHistoryEntry {
         Xid schema_xid;

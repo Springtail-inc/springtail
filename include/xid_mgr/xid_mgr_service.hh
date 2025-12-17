@@ -40,14 +40,21 @@ namespace xid_mgr {
          *
          * @param db_id - database id
          * @param xid - transaction id
+         * @param has_schema_changes - whether transaction has schema changes
+         * @param real_commit - whether this is a real commit
+         * @param table_ids - list of table IDs mutated in the transaction
          */
         void
-        notify_subscriber(uint64_t db_id, uint64_t xid, bool has_schema_changes)
+        notify_subscriber(uint64_t db_id, uint64_t xid, bool has_schema_changes, bool real_commit, const std::vector<uint64_t>& table_ids = {})
         {
             proto::XidPushResponse msg;
             msg.set_db_id(db_id);
             msg.set_xid(xid);
             msg.set_has_schema_changes(has_schema_changes);
+            msg.set_real_commit(real_commit);
+            for (auto tid : table_ids) {
+                msg.add_table_ids(tid);
+            }
             _notification_thread->notify(msg);
         }
 

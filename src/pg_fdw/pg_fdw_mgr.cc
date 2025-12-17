@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <stdlib.h>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <sstream>
 
@@ -60,6 +61,9 @@ extern "C" {
 }
 
 namespace springtail::pg_fdw {
+    // max number of extents to fetch from write cache
+    constexpr size_t MAX_WRITE_CACHE_EXTENTS = 10;
+
     using springtail::Index;
 
     static std::string
@@ -412,7 +416,7 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
+        auto [table, _] = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
 
         // Get stats for row count
         *rows = table->get_stats().row_count;
@@ -476,9 +480,9 @@ namespace springtail::pg_fdw {
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
 
-        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
+        auto [table, changeset] = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, true);
 
-        std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
+        std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, *changeset, tr.db_id, tr.tid, tr.xid);
 
         // fetch stats from state for row count
         *rows = state->stats.row_count;
@@ -547,8 +551,9 @@ namespace springtail::pg_fdw {
         // NOTE: first call to XidMgrClient needs to be done on the main thread to prevent occasional
         //      deadlock during shutdown for short-lived FDW processes.
         (void)XidMgrClient::get_instance();
-        // NOTE: the same for RedisDDL
+        // NOTE: the same for RedisDDL and WriteCacheClient
         (void)RedisDDL::get_instance();
+        (void)WriteCacheClient::get_instance();
         start_thread();
         LOG_INFO("FDW process finished initialization");
     }
@@ -597,9 +602,9 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_update_last_xid(uint64_t schema_xid)
     {
         {
-            std::unique_lock<std::shared_mutex> lock(_rc_mutex);
-            if (_roots_cache) {
-                auto cached_xid = _roots_cache->get_committed_xid(_db_id, schema_xid);
+            std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
+            if (_roots_shm_cache) {
+                auto cached_xid = _roots_shm_cache->get_committed_xid(_db_id, schema_xid);
                 if (cached_xid.has_value()) {
                     LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Use cached xid = {}", *cached_xid);
                     return *cached_xid;
@@ -610,6 +615,99 @@ namespace springtail::pg_fdw {
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
         LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "XidMgrClient returned xid = {}", xid);
         return xid;
+    }
+
+    std::pair<TablePtr, std::optional<ChangeSet>> 
+    PgFdwMgr::_get_table(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid,
+            const ExtensionCallback& extension_callback, bool enable_write_cache_lookup)
+    {
+        auto table = TableMgrClient::get_instance()->get_table(db_id, tid, xid, extension_callback);
+        if (!enable_write_cache_lookup) {
+            return {table, std::nullopt};
+        }
+
+        ChangeSet changes;
+
+
+        //now collect xid that have mutations for this table
+        //note: if any of the operations fail, we just return the base table
+        std::vector<uint64_t> xids_with_mutations;
+
+        {
+            std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
+            if (!_table_ids_shm_cache) {
+                return {table, changes};
+            }
+
+            // check for pending mutations cache first
+            // The table ids cache keeps track of recorded xid's too
+
+            auto pending_xids = _table_ids_shm_cache->get_pending_xids(db_id, xid);
+            if (pending_xids.empty()) {
+                return {table, changes};
+            }
+
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found pending mutations: db={}, xid = {}, xids={}",
+                    db_id, xid, pending_xids.size());   
+
+            for (auto pxid : pending_xids) {
+                auto msg = _table_ids_shm_cache->find(db_id, 0, pxid);
+                if (!msg.has_value()) {
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Missing XidPushResponse for pending xid: {}", pxid);
+                    return {table, changes};
+                }
+                proto::XidPushResponse r;
+                if (!r.ParseFromString(*msg)) {
+                    LOG_ERROR("Failed to parse XidPushResponse for xid: {}", pxid);
+                    return {table, changes};
+                }
+                if (std::ranges::find(r.table_ids(), tid) != r.table_ids().end()) {
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Pending mutation found for table id: {}, xid: {}", tid, pxid);
+                    xids_with_mutations.push_back(pxid);
+                }
+            }
+
+            DCHECK(std::is_sorted(xids_with_mutations.begin(), xids_with_mutations.end())); 
+        }
+
+        for (auto pxid : xids_with_mutations) {
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Applying pending table mutations for xid = {}", pxid); 
+
+            uint64_t extent_cursor = 0;
+            PostgresTimestamp ts;
+
+            auto extent_list = WriteCacheClient::get_instance()->get_extents(db_id, tid, pxid, MAX_WRITE_CACHE_EXTENTS, extent_cursor, ts);
+            if (extent_list.size() == MAX_WRITE_CACHE_EXTENTS) {
+                LOG_WARN("Too many extents in WriteCache for tid={}, xid = {}", tid, pxid); 
+                // reset pending xids to avoid repeatedly hitting this condition
+                _table_ids_shm_cache->reset_pending_xids(db_id);
+                // return base table without mutations
+                return {table, changes};
+            }
+
+            if (extent_list.empty()) {
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "No extents found tid={}, xid = {}", tid, pxid); 
+                continue;
+            }
+
+            for (auto &wc_extent : extent_list) {
+                DCHECK_EQ(wc_extent.xid, pxid);
+
+                Extent pe = Extent(
+                        ExtentType{false}, wc_extent.xid, 
+                        table->extent_schema()->row_size(),
+                        table->extent_schema()->field_types());
+
+                //TODO: optimize to avoid copy by using the data directly from shared memory
+                pe.deserialize(wc_extent.data);
+                changes.push_back(std::move(pe));
+            }
+
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Extents fetched from WriteCache: xid={}, extents={}", pxid, extent_list.size());
+        }
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Total transactions to apply: {}", changes.size());
+
+        return {table, std::move(changes)};
     }
 
     // called from the PG exit callback
@@ -642,12 +740,12 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::_try_create_cache()
     {
-        std::unique_lock<std::shared_mutex> lock(_rc_mutex);
+        std::unique_lock<std::shared_mutex> lock(_shm_cache_mutex);
 
         //helper to create cache
-        auto create_cache = [](auto name) -> std::shared_ptr<sys_tbl_mgr::ShmCache> {
+        auto create_cache = [](auto name, bool enable_xid_history) -> std::shared_ptr<sys_tbl_mgr::ShmCache> {
             try {
-                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(name);
+                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(name, enable_xid_history);
                 return cache;
             } catch (const boost::interprocess::bad_alloc&) {
                 // the cache hasn't been created
@@ -660,16 +758,16 @@ namespace springtail::pg_fdw {
             return nullptr;
         };
 
-        if (!_roots_cache || !_roots_cache->is_alive()) {
-            _roots_cache = create_cache(sys_tbl_mgr::SHM_CACHE_ROOTS);
-            if (_roots_cache) {
+        if (!_roots_shm_cache || !_roots_shm_cache->is_alive()) {
+            _roots_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_ROOTS, true);
+            if (_roots_shm_cache) {
                 // start using the new cache
-                sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
+                sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_shm_cache);
             }
         }
 
         if (!_schema_shm_cache || !_schema_shm_cache->is_alive()) {
-            _schema_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_SCHEMAS);
+            _schema_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_SCHEMAS, false);
             if (_schema_shm_cache) {
                 // start using the new cache
                 sys_tbl_mgr::Client::get_instance()->use_schema_cache(_schema_shm_cache);
@@ -677,11 +775,22 @@ namespace springtail::pg_fdw {
         }
 
         if (!_usertype_shm_cache || !_usertype_shm_cache->is_alive()) {
-            _usertype_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_USERTYPES);
+            _usertype_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_USERTYPES, false);
             if (_usertype_shm_cache) {
                 // start using the new cache
                 sys_tbl_mgr::Client::get_instance()->use_usertype_cache(_usertype_shm_cache);
             }
+        }
+
+        if (!_extents_shm_cache || !_extents_shm_cache->is_alive()) {
+            _extents_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_EXTENTS, false);
+            if (_extents_shm_cache) {
+                WriteCacheClient::get_instance()->use_extents_cache(_extents_shm_cache);
+            }
+        }
+
+        if (!_table_ids_shm_cache || !_table_ids_shm_cache->is_alive()) {
+            _table_ids_shm_cache = create_cache(sys_tbl_mgr::SHM_CACHE_TABLE_IDS, true);
         }
     }
 
@@ -717,7 +826,6 @@ namespace springtail::pg_fdw {
             rd_lock.unlock();
 
             xid = _update_last_xid(schema_xid);
-
             std::unique_lock<std::shared_mutex> lock(_mutex);
             _trans_pg_xid = pg_xid;
             _trans_xid = xid;
@@ -750,7 +858,7 @@ namespace springtail::pg_fdw {
         // by the PG executor. fdw_private() return the List pointer
         // that we can pass around FDW callbacks as a collection of
         // our private data.
-        SpringtailPlanState ps{db_id, tid, xid};
+        SpringtailPlanState ps{db_id, tid, xid, schema_xid};
         return ps.fdw_private();
     }
 
@@ -849,18 +957,18 @@ namespace springtail::pg_fdw {
         // set target columns; will contain filtered qual columns as well
         if (!target_colnames.empty() && state->index.has_value() && state->index->id != constant::INDEX_PRIMARY) {
             // check if all target columns are part of the index
-            auto index_colnames = state->table->get_index_column_names(state->index->id);
+            auto index_colnames = state->table()->get_index_column_names(state->index->id);
             if (std::ranges::all_of(target_colnames, [&index_colnames](const auto& n) ->bool {
                         return std::ranges::find(index_colnames, n) != index_colnames.end();
                         })) {
-                auto ind_schema = state->table->get_index_schema(state->index->id);
+                auto ind_schema = state->table()->get_index_schema(state->index->id);
                 state->fields = ind_schema->get_fields(target_colnames);
                 state->index_only_scan  = true;
             }
         }
 
         if (!state->fields) {
-            state->fields = state->table->extent_schema()->get_fields(target_colnames);
+            state->fields = state->table()->extent_schema()->get_fields(target_colnames);
         }
 
         // set the iterators for the scan taking quals into consideration
@@ -911,8 +1019,8 @@ namespace springtail::pg_fdw {
         if (!state->index.has_value()) {
             LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting up iterators for full table scan: tid={}, ASC={}, quals={}",
                     state->tid, state->scan_asc, state->filtered_quals.size());
-            state->iter_start.emplace(state->table->begin());
-            state->iter_end.emplace(state->table->end());
+            state->iter_start.emplace(state->mtable().begin());
+            state->iter_end.emplace(state->mtable().end());
             return;
         }
 
@@ -920,8 +1028,8 @@ namespace springtail::pg_fdw {
             // Usually the index is defined by sortgroup in this case.
             LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
                     state->tid ,state->index->id, state->scan_asc);
-            state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
-            state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
+            state->iter_start.emplace(state->mtable().begin(state->index->id, state->index_only_scan));
+            state->iter_end.emplace(state->mtable().end(state->index->id, state->index_only_scan));
             return;
         }
 
@@ -937,33 +1045,33 @@ namespace springtail::pg_fdw {
 
         switch (op) {
             case LESS_THAN:
-                state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
-                state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_start.emplace(state->mtable().begin(state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->mtable().lower_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case LESS_THAN_EQUALS:
-                state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
-                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_start.emplace(state->mtable().begin(state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->mtable().upper_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case NOT_EQUALS:
                 if (state->scan_asc) {
-                    state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
-                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
+                    state->iter_start.emplace(state->mtable().begin(state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->mtable().lower_bound(tuple, state->index->id, state->index_only_scan));
                 } else {
-                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
-                    state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
+                    state->iter_start.emplace(state->mtable().upper_bound(tuple, state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->mtable().end(state->index->id, state->index_only_scan));
                 }
                 break;
             case EQUALS:
-                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
-                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_start.emplace(state->mtable().lower_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->mtable().upper_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case GREATER_THAN_EQUALS:
-                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
-                state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
+                state->iter_start.emplace(state->mtable().lower_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->mtable().end(state->index->id, state->index_only_scan));
                 break;
             case GREATER_THAN:
-                state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
-                state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
+                state->iter_start.emplace(state->mtable().upper_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->mtable().end(state->index->id, state->index_only_scan));
                 break;
             case UNSUPPORTED:
                 CHECK(false);
@@ -1105,29 +1213,29 @@ namespace springtail::pg_fdw {
             if (state->scan_asc) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
-                if (state->index.has_value() && state->iter_end != state->table->end(state->index->id, state->index_only_scan)) {
+                if (state->index.has_value() && state->iter_end != state->mtable().end(state->index->id, state->index_only_scan)) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
-                    state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
+                    state->iter_start.emplace(state->mtable().upper_bound(tuple, state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->mtable().end(state->index->id, state->index_only_scan));
                     return false;
-                } else if (!state->index.has_value() && state->iter_end != state->table->end()) {
+                } else if (!state->index.has_value() && state->iter_end != state->mtable().end()) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->upper_bound(tuple));
-                    state->iter_end.emplace(state->table->end());
+                    state->iter_start.emplace(state->mtable().upper_bound(tuple));
+                    state->iter_end.emplace(state->mtable().end());
                     return false;
                 }
             } else {
                 // check if we need to switch iterators for not equals
                 // we start scanning from end -> upper-bound, then switch to lower-bound -> begin
-                if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id, state->index_only_scan)) {
+                if (state->index.has_value() && state->iter_start !=state->mtable().begin(state->index->id, state->index_only_scan)) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
-                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
+                    state->iter_start.emplace(state->mtable().begin(state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->mtable().lower_bound(tuple, state->index->id, state->index_only_scan));
                     return false;
-                } else if (!state->index.has_value() && state->iter_start !=state->table->begin() ) {
+                } else if (!state->index.has_value() && state->iter_start !=state->mtable().begin() ) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->begin());
-                    state->iter_end.emplace(state->table->lower_bound(tuple));
+                    state->iter_start.emplace(state->mtable().begin());
+                    state->iter_end.emplace(state->mtable().lower_bound(tuple));
                     return false;
                 }
             }
@@ -1367,7 +1475,7 @@ namespace springtail::pg_fdw {
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
-        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
+        auto [table, _] = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
         auto indexes = table->get_ready_indexes();
 
         // Get cached indexes from planstate
@@ -1394,21 +1502,18 @@ namespace springtail::pg_fdw {
                 }
             }
 
-            bool in_join_indexes = false;
-            for (size_t i = 0; i < join_indexes.size(); ++i) {
-                if (join_indexes[i] == idx.id) {
-                    in_join_indexes = true;
-                    break;
-                }
-            }
-
-            if (!in_qual_indexes && in_join_indexes) {
-                if (idx.is_unique) {
-                    rows = 1;
-                } else {
-                    rows /= 100;
-                    if (!rows) {
-                        rows = 2;
+            if (!in_qual_indexes) {
+                for (size_t i = 0; i < join_indexes.size(); ++i) {
+                    if (join_indexes[i] == idx.id) {
+                        if (idx.is_unique) {
+                            rows = 1;
+                        } else {
+                            rows /= 100;
+                            if (!rows) {
+                                rows = 2;
+                            }
+                        }
+                        break;
                     }
                 }
             }
@@ -1450,9 +1555,11 @@ namespace springtail::pg_fdw {
 
         // For width calculation, we need the columns. Get them from the table directly.
         SpringtailPlanState::TableRef &&tr = planstate->get_table_ref();
+
         ExtensionContext extension_context = {tr.db_id, tr.xid};
         ExtensionCallback extension_callback = {_comparator_function, extension_context};
-        TablePtr table = TableMgrClient::get_instance()->get_table(tr.db_id, tr.tid, tr.xid, extension_callback);
+        auto [table, _]  = _get_table(tr.db_id, tr.tid, tr.xid, tr.schema_xid, extension_callback, false);
+
         auto columns = table->extent_schema()->get_column_map();
 
         // Build name_map for column name lookup
@@ -2306,8 +2413,8 @@ namespace springtail::pg_fdw {
         return utp;
     }
 
-    PgFdwState::PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid)
-            : table(table), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
+    PgFdwState::PgFdwState(TablePtr table, ChangeSet changeset, uint64_t db_id, uint64_t tid, uint64_t xid)
+            : merge_table(table, std::move(changeset)), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
         // Get columns from cached ExtentSchema instead of RPC
         columns = table->extent_schema()->get_column_map();
