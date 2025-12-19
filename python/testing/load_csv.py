@@ -129,8 +129,7 @@ if __name__ == "__main__":
         check_config(props)
 
         # sync the benchmark data files
-        # Use signed requests to access S3 since we changed to Private buckets
-        helper = AwsHelper(config=None,
+        helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
                            region="us-east-1")
         helper.sync_s3_data('test_data', s3_path='test_files')
 
