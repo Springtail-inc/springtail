@@ -217,7 +217,7 @@ class AwsHelper:
     def sync_s3_data(self,
                      local_dir: str,
                      s3_path: str,
-                     bucket_name: str = 'public-share.springtail.io') -> None:
+                     bucket_name: str = 'public-data-share.springtail.io') -> None:
         """
         Synchronizes the compressed data files from an S3
         bucket/directory to uncompressed files in a local directory.
