@@ -24,6 +24,8 @@ message XidPushResponse {
   int64 db_id = 1;
   int64 xid = 2;
   bool has_schema_changes = 3;
+  bool real_commit = 4;
+  repeated int64 table_ids = 5;
 }
 
 // XID Manager service definition

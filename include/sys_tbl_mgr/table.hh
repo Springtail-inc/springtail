@@ -8,6 +8,7 @@
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
 
+#include <optional>
 #include <thread>
 #include <variant>
 
@@ -430,7 +431,19 @@ namespace indexer_helpers {
             const std::vector<Index> &secondary,
             const TableMetadata &metadata,
             ExtentSchemaPtr schema,
+            std::optional<ExtentSchemaPtr> schema_without_row_id,
             const ExtensionCallback &extension_callback = {});
+
+        Table(uint64_t db_id,
+            uint64_t table_id,
+            uint64_t xid,
+            const std::filesystem::path &table_base,
+            const std::vector<std::string> &primary_key,
+            const std::vector<Index> &secondary,
+            const TableMetadata &metadata,
+            ExtentSchemaPtr schema,
+            const ExtensionCallback &extension_callback = {}) : Table(db_id, table_id, xid, table_base, primary_key,
+                secondary, metadata, schema, std::nullopt, extension_callback) {};
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -506,6 +519,13 @@ namespace indexer_helpers {
          * Get the index schema.
          */
         ExtentSchemaPtr get_index_schema(uint64_t index_id) const;
+
+        /**
+         * Returns the schema of the table without internal_row_id.
+         */     
+        std::optional<ExtentSchemaPtr> get_extent_schema_without_row_id() const {
+            return _schema_without_row_id;
+        }
 
         /**
          * Get the secondary index column names in the order as they appear in the index.
@@ -588,6 +608,13 @@ namespace indexer_helpers {
          */
         void advance_to_xid(uint64_t new_xid, const std::vector<TableRoot> &new_roots);
 
+        /**
+         * Returns the extension callback for this table.
+         */
+        ExtensionCallback get_extension_callback() const {
+            return _extension_callback;
+        }
+
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
@@ -617,6 +644,7 @@ namespace indexer_helpers {
         std::filesystem::path _table_dir; ///< The directory holding the table data.
         std::vector<std::string> _primary_key; ///< The primary index key columns.
         ExtentSchemaPtr _schema; ///< The schema of the data extents for this table.
+        std::optional<ExtentSchemaPtr> _schema_without_row_id; ///< The schema of the data extents for this table without internal_row_id. 
         ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index for this table.
 
         FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
@@ -657,5 +685,50 @@ namespace indexer_helpers {
         }
     };
     typedef std::shared_ptr<Table> TablePtr;
+
+    /**
+     * WriteCache schema information.
+     */
+    struct WcSchemaInfo
+    {
+        WcSchemaInfo() = default;
+
+        /** Constructor.
+         * @param schema The table schema without internal_row_id.
+         * @param extension_callback The extension callback.
+         */
+        WcSchemaInfo(ExtentSchemaPtr schema, const ExtensionCallback& extension_callback) {
+            // Build sort keys with __springtail_lsn
+            auto sort_keys = schema->get_sort_keys();
+            sort_keys.emplace_back("__springtail_lsn");
+
+            // Get column order
+            auto columns = schema->column_order();
+
+            // Create new columns for write cache
+            SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
+            SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
+            std::vector<SchemaColumn> new_columns{op, lsn};
+
+            // Create write cache schema
+            _wc_schema = schema->create_schema(columns, new_columns, sort_keys, extension_callback, true);
+
+            // Get table only fields, and then add internal_row_id for wc_fields
+            _actual_table_fields = _wc_schema->get_fields(columns);
+            columns.push_back(constant::INTERNAL_ROW_ID);
+
+            // Cache field accessors
+            _wc_op_field = _wc_schema->get_field("__springtail_op");
+            _wc_fields = _wc_schema->get_fields(columns);
+            _wc_key_fields = _wc_schema->get_fields(schema->get_sort_keys());
+        }
+
+        ExtentSchemaPtr _wc_schema;           ///< Pre-computed write cache schema with op/lsn columns
+        FieldPtr _wc_op_field;                ///< Field accessor for __springtail_op
+        FieldArrayPtr _wc_fields;             ///< Field accessors for all data columns
+        FieldArrayPtr _actual_table_fields;   ///< Field accessors for all data columns without internal_row_id
+        FieldArrayPtr _wc_key_fields;         ///< Field accessors for primary key columns
+    };
+
 
 } // namespace springtail

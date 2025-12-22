@@ -262,7 +262,7 @@ namespace {
             // don't call create state as it calls xid mgr, just create state
             auto table = TableMgrClient::get_instance()->get_table(_db_id, _tid, _table_xid);
 
-            SpringtailPlanState plan{_db_id, _tid, _table_xid};
+            SpringtailPlanState plan{_db_id, _tid, _table_xid, _table_xid};
 
             for(const auto& [name, attnum]: _target_list) {
                 plan.add_target_column(name, attnum);

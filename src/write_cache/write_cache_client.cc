@@ -73,19 +73,38 @@ WriteCacheClient::get_extents(uint64_t db_id,
                               uint64_t& cursor,
                               PostgresTimestamp& commit_ts)
 {
-    proto::GetExtentsRequest request;
     proto::GetExtentsResponse response;
+    bool found = false;
 
-    request.set_db_id(db_id);
-    request.set_table_id(tid);
-    request.set_xid(xid);
-    request.set_count(count);
-    request.set_cursor(cursor);
+    // Try cache first if starting from beginning
+    auto cache = _extents_cache.load();
+    if (cache && cursor == 0) {
+        auto msg = cache->find(db_id, tid, xid);
+        if (msg) {
+            found = response.ParseFromString(msg.value());
+            DCHECK(found);
+        }
+    }
 
-    grpc_client::retry_rpc("WriteCache", "GetExtents",
-                           [this, &request, &response](grpc::ClientContext* context) {
-                               return _stub->GetExtents(context, request, &response);
-                           });
+    if (!found) {
+        proto::GetExtentsRequest request;
+        request.set_db_id(db_id);
+        request.set_table_id(tid);
+        request.set_xid(xid);
+        request.set_count(count);
+        request.set_cursor(cursor);
+
+        grpc_client::retry_rpc("WriteCache", "GetExtents",
+                               [this, &request, &response](grpc::ClientContext* context) {
+                                   return _stub->GetExtents(context, request, &response);
+                               });
+    }
+
+    if (cache && cursor == 0 && response.extents_size() < count) {
+        // we only cache complete responses starting from beginning
+        auto response_str = response.SerializeAsString();
+        cache->insert(db_id, tid, xid, response_str);
+    }
 
     CHECK_EQ(response.table_id(), tid);
     cursor = response.cursor();
@@ -131,6 +150,12 @@ WriteCacheClient::evict_xid(uint64_t db_id, uint64_t xid)
                            [this, &request, &response](grpc::ClientContext* context) {
                                return _stub->EvictXid(context, request, &response);
                            });
+}
+
+void
+WriteCacheClient::use_extents_cache(std::shared_ptr<sys_tbl_mgr::ShmCache> c)
+{
+    _extents_cache.store(std::move(c));
 }
 
 }  // namespace springtail

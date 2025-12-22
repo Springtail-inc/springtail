@@ -15,7 +15,7 @@ TEST(ShmTest, Basic) {
 
     sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
 
-    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE};
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE, true};
 
     for (uint64_t i = 0; i != 100; ++i) {
         std::ostringstream os;
@@ -49,7 +49,7 @@ TEST(ShmTest, Basic) {
 
     if (fork() == 0) {
 
-        sys_tbl_mgr::ShmCache child_cache{CACHE_NAME};
+        sys_tbl_mgr::ShmCache child_cache{CACHE_NAME, true};
 
         for (uint64_t i = 0; i != 100; ++i) {
             std::ostringstream os;
@@ -82,7 +82,7 @@ TEST(ShmTest, Lifecycle) {
 
     // try to open a cache that hasn't been created, it must throw.
     try {
-        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME); 
+        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME, true); 
         // must not come here
         ASSERT_TRUE(false);
     } catch (const boost::interprocess::interprocess_exception&) {
@@ -90,11 +90,11 @@ TEST(ShmTest, Lifecycle) {
 
     // create the cache
     std::unique_ptr<sys_tbl_mgr::ShmCache> parent;
-    parent = std::make_unique<sys_tbl_mgr::ShmCache>(CACHE_NAME, CACHE_SIZE); 
+    parent = std::make_unique<sys_tbl_mgr::ShmCache>(CACHE_NAME, CACHE_SIZE, true); 
 
     // try to create another instance, it must throw.
     try {
-        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME, CACHE_SIZE); 
+        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME, CACHE_SIZE, true); 
         // must not come here
         ASSERT_TRUE(false);
     } catch (const boost::interprocess::interprocess_exception&) {
@@ -110,7 +110,7 @@ TEST(ShmTest, Lifecycle) {
 
     // open the cache
     {
-        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME); 
+        auto c = sys_tbl_mgr::ShmCache(CACHE_NAME, true); 
         // read it
         for (uint64_t i = 0; i != 100; ++i) {
             std::ostringstream os;
@@ -142,7 +142,7 @@ TEST(ShmTest, Lifecycle) {
         parent.reset();
 
         // create new parent
-        parent = std::make_unique<sys_tbl_mgr::ShmCache>(CACHE_NAME, CACHE_SIZE); 
+        parent = std::make_unique<sys_tbl_mgr::ShmCache>(CACHE_NAME, CACHE_SIZE, true); 
         
         // should still have the old read
         for (uint64_t i = 0; i != 100; ++i) {
@@ -167,7 +167,7 @@ TEST(ShmTest, BasicEviction) {
 
     sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
 
-    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE};
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE, true};
 
     for (uint64_t i = 0; i != 10000; ++i) {
         std::ostringstream os;
@@ -237,7 +237,7 @@ TEST(ShmTest, BasicEviction) {
 
 TEST(ShmTest, XidUpdates) {
     sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
-    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE};
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE, true};
 
     uint64_t db = 1;
     uint64_t xid = 100;
@@ -247,7 +247,7 @@ TEST(ShmTest, XidUpdates) {
     ASSERT_FALSE(result.has_value());
 
     // Update committed XID without schema changes
-    c.update_committed_xid(db, xid, true);
+    c.update_committed_xid(db, xid, true, true);
 
     // Now should get the XID back
     result = c.get_committed_xid(db, xid);
@@ -256,7 +256,7 @@ TEST(ShmTest, XidUpdates) {
 
     // Update to a higher XID
     uint64_t xid2 = 200;
-    c.update_committed_xid(db, xid2, false);
+    c.update_committed_xid(db, xid2, false, true);
 
     result = c.get_committed_xid(db, xid);
     ASSERT_TRUE(result.has_value());
@@ -264,7 +264,7 @@ TEST(ShmTest, XidUpdates) {
 
     // Update to a higher XID
     uint64_t xid3 = 300;
-    c.update_committed_xid(db, xid3, true);
+    c.update_committed_xid(db, xid3, true, true);
 
     result = c.get_committed_xid(db, xid);
     ASSERT_TRUE(result.has_value());
@@ -273,4 +273,51 @@ TEST(ShmTest, XidUpdates) {
     result = c.get_committed_xid(db, xid3);
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(result.value(), xid3);
+}
+
+TEST(ShmTest, PendingXids) {
+    sys_tbl_mgr::ShmCache::remove(CACHE_NAME);
+    sys_tbl_mgr::ShmCache c{CACHE_NAME, CACHE_SIZE, true};
+
+    uint64_t db = 1;
+
+    // Initially, no pending xids
+    auto pending = c.get_pending_xids(db, 0);
+    ASSERT_EQ(pending.size(), 0);
+
+    // Add a real commit
+    c.update_committed_xid(db, 100, true, true);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 0);  // Real commits are not pending
+
+    // Add a pending commit
+    c.update_committed_xid(db, 200, false, false);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 1);
+    ASSERT_EQ(pending[0], 200);
+
+    // Add another pending commit
+    c.update_committed_xid(db, 300, false, false);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 2);
+    ASSERT_EQ(pending[0], 200);
+    ASSERT_EQ(pending[1], 300);
+
+    // not real commit with schema change, should be ignored
+    // and reset and disable pending xids until the next real commit
+    c.update_committed_xid(db, 200, true, false);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 0);
+
+    c.update_committed_xid(db, 210, false, false);
+    pending = c.get_pending_xids(db, 100);
+    ASSERT_EQ(pending.size(), 0); // should still be ignored
+
+    // Add another real commit
+    c.update_committed_xid(db, 400, true, true);
+    pending = c.get_pending_xids(db, 400);
+    ASSERT_EQ(pending.size(), 0);  // should reset pending xids
+
+    pending = c.get_pending_xids(db, 100); // older xid
+    ASSERT_EQ(pending.size(), 0);
 }

@@ -7,8 +7,9 @@
 
 using namespace springtail::sys_tbl_mgr;
 
-ShmCache::ShmCache(std::string name, size_t size)
+ShmCache::ShmCache(std::string name, size_t size, bool enable_xid_history)
     :_name{std::move(name)},
+    _enable_xid_history{enable_xid_history},
     _created{true},
     _shm{ipc::create_only, _name.c_str(), size, nullptr,
         []{ipc::permissions  p; p.set_unrestricted(); return p;}()},
@@ -16,6 +17,7 @@ ShmCache::ShmCache(std::string name, size_t size)
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()},
     _msg_cache(_mutex, _messages_alloc, _string_alloc),
+    _xid_vector_alloc{_shm.get_segment_manager()},
     _history_alloc{_shm.get_segment_manager()}
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {} - {}", _name, size);
@@ -24,14 +26,16 @@ ShmCache::ShmCache(std::string name, size_t size)
     _init();
 }
 
-ShmCache::ShmCache(std::string name)
+ShmCache::ShmCache(std::string name, bool enable_xid_history)
     :_name{std::move(name)},
+    _enable_xid_history{enable_xid_history},
     _created{false},
     _shm{ipc::open_only, _name.c_str()},
     _mutex{ipc::open_only, (_name + std::string(".mutex")).c_str()},
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()},
     _msg_cache(_mutex, _messages_alloc, _string_alloc),
+    _xid_vector_alloc{_shm.get_segment_manager()},
     _history_alloc{_shm.get_segment_manager()}
 {
     LOG_DEBUG(LOG_CACHE, LOG_LEVEL_DEBUG1, "ShmCache open: {}", _name);
@@ -69,9 +73,11 @@ ShmCache::_init()
             XidMap::allocator_type(_shm.get_segment_manager()));
     CHECK(_committed_xid_map);
 
-    _xid_history_map = _shm.find_or_construct<XidHistoryMap>("xid_history")(
-            XidHistoryMap::allocator_type(_shm.get_segment_manager()));
-    CHECK(_xid_history_map);
+    if (_enable_xid_history) {
+        _xid_history_map = _shm.find_or_construct<XidHistoryMap>("xid_history")(
+                XidHistoryMap::allocator_type(_shm.get_segment_manager()));
+        CHECK(_xid_history_map);
+    }
 }
 
 
@@ -85,8 +91,10 @@ ShmCache::remove(const std::string& name)
 }
 
 void
-ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
+ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool real_commit)
 {
+    CHECK(_enable_xid_history);
+
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
@@ -95,10 +103,25 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
     check_free_space_locked();
 
     *_xid_commit_time = std::chrono::high_resolution_clock::now();
+    auto it_db = _committed_xid_map->find(db);
+
     if (has_schema_changes) {
+
+        if (!real_commit) {
+            LOG_WARN("Schema change xid {} for db {} but it's not real commit", xid, db);
+            if (it_db != _committed_xid_map->end()) {
+                // rollback pending xids
+                it_db->second.pending_xid.clear();
+                // and stop recording not real commits
+                // until we get another real commit
+                it_db->second.record_pending = false;
+                return;
+            }
+        }
+
         Xid last_xid = 0;
-        if (_committed_xid_map->find(db) != _committed_xid_map->end()) {
-            last_xid = (*_committed_xid_map)[db];
+        if (it_db != _committed_xid_map->end()) {
+            last_xid = it_db->second.committed_xid;
         }
         // put the schema change xid and last committed xid into history
         auto it = _xid_history_map->find(db);
@@ -107,7 +130,29 @@ ShmCache::update_committed_xid(DbId db, Xid xid, bool has_schema_changes)
         }
         it->second.emplace_back(xid, last_xid);
     }
-    (*_committed_xid_map)[db] = xid;
+
+    if (real_commit) {
+        if (it_db == _committed_xid_map->end()) {
+            XidVector empty_vector(_xid_vector_alloc);
+            _committed_xid_map->emplace(db, XidRecord{xid, empty_vector, true});
+        } else {
+            it_db->second.committed_xid = xid;
+            // reset pending xids
+            it_db->second.pending_xid.clear();
+            it_db->second.record_pending = true;
+        }
+    } else {
+        // add to pending xids
+        if (it_db != _committed_xid_map->end() && it_db->second.record_pending) {
+            DCHECK(xid > it_db->second.committed_xid) << "Pending xid must be greater than last committed xid";
+            try {
+                it_db->second.pending_xid.push_back(xid);
+            } catch (const std::exception& e) {
+                LOG_ERROR("Failed to add xid {} for db {}: {}", xid, db, e.what());
+                it_db->second.pending_xid.clear();
+            }
+        }
+    }
 }
 
 void
@@ -134,9 +179,48 @@ ShmCache::is_alive()
     return true;
 }
 
+std::vector<Xid> 
+ShmCache::get_pending_xids(DbId db, Xid last_committed_xid)
+{
+    CHECK(_enable_xid_history);
+
+    std::vector<Xid> result;
+
+    auto it = _committed_xid_map->find(db);
+    if (it == _committed_xid_map->end()) {
+        return result;
+    }
+
+    if (it->second.committed_xid != last_committed_xid) {
+        return result;
+    }
+
+    for (auto xid : it->second.pending_xid) {
+        result.push_back(xid);
+    }
+    return result;
+}
+
+void 
+ShmCache::reset_pending_xids(DbId db)
+{
+    CHECK(_enable_xid_history);
+
+    ipc::scoped_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    auto it = _committed_xid_map->find(db);
+    if (it != _committed_xid_map->end()) {
+        it->second.pending_xid.clear();
+    }
+}
+
 std::optional<Xid>
 ShmCache::get_committed_xid(DbId db, Xid schema_xid)
 {
+    CHECK(_enable_xid_history);
     ipc::sharable_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
@@ -156,7 +240,7 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
         if (it == _committed_xid_map->end()) {
             return std::nullopt;
         }
-        last_xid = it->second;
+        last_xid = it->second.committed_xid;
     }
 
     // Look up history if the history is ahead of the commit, return the committed xid
@@ -175,6 +259,8 @@ ShmCache::get_committed_xid(DbId db, Xid schema_xid)
 
 void ShmCache::delete_xid_history(DbId db)
 {
+    CHECK(_enable_xid_history);
+
     LOG_INFO("Delete db history: {}", db);
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)

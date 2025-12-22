@@ -113,6 +113,14 @@ namespace springtail::committer {
         _table_copy_tracker->remove_db(db_id);
         std::unique_lock lock(_main_mutex);
         _completed_xids.erase(db_id);
+
+        auto it = _write_cache_evictions.find(db_id);
+        if (it != _write_cache_evictions.end()) {
+            for (auto xid: it->second) {
+                WriteCacheServer::get_instance()->evict_xid(db_id, xid);
+            }
+            _write_cache_evictions.erase(it);
+        }
     }
 
     void
@@ -295,6 +303,22 @@ namespace springtail::committer {
             for (auto& [db_id, batch] : batches_to_commit) {
                 uint64_t completed_xid = _completed_xids[db_id];
                 _commit_batch(db_id, batch, completed_xid);
+
+                // evict any write cache XIDs that are below the vacuum cutoff XID
+                auto it = _write_cache_evictions.find(db_id);
+                if (it != _write_cache_evictions.end()) {
+                    auto cutoff_xid = Vacuumer::get_instance()->get_vacuum_cutoff_xid(db_id);
+                    DCHECK(std::is_sorted(it->second.begin(), it->second.end()));
+                    auto xid_it = it->second.begin();
+                    for (; xid_it != it->second.end(); ++xid_it) {
+                        if (*xid_it > cutoff_xid) {
+                            break;
+                        }
+                        LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Evicting XID {}@{} from write cache", db_id, *xid_it);
+                        WriteCacheServer::get_instance()->evict_xid(db_id, *xid_it);
+                    }
+                    it->second.erase(it->second.begin(), xid_it);
+                }
             }
         }
 
@@ -365,11 +389,16 @@ namespace springtail::committer {
         // finalize all tables in the batch
         // Note: table_cache() is not thread-safe, but safe here since all workers are done
         std::vector<MutableTablePtr> tables_to_sync;
+        tables_to_sync.reserve(batch->table_cache().size());
+        std::vector<uint64_t> table_ids;
+        table_ids.reserve(batch->table_cache().size());
+
         for (auto& [tid, table] : batch->table_cache()) {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Finalizing table {}", tid);
             auto metadata = table->finalize(false);
             sys_tbl_mgr::Server::get_instance()->update_roots(db_id, tid, final_xid, metadata);
             tables_to_sync.push_back(table);
+            table_ids.push_back(tid);
         }
 
         Coordinator::get_instance()->register_thread(daemon_type, "committer");
@@ -435,7 +464,7 @@ namespace springtail::committer {
                 } else {
                     // for intermediate XIDs, just record the mapping
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
-                            result->timestamp(), result->get_tracker());
+                            result->timestamp(), result->get_tracker(), table_ids);
                 }
             } else {
                 if (is_last_xid) {
@@ -443,24 +472,23 @@ namespace springtail::committer {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
                         // don't commit, but record any DDL changes to the history
                         xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
-                                result->timestamp(), result->get_tracker());
+                                result->timestamp(), result->get_tracker(), table_ids);
                     } else {
                         // commit the completed XID without xlog update
                         xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false,
-                                result->timestamp(), result->get_tracker());
-                        _table_sync_processor->add(final_xid, std::move(tables_to_sync));
+                                result->timestamp(), result->get_tracker(), table_ids);
+                        _table_sync_processor->add(batch->get_final_xid(), tables_to_sync);
                     }
                 } else {
                     // don't commit, but record any DDL changes to the history
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
-                            result->timestamp(), result->get_tracker());
+                            result->timestamp(), result->get_tracker(), table_ids);
                 }
             }
 
             _completed_xids[db_id] = xid;
 
-            // evict from write cache
-            WriteCacheServer::get_instance()->evict_xid(db_id, xid);
+            _write_cache_evictions[db_id].push_back(xid);
 
             // Record per-transaction latency metrics for this XID
             // Note: xid_metadata() is not thread-safe, but safe here since all workers are done
@@ -540,7 +568,7 @@ namespace springtail::committer {
             xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, xid, false, result->timestamp());
         } else {
             // Record mapping if commits are blocked
-            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, xid, false, result->timestamp(), nullptr);
+            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, xid, false, result->timestamp(), nullptr, {});
         }
 
         _completed_xids[db_id] = xid;
@@ -602,7 +630,7 @@ namespace springtail::committer {
             }
         } else {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Record DDL changes db {} xid {}", db_id, completed_xid);
-            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true, result->timestamp(), nullptr);
+            xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true, result->timestamp(), nullptr, {});
         }
         _completed_xids[db_id] = completed_xid;
         WriteCacheServer::get_instance()->evict_xid(db_id, completed_xid);
