@@ -174,7 +174,7 @@ namespace {
 
             return std::make_shared<UserTable>(_db_id, table_id, xid, _base_dir,
                                            _primary_keys, keys,
-                                           tbl_meta, _schema);
+                                           tbl_meta, _schema, _schema_without_row_id);
         }
 
         MutableTablePtr

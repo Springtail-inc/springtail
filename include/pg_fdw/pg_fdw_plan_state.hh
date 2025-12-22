@@ -115,6 +115,7 @@ namespace springtail::pg_fdw {
             uint64_t db_id;
             uint64_t tid;
             uint64_t xid;
+            uint64_t schema_xid;
         };
 
         struct ColumnInfo {
@@ -123,7 +124,7 @@ namespace springtail::pg_fdw {
         };
 
         SpringtailPlanState() = default;
-        SpringtailPlanState( uint64_t db_id, uint64_t tid, uint64_t xid);
+        SpringtailPlanState(uint64_t db_id, uint64_t tid, uint64_t xid, uint64_t schema_xid);
         explicit SpringtailPlanState(List* s);
 
         SpringtailPlanState(const SpringtailPlanState&) = delete;
@@ -189,7 +190,8 @@ namespace springtail::pg_fdw {
         enum TableIdIndex {
             DB_ID,
             TID,
-            XID
+            XID,
+            SCHEMA_XID
         };
         // indexes in REL_SIZE
         enum RelSizeIndex {

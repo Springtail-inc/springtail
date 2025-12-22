@@ -99,17 +99,20 @@ XidMgrServer::commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has
     _record_xid_change(db_id, pg_xid, xid, has_schema_changes, true, timestamp, tracker);
 }
 
-void 
+void
 XidMgrServer::commit_xid_no_xlog(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit,
-        uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker)
+        uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker, const std::vector<uint64_t>& table_ids)
 {
     DCHECK(tracker);
+    DCHECK(table_ids.empty() || !real_commit);
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit, timestamp, tracker, false);
-    if (real_commit) {
-        _service->notify_subscriber(db_id, xid, has_schema_changes);
+    if (!real_commit && table_ids.empty()) {
+        // notify subscribers about not real xids only if there are table IDs
+        return;
     }
+    _service->notify_subscriber(db_id, xid, has_schema_changes, real_commit, table_ids);
 }
 
 void 
@@ -122,9 +125,13 @@ XidMgrServer::commit_xlog(uint64_t db_id, uint64_t xid)
 
 void
 XidMgrServer::record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes,
-        uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker)
+        uint64_t timestamp, pg_log_mgr::WalProgressTrackerPtr tracker, const std::vector<uint64_t>& table_ids)
 {
     _record_xid_change(db_id, pg_xid, xid, has_schema_changes, false, timestamp, tracker);
+    // notify subscribers about not real xids only if there are table IDs
+    if (!table_ids.empty()) {
+        _service->notify_subscriber(db_id, xid, has_schema_changes, false, table_ids);
+    }
 }
 
 void
@@ -140,7 +147,7 @@ XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit, timestamp, tracker, true);
     if (real_commit) {
-        _service->notify_subscriber(db_id, xid, has_schema_changes);
+        _service->notify_subscriber(db_id, xid, has_schema_changes, true);
     }
 }
 

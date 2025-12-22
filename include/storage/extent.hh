@@ -181,6 +181,9 @@ namespace springtail {
             uint32_t offset;
         };
 
+        using value_type        = const Row;
+
+
         /** Iterator over the rows in an extent. */
         class Iterator {
             // to allow use of the private constructor
@@ -490,6 +493,11 @@ namespace springtail {
             std::memcpy(vdata.data(), data.data() + 4 + fsize + 4, vsize);
             _variable_data = std::make_shared<VariableData>(std::move(vdata));
         }
+
+        using const_iterator = Iterator;
+        using const_reverse_iterator = Iterator;
+        using reverse_iterator = Iterator;
+        using iterator = Iterator;
     };
 
     /** Pointer typedef for Extent. */

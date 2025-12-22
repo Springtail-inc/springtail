@@ -148,8 +148,9 @@ namespace springtail {
                   const std::vector<Index> &secondary,
                   const TableMetadata &metadata,
                   ExtentSchemaPtr schema,
+                  ExtentSchemaPtr schema_without_row_id,
                   const ExtensionCallback &extension_callback = {}) :
-            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, extension_callback) {}
+            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, schema_without_row_id, extension_callback) {}
 
     };
 

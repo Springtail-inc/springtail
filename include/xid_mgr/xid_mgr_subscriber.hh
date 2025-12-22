@@ -1,5 +1,6 @@
 #include <proto/xid_manager.grpc.pb.h>
 #include <condition_variable>
+#include <vector>
 #include <grpc/grpc_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -7,10 +8,9 @@ namespace springtail {
 
 struct XidMgrSubscriber : public grpc::ClientReadReactor<proto::XidPushResponse>
 {
-    //void PushCallback(uint64_t db_id, uint64_t xid, bool has_schema_change);
-    using PushCallback = std::function<void(uint64_t, uint64_t, bool)>;
+    /** @brief Callback type for XID push notifications */
+    using PushCallback = std::function<void(proto::XidPushResponse)>;
     using DisconnectCallback = std::function<void()>;
-
 
     /**
      * @brief Subscriber callbacks. The callbacks are called in the context of

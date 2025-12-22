@@ -40,6 +40,7 @@ namespace springtail {
 
         // Cache miss or new schema - construct a new Table
         auto schema = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN}, extension_callback);
+        auto schema_without_row_id = get_extent_schema(db_id, table_id, {xid, constant::MAX_LSN}, extension_callback, false, false);
 
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
@@ -49,7 +50,7 @@ namespace springtail {
 
         auto new_table = std::make_shared<UserClientTable>(db_id, table_id, xid, _table_base,
                                                            schema->get_sort_keys(), secondary_indexes,
-                                                           *tbl_meta, schema, extension_callback);
+                                                           *tbl_meta, schema, schema_without_row_id, extension_callback);
 
         // Cache the new table
         {

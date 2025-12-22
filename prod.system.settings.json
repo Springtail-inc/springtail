@@ -60,7 +60,9 @@
     "cache_size": 4096,
     "roots_shm_cache_size": 10485760,
     "schema_shm_cache_size": 10485760,
-    "usertype_shm_cache_size": 4194304
+    "usertype_shm_cache_size": 4194304,
+    "table_ids_shm_cache_size": 1048576,
+    "extents_shm_cache_size": 10485760
   },
   "storage": {
     "table_dir": "table",

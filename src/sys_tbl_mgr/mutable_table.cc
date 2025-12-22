@@ -355,32 +355,7 @@ namespace indexer_helpers {
     void
     MutableTable::initialize_wc_schema(const ExtensionCallback& extension_callback)
     {
-        // Use the table's existing schema (_schema is already set in constructor)
-        auto schema = _schema_without_row_id;
-
-        // Build sort keys with __springtail_lsn
-        auto sort_keys = schema->get_sort_keys();
-        sort_keys.push_back("__springtail_lsn");
-
-        // Get column order
-        auto columns = schema->column_order();
-
-        // Create new columns for write cache
-        SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
-        SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
-        std::vector<SchemaColumn> new_columns{op, lsn};
-
-        // Create write cache schema
-        _wc_schema = schema->create_schema(columns, new_columns, sort_keys, extension_callback, true);
-
-        // Get table only fields, and then add internal_row_id for wc_fields
-        _actual_table_fields = _wc_schema->get_fields(columns);
-        columns.push_back(constant::INTERNAL_ROW_ID);
-
-        // Cache field accessors
-        _wc_op_field = _wc_schema->get_field("__springtail_op");
-        _wc_fields = _wc_schema->get_fields(columns);
-        _wc_key_fields = _wc_schema->get_fields(schema->get_sort_keys());
+        _wc_shema_info = WcSchemaInfo(_schema_without_row_id, extension_callback);
     }
 
     void
