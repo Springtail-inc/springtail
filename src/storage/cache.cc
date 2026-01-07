@@ -16,6 +16,9 @@
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
 
+#include <pg_ext/string.hh>
+#include <pg_ext/extn_registry.hh>
+
 namespace springtail {
 
 /* Thread-local variable to identify the background flushing thread. */
@@ -738,6 +741,38 @@ StorageCache::PageCache::background_cleaner()
         return flush_future.get();
     }
 
+    // StorageCache::Page::Iterator
+    // StorageCache::Page::penalty()
+    // {
+    //     double best_penalty = std::numeric_limits<double>::infinity();
+    //     auto best_extent = _extents.end();
+
+    //     for (auto i = _extents.begin(); i != _extents.end(); ++i) {
+    //         // Load extent
+    //         auto extent = i->make_safe_extent(_file, _database_id);
+    //         auto &row = (*extent)->back();
+
+    //         GistEntry internal_entry = extract_gist_entry_from_row(row);
+
+    //         // Compute the penalty
+    //         double p = compute_gist_penalty(internal_entry, new_entry);
+
+    //         if (p < best_penalty) {
+    //             best_penalty = p;
+    //             best_extent = i;
+    //         }
+    //     }
+
+    //     if (best_extent == _extents.end()) {
+    //         return end();
+    //     }
+
+    //     auto chosen_extent = best_extent->make_safe_extent(_file, _database_id);
+    //     auto row_i = (*chosen_extent)->begin();
+
+    //     return Iterator(this, best_extent, std::move(chosen_extent), row_i);
+    // }
+
     StorageCache::Page::Iterator
     StorageCache::Page::lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
     {
@@ -857,6 +892,82 @@ StorageCache::PageCache::background_cleaner()
 
         // index is beyond the end of the page
         return end();
+    }
+
+    uintptr_t
+    make_datum_from_tuple_field(TuplePtr tuple, int col)
+    {
+        FieldPtr fld = tuple->field(col);
+
+        LOG_INFO("Field type: {}", (int)fld->get_type());
+        switch(fld->get_type()) {
+            case SchemaType::TEXT: {
+                std::string val = std::string(fld->get_text(tuple->row()));
+                return (uintptr_t)cstring_to_text_auto(val.c_str());
+            }
+            default:
+                throw std::runtime_error("Unsupported field type for GIST index");
+        }
+    }
+
+    StorageCache::Page::Iterator
+    StorageCache::Page::gist_choose_subtree(GistEntry entry, ExtentSchemaPtr schema, const std::vector<std::string>& opclass_names)
+    {
+        LOG_INFO("[DEBUG] Inside gist_choose_subtree");
+        double best_penalty = std::numeric_limits<double>::infinity();
+        auto best_it = _extents.end();
+        Extent::Row best_row;
+
+        for (auto it = _extents.begin(); it != _extents.end(); ++it) {
+            auto extent = it->make_safe_extent(_file, _database_id);
+            // assume branch tuple stored at back()
+            auto &&row = (*extent)->back();
+            GistEntry child = gist_helpers::read_branch_entry_from_row(row, schema, opclass_names);
+            double p = gist_helpers::compute_gist_penalty(child, entry, opclass_names);
+            if (p < best_penalty) {
+                best_penalty = p;
+                best_it = it;
+                best_row = row;
+            }
+        }
+
+        if (best_it == _extents.end()) {
+            // fallback to last extent
+            auto it = --_extents.end();
+            auto extent = it->make_safe_extent(_file, _database_id);
+            auto row_it = std::prev((*extent)->end());
+            return StorageCache::Page::Iterator(this, it, std::move(extent), row_it);
+        }
+
+        auto chosen_extent = best_it->make_dirty_safe_extent(_file, _database_id);
+        auto row_it = std::prev((*chosen_extent)->end()); // branch tuple here
+
+        return StorageCache::Page::Iterator(this, best_it, std::move(chosen_extent), row_it);
+    }
+
+    void
+    StorageCache::Page::insert_gist(GistEntry entry,
+                                    TuplePtr tuple,
+                                    ExtentSchemaPtr schema,
+                                    const std::vector<std::string>& opclass_names,
+                                    MutationHandlerPtr post_insert_handler,
+                                    void* handler_context)
+    {
+        LOG_INFO("[DEBUG] Inside insert_gist");
+         boost::unique_lock lock(_mutex);
+        _is_dirty = true;
+
+        // if the page is empty, do an _append() which handles the empty extent case
+        if (_empty()) {
+            _append(tuple, schema, post_insert_handler, handler_context);
+            return;
+        }
+
+        // Use helper to choose subtree
+        auto row = gist_choose_subtree(entry, schema, opclass_names);
+
+        // insert the tuple into the extent
+        MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
     }
 
     void

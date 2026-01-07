@@ -52,6 +52,44 @@ namespace springtail::schema_helpers {
         return base_schema->create_index_schema(col_names, { internal_row_id }, key_columns, extension_callback);
     }
 
+    ExtentSchemaPtr create_gist_index_schema(
+        ExtentSchemaPtr base_schema,
+        const std::vector<uint32_t>& index_columns,
+        uint64_t index_id,
+        const ExtensionCallback& extension_callback,
+        const Index& index)
+    {
+        return create_index_schema(base_schema, index_columns, index_id, extension_callback);
+        // // Get the column names in the order they appear in the index
+        // auto col_names = base_schema->get_column_names(index_columns);
+
+        // // Add the index-specific field (only __internal_row_id for secondary indexes)
+        // SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
+
+        // auto key_columns = col_names;
+        // key_columns.push_back(constant::INTERNAL_ROW_ID);
+
+        // std::vector<std::string> column_names;
+        // std::vector<SchemaColumn> new_columns;
+        // for (int idx = 0; idx < index.columns.size(); ++idx) {
+        //     const auto& col = index.columns[idx];
+        //     const auto opclass = col.opclass;
+        //     if (opclass.empty()) {
+        //         LOG_ERROR("No opclass specified for column {}", col_names.at(idx));
+        //         column_names.push_back(col_names.at(idx));
+        //     } else {
+        //         LOG_INFO("Adding column {} to gist index schema", col_names.at(idx));
+        //         auto opclass_method = PgExtnRegistry::get_instance()->get_opclass_method_by_method_name(opclass, 1);
+        //         new_columns.push_back(SchemaColumn(col_names.at(idx), col.idx_position, convert_pg_type(opclass_method.key_type_oid, 'U'), opclass_method.key_type_oid, false));
+        //     }
+        // }
+
+        // new_columns.push_back(internal_row_id);
+
+        // // Create the index schema using create_index_schema()
+        // return base_schema->create_index_schema(column_names, new_columns, key_columns, extension_callback);
+    }
+
     ExtentSchemaPtr create_pg_log_batch_schema(
         ExtentSchemaPtr base_schema,
         const ExtensionCallback& extension_callback)

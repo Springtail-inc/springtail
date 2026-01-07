@@ -118,6 +118,9 @@ namespace springtail::committer {
         void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx,
                 uint64_t end_xid, MutableBTreePtr look_aside_root);
 
+        MutableBTreePtr _build_gist_index(std::stop_token& st, MutableTablePtr mutable_table,
+                TablePtr table, const Key& key, const IndexParams& idx, std::vector<uint32_t>& idx_cols);
+
         // work state
         std::condition_variable_any _cv;
         std::mutex _m;

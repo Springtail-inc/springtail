@@ -12,7 +12,6 @@ using Datum = uintptr_t;
 using Size = size_t;
 using CommandId = uint32_t;
 using TransactionId = uint32_t;
-using Index = uint32_t;
 
 #define InvalidOid (Oid(0))
 #define FLEXIBLE_ARRAY_MEMBER

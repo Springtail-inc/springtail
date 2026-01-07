@@ -58,6 +58,8 @@ extern "C" PGEXT_API void* cstring_to_text_4b(const char *s);
 extern "C" PGEXT_API void* cstring_to_text_1b(const char *s);
 extern "C" PGEXT_API void* cstring_to_text_auto(const char *s);
 
+extern "C" PGEXT_API char *text_to_cstring(const text *t);
+
 extern "C" PGEXT_API char *lowerstr(const char *str);
 extern "C" PGEXT_API char *lowerstr_with_len(const char *str, int len);
 extern "C" PGEXT_API char *upperstr(const char *str);

@@ -3,6 +3,10 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <storage/mutable_btree.hh>
+#include <storage/gist_helpers.hh>
+
+#include <pg_ext/extn_registry.hh>
+#include <pg_ext/string.hh>
 
 namespace springtail {
     MutableBTree::MutableBTree(uint64_t database_id,
@@ -13,7 +17,9 @@ namespace springtail {
                                uint64_t max_extent_size,
                                const ExtensionCallback &extension_callback,
                                const OpClassHandler &opclass_handler,
-                               const std::string_view index_type)
+                               const std::string_view index_type,
+                               const std::vector<std::string> opclass_names
+                               )
         : _database_id(database_id),
           _file(file),
           _sort_keys(keys),
@@ -22,6 +28,7 @@ namespace springtail {
           _finalized(true),
           _extension_callback(extension_callback),
           _opclass_handler(opclass_handler),
+          _opclass_names(opclass_names),
           _index_type(index_type)
     {
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
@@ -76,6 +83,8 @@ namespace springtail {
         _finalized = false;
     }
 
+
+
     void
     MutableBTree::insert(TuplePtr value)
     {
@@ -91,36 +100,19 @@ namespace springtail {
         if (_index_type == constant::INDEX_TYPE_GIST) {
             LOG_INFO("Inserting value into GIST index");
             try {
-                // Get the text field to be indexed. Use the first field as default for now
-                auto field = value->field(0);
-                if (!field) {
-                    throw std::runtime_error("No field available in the tuple for GIST index");
-                }
+                LOG_INFO("Extracting GIST entry from tuple");
+                GistEntry entry = gist_helpers::extract_gist_entry_from_tuple(value, _leaf_schema, _opclass_names);
 
-                auto val = field->get_text(value->row());
-                if (val.empty()) {
-                    LOG_INFO("Skipping empty value for GIST index");
-                    return;
-                }
+                LOG_INFO("Inserting GIST entry into page");
+                NodePtr node = std::make_shared<Node>(nullptr, _root);
 
-                // Create GIST entry with the data
-                GistEntry entry;
-                entry.key = reinterpret_cast<uintptr_t>(val.data());
-                entry.leafkey = true;
-
-                // Compress the value using the GIST compression function
-                auto gist_entry_datum = reinterpret_cast<uintptr_t>(&entry);
-                auto compressed = _opclass_handler.opclass_func("gist_trgm_ops", GIST_COMPRESS, gist_entry_datum);
-
-                DCHECK(compressed);
-
-                // XXX Insert
+                node->page->insert_gist(entry, value);
 
                 LOG_INFO("Successfully inserted value into GIST index");
                 return;
 
             } catch (const std::exception &e) {
-                LOG_ERROR("Error inserting into GIST index: %s", e.what());
+                LOG_ERROR("Error inserting into GIST index: {}", e.what());
                 throw;
             }
         }
@@ -539,6 +531,16 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // insert into the backing page
         _cache_page->insert(value, _schema);
+    }
+
+    void
+    MutableBTree::Page::insert_gist(GistEntry entry, TuplePtr value)
+    {
+        // mark this page as dirty
+        _dirty = true;
+
+        // insert into the backing page
+        _cache_page->insert_gist(entry, value, _schema, _btree->get_opclass_names());
     }
 
     void

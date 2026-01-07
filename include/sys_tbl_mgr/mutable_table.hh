@@ -1,9 +1,10 @@
 #pragma once
 
 #include <sys_tbl_mgr/table.hh>
-#include "common/constants.hh"
+#include <common/constants.hh>
 
 namespace springtail {
+    using IndexLookupMap = std::map<uint64_t, Index>;
 
     /**
      * Interface for mutating a table at the most recent XID.
@@ -135,6 +136,14 @@ namespace springtail {
          * @param index_columns Positions of the index columns.
          */
         MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {}, const OpClassHandler& opclass_handler = {}, const std::string_view index_type = constant::INDEX_TYPE_BTREE);
+
+        /**
+         * Create a gist that can be used for indexes.
+         * @param index_id PG index ID.
+         * @param extension_callback Extension callback.
+         * @param opclass_handler Opclass handler.
+         */
+        MutableBTreePtr create_gist_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {}, const OpClassHandler& opclass_handler = {}, const Index& index = {});
 
         /**
          * Create a btree that can be used for look aside index.
@@ -371,6 +380,7 @@ namespace springtail {
         ExtentSchemaPtr _schema_without_row_id; ///< The schema of the data extents of
                                                 ///the table without internal row id.
         ExtentSchemaPtr _look_aside_schema; ///< The schema of the look aside index.
+        ExtentSchemaPtr _gist_index_schema; ///< The schema of the gist index.
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
@@ -389,6 +399,8 @@ namespace springtail {
         FieldArrayPtr _wc_fields;             ///< Field accessors for all data columns
         FieldArrayPtr _actual_table_fields;   ///< Field accessors for all data columns without internal_row_id
         FieldArrayPtr _wc_key_fields;         ///< Field accessors for primary key columns
+
+        IndexLookupMap _index_lookup;
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

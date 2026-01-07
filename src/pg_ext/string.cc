@@ -14,6 +14,7 @@
 #include <stdexcept>
 
 #include <common/logging.hh>
+#include <pg_ext/toast.hh>
 
 #define HIGHBIT (0x80)
 #define IS_HIGHBIT_SET(ch) ((unsigned char)(ch) & HIGHBIT)
@@ -489,6 +490,24 @@ void* cstring_to_text_auto(const char *s)
     }
     size_t n = std::strlen(s);
     return (n <= 127) ? cstring_to_text_1b(s) : cstring_to_text_4b(s);
+}
+
+char *
+text_to_cstring(const text *t)
+{
+	/* must cast away the const, unfortunately */
+	text	   *tunpacked = (text *) pg_detoast_datum((struct varlena *)(Datum) t);
+	int			len = VARSIZE_ANY_EXHDR(tunpacked);
+	char	   *result;
+
+	result = (char *) palloc(len + 1);
+	memcpy(result, VARDATA_ANY(tunpacked), len);
+	result[len] = '\0';
+
+	if (tunpacked != t)
+		pfree(tunpacked);
+
+	return result;
 }
 
 int

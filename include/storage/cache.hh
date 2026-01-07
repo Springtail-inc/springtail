@@ -1,5 +1,7 @@
 #pragma once
 
+#include <storage/gist_helpers.hh>
+
 #include <filesystem>
 #include <memory>
 
@@ -886,6 +888,11 @@ namespace springtail {
             }
 
             /**
+             * Returns an iterator to the row with the highest penalty.
+             */
+            Iterator penalty();
+
+            /**
              * Returns the first row of the page with columns >= the matching columns of the provided tuple.
              * @param tuple A tuple holding data that matches the sort columns of the extent.
              */
@@ -953,6 +960,28 @@ namespace springtail {
             void insert(TuplePtr tuple, ExtentSchemaPtr schema, MutationHandlerPtr post_insert_handler = nullptr, void* handler_context = nullptr);
 
             /**
+             * Chooses the appropriate subtree for a GIST entry insertion.
+             * @param entry                GIST entry to insert
+             * @param extent               Extent to consider for insertion
+             * @return                     Iterator to the chosen subtree
+             */
+            Iterator gist_choose_subtree(GistEntry entry, ExtentSchemaPtr schema, const std::vector<std::string>& opclass_names);
+
+            /**
+             * Inserts the provided tuple into the Page using the provided ExtentSchema.
+             * @param tuple                Tuple to be inserted
+             * @param schema               Schema for the tuple
+             * @param post_insert_handler  callback to trigger with the resulted row, post the insert
+             * @param handler_context      Context to be passed to the callback
+             */
+            void insert_gist(GistEntry entry,
+                             TuplePtr tuple,
+                             ExtentSchemaPtr schema,
+                             const std::vector<std::string>& opclass_names,
+                             MutationHandlerPtr post_insert_handler = nullptr,
+                             void* handler_context = nullptr);
+
+            /**
              * Appends the provided tuple to the Page using the provided ExtentSchema.
              * @param tuple                    Tuple to be appended
              * @param schema                   Schema for the tuple
@@ -1015,7 +1044,7 @@ namespace springtail {
              * @param handler_context          Context to be passed to the callback
              * @return true if the row was found and removed, false otherwise.
              */
-            bool try_remove_by_scan(TuplePtr value, ExtentSchemaPtr schema, 
+            bool try_remove_by_scan(TuplePtr value, ExtentSchemaPtr schema,
                     MutationHandlerPtr post_remove_handler = nullptr,
                     void* handler_context = nullptr);
 

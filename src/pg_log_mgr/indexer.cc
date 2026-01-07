@@ -668,6 +668,10 @@ namespace springtail::committer {
                     for (auto &row: *prev_extent) {
                         if (idx_state._idx._index_request.index().index_type() == constant::INDEX_TYPE_GIN) {
                             //XXX: Invalidate GIN Index
+                        } else if (idx_state._idx._index_request.index().index_type() == constant::INDEX_TYPE_GIST) {
+                            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+                            auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
+                            idx_state._root->remove(svalue);
                         } else {
                             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
                             auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);

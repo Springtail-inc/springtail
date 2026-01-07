@@ -4,8 +4,19 @@
 #include <limits>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace springtail {
+    struct GistEntry {
+        GistEntry() = default;
+        std::vector<uintptr_t> keys;
+        bool leafkey;
+        uint64_t internal_row_id;
+        // For branch entries, we might need a child pointer (page/extent ID)
+        // but that might be separate or part of the row.
+        // Let's keep it simple for now.
+    };
+
     struct ExtensionContext {
         uint64_t db_id;
         uint64_t xid;

@@ -9,6 +9,9 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/schema_helpers.hh>
 
+#include <pg_ext/string.hh>
+#include <pg_ext/extn_registry.hh>
+
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
 
@@ -68,6 +71,7 @@ namespace indexer_helpers {
     void index_mutation_handler(
             const ExtentSchemaPtr schema,
             const SecondaryIndexesCache& secondary_indexes,
+            const IndexLookupMap& index_lookup,
             const Extent::Row& row)
     {
         auto internal_row_id_f = schema->get_field(constant::INTERNAL_ROW_ID);
@@ -135,6 +139,7 @@ namespace indexer_helpers {
     {
         const ExtentSchemaPtr schema;
         const SecondaryIndexesCache& indexes;
+        const IndexLookupMap& index_lookup;
     };
 
     /**
@@ -145,7 +150,7 @@ namespace indexer_helpers {
     template<IndexOperation op>
     static void mutation_handler(const Extent::Row& row, void* ctx) {
         auto* c = static_cast<const IndexMutationContext*>(ctx);
-        index_mutation_handler<op>(c->schema, c->indexes, row);
+        index_mutation_handler<op>(c->schema, c->indexes, c->index_lookup, row);
     }
 
 } // namespace indexer_helpers
@@ -273,6 +278,10 @@ namespace indexer_helpers {
                 continue;
             }
             assert(idx.id != constant::INDEX_PRIMARY);
+
+            // Populate lookup to be used during mutation
+            _index_lookup.emplace(idx.id, idx);
+
             // work with the index
             std::vector<uint32_t> idx_cols;
             idx_cols.reserve(idx.columns.size());
@@ -281,7 +290,13 @@ namespace indexer_helpers {
             }
             if (!idx_cols.empty()) {
 
-                auto btree = create_index_root(idx.id, idx_cols, extension_callback, opclass_handler, idx.index_type);
+                MutableBTreePtr btree;
+                if (idx.index_type == constant::INDEX_TYPE_GIST) {
+                    // btree = create_gist_index_root(idx.id, idx_cols, extension_callback, opclass_handler, idx);
+                    btree = create_index_root(idx.id, idx_cols, extension_callback, opclass_handler, idx.index_type);
+                } else {
+                    btree = create_index_root(idx.id, idx_cols, extension_callback, opclass_handler, idx.index_type);
+                }
 
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
@@ -718,6 +733,49 @@ namespace indexer_helpers {
         return btree;
     }
 
+    MutableBTreePtr
+    MutableTable::create_gist_index_root(uint64_t index_id,
+                                         const std::vector<uint32_t>& index_columns,
+                                         const ExtensionCallback& extension_callback,
+                                         const OpClassHandler& opclass_handler,
+                                         const Index& index)
+    {
+        // Get the index schema - bypass cache if this is a snapshot table without system table metadata
+        _gist_index_schema = _bypass_schema_cache
+            ? schema_helpers::create_gist_index_schema(_schema, index_columns, index_id, extension_callback, index)
+            : TableMgr::get_instance()->get_index_schema(_db_id, _id, index_id, index_columns, XidLsn{_target_xid}, extension_callback, index);
+
+        auto &&col_names = _schema->get_column_names(index_columns);
+        auto key = col_names;
+        key.push_back(constant::INTERNAL_ROW_ID);
+
+        std::vector<std::string> opclass_names;
+        for (int idx = 0; idx < index.columns.size(); ++idx) {
+            const auto& col = index.columns[idx];
+            const auto opclass = col.opclass;
+            if (opclass.empty()) {
+                LOG_ERROR("No opclass specified for column {}", col_names.at(idx));
+                opclass_names.push_back("EMPTY");
+            } else {
+                LOG_INFO("Adding column {} to gist index schema", col_names.at(idx));
+                auto opclass_method = PgExtnRegistry::get_instance()->get_opclass_method_by_method_name(opclass, 1);
+                opclass_names.push_back(opclass);
+            }
+        }
+
+        auto btree = std::make_shared<MutableBTree>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                key, _gist_index_schema,
+                _target_xid,
+                get_max_extent_size_secondary(),
+                extension_callback,
+                opclass_handler,
+                constant::INDEX_TYPE_GIST,
+                opclass_names
+                );
+        return btree;
+    }
+
     template <MutableTable::MutationType m_type>
     auto
     MutableTable::_mutation_wrapper(StorageCache::SafePagePtr &page,
@@ -726,7 +784,7 @@ namespace indexer_helpers {
 
         // Create a context to passed to cache and so the same will be
         // passed back to the mutation_handler
-        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes };
+        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes, _index_lookup };
 
         // Find and invoke appropriate mutations in the cache
         if constexpr (m_type == MutationType::INSERT) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <boost/thread.hpp>
 
 #include <common/constants.hh>
@@ -43,11 +44,6 @@ namespace springtail {
         typedef std::shared_ptr<Node> NodePtr;
 
     public:
-        struct GistEntry {
-            GistEntry() = default;
-            uintptr_t key;
-            bool leafkey;
-        };
         /**
          * Cache of Page objects.  Works with the BTree page locks to enable thread-safe access.
          */
@@ -100,7 +96,8 @@ namespace springtail {
                      uint64_t max_extent_size,
                      const ExtensionCallback &extension_callback = {},
                      const OpClassHandler &opclass_handler = {},
-                     const std::string_view index_type = constant::INDEX_TYPE_BTREE);
+                     const std::string_view index_type = constant::INDEX_TYPE_BTREE,
+                     const std::vector<std::string> opclass_names = {});
 
         MutableBTree() = delete;
 
@@ -144,6 +141,23 @@ namespace springtail {
          * @return The offset of the root for the target XID we just finalized.
          */
         uint64_t finalize(bool fs_sync = true);
+
+        // Gist helper functions
+        /**
+         * Returns the opclass names used by this index.
+         */
+        const std::vector<std::string>& get_opclass_names() const {
+            return _opclass_names;
+        }
+
+        /**
+         * Helper function to convert a tuple field to a datum.
+         *
+         * @param tuple The tuple to extract the field from.
+         * @param col The column number of the field to extract.
+         * @return The datum for the field.
+         */
+        uintptr_t make_datum_from_tuple_field(TuplePtr tuple, int col);
 
         /**
          * Helper function to return the key fields of the btree leaf extents.
@@ -283,6 +297,14 @@ namespace springtail {
              * @param fields The fields in the page that the value corresponds to.
              */
             void insert(TuplePtr search_key, TuplePtr value, MutableFieldArrayPtr fields);
+
+            /**
+             * Adds an entry to this page.  Assumes that the page is locked for exclusive access.
+             *
+             * @param entry The entry to insert.
+             * @param value The value to insert.
+             */
+            void insert_gist(GistEntry entry, TuplePtr value);
 
             /**
              * Remove an entry from this page.  Removes the first entry in the page with a matching
@@ -568,6 +590,9 @@ namespace springtail {
 
         /** The opclass handler for the tree. */
         OpClassHandler _opclass_handler;
+
+        /** The opclass names for the tree. */
+        std::vector<std::string> _opclass_names;
 
         /** The type of the index. */
         std::string_view _index_type;
