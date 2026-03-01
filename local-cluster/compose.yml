@@ -133,6 +133,7 @@ services:
     image: ${IMAGE:-local-cluster-img:latest}
     labels:
       <<: *common_labels
+    user: root
     privileged: true
     security_opt:
       - seccomp:unconfined
@@ -171,6 +172,7 @@ services:
     image: ${IMAGE:-local-cluster-img:latest}
     labels:
       <<: *common_labels
+    user: root
     privileged: true
     security_opt:
       - seccomp:unconfined
@@ -212,6 +214,7 @@ services:
     image: ${IMAGE:-local-cluster-img:latest}
     labels:
       <<: *common_labels
+    user: root
     privileged: true
     security_opt:
       - seccomp:unconfined
@@ -252,6 +255,7 @@ services:
     image: ${IMAGE:-local-cluster-img:latest}
     labels:
       <<: *common_labels
+    user: root
     privileged: true
     security_opt:
       - seccomp:unconfined

@@ -15,25 +15,31 @@
       - sysstat
     state: present
 
+- name: Check if PG tarball already exists (from local build)
+  ansible.builtin.stat:
+    path: /tmp/springtail-pg.tar.gz
+  register: pg_tarball
+
 - name: Download Custom PG build from Custom URL
   ansible.builtin.get_url:
     url: "{{ custom_pg_package_url }}"
-    dest: /tmp/springtail-pg.tar
+    dest: /tmp/springtail-pg.tar.gz
     mode: '0644'
+  when: not pg_tarball.stat.exists
 
 - name: Copy to remote host
   ansible.builtin.copy:
-    src: /tmp/springtail-pg.tar
-    dest: /tmp/springtail-pg.tar
+    src: /tmp/springtail-pg.tar.gz
+    dest: /tmp/springtail-pg.tar.gz
 
 - name: Install Custom PG build
   ansible.builtin.shell: |
     export DEBIAN_FRONTEND=noninteractive
     cd /tmp
-    tar xvf springtail-pg.tar
+    tar xzf springtail-pg.tar.gz
     dpkg -i libpq5_16.9-1.pgdg24.04+1_arm64.deb postgresql-client-16_16.9-1.pgdg24.04+1_arm64.deb
     dpkg -i postgresql-16_16.9-1.pgdg24.04+1_arm64.deb
-    rm -f /tmp/*.tar /tmp/*.deb /tmp/*.ddeb
+    rm -f /tmp/*.tar.gz /tmp/*.deb /tmp/*.ddeb
 
 - name: Enable PG16
   ansible.builtin.copy:

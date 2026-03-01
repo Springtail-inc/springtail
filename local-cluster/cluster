@@ -15,11 +15,8 @@
 # - Docker Compose is auto-detected (supports both `docker compose` and `docker-compose`)
 set -Eeuo pipefail
 
-# This Base image should be updated and committed when a new version is available.
-BASE_BUILDER_IMAGE_TAG="ci-debug-202509091508-gold"
-ACCOUNT_ID="381492230138"
-REPO_URI="${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/devsupport"
-BASE_BUILDER_IMAGE_FULL_URI="${REPO_URI}:${BASE_BUILDER_IMAGE_TAG}"
+# Base builder image for build-package command (built from docker/Dockerfile.base)
+BASE_BUILDER_IMAGE="local-cluster-img:latest"
 
 export COMPOSE_PROJECT_NAME=springtail_local_cluster
 # ---- helpers ----
@@ -52,6 +49,24 @@ run_compose() {
 
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 
+# Run aws CLI commands inside a container (avoids requiring aws on host)
+# Usage: run_aws s3 mb s3://bucket
+# For s3 cp with local files, set PACKAGE_FILE_FOR_AWS env var to the host path
+run_aws() {
+  local mount_args=()
+  if [ -n "${PACKAGE_FILE_FOR_AWS:-}" ]; then
+    mount_args=(-v "$PACKAGE_FILE_FOR_AWS":/package.tgz:ro)
+  fi
+  # Use ${arr[@]+"${arr[@]}"} syntax for bash 3.x compatibility with set -u
+  docker run --rm --network host \
+    ${mount_args[@]+"${mount_args[@]}"} \
+    -e AWS_ACCESS_KEY_ID=test \
+    -e AWS_SECRET_ACCESS_KEY=test \
+    --entrypoint aws \
+    "$BASE_BUILDER_IMAGE" \
+    --endpoint-url "http://localhost:${HOST_PORT_MOTO}" "$@"
+}
+
 # ---- subcommands ----
 
 sub_build_package() {
@@ -67,7 +82,7 @@ sub_build_package() {
 
   fetch_base_image
 
-  log "Build package using base image $BASE_BUILDER_IMAGE_FULL_URI"
+  log "Build package using base image $BASE_BUILDER_IMAGE"
 
   if [ ! -d "$output_dir" ]; then
     echo "Creating output directory $output_dir"
@@ -75,13 +90,20 @@ sub_build_package() {
   fi
 
   # Mount the parent directory of the current repo as /__w/springtail/springtail in the container
-  # and run packaging flow.
-  docker run --rm -it -e OUTPUT_DIR="/output" \
+  # and run packaging flow. Use --entrypoint to bypass the default entrypoint which tries to
+  # start services (postgres, redis, ssh) that aren't needed for building.
+  # Pass host UID/GID so container can fix output ownership at the end.
+  docker run --rm -it \
+    -e OUTPUT_DIR="/output" \
+    -e HOST_UID="$(id -u)" \
+    -e HOST_GID="$(id -g)" \
+    --user root \
+    --entrypoint /bin/bash \
     -v "$output_dir":/output \
     -v "$(dirname "$(pwd)")":/__w/springtail/springtail \
     -v ./builder/container-build-package:/container-build-package \
-    "$BASE_BUILDER_IMAGE_FULL_URI" /bin/bash -lc '/container-build-package ${OUTPUT_DIR}'
-  pkg_name="${output_dir}/$(ls -t "$output_dir" | head -n 1)"
+    "$BASE_BUILDER_IMAGE" -lc '/container-build-package ${OUTPUT_DIR}'
+  pkg_name="${output_dir}/$(/bin/ls -t "$output_dir" | head -n 1)"
   log "Package $pkg_name built."
   # Give a clean output for scripting
   echo -n "$pkg_name"
@@ -209,15 +231,15 @@ sub_up() {
     fi
   done
   log "aws-mock is ready."
-  aws --endpoint-url http://localhost:${HOST_PORT_MOTO} s3 mb "s3://$S3_BUCKET" > /dev/null 2>&1 || true
+  run_aws s3 mb "s3://$S3_BUCKET" > /dev/null 2>&1 || true
   log "S3 bucket $S3_BUCKET is ready."
   # Only cp the package if it does not already exist
   PACKAGE_FILE_BASE_NAME=$(basename "$PACKAGE_FILE_NAME")
-  if aws --endpoint-url http://localhost:${HOST_PORT_MOTO} s3 ls "s3://$S3_BUCKET/packages/$PACKAGE_FILE_BASE_NAME" > /dev/null 2>&1; then
+  if run_aws s3 ls "s3://$S3_BUCKET/packages/$PACKAGE_FILE_BASE_NAME" > /dev/null 2>&1; then
     log "Package $PACKAGE_FILE_BASE_NAME already exists in S3 bucket $S3_BUCKET"
   else
     log "Uploading the $package_file_name to S3 bucket $S3_BUCKET"
-    aws --endpoint-url http://localhost:${HOST_PORT_MOTO} s3 cp "$PACKAGE_FILE_NAME" "s3://$S3_BUCKET/packages/$PACKAGE_FILE_BASE_NAME"
+    PACKAGE_FILE_FOR_AWS="$PACKAGE_FILE_NAME" run_aws s3 cp /package.tgz "s3://$S3_BUCKET/packages/$PACKAGE_FILE_BASE_NAME"
     if [ $? -ne 0 ]; then
       die "Failed to upload package $PACKAGE_FILE_BASE_NAME to S3 bucket $S3"
     fi
@@ -292,7 +314,7 @@ logs() {
   run_compose logs "$svc" "$@"
 }
 
-ls() {
+sub_ls() {
   run_compose ps --services
 }
 
@@ -317,17 +339,8 @@ EOF
 }
 
 fetch_base_image() {
-  # Docker image ls to check if $BASE_BUILDER_IMAGE_FULL_URI is present at local
-  if ! docker image inspect "$BASE_BUILDER_IMAGE_FULL_URI" > /dev/null 2>&1 ; then
-    log "Base builder image $BASE_BUILDER_IMAGE_FULL_URI not found locally."
-    # Check if user is SSO'd into the correct ACCOUNT_ID
-    log "Checking AWS SSO login for account $ACCOUNT_ID"
-    if [ "$(aws sts get-caller-identity --query Account --output text | tr -d '\r\n[:space:]')" != "$ACCOUNT_ID" ]; then
-      die "You are not logged into the correct AWS account. Please run 'aws sso login --profile <your dev profile>' and try again. Then make sure the AWS_PROFILE env var is set correctly."
-    fi
-    log "Pulling base builder image $BASE_BUILDER_IMAGE_FULL_URI"
-    aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$REPO_URI"
-    docker pull "$BASE_BUILDER_IMAGE_FULL_URI"
+  if ! docker image inspect "$BASE_BUILDER_IMAGE" > /dev/null 2>&1; then
+    die "Base builder image $BASE_BUILDER_IMAGE not found. Please build it first with: docker build -t local-cluster-img:latest -f docker/Dockerfile.base ."
   fi
 }
 
@@ -336,7 +349,6 @@ fetch_base_image() {
 main() {
 
   need_cmd docker
-  need_cmd aws
   local cmd="${1:-}"; shift || true
   # Load env vars from env files only if the cmd is not `build-package`
   # because build-package need real AWS access
@@ -362,7 +374,7 @@ main() {
     stop)          stop "$@";;
     restart)       restart "$@";;
     logs)          logs "$@";;
-    ls)            ls "$@";;
+    ls)            sub_ls "$@";;
     -h|--help|"")  usage;;
     *)             err "Unknown subcommand: ${cmd}"; usage; exit 2;;
   esac
