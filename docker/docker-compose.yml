@@ -25,9 +25,20 @@ services:
     container_name: dev-springtail
     depends_on:
       - postgres
-    privileged: true
+    user: root
     cap_drop:
       - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - CHOWN
+      - DAC_OVERRIDE
+      - NET_BIND_SERVICE
+      - SYS_PTRACE
+      - AUDIT_WRITE
+      - KILL
+      - SYS_CHROOT
+      - FOWNER
     security_opt:
       - seccomp=unconfined
     stdin_open: true
