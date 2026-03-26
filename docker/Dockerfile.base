@@ -12,6 +12,8 @@ EXPOSE 5432 6379 22
 RUN apt-get update && apt-get install -y ansible-core
 # Copy over the ansible assets
 COPY docker/ansible/ /var/ansible/
+# Copy local PG tarball if present (for local builds)
+COPY docker/postgresql-16*.tar.gz /tmp/springtail-pg.tar.gz
 COPY docker/entrypoint.sh /entrypoint.sh
 # Run Ansible playbook to install additional dependencies
 RUN ansible-playbook /var/ansible/playbook.base.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"

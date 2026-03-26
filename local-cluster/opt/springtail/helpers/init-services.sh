@@ -72,4 +72,13 @@ if [ "$SERVICE_NAME" == "fdw" ]; then
   echo "Starting the bootstrap FDW Custom PG"
   CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1 ansible-playbook -i localhost, -c local "${INSTALL_DIR}/helpers/customize-pg.yml" --extra-vars "username=${FDW_USER}"
 fi
+
+# Start the coordinator service via supervisor
+echo "Starting the springtail-coordinator service..."
+supervisorctl start springtail-coordinator
+if [ $? -ne 0 ]; then
+  echo "Failed to start springtail-coordinator"
+  exit 1
+fi
+
 echo "<SUCCESS> Bootstrap coordinator package installed"

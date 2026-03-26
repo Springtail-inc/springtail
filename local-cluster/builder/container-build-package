@@ -5,10 +5,17 @@ ci_workspace="${CI_WORKSPACE:-/__w/springtail/springtail}"
 set -e
 set -o pipefail
 cd $ci_workspace
+# Mark the mounted repository as safe (container user differs from host owner)
+git config --global --add safe.directory "$ci_workspace"
 ./debug.sh
 cd debug
 make install
-cd ..
+cd "$ci_workspace"
 ./package.sh
 n=$(ls -t releases | head -n 1)
 mv "releases/$n" "$OUTPUT_DIR/"
+
+# Fix ownership so host user can access the output
+if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
+  chown -R "$HOST_UID:$HOST_GID" "$OUTPUT_DIR"
+fi

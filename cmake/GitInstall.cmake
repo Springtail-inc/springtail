@@ -47,5 +47,5 @@ endif()
 # Step 6: Install the file to the desired directory as part of the install target
 install(
     FILES ${INFO_FILE}
-    DESTINATION ${CMAKE_INSTALL_PREFIX}  # or specify the directory you want under the install path
+    DESTINATION .
 )
