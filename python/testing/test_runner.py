@@ -257,7 +257,7 @@ if __name__ == "__main__":
     # sync the test data files
     helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED), region="us-east-1")
     if not args.skip_downloads:
-        helper.sync_s3_data('test_data', s3_path='test_files')
+        helper.sync_s3_data('test_data', s3_path='test_data')
     else:
         # CI sets skip_downloads to true but
         # to run performance regressions we use customer.csv
@@ -265,7 +265,7 @@ if __name__ == "__main__":
         csv_file = "customers.csv"
         os.makedirs("test_data", exist_ok=True)
         helper.s3.download_file('public-share.springtail.io',
-                                f"test_files/{csv_file}.gz",
+                                f"test_data/{csv_file}.gz",
                                 f"test_data/{csv_file}.gz")
         with gzip.open(f"test_data/{csv_file}.gz", 'rb') as f_in:
             with open(f"test_data/{csv_file}", 'wb') as f_out:
