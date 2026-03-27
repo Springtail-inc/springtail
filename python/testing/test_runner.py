@@ -255,7 +255,7 @@ if __name__ == "__main__":
         tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, args.test_case, default_config, args.overlay, args.valgrind)
 
     # sync the test data files
-    helper = AwsHelper(config=None, region="us-east-1")
+    helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED), region="us-east-1")
     if not args.skip_downloads:
         helper.sync_s3_data('test_data', s3_path='test_files')
     else:
