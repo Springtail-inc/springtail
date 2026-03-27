@@ -131,7 +131,7 @@ if __name__ == "__main__":
         # sync the benchmark data files
         helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
                            region="us-east-1")
-        helper.sync_s3_data('test_data', s3_path='test_files')
+        helper.sync_s3_data('test_data', s3_path='test_data')
 
         # Connect to the primary database
         db_name = props.get_db_configs()[0]['name']
