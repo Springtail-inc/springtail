@@ -21,7 +21,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   dev:
-    image: springtail:dev
+    image: springtail:base
     container_name: dev-springtail
     depends_on:
       - postgres
