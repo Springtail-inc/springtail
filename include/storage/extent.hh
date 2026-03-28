@@ -262,7 +262,7 @@ namespace springtail {
         Extent(ExtentType type,
                uint64_t xid,
                uint32_t row_size,
-               std::vector<uint8_t> types)
+               const std::vector<uint8_t>& types)
             : _header(type, xid, row_size, types, constant::UNKNOWN_EXTENT)
         {
             // empty extent
@@ -482,7 +482,7 @@ namespace springtail {
             return data;
         }
 
-        void deserialize(const std::string &data)
+        void deserialize(std::string_view data)
         {
             uint32_t fsize = recvint32(data.data());
             _fixed_data->resize(fsize);
