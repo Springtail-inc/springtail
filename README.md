@@ -225,3 +225,12 @@ psql -h localhost -p 55432 -U postgres
 # Stop everything and remove all data volumes and networks
 ./cluster down all
 ```
+
+## License
+
+This project is licensed under the Elastic License 2.0 (ELv2).
+
+You may use, copy, modify, and distribute this software, subject to the terms of the license.
+
+Limitations include:
+- You may not provide this software as a hosted or managed service.
