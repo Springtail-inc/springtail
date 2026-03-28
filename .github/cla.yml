@@ -1,0 +1,25 @@
+# CLA Assistant configuration
+
+# URL to the CLA document in your repo
+cla_document: https://github.com/Springtail-inc/springtail/blob/main/.github/CLA.md
+
+# Require users to sign once for all repos (optional)
+# If false, they sign per repo
+# Change to true if you plan multiple repos
+contributor_agreement:
+  enabled: true
+  type: click
+
+# Customize the PR comment
+comment: >
+  Thank you for your contribution!
+  Before we can merge this PR, please review and sign our Contributor License Agreement (CLA).
+
+# Status check name
+status_check:
+  name: cla-signed
+
+# Allow commits from bots without signing
+allowlist:
+  - dependabot[bot]
+  - renovate[bot]
