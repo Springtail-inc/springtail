@@ -1,2 +1,2 @@
 -r requirements.txt
-black==25.1.0
+black==26.3.1
