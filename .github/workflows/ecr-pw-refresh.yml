@@ -2,8 +2,6 @@
 # It leverages the `gh` CLI to set the secrets for the dev support repo for testing purpose (DEV_SUPPORT_ECR_REPO_PW).
 name: ECR PW Refresh (Dev Support)
 on:
-  schedule:
-    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 permissions:

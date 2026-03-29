@@ -1,12 +1,7 @@
 name: PR Notifications
 
 on:
-  pull_request:
-    types:
-      - review_requested
-  pull_request_review:
-    types:
-      - submitted
+  workflow_dispatch:
 
 jobs:
   notify-slack:

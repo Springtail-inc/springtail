@@ -1,10 +1,6 @@
 name: PR Actions (PR to Main)
 
 on:
-  pull_request:
-    types: [ opened, synchronize, ready_for_review ]
-    branches:
-      - main
   workflow_dispatch:
 
 
