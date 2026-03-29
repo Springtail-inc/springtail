@@ -8,6 +8,7 @@ permissions:
   id-token: write
   contents: read
   checks: write
+  packages: write
 
 
 jobs:
@@ -26,9 +27,6 @@ jobs:
       build_type: "debug"
       num_procs: "6"
       push: true
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   unit-test:
     uses: ./.github/workflows/rw-run-unit-test.yml
@@ -36,13 +34,9 @@ jobs:
     if: ${{ github.event.pull_request.draft == false }}
     with:
       image_tag: ${{ needs.build.outputs.output_image_tag }}
-      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
       timeout_minutes: ${{ vars.UNIT_TEST_TIMEOUT_MINUTES  || 20 }}
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   integration-test-p1:
     uses: ./.github/workflows/rw-run-integration-test.yml
@@ -51,13 +45,9 @@ jobs:
     with:
       image_tag: ${{ needs.build.outputs.output_image_tag }}
       config_to_run: "github_ci_p1"
-      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
       timeout_minutes: ${{ vars.INTEGRATION_TEST_TIMEOUT_MINUTES || 20 }}
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   integration-test-p2:
     uses: ./.github/workflows/rw-run-integration-test.yml
@@ -66,13 +56,9 @@ jobs:
     with:
       image_tag: ${{ needs.build.outputs.output_image_tag }}
       config_to_run: "github_ci_p2"
-      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
       timeout_minutes: ${{ vars.INTEGRATION_TEST_TIMEOUT_MINUTES || 20 }}
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   integration-test-p3:
     uses: ./.github/workflows/rw-run-integration-test.yml
@@ -81,23 +67,16 @@ jobs:
     with:
       image_tag: ${{ needs.build.outputs.output_image_tag }}
       config_to_run: "github_ci_p3"
-      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
       build_type: "debug"
       reuse_code: true
       timeout_minutes: ${{ vars.INTEGRATION_TEST_TIMEOUT_MINUTES || 20 }}
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   integration-test-join:
     needs: [ build, unit-test, integration-test-p1, integration-test-p2, integration-test-p3 ]
     runs-on: ubuntu-latest
     if: ${{ always() && !cancelled() && github.event.pull_request.draft == false }}
     outputs:
-      it_test_log_s3_uris: ${{ steps.set_outputs.outputs.it_test_log_s3_uris }}
-      it_springtail_log_s3_uris: ${{ steps.set_outputs.outputs.it_springtail_log_s3_uris }}
       it_result: ${{ steps.set_outputs.outputs.it_result }}
-      ut_test_log_s3_uri: ${{ needs.unit-test.outputs.test_log_s3_uri }}
       ut_result: ${{ steps.set_outputs.outputs.ut_result }}
       build_result: ${{ steps.set_outputs.outputs.build_result }}
     env:
@@ -107,9 +86,6 @@ jobs:
       - name: Set Outputs
         id: set_outputs
         run: |
-          echo "it_test_log_s3_uris=${{ needs.integration-test-p1.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.test_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.test_log_s3_uri }} ;" >> $GITHUB_OUTPUT
-          echo "it_springtail_log_s3_uris=${{ needs.integration-test-p1.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p2.outputs.springtail_log_s3_uri }} ; ${{ needs.integration-test-p3.outputs.springtail_log_s3_uri }} ; " >> $GITHUB_OUTPUT
-          echo "ut_test_log_s3_uri=${{ needs.unit-test.outputs.test_log_s3_uri }}" >> $GITHUB_OUTPUT
           echo "build_result=${{ needs.build.result }}" >> $GITHUB_OUTPUT
           
           it_result="unknown"
@@ -182,15 +158,16 @@ jobs:
             },
             {
               "title": "Unit Test - *${{ needs.integration-test-join.outputs.ut_result }}*",
-              "value": "test logs:\n${{ needs.integration-test-join.outputs.ut_test_log_s3_uri }}",
+              "value": "logs: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Artifacts>",
               "short": false
             },
             {
               "title": "Integration Test - *${{ needs.integration-test-join.outputs.it_result }}*",
-              "value": "test logs:\n${{ needs.integration-test-join.outputs.it_test_log_s3_uris }}\nspringtail logs:\n${{ needs.integration-test-join.outputs.it_springtail_log_s3_uris }}",
+              "value": "logs: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Artifacts>",
               "short": false
             }
           ]
         }
         
+
 

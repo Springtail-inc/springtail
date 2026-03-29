@@ -8,12 +8,12 @@ on:
         type: string
         required: true
       build_type:
-        description: 'The type of build to perform. This also determines the S3 bucket we upload to. For release build, we upload to the "release-builds.springtail.internal" bucket (in production account), for debug builds we upload to the "debug-builds.springtail.internal" bucket (in development account).'
+        description: 'The type of build to perform.'
         type: string
       package_bucket_name:
-        description: 'The name of the S3 bucket to store the build artifacts.'
+        description: 'Legacy field, no longer used.'
         type: string
-        required: true
+        required: false
       image_version_tag:
         description: 'The image version tag for the base builder to pull.'
         type: string
@@ -22,29 +22,20 @@ on:
         type: string
         description: "The Slack webhook URL."
         required: true
-    secrets:
-      aws_role_arn:
-        description: "The ARN of the role to assume."
-        required: true
-      aws_ecr_docker_password:
-        description: "The password for the ECR docker registry."
-        required: true
 
 jobs:
   build:
     name: Build Springtail Packages
-    runs-on: warp-ubuntu-latest-arm64-4x-spot
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: 30
     container:
       image: ${{ inputs.image_version_tag }}
       credentials:
-        username: AWS
-        password: ${{ secrets.aws_ecr_docker_password }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       VCPKG_FORCE_SYSTEM_BINARIES: 1
       ZIC: true
-      PACKAGE_BUCKET_NAME: ${{ inputs.package_bucket_name }}
-      PACKAGES_S3_PREFIX: packages
       NUM_PROCS: ${{ inputs.num_procs }}
       SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
       SLACK_CHANNEL: '#release'
@@ -54,20 +45,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           clean: true
-
-      - name: install-aws-cli-action
-        uses: unfor19/install-aws-cli-action@v1
-        with:
-          version: 2                         # default
-          verbose: false                     # default
-          arch: arm64
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.aws_role_arn }}
-          role-session-name: tempSession
-          aws-region: us-east-1
 
       - name: Build Springtail Service
         run: |
@@ -84,7 +61,7 @@ jobs:
           cd "$BUILD_TYPE"
           make install
 
-      - name: Package and Upload Build artifacts to S3
+      - name: Package Build artifacts
         if: success()
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
@@ -96,8 +73,14 @@ jobs:
           } >> $GITHUB_ENV
           cd releases
           PKG_NAME="$(ls -t *.tgz | head -n1)"
-          aws s3 cp $PKG_NAME s3://${PACKAGE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
-          echo "PACKAGE_PATH=s3://${PACKAGE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
+          echo "PACKAGE_NAME=${PKG_NAME}" >> $GITHUB_ENV
+
+      - name: Upload Build Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'Release Package'
+          path: ./releases/*.tgz
 
       - name: Notify Slack Success
         if: success()
@@ -119,7 +102,7 @@ jobs:
                     },
                     {
                       "title": "Build Artifacts",
-                      "value": "${{ env.PACKAGE_PATH }}",
+                      "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Artifacts>",
                       "short": false
                     },
                     {
@@ -138,4 +121,3 @@ jobs:
         with:
           name: release-info
           path: install/INFO.txt
-

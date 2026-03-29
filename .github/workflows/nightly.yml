@@ -6,6 +6,7 @@ permissions:
   id-token: write
   contents: read
   checks: write
+  packages: write
 
 jobs:
   prepare:
@@ -31,9 +32,6 @@ jobs:
     with:
       base_image_tag: ${{ vars.IMAGE_TAG_DEBUG }}
       build_type: "debug"
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   release-build-with-time-traces:
     uses: ./.github/workflows/rw-build-container.yml
@@ -41,50 +39,35 @@ jobs:
       base_image_tag: ${{ vars.IMAGE_TAG_RELEASE }}
       build_type: "release"
       springtail_include_time_traces: true
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   unit-test:
     uses: ./.github/workflows/rw-run-unit-test.yml
     needs: [ debug-build, prepare ]
     with:
       image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
-      s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
       build_type: "debug"
       reuse_code: true
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   multi-rounds-integration-test:
     uses: ./.github/workflows/rw-run-integration-test.yml
     needs: [ debug-build, prepare ]
     with:
       image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
-      s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
       config_to_run: "nightly"
       system_settings_override: '.github/workflows/nightly.overrides.json'
       iterations: "1"
       build_type: "debug"
       reuse_code: true
       timeout_minutes: 120
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   performance-test:
     uses: ./.github/workflows/rw-run-performance-test.yml
     needs: [ release-build-with-time-traces, prepare ]
     with:
       image_tag: ${{ needs.release-build-with-time-traces.outputs.output_image_tag }}
-      s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
       system_settings_override: '.github/workflows/nightly.overrides.json'
       build_type: "release"
       reuse_code: true
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
   slack-notification:
     uses: ./.github/workflows/rw-notify-slack.yml
@@ -98,31 +81,26 @@ jobs:
         Nightly builds has completed for ${{ needs.prepare.outputs.date_prefix }} - ${{ needs.prepare.outputs.commit_sha }}.
       attachment: |
         {
-          color": "${{ needs.unit-test.result == 'success' && needs.multi-rounds-integration-test.result == 'success' && needs.performance-test.result == 'success' && 'good' || 'danger' }}",
+          "color": "${{ needs.unit-test.result == 'success' && needs.multi-rounds-integration-test.result == 'success' && needs.performance-test.result == 'success' && 'good' || 'danger' }}",
           "fields": [
             {
               "title": "Unit Test",
-              "value": "${{ needs.unit-test.result }}; logs: <${{ needs.unit-test.outputs.test_log_s3_uri }}|here>",
+              "value": "${{ needs.unit-test.result }}; <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Artifacts>",
               "short": false
             },
             {
               "title": "Multi-rounds Integration Test",
-              "value": "${{ needs.multi-rounds-integration-test.result }}; last logs: <${{ needs.multi-rounds-integration-test.outputs.test_log_s3_uri }}|here>; last springtail logs: <${{ needs.multi-rounds-integration-test.outputs.springtail_log_s3_uri }}|here>",
+              "value": "${{ needs.multi-rounds-integration-test.result }}; <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Artifacts>",
               "short": false
             },
             {
               "title": "Performance Test",
-              "value": "${{ needs.performance-test.result }}; logs: <${{ needs.performance-test.outputs.test_log_s3_uri }}|here>",
+              "value": "${{ needs.performance-test.result }}; <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Artifacts>",
               "short": false
             },
             {
                 "title": "Commit SHA",
                 "value": "${{ needs.prepare.outputs.commit_sha }}",
-                "short": false
-            },
-            {
-                "title": "All Logs",
-                "value": "s3://devsupport.springtail.internal/nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}",
                 "short": false
             }
           ]

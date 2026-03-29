@@ -12,7 +12,7 @@ on:
         required: true
         default: "debug"
       push:
-        description: 'Whether to push the built image to ECR. If false, the image will only be loaded into the local Docker daemon. Otherwise it will be pushed to ECR but not loaded locally.'
+        description: 'Whether to push the built image to GHCR. If false, the image will only be loaded into the local Docker daemon. Otherwise it will be pushed to GHCR but not loaded locally.'
         type: boolean
         required: false
         default: true
@@ -31,13 +31,6 @@ on:
         type: boolean
         required: false
         default: false
-    secrets:
-      aws_role_arn:
-        description: "The ARN of the role to assume."
-        required: true
-      aws_ecr_docker_password:
-        description: "The password for the ECR docker registry."
-        required: true
     outputs:
       output_image_tag:
         description: "The tag of the built image. Ready to use for the next steps."
@@ -45,11 +38,11 @@ on:
 jobs:
   build-container:
     name: Build Springtail Container
-    runs-on: warp-ubuntu-latest-arm64-4x
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: 20
     env:
       CI_BUILD_TYPE: ${{ inputs.build_type }}
-      ECR_REPO_URI: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}
+      REGISTRY_URI: ghcr.io/springtail-inc
       VCPKG_FORCE_SYSTEM_BINARIES: 1
       ZIC: true
       USER: root
@@ -64,13 +57,6 @@ jobs:
         with:
           clean: true
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.aws_role_arn }}
-          role-session-name: tempSession
-          aws-region: us-east-1
-
       - name: Prepare Build
         id: prepare-build
         run: |
@@ -82,8 +68,8 @@ jobs:
             output_image_tag="tmp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
           fi
           
-          # Logs in ECR
-          aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR_REPO_URI}
+          # Log in to GHCR
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           echo "output_image_tag=$output_image_tag" >> $GITHUB_OUTPUT
           
           # Figure out the build args (line separated for later use)
@@ -95,7 +81,7 @@ jobs:
             echo "springtail_include_time_traces=SPRINGTAIL_INCLUDE_TIME_TRACES=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Make ECR-safe tag from ref_name
+      - name: Make registry-safe tag from ref_name
         id: slug
         shell: bash
         run: |
@@ -119,9 +105,8 @@ jobs:
           echo "tag=cache-$tag" >> "$GITHUB_OUTPUT"
 
       - name: Docker Build Push Action
-        uses: Warpbuilds/build-push-action@v6
+        uses: docker/build-push-action@v6
         with:
-          profile-name: "Springtail-CI"
           context: .
           push: ${{ inputs.push }}
           load: ${{ !inputs.push }}
@@ -135,13 +120,13 @@ jobs:
             compression=zstd,           # much faster than gzip
             compression-level=3,        # good speed/size tradeoff
             force-compression=true
-          cache-from: type=registry,ref=381492230138.dkr.ecr.us-east-1.amazonaws.com/devsupport:cache-latest
+          cache-from: type=registry,ref=ghcr.io/springtail-inc/cache-latest
           cache-to: type=inline
           tags: |
-            ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ steps.prepare-build.outputs.output_image_tag }}
-            ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ steps.slug.outputs.tag }}
+            ghcr.io/springtail-inc/${{ steps.prepare-build.outputs.output_image_tag }}
+            ghcr.io/springtail-inc/${{ steps.slug.outputs.tag }}
           build-args: |
-            BASE_IMAGE=${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.base_image_tag }}
+            BASE_IMAGE=ghcr.io/springtail-inc/${{ inputs.base_image_tag }}
             CI_BUILD_TYPE=${{ inputs.build_type }}
             NCORES=${{ inputs.num_procs }}
             ${{ steps.prepare-build.outputs.springtail_include_time_traces }}
@@ -149,16 +134,7 @@ jobs:
       - name: Clean up secrets
         if: always()
         run: |
-          docker logout ${ECR_REPO_URI}
-          rm -f $HOME/.aws $HOME/.ssh $HOME/.git-credentials
+          docker logout ghcr.io
+          rm -f $HOME/.ssh $HOME/.git-credentials
 
-      # Reuse the Image Tag as the snapshot ID. This allows reusing the
-      # same snapshot in subsequent jobs.
-      - name: Snapshot the VM
-        uses: WarpBuilds/snapshot-save@v1
-        if: ${{ !inputs.push }}
-        with:
-          alias: ${{ steps.prepare-build.outputs.output_image_tag }}
-          fail-on-error: true
-          wait-timeout-minutes: 30
-          
+

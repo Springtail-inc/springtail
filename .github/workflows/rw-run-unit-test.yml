@@ -13,10 +13,6 @@ on:
         type: string
         required: false
         default: '.github/workflows/ci-general.overrides.json'
-      s3_log_prefix:
-        description: 'The S3 prefix for logs. This is the folder inside the S3 bucket where logs will be stored.'
-        type: string
-        required: true
       build_type:
         description: 'The type of build to base the tests on. "release" or "debug". The type of build need to match the base image type.'
         type: string
@@ -41,17 +37,7 @@ on:
         type: string
         required: false
         default: ""
-    secrets:
-      aws_role_arn:
-        description: "The ARN of the role to assume."
-        required: true
-      aws_ecr_docker_password:
-        description: "The password for the ECR docker registry."
-        required: true
     outputs:
-      test_log_s3_uri:
-        description: "The full S3 prefix where the test logs are stored."
-        value: ${{ jobs.test.outputs.test_log_s3_uri }}
       skipped_tests:
         description: "The number of skipped tests during the unit test run."
         value: ${{ jobs.test.outputs.skipped_tests }}
@@ -60,24 +46,21 @@ on:
 jobs:
   test:
     name: unit-test
-    runs-on: ${{ inputs.reuse_code && inputs.shapshot_alias != '' && format('warp-ubuntu-latest-arm64-4x;snapshot.key={0}', inputs['snapshot_alias']) || 'warp-ubuntu-latest-arm64-4x' }}
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: ${{ inputs.timeout_minutes }}
     container:
-      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}
+      image: ghcr.io/springtail-inc/${{ inputs.image_tag }}
       credentials:
-        username: AWS
-        password: ${{ secrets.aws_ecr_docker_password }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       options: >-
         --init
         -v /var/run/docker.sock:/var/run/docker.sock        
     outputs:
-      test_log_s3_uri: ${{ steps.run-test.outputs.test_log_s3_uri }}
       skipped_tests: ${{ steps.run-test.outputs.skipped_tests }}
     env:
       CI_WORKSPACE: /__w/springtail/springtail
       CI_BUILD_TYPE: ${{ inputs.build_type }}
-      S3_LOGS_PREFIX_FULL: "s3://devsupport.springtail.internal/${{ inputs.s3_log_prefix }}"
-      ECR_REPO_URI: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}
       IMAGE_TAG: ${{ inputs.image_tag }}
       SYSTEM_SETTINGS_OVERRIDE: ${{ inputs.system_settings_override }}
       VCPKG_FORCE_SYSTEM_BINARIES: 1
@@ -104,13 +87,6 @@ jobs:
         run: |
           echo "Reusing existing code from /home/dev/springtail"
           rsync -a /home/dev/springtail/ .
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.aws_role_arn }}
-          role-session-name: tempSession
-          aws-region: us-east-1
 
       - name: Prepare Tests
         run: |
@@ -226,11 +202,6 @@ jobs:
           log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
           tar zcvf $log_file tmplog
           rm tmplog
-          
-          unit_test_log_s3key="${S3_LOGS_PREFIX_FULL}/$log_file"
-          aws s3 cp "$log_file" "$unit_test_log_s3key"
-          echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
-          echo "test_log_s3_uri=${unit_test_log_s3key}" >> $GITHUB_OUTPUT
           
           # Fail eventually
           if [ "$_LOG_FLAG" = "failed" ]; then

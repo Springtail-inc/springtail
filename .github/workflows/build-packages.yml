@@ -19,6 +19,7 @@ permissions:
   id-token: write
   contents: read
   checks: write
+  packages: write
 
 jobs:
   system-settings-check:
@@ -32,9 +33,6 @@ jobs:
     with:
       num_procs: ${{ inputs.num_procs || 4 }}
       package_bucket_name: ${{ inputs.build_type == 'release' && 'prod-data-share.springtail.internal' || 'data-share.springtail.internal' }}
-      image_version_tag: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.build_type == 'release'  && vars.RELEASE_BUILDER_IMAGE_VERSION  || vars.BUILDER_IMAGE_VERSION }}
+      image_version_tag: ghcr.io/springtail-inc/${{ inputs.build_type == 'release'  && vars.RELEASE_BUILDER_IMAGE_VERSION  || vars.BUILDER_IMAGE_VERSION }}
       slack_webhook_url: "${{ vars.GENERIC_SLACK_WEBHOOK_URL }}"
       build_type: ${{ inputs.build_type || 'release' }}
-    secrets:
-      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
-      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
