@@ -1,11 +1,6 @@
 name: Build Springtail Packages
 
 on:
-  push:
-    branches:
-      - jeff/package-build
-  release:
-    types: [ published ]
   workflow_dispatch:
     inputs:
       num_procs:

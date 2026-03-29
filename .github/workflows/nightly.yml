@@ -1,8 +1,5 @@
 name: Nightly Build & Test
 on:
-  schedule:
-    # Runs at 07:00 UTC, which corresponds to 11:00 PM PT
-    - cron: '0 7 * * *'
   workflow_dispatch:
 
 permissions:
