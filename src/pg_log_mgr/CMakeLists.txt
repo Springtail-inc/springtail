@@ -26,6 +26,7 @@ target_link_libraries(springtail_pglog
            springtail_storage
            springtail_sys_tbl_mgr
     PRIVATE nlohmann_json::nlohmann_json
+    PRIVATE proto_ddl
     PRIVATE springtail_pgext
     PRIVATE fmt::fmt)
 

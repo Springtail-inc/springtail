@@ -3,3 +3,4 @@ sys_tbl_mgr
 write_cache
 xid_manager
 pg_copy_table
+ddl

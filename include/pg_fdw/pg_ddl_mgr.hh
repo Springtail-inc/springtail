@@ -6,6 +6,7 @@
 #include <common/object_cache.hh>
 #include <common/libpq_connection.hh>
 
+#include <ddl.pb.h>
 #include <redis/db_state_change.hh>
 
 namespace springtail::pg_fdw {
@@ -88,7 +89,7 @@ namespace springtail::pg_fdw {
 
         struct DBData {
             std::mutex pending_ddls_mutex;                      ///< mutex for applying changes to pending_ddls
-            std::map<uint64_t, nlohmann::json> pending_ddls;    ///< map of xid to pending ddl
+            std::map<uint64_t, std::vector<proto::DDLOperation>> pending_ddls;    ///< map of xid to pending ddl operations
             std::shared_mutex db_mutex;                         ///< mutex for changes to this data structure
             std::string db_name{};                              ///< database name
             std::atomic<redis::db_state_change::DBState> state{redis::db_state_change::DB_STATE_UNKNOWN};
@@ -201,12 +202,12 @@ namespace springtail::pg_fdw {
         /**
          * @brief Helper to apply outstanding DDL changes to the FDW tables.
          * @param db_id The database ID to apply the changes to.
-         * @param schema_xid The XID at which the DDL changes were applied.
-         * @param ddls A JSON array of DDL statements to apply.
+         * @param db_name The database name.
+         * @param xid_map Map of XIDs to DDL operations to apply.
          * @return Status of the operation. True if successful, false otherwise.
          */
         bool _update_schemas(uint64_t db_id, const std::string &db_name,
-                             const std::map<uint64_t, nlohmann::json> &xid_map);
+                             const std::map<uint64_t, std::vector<proto::DDLOperation>> &xid_map);
 
         /** Helper to execute ddl statements for this db */
         /**
@@ -237,15 +238,15 @@ namespace springtail::pg_fdw {
         _get_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
-         * @brief Helper to generate sql statement from json.  Decodes the ddl json.
+         * @brief Helper to generate sql statement from a protobuf DDL operation.
          * @param conn LibPqConnectionPtr connection
          * @param server_name fdw server name
-         * @param ddl json object containing ddl
+         * @param op protobuf DDLOperation
          * @return std::string sql statement
          */
-        std::string _gen_sql_from_json(LibPqConnectionPtr conn,
-                                       const std::string &server_name,
-                                       const nlohmann::json &ddl);
+        std::string _gen_sql_from_ddl(LibPqConnectionPtr conn,
+                                      const std::string &server_name,
+                                      const proto::DDLOperation &op);
 
         /**
          * @brief Function for creating a replicated database
@@ -404,7 +405,7 @@ namespace springtail::pg_fdw {
          * @param db_id - database id
          * @param xid_map - map of xids to ddl
          */
-        void _queue_request(uint64_t db_id, const std::map<uint64_t, nlohmann::json> &xid_map);
+        void _queue_request(uint64_t db_id, const std::map<uint64_t, std::vector<proto::DDLOperation>> &xid_map);
     };
 
 } // springtail::pg_fdw

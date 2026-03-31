@@ -3,9 +3,11 @@
 #include <postgresql/server/catalog/pg_type_d.h>
 
 #include <common/common.hh>
+#include <common/ddl_helpers.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
+#include <ddl.pb.h>
 #include <storage/vacuumer.hh>
 #include <sys_tbl_mgr/request_helper.hh>
 #include <sys_tbl_mgr/server.hh>
@@ -43,7 +45,7 @@ Server::_internal_shutdown()
     _grpc_server_manager.shutdown();
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 {
     auto request = RequestHelper::gen_table_request(db_id, xid, msg);
@@ -55,13 +57,10 @@ Server::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     boost::shared_lock lock(_write_mutex);
 
     // perform the CREATE TABLE
-    auto&& ddl = _create_table(request);
-
-    // serialize the JSON and return
-    return nlohmann::to_string(ddl);
+    return _create_table(request);
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 {
     auto request = RequestHelper::gen_table_request(db_id, xid, msg);
@@ -78,14 +77,16 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     auto ns_info = _get_namespace_info(db_id, request.table().namespace_name(), xid, false);
     CHECK(ns_info);
 
-    nlohmann::json ddl;
-    ddl["tid"] = request.table().id();
-    ddl["xid"] = request.xid();
-    ddl["lsn"] = request.lsn();
-    ddl["schema"] = request.table().namespace_name();
-    ddl["table"] = request.table().name();
-    ddl["rls_enabled"] = request.table().rls_enabled();
-    ddl["rls_forced"] = request.table().rls_forced();
+    // Common fields for the DDLOperation
+    const uint64_t tid = request.table().id();
+    const auto& schema_name = request.table().namespace_name();
+    const auto& table_name = request.table().name();
+    const bool rls_enabled = request.table().rls_enabled();
+    const bool rls_forced = request.table().rls_forced();
+
+    proto::DDLOperation op;
+    op.set_xid(request.xid());
+    op.set_lsn(request.lsn());
 
     // retrieve the name of the table at the point of alteration
     auto table_info = _get_table_info(db_id, request.table().id(), xid);
@@ -107,17 +108,6 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         partition_bound = request.table().partition_bound();
     }
 
-    // update the partition details
-    if (partition_key.has_value()) {
-        ddl["partition_key"] = partition_key.value();
-    }
-    if (partition_bound.has_value()) {
-        ddl["partition_bound"] = partition_bound.value();
-    }
-    if (parent_table_id.has_value()) {
-        ddl["parent_table_id"] = parent_table_id.value();
-    }
-
     auto new_info = std::make_shared<TableCacheRecord>(request.table().id(), request.xid(),
                                                        request.lsn(), ns_info->id,
                                                        request.table().name(),
@@ -131,12 +121,26 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 
         _set_table_info(db_id, new_info);
 
-        // set the DDL statement
-        ddl["action"] = "set_namespace";
-
         auto old_ns_info = _get_namespace_info(db_id, table_info->namespace_id, xid);
         CHECK(old_ns_info);
-        ddl["old_schema"] = old_ns_info->name;
+
+        // set the DDL statement
+        auto* sns = op.mutable_set_namespace();
+        sns->set_tid(tid);
+        sns->set_schema(schema_name);
+        sns->set_table(table_name);
+        sns->set_rls_enabled(rls_enabled);
+        sns->set_rls_forced(rls_forced);
+        sns->set_old_schema(old_ns_info->name);
+        if (partition_key.has_value()) {
+            sns->set_partition_key(partition_key.value());
+        }
+        if (partition_bound.has_value()) {
+            sns->set_partition_bound(partition_bound.value());
+        }
+        if (parent_table_id.has_value()) {
+            sns->set_parent_table_id(parent_table_id.value());
+        }
 
     } else if (table_info->name != request.table().name()) {
         // if the name is changed, update the name in the table_names table
@@ -144,15 +148,23 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         _set_table_info(db_id, new_info);
 
         // set the DDL statement
-        ddl["action"] = "rename";
-        ddl["old_table"] = table_info->name;
+        auto* rn = op.mutable_rename_table();
+        rn->set_tid(tid);
+        rn->set_schema(schema_name);
+        rn->set_table(table_name);
+        rn->set_rls_enabled(rls_enabled);
+        rn->set_rls_forced(rls_forced);
+        rn->set_old_table(table_info->name);
+        if (partition_key.has_value()) {
+            rn->set_partition_key(partition_key.value());
+        }
 
         if (table_info->namespace_id != ns_info->id) {
             auto old_ns_info = _get_namespace_info(db_id, table_info->namespace_id, xid);
             CHECK(old_ns_info);
-            ddl["old_schema"] = old_ns_info->name;
+            rn->set_old_schema(old_ns_info->name);
         } else {
-            ddl["old_schema"] = request.table().namespace_name();
+            rn->set_old_schema(schema_name);
         }
 
         _set_primary_index(db_id, ns_info->id, request.table().id(), table_info->name,
@@ -166,35 +178,51 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         _set_table_info(db_id, new_info);
 
         // set the DDL statement
-        ddl["action"] = "set_rls_enabled";
-        ddl["rls_enabled"] = request.table().rls_enabled();
+        auto* sre = op.mutable_set_rls_enabled();
+        sre->set_tid(tid);
+        sre->set_schema(schema_name);
+        sre->set_table(table_name);
+        sre->set_rls_enabled(rls_enabled);
+        sre->set_rls_forced(rls_forced);
+        if (partition_key.has_value()) {
+            sre->set_partition_key(partition_key.value());
+        }
     } else if (table_info->rls_forced != request.table().rls_forced()) {
         // if the RLS forced flags are changed, update the table_names table
         _set_table_info(db_id, new_info);
 
         // set the DDL statement
-        ddl["action"] = "set_rls_forced";
-        ddl["rls_forced"] = request.table().rls_forced();
+        auto* srf = op.mutable_set_rls_forced();
+        srf->set_tid(tid);
+        srf->set_schema(schema_name);
+        srf->set_table(table_name);
+        srf->set_rls_enabled(rls_enabled);
+        srf->set_rls_forced(rls_forced);
+        if (partition_key.has_value()) {
+            srf->set_partition_key(partition_key.value());
+        }
     } else {
         // get the schema prior to this change
         auto info = _get_schema_info(db_id, request.table().id(), xid, xid);
 
         // generate a tuple for the change
-        // note: _generate_update() sets the necessary elements of the ddl
-        auto history = _generate_update(info->columns(), request.table().columns(),
-                                        xid, ddl);
+        auto result = _generate_update(info->columns(), request.table().columns(),
+                                        xid, tid, schema_name, table_name,
+                                        rls_enabled, rls_forced);
 
         // If the partition key is not empty, generate the history events for the the child partition tables
         if (partition_key.value_or("") != "") {
-            ddl = _generate_partition_updates(request, history);
+            op = _generate_partition_updates(request, result.history, xid);
+        } else {
+            op = std::move(result.operation);
         }
 
         // we won't apply any changes to the system tables in these cases
-        if (history.update_type() != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
-            history.update_type() != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
+        if (result.history.update_type() != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
+            result.history.update_type() != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
             // write the column change to the schemas table and update the cache
             _set_schema_info(db_id, request.table().id(), ns_info->id,
-                            request.table().name(), {history});
+                            request.table().name(), {result.history});
         }
 
         _set_primary_index(db_id, ns_info->id, request.table().id(),
@@ -205,12 +233,12 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     invalidate_table(db_id, msg.oid, xid);
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Alter table {}@{}:{} action: {}", db_id, xid.xid,
-                            request.table().id(), ddl["action"].get<std::string>());
+                            request.table().id(), get_action_name(op));
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
 {
 
@@ -226,15 +254,15 @@ Server::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
     boost::shared_lock lock(_write_mutex);
 
     // perform the DROP TABLE
-    auto&& ddl = _drop_table(request);
+    auto op = _drop_table(request);
 
     // Automatically invalidate the schema cache from the provided XID
     invalidate_table(db_id, msg.oid, xid);
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
     proto::NamespaceRequest request;
@@ -246,9 +274,6 @@ Server::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace
                 db_id, request.namespace_id(), request.name(), request.xid(),
                 request.lsn());
 
-
-    nlohmann::json ddl;
-
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
@@ -257,16 +282,27 @@ Server::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace
         LOG_INFO("Namespace exists -- db {} namespace_id {} name {} xid {} lsn {}",
                 db_id, request.namespace_id(), request.name(), request.xid(),
                 request.lsn());
-        ddl["action"] = "no_change";
+        proto::DDLOperation op;
+        op.set_xid(xid.xid);
+        op.set_lsn(xid.lsn);
+        auto* nc = op.mutable_no_change();
+        nc->set_tid(0);
+        nc->set_schema("");
+        nc->set_table("");
+        nc->set_rls_enabled(false);
+        nc->set_rls_forced(false);
+        return {std::move(op)};
     } else {
         // update the namespace_names table
-        ddl = _mutate_namespace(db_id, request.namespace_id(), request.name(), xid, true);
-        ddl["action"] = "ns_create";
+        auto op = _mutate_namespace(db_id, request.namespace_id(), request.name(), xid, true);
+        auto* nc = op.mutable_namespace_create();
+        nc->set_id(request.namespace_id());
+        nc->set_name(request.name());
+        return {std::move(op)};
     }
-    return nlohmann::to_string(ddl);
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
     proto::NamespaceRequest request;
@@ -286,15 +322,17 @@ Server::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace 
     CHECK(ns_info);
 
     // update the namespace_names table
-    auto ddl =
+    auto op =
         _mutate_namespace(db_id, request.namespace_id(), request.name(), xid, true);
-    ddl["action"] = "ns_alter";
-    ddl["old_name"] = ns_info->name;
+    auto* na = op.mutable_namespace_alter();
+    na->set_id(request.namespace_id());
+    na->set_name(request.name());
+    na->set_old_name(ns_info->name);
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
 {
     proto::NamespaceRequest request;
@@ -309,15 +347,16 @@ Server::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &
     boost::shared_lock lock(_write_mutex);
 
     // update the namespace_names table
-    auto ddl =
+    auto op =
         _mutate_namespace(db_id, request.namespace_id(), request.name(), xid, false);
-    ddl["action"] = "ns_drop";
-    ddl["name"] = request.name();
+    auto* nd = op.mutable_namespace_drop();
+    nd->set_id(request.namespace_id());
+    nd->set_name(request.name());
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
     proto::UserTypeRequest request;
@@ -337,16 +376,21 @@ Server::create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &
     boost::shared_lock lock(_write_mutex);
 
     // update the user_types table
-    auto ddl = _mutate_usertype(db_id, request.type_id(), request.name(),
+    auto op = _mutate_usertype(db_id, request.type_id(), request.name(),
         request.namespace_id(), request.type(), request.value_json(), xid, true);
 
-    ddl["action"] = "ut_create";
-    ddl["schema"] = request.namespace_name();
+    auto* uc = op.mutable_usertype_create();
+    uc->set_id(request.type_id());
+    uc->set_name(request.name());
+    uc->set_value_json(request.value_json());
+    uc->set_type(request.type());
+    uc->set_namespace_id(request.namespace_id());
+    uc->set_schema(request.namespace_name());
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
     proto::UserTypeRequest request;
@@ -370,26 +414,31 @@ Server::alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &m
     CHECK(user_type_info != nullptr);
 
     // update the user defined types table
-    auto ddl = _mutate_usertype(db_id, request.type_id(), request.name(),
+    auto op = _mutate_usertype(db_id, request.type_id(), request.name(),
         request.namespace_id(), request.type(), request.value_json(), xid, true);
 
-    ddl["action"] = "ut_alter";
-    ddl["schema"] = request.namespace_name();
-    ddl["old_name"] = user_type_info->name;
-    ddl["old_value"] = user_type_info->value_json;
+    auto* ua = op.mutable_usertype_alter();
+    ua->set_id(request.type_id());
+    ua->set_name(request.name());
+    ua->set_value_json(request.value_json());
+    ua->set_type(request.type());
+    ua->set_namespace_id(request.namespace_id());
+    ua->set_schema(request.namespace_name());
+    ua->set_old_name(user_type_info->name);
+    ua->set_old_value_json(user_type_info->value_json);
 
     // need to get old namespace id and check if it has changed
     if (user_type_info->namespace_id != request.namespace_id()) {
         auto old_ns_info = _get_namespace_info(db_id, user_type_info->namespace_id, xid);
-        ddl["old_schema"] = old_ns_info->name;
+        ua->set_old_schema(old_ns_info->name);
     } else {
-        ddl["old_schema"] = request.namespace_name();
+        ua->set_old_schema(request.namespace_name());
     }
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
 {
     proto::UserTypeRequest request;
@@ -404,25 +453,34 @@ Server::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &ms
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    nlohmann::json ddl;
+    proto::DDLOperation op;
     auto user_type_info = _get_usertype_info(db_id, request.type_id(), xid);
     if (user_type_info == nullptr) {
         // drop could for a type we don't support, so ignore it here
         LOG_WARN("User type {} not found", request.type_id());
-        ddl["action"] = "no_change";
+        op.set_xid(xid.xid);
+        op.set_lsn(xid.lsn);
+        auto* nc = op.mutable_no_change();
+        nc->set_tid(0);
+        nc->set_schema("");
+        nc->set_table("");
+        nc->set_rls_enabled(false);
+        nc->set_rls_forced(false);
     } else {
         // update the user defined types table
-        ddl = _mutate_usertype(db_id, request.type_id(), request.name(),
+        op = _mutate_usertype(db_id, request.type_id(), request.name(),
             request.namespace_id(), request.type(), request.value_json(), xid, false);
 
-        ddl["action"] = "ut_drop";
-        ddl["schema"] = request.namespace_name();
+        auto* ud = op.mutable_usertype_drop();
+        ud->set_id(request.type_id());
+        ud->set_name(request.name());
+        ud->set_schema(request.namespace_name());
     }
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg)
 {
     proto::AttachPartitionRequest request;
@@ -485,23 +543,24 @@ Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPar
         partition_name = table_info->name;
     }
 
-    nlohmann::json ddl;
+    proto::DDLOperation op;
+    op.set_xid(request.xid());
+    op.set_lsn(request.lsn());
 
-    ddl["action"] = "attach_partition";
-    ddl["partition_schema"] = partition_schema;
-    ddl["partition_name"] = partition_name;
-    ddl["partition_bound"] = partition_bound;
-    ddl["schema"] = request.namespace_name();
-    ddl["table"] = request.table_name();
-    ddl["xid"] = request.xid();
-    ddl["lsn"] = request.lsn();
+    auto* ap = op.mutable_attach_partition();
+    ap->set_schema(request.namespace_name());
+    ap->set_table(request.table_name());
+    ap->set_partition_schema(partition_schema);
+    ap->set_partition_name(partition_name);
+    ap->set_partition_bound(partition_bound);
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attach partition DDL: {}", ddl.dump());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Attach partition DDL: schema={} table={} partition={}",
+              request.namespace_name(), request.table_name(), partition_name);
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg)
 {
     proto::DetachPartitionRequest request;
@@ -555,19 +614,20 @@ Server::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPar
         partition_name = table_info->name;
     }
 
-    nlohmann::json ddl;
+    proto::DDLOperation op;
+    op.set_xid(request.xid());
+    op.set_lsn(request.lsn());
 
-    ddl["action"] = "detach_partition";
-    ddl["partition_schema"] = partition_schema;
-    ddl["partition_name"] = partition_name;
-    ddl["schema"] = request.namespace_name();
-    ddl["table"] = request.table_name();
-    ddl["xid"] = request.xid();
-    ddl["lsn"] = request.lsn();
+    auto* dp = op.mutable_detach_partition();
+    dp->set_schema(request.namespace_name());
+    dp->set_table(request.table_name());
+    dp->set_partition_schema(partition_schema);
+    dp->set_partition_name(partition_name);
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detach partition DDL: {}", ddl.dump());
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Detach partition DDL: schema={} table={} partition={}",
+              request.namespace_name(), request.table_name(), partition_name);
 
-    return nlohmann::to_string(ddl);
+    return {std::move(op)};
 }
 
 proto::IndexProcessRequest
@@ -1037,14 +1097,14 @@ Server::exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
     return result.value();
 }
 
-std::string
+std::vector<proto::DDLOperation>
 Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
                         const proto::TableRequest &create_req,
                         const std::vector<proto::IndexRequest> &index_reqs,
                         const proto::UpdateRootsRequest &roots_req)
 {
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got swap_sync_table()");
-    nlohmann::json ddls = nlohmann::json::array();  // Initialize to empty array
+    std::vector<proto::DDLOperation> ddl_ops;
 
     // 1. acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
@@ -1057,10 +1117,12 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
                             namespace_req.db_id(), namespace_req.name(),
                             namespace_req.namespace_id(), ns_xid.xid, ns_xid.lsn);
 
-        auto&& ns_ddl = _mutate_namespace(namespace_req.db_id(), namespace_req.namespace_id(),
+        auto ns_op = _mutate_namespace(namespace_req.db_id(), namespace_req.namespace_id(),
                                           namespace_req.name(), ns_xid, true);
-        ns_ddl["action"] = "ns_create";
-        ddls.push_back(ns_ddl);
+        auto* nc = ns_op.mutable_namespace_create();
+        nc->set_id(namespace_req.namespace_id());
+        nc->set_name(namespace_req.name());
+        ddl_ops.push_back(std::move(ns_op));
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Create namespace name {}, id {}", namespace_req.name(),
                             namespace_req.namespace_id());
     } else {
@@ -1087,9 +1149,8 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
                             drop.xid(), drop.lsn());
 
         is_resync = true;
-        auto&& drop_ddl = this->_drop_table(drop, is_resync);
-        drop_ddl["is_resync"] = is_resync;
-        ddls.push_back(drop_ddl);
+        auto drop_op = this->_drop_table(drop, is_resync);
+        ddl_ops.push_back(std::move(drop_op));
     }
 
     // 5. perform a create table
@@ -1097,27 +1158,27 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
                         create_req.table().id(), create_req.xid(), create_req.lsn());
 
     assert(create_req.lsn() == constant::RESYNC_CREATE_LSN);
-    auto&& create_ddl_array = this->_create_table(create_req);
+    auto create_ddl_ops = this->_create_table(create_req);
 
-    DCHECK(create_ddl_array.is_array());  // Always an array now
-
-    if (create_ddl_array.empty()) {
-        // Empty array - parent chain incomplete, DDL deferred
+    if (create_ddl_ops.empty()) {
+        // Empty - parent chain incomplete, DDL deferred
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
                   "DDL deferred during resync for table {} - parent chain incomplete",
                   create_req.table().id());
 
     } else {
-        // Non-empty array - mark first element (root parent) with is_resync flag
-        create_ddl_array[0]["is_resync"] = is_resync;
+        // Non-empty - mark first element (root parent) with is_resync flag if applicable
+        if (is_resync && create_ddl_ops[0].has_create_table()) {
+            create_ddl_ops[0].mutable_create_table()->set_is_resync(true);
+        }
 
-        for (const auto& ddl_item : create_ddl_array) {
-            ddls.push_back(ddl_item);
+        for (auto& ddl_item : create_ddl_ops) {
+            ddl_ops.push_back(std::move(ddl_item));
         }
 
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
                   "Resync generated {} DDL statement(s) (parent + descendants)",
-                  create_ddl_array.size());
+                  create_ddl_ops.size());
     }
 
     for (const proto::IndexRequest& index : index_reqs) {
@@ -1136,14 +1197,14 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
                         create_req.table().id(), create_req.xid(), create_req.lsn());
     this->_update_roots(roots_req);
 
-    // 7. serialize the ddl json and return
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Response: {}", nlohmann::to_string(ddls));
+    // 7. return the DDL operations
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Response: {} DDL operation(s)", ddl_ops.size());
 
     // Auto-invalidate the cache for the swapped table
     invalidate_table(create_req.db_id(), create_req.table().id(),
                      XidLsn(create_req.xid(), create_req.lsn()));
 
-    return nlohmann::to_string(ddls);
+    return ddl_ops;
 }
 
 std::shared_ptr<UserType>
@@ -1742,7 +1803,7 @@ Server::_get_direct_children(uint64_t db_id,
     return children;
 }
 
-nlohmann::json
+proto::DDLOperation
 Server::_generate_attach_partition_ddl(uint64_t db_id,
                                        const TableCacheRecordPtr& child_info,
                                        uint64_t parent_table_id,
@@ -1757,17 +1818,18 @@ Server::_generate_attach_partition_ddl(uint64_t db_id,
     auto child_ns = _get_namespace_info(db_id, child_info->namespace_id, xid);
     auto parent_ns = _get_namespace_info(db_id, parent_info->namespace_id, xid);
 
-    nlohmann::json ddl;
-    ddl["action"] = "attach_partition";
-    ddl["partition_schema"] = child_ns->name;
-    ddl["partition_name"] = child_info->name;
-    ddl["partition_bound"] = child_info->partition_bound.value();
-    ddl["schema"] = parent_ns->name;
-    ddl["table"] = parent_info->name;
-    ddl["xid"] = xid.xid;
-    ddl["lsn"] = xid.lsn;
+    proto::DDLOperation op;
+    op.set_xid(xid.xid);
+    op.set_lsn(xid.lsn);
 
-    return ddl;
+    auto* ap = op.mutable_attach_partition();
+    ap->set_partition_schema(child_ns->name);
+    ap->set_partition_name(child_info->name);
+    ap->set_partition_bound(child_info->partition_bound.value());
+    ap->set_schema(parent_ns->name);
+    ap->set_table(parent_info->name);
+
+    return op;
 }
 
 void
@@ -1775,7 +1837,7 @@ Server::_generate_child_attach_ddls(uint64_t db_id,
                                     uint64_t parent_table_id,
                                     const XidLsn& xid,
                                     uint64_t parent_snapshot_xid,
-                                    std::vector<nlohmann::json>& ddl_array_out)
+                                    std::vector<proto::DDLOperation>& ddl_array_out)
 {
     // Find all children that have this table as their parent
     auto children = _get_direct_children(db_id, parent_table_id, xid);
@@ -1811,13 +1873,13 @@ Server::_generate_child_attach_ddls(uint64_t db_id,
                 continue;
             }
 
-            auto attach_ddl = _generate_attach_partition_ddl(
+            auto attach_op = _generate_attach_partition_ddl(
                 db_id,
                 child_info,
                 parent_table_id,
                 xid
             );
-            ddl_array_out.push_back(attach_ddl);
+            ddl_array_out.push_back(std::move(attach_op));
 
             LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
                       "Generated ATTACH DDL for child table {} (snapshot_xid={})",
@@ -1826,7 +1888,7 @@ Server::_generate_child_attach_ddls(uint64_t db_id,
     }
 }
 
-nlohmann::json
+std::vector<proto::DDLOperation>
 Server::_create_table(const proto::TableRequest& request)
 {
     XidLsn xid(request.xid(), request.lsn());
@@ -1835,18 +1897,6 @@ Server::_create_table(const proto::TableRequest& request)
     auto ns_info = _get_namespace_info(request.db_id(), request.table().namespace_name(),
                                        XidLsn(request.xid(), request.lsn()));
     CHECK(ns_info);
-
-    // initialize the ddl statement
-    nlohmann::json ddl;
-    ddl["action"] = "create";
-    ddl["schema"] = request.table().namespace_name();
-    ddl["table"] = request.table().name();
-    ddl["tid"] = request.table().id();
-    ddl["xid"] = request.xid();
-    ddl["lsn"] = request.lsn();
-    ddl["rls_enabled"] = request.table().rls_enabled();
-    ddl["rls_forced"] = request.table().rls_forced();
-    ddl["columns"] = nlohmann::json::array();
 
     // partition info - track for system tables and logic, but don't add to CREATE DDL
     std::optional<uint64_t> parent_table_id = std::nullopt;
@@ -1863,7 +1913,6 @@ Server::_create_table(const proto::TableRequest& request)
     std::optional<std::string> partition_key = std::nullopt;
     if (request.table().has_partition_key() && !request.table().partition_key().empty()) {
         partition_key = request.table().partition_key();
-        ddl["partition_key"] = partition_key.value();
     }
 
     // partition bound - track for system tables but don't add to CREATE DDL
@@ -1897,6 +1946,21 @@ Server::_create_table(const proto::TableRequest& request)
 
     // add schemas entries for each column
     std::vector<proto::ColumnHistory> columns;
+
+    // Build the CreateTableDDL protobuf
+    proto::DDLOperation create_op;
+    create_op.set_xid(request.xid());
+    create_op.set_lsn(request.lsn());
+    auto* ct = create_op.mutable_create_table();
+    ct->set_tid(request.table().id());
+    ct->set_schema(request.table().namespace_name());
+    ct->set_table(request.table().name());
+    ct->set_rls_enabled(request.table().rls_enabled());
+    ct->set_rls_forced(request.table().rls_forced());
+    if (partition_key.has_value()) {
+        ct->set_partition_key(partition_key.value());
+    }
+
     for (const auto& column : request.table().columns()) {
         proto::ColumnHistory& history = columns.emplace_back();
         history.set_xid(xid.xid);
@@ -1905,18 +1969,16 @@ Server::_create_table(const proto::TableRequest& request)
         history.set_update_type(static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN));
         *history.mutable_column() = column;
 
-        // store the column data into the json
-        nlohmann::json column_json;
-        column_json["name"] = column.name();
-        column_json["type"] = column.pg_type();
-        column_json["type_name"] = column.type_name();
-        column_json["type_namespace"] = column.type_namespace();
-        column_json["nullable"] = column.is_nullable();
+        // store the column data into the protobuf
+        auto* ddl_col = ct->add_columns();
+        ddl_col->set_name(column.name());
+        ddl_col->set_type_oid(column.pg_type());
+        ddl_col->set_type_name(column.type_name());
+        ddl_col->set_type_namespace(column.type_namespace());
+        ddl_col->set_nullable(column.is_nullable());
         if (column.has_default_value()) {
-            column_json["default"] = column.default_value();
+            ddl_col->set_default_value(column.default_value());
         }
-
-        ddl["columns"].push_back(column_json);
     }
 
     _set_schema_info(request.db_id(), request.table().id(), ns_info->id, request.table().name(),
@@ -1941,25 +2003,25 @@ Server::_create_table(const proto::TableRequest& request)
                   ranges.size());
     }
 
-    // Build DDL array - always include CREATE TABLE
-    std::vector<nlohmann::json> ddl_array;
+    // Build DDL operation vector - always include CREATE TABLE
+    std::vector<proto::DDLOperation> ddl_array;
 
     // Step 1: Always generate CREATE TABLE DDL
     // (partition_bound and parent info not added - they go in ATTACH PARTITION)
-    ddl_array.push_back(ddl);
+    ddl_array.push_back(std::move(create_op));
 
     // Step 2: If this is a child partition with an existing parent, generate ATTACH PARTITION DDL
     if (partition_bound.has_value() && has_parent) {
         auto child_info = _get_table_info(request.db_id(), request.table().id(), xid);
         DCHECK(child_info != nullptr && child_info->exists);
 
-        auto attach_ddl = _generate_attach_partition_ddl(
+        auto attach_op = _generate_attach_partition_ddl(
             request.db_id(),
             child_info,
             parent_table_id.value(),
             xid
         );
-        ddl_array.push_back(attach_ddl);
+        ddl_array.push_back(std::move(attach_op));
 
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1,
                   "Generated ATTACH PARTITION for child table {}", request.table().id());
@@ -1984,28 +2046,28 @@ Server::_create_table(const proto::TableRequest& request)
         }
     }
 
-    // ALWAYS return a JSON array
-    return nlohmann::json(ddl_array);
+    return ddl_array;
 }
 
-nlohmann::json
+proto::DDLOperation
 Server::_generate_partition_updates(const proto::TableRequest& request,
-                                     const proto::ColumnHistory& history)
+                                     const proto::ColumnHistory& history,
+                                     const XidLsn& xid)
 {
-    nlohmann::json ddl;
-    std::vector<uint64_t> table_ids;
+    proto::DDLOperation op;
+    op.set_xid(xid.xid);
+    op.set_lsn(xid.lsn);
+
+    auto* rp = op.mutable_resync_partitions();
+    rp->set_parent_table_id(request.table().id());
     for (auto &partition : request.table().partition_data()) {
-        table_ids.push_back(partition.table_id());
+        rp->add_table_ids(partition.table_id());
     }
 
-    ddl["action"] = "resync_partitions";
-    ddl["parent_table_id"] = request.table().id();
-    ddl["table_ids"] = table_ids;
-
-    return ddl;
+    return op;
 }
 
-nlohmann::json
+proto::DDLOperation
 Server::_drop_table(const proto::DropTableRequest& request, bool is_resync)
 {
     // retrieve the id of the namespace
@@ -2022,23 +2084,24 @@ Server::_drop_table(const proto::DropTableRequest& request, bool is_resync)
 
     CHECK(old_table_info);
 
-    // initialize the ddl json
-    nlohmann::json ddl;
-    ddl["action"] = "drop";
-    ddl["tid"] = request.table_id();
-    ddl["xid"] = request.xid();
-    ddl["lsn"] = request.lsn();
-    ddl["schema"] = request.namespace_name();
-    ddl["table"] = request.name();
+    // initialize the DDLOperation
+    proto::DDLOperation op;
+    op.set_xid(request.xid());
+    op.set_lsn(request.lsn());
+
+    auto* dt = op.mutable_drop_table();
+    dt->set_tid(request.table_id());
+    dt->set_schema(request.namespace_name());
+    dt->set_table(request.name());
 
     if (old_table_info->parent_table_id.has_value()) {
-        ddl["parent_table_id"] = old_table_info->parent_table_id.value();
+        dt->set_parent_table_id(old_table_info->parent_table_id.value());
     }
     if (old_table_info->partition_key.has_value() && !old_table_info->partition_key.value().empty()) {
-        ddl["partition_key"] = old_table_info->partition_key.value();
+        dt->set_partition_key(old_table_info->partition_key.value());
     }
     if (old_table_info->partition_bound.has_value() && !old_table_info->partition_bound.value().empty()) {
-        ddl["partition_bound"] = old_table_info->partition_bound.value();
+        dt->set_partition_bound(old_table_info->partition_bound.value());
     }
 
     XidLsn xid(request.xid(), request.lsn());
@@ -2105,21 +2168,17 @@ Server::_drop_table(const proto::DropTableRequest& request, bool is_resync)
         }
     }
 
-    return ddl;
+    return op;
 }
 
-nlohmann::json
+proto::DDLOperation
 Server::_mutate_namespace(
     uint64_t db_id, uint64_t ns_id, std::optional<std::string> name, const XidLsn& xid, bool exists)
 {
-    // construct the DDL to provide to the FDW
-    nlohmann::json ddl;
-    ddl["id"] = ns_id;
-    ddl["xid"] = xid.xid;
-    ddl["lsn"] = xid.lsn;
-    if (name) {
-        ddl["name"] = *name;
-    }
+    // construct a base DDLOperation with xid/lsn set; caller sets the oneof action
+    proto::DDLOperation op;
+    op.set_xid(xid.xid);
+    op.set_lsn(xid.lsn);
 
     // record the namespace info into the cache
     {
@@ -2139,7 +2198,7 @@ Server::_mutate_namespace(
         sys_tbl::NamespaceNames::Data::tuple(ns_id, name.value_or(""), xid.xid, xid.lsn, exists, table->get_next_internal_row_id());
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
-    return ddl;
+    return op;
 }
 
 void
@@ -2298,7 +2357,7 @@ Server::_get_modified_partition_details(uint64_t db_id,
     return result;
 }
 
-nlohmann::json
+proto::DDLOperation
 Server::_mutate_usertype(uint64_t db_id,
                           uint64_t type_id,
                           const std::string &name,
@@ -2306,36 +2365,27 @@ Server::_mutate_usertype(uint64_t db_id,
                           int8_t type,
                           const std::string &value_json,
                           const XidLsn xid,
-                          bool exists)
+                          bool active)
 {
-    // construct the DDL to provide to the FDW
-    nlohmann::json ddl;
-    ddl["id"] = type_id;
-    ddl["xid"] = xid.xid;
-    ddl["lsn"] = xid.lsn;
-    ddl["name"] = name;
-
-    if (exists) {
-        // these are not set for drop when exists is false
-        ddl["value"] = value_json;
-        ddl["type"] = type;
-        ddl["namespace_id"] = ns_id;
-    }
+    // construct a base DDLOperation with xid/lsn set; caller sets the oneof action
+    proto::DDLOperation op;
+    op.set_xid(xid.xid);
+    op.set_lsn(xid.lsn);
 
     // record the user defined type info into the cache
     {
         boost::unique_lock lock(_mutex);
-        auto entry = std::make_shared<UserTypeCacheRecord>(type_id, name, ns_id, type, value_json, exists);
+        auto entry = std::make_shared<UserTypeCacheRecord>(type_id, name, ns_id, type, value_json, active);
         _usertype_id_cache[db_id][type_id][xid] = entry;
     }
 
     // add the type to the user types table
     auto table = _get_mutable_system_table(db_id, sys_tbl::UserTypes::ID);
     auto tuple =
-        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists, table->get_next_internal_row_id());
+        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, active, table->get_next_internal_row_id());
     table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
-    return ddl;
+    return op;
 }
 
 Server::UserTypeCacheRecordPtr
@@ -3916,15 +3966,36 @@ Server::_write_index(const XidLsn& xid,
     }
 }
 
-proto::ColumnHistory
+Server::SchemaUpdateResult
 Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
                           const google::protobuf::RepeatedPtrField<proto::TableColumn>& new_schema,
                           const XidLsn& xid,
-                          nlohmann::json& ddl)
+                          uint64_t tid,
+                          const std::string& schema_name,
+                          const std::string& table_name,
+                          bool rls_enabled,
+                          bool rls_forced)
 {
-    proto::ColumnHistory update;
+    SchemaUpdateResult result;
+    auto& update = result.history;
+    auto& op = result.operation;
+
     update.set_xid(xid.xid);
     update.set_lsn(xid.lsn);
+
+    op.set_xid(xid.xid);
+    op.set_lsn(xid.lsn);
+
+    // Helper lambda to populate a resync DDLOperation
+    auto set_resync = [&]() {
+        auto* r = op.mutable_resync();
+        r->set_tid(tid);
+        r->set_schema(schema_name);
+        r->set_table(table_name);
+        r->set_rls_enabled(rls_enabled);
+        r->set_rls_forced(rls_forced);
+        update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
+    };
 
     // Build maps keyed by column.position() for both old and new schemas
     std::map<uint32_t, const proto::TableColumn*> oldMap;
@@ -3944,19 +4015,22 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
     for (const auto& [pos, old_col] : oldMap) {
         if (newMap.find(pos) == newMap.end()) {
 
-
 #if ENABLE_SCHEMA_MUTATES
             // Column has been removed
             *update.mutable_column() = *old_col;
             update.set_update_type(static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN));
             update.set_exists(false);
-            ddl["action"] = "col_drop";
-            ddl["column"] = old_col->name();
+            auto* cd = op.mutable_column_drop();
+            cd->set_tid(tid);
+            cd->set_schema(schema_name);
+            cd->set_table(table_name);
+            cd->set_rls_enabled(rls_enabled);
+            cd->set_rls_forced(rls_forced);
+            cd->set_column_name(old_col->name());
 #else
-            ddl["action"] = "resync";
-            update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
+            set_resync();
 #endif
-            return update;
+            return result;
         }
     }
 
@@ -3967,27 +4041,31 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
 
 #if ENABLE_SCHEMA_MUTATES
             if (new_col->has_default_value()) {
-                ddl["action"] = "resync";
-                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
+                set_resync();
             } else {
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NEW_COLUMN));
                 update.set_exists(true);
                 *update.mutable_column() = *new_col;
-                ddl["action"] = "col_add";
-                ddl["column"]["name"] = new_col->name();
-                ddl["column"]["type"] = new_col->pg_type();
-                ddl["column"]["nullable"] = new_col->is_nullable();
+                auto* ca = op.mutable_column_add();
+                ca->set_tid(tid);
+                ca->set_schema(schema_name);
+                ca->set_table(table_name);
+                ca->set_rls_enabled(rls_enabled);
+                ca->set_rls_forced(rls_forced);
+                auto* col = ca->mutable_column();
+                col->set_name(new_col->name());
+                col->set_type_oid(new_col->pg_type());
+                col->set_nullable(new_col->is_nullable());
                 if (new_col->has_default_value()) {
-                    ddl["column"]["default"] = new_col->default_value();
+                    col->set_default_value(new_col->default_value());
                 }
                 CHECK(false); // XXX new_col->type_name must be added
             }
 #else
-            ddl["action"] = "resync";
-            update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
+            set_resync();
 #endif
 
-            return update;
+            return result;
         }
     }
 
@@ -4001,10 +4079,15 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
                 *update.mutable_column() = *new_col;
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NAME_CHANGE));
                 update.set_exists(true);
-                ddl["action"] = "col_rename";
-                ddl["old_name"] = old_col->name();
-                ddl["new_name"] = new_col->name();
-                return update;
+                auto* cr = op.mutable_column_rename();
+                cr->set_tid(tid);
+                cr->set_schema(schema_name);
+                cr->set_table(table_name);
+                cr->set_rls_enabled(rls_enabled);
+                cr->set_rls_forced(rls_forced);
+                cr->set_old_name(old_col->name());
+                cr->set_new_name(new_col->name());
+                return result;
             }
 
             // Check for a change in nullability (from not-null to nullable).
@@ -4015,50 +4098,55 @@ Server::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableCo
                 *update.mutable_column() = *new_col;
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
                 update.set_exists(true);
-                ddl["action"] = "col_nullable";
-                ddl["column"]["name"] = new_col->name();
-                ddl["column"]["nullable"] = new_col->is_nullable();
+                auto* cn = op.mutable_column_nullable();
+                cn->set_tid(tid);
+                cn->set_schema(schema_name);
+                cn->set_table(table_name);
+                cn->set_rls_enabled(rls_enabled);
+                cn->set_rls_forced(rls_forced);
+                cn->set_column_name(new_col->name());
+                cn->set_nullable(new_col->is_nullable());
 #else
-                ddl["action"] = "resync";
-                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
+                set_resync();
 #endif
-                return update;
+                return result;
             }
 
             // Changing from nullable to not-nullable requires a resync
             if (old_col->is_nullable() && !new_col->is_nullable()) {
-
-                ddl["action"] = "resync";
-                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
-                return update;
+                set_resync();
+                return result;
             }
 
             // Check for a change in the data type
             if (old_col->pg_type() != new_col->pg_type()) {
-                ddl["action"] = "resync";
-                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
-                return update;
+                set_resync();
+                return result;
             }
 
             // Check for a primary key position change
             if ((old_col->has_pk_position() && !new_col->has_pk_position()) ||
                 (!old_col->has_pk_position() && new_col->has_pk_position()) ||
                 (old_col->pk_position() != new_col->pk_position())) {
-                ddl["action"] = "resync";
-                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
-                return update;
+                set_resync();
+                return result;
             }
         }
     }
 
     // No change detected
-    ddl["action"] = "no_change";
+    auto* nc = op.mutable_no_change();
+    nc->set_tid(tid);
+    nc->set_schema(schema_name);
+    nc->set_table(table_name);
+    nc->set_rls_enabled(rls_enabled);
+    nc->set_rls_forced(rls_forced);
     update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NO_CHANGE));
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No schema change detected for table @{}:{}",
               xid.xid, xid.lsn);
 
-    return update;
+    return result;
 }
 
 }  // namespace springtail::sys_tbl_mgr

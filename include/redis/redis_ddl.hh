@@ -5,7 +5,7 @@
 #include <utility>
 #include <shared_mutex>
 #include <unordered_map>
-#include <nlohmann/json.hpp>
+#include <ddl.pb.h>
 
 #include <common/redis.hh>
 #include <common/singleton.hh>
@@ -30,18 +30,19 @@ namespace springtail {
 
         /**
          * Used by gc::LogParser (GC-1) to record DDL statements against the XID.
+         * @param db_id The database ID.
          * @param xid The XID at which this DDL statement needs to be applied.
-         * @param ddl A JSON representation of the DDL statement.
+         * @param ddl A protobuf DDLOperation representing the DDL statement.
          */
-        void add_ddl(uint64_t db_id, uint64_t xid, const std::string &ddl);
+        void add_ddl(uint64_t db_id, uint64_t xid, proto::DDLOperation ddl);
 
         /**
          * Used by gc::Committer (GC-2) to retrieve the set of DDL statements recorded against the
          * XID we are about to commit.
          * @param xid The XID we are about to commit.
-         * @return A JSON array containing the ordered set of DDLs to apply at each FDW.
+         * @return The ordered set of DDLOperations to apply at each FDW, empty if none.
          */
-        nlohmann::json get_ddls_xid(uint64_t db_id, uint64_t xid);
+        std::vector<proto::DDLOperation> get_ddls_xid(uint64_t db_id, uint64_t xid);
 
         /**
          * Used by gc::LogParser (GC-1) to clear DDL statements it recorded against a given XID.
@@ -63,9 +64,9 @@ namespace springtail {
          * commit_ddl().
          * @param db_id The ID of the database instance we are updating.
          * @param xid The XID at which these DDL statements were applied.
-         * @param ddls A JSON array of DDL statements to apply, retrieved from get_ddls_xid()
+         * @param ddls The DDL operations to apply, retrieved from get_ddls_xid()
          */
-        void precommit_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls);
+        void precommit_ddl(uint64_t db_id, uint64_t xid, std::vector<proto::DDLOperation> ddls);
 
         /**
          * Used by gc::Committer (GC-2) to provide the list of DDL statements to the FDWs.
@@ -89,12 +90,11 @@ namespace springtail {
         void abort_ddl(uint64_t db_id, uint64_t xid);
 
         /**
-         * Used by the FDW to retrieve the next set of DDL statements that need to be applied.
+         * Used by the FDW to retrieve the next set of DDL batches that need to be applied.
          * @param fdw_id The ID of the FDW we are updating.
-         * @return A JSON object containing the XID at which the DDLs were applied and an array of
-         *         the DDL statements themselves.
+         * @return A vector of DDLBatch messages, each containing db_id, xid, and DDL operations.
          */
-        std::vector<nlohmann::json> get_next_ddls(const std::string &fdw_id);
+        std::vector<proto::DDLBatch> get_next_ddls(const std::string &fdw_id);
 
         /**
          * Used by the FDW to abort applying a set of DDL statements and place them back on the
@@ -177,10 +177,10 @@ namespace springtail {
 
         RedisClientPtr _redis;
 
-        // In-memory DDL storage: db_id -> (xid -> [ddl_statements])
+        // In-memory DDL storage: db_id -> (xid -> [ddl_operations])
         // Used for the hot path between GC-1 (PgLogReader) and GC-2 (Committer)
         // Entries are transient and cleared after precommit_ddl() moves them to Redis
-        std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::vector<nlohmann::json>>> _ddl_cache;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::vector<proto::DDLOperation>>> _ddl_cache;
         mutable std::shared_mutex _ddl_cache_mutex;
     };
 

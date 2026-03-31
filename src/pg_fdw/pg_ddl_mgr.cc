@@ -13,6 +13,9 @@
 #include <pg_fdw/pg_xid_collector.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
 
+#include <common/ddl_helpers.hh>
+#include <ddl.pb.h>
+
 namespace {
 
     // helper to delete xid history from shm caches
@@ -276,7 +279,7 @@ namespace springtail::pg_fdw {
         }
     }
 
-    void PgDDLMgr::_queue_request(uint64_t db_id, const std::map<uint64_t, nlohmann::json> &xid_map)
+    void PgDDLMgr::_queue_request(uint64_t db_id, const std::map<uint64_t, std::vector<proto::DDLOperation>> &xid_map)
     {
         _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
             db_id, [this, db_id, xid_map]() {
@@ -1170,14 +1173,14 @@ namespace springtail::pg_fdw {
                 }
 
                 // check if we should skip applying any of the DDLs based on already-applied XIDs
-                std::map<uint64_t, std::map<uint64_t, nlohmann::json>> db_map;
-                for (auto &entry : ddls_vec) {
-                    uint64_t db_id = entry.at("db_id").get<uint64_t>();
-                    uint64_t schema_xid = entry.at("xid").get<uint64_t>();
-                    auto ddls = entry.at("ddls");
+                std::map<uint64_t, std::map<uint64_t, std::vector<proto::DDLOperation>>> db_map;
+                for (auto &batch : ddls_vec) {
+                    uint64_t db_id = batch.db_id();
+                    uint64_t schema_xid = batch.xid();
                     auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
 
-                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "DDLS: {}", ddls.dump(4));
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "DDLS: batch db_id={}, xid={}, ops={}",
+                              db_id, schema_xid, batch.operations_size());
 
                     std::shared_lock lock(_db_mutex);
                     auto it = _db_data.find(db_id);
@@ -1186,6 +1189,9 @@ namespace springtail::pg_fdw {
 
                     std::shared_lock db_lock(db_item.db_mutex);
                     lock.unlock();
+
+                    // Convert repeated operations to a vector
+                    std::vector<proto::DDLOperation> ops(batch.operations().begin(), batch.operations().end());
 
                     uint64_t current_xid = db_item.latest_xid;
                     if (current_xid >= schema_xid) {
@@ -1196,11 +1202,11 @@ namespace springtail::pg_fdw {
                         if (db_item.state != redis::db_state_change::DB_STATE_RUNNING) {
                             LOG_INFO("New schema XID will be stored till database is in 'running' state: db_id={}, current={}, new={}",
                                     db_id, current_xid, schema_xid);
-                            db_item.pending_ddls[schema_xid] = ddls;
+                            db_item.pending_ddls[schema_xid] = std::move(ops);
                         } else {
                             LOG_INFO("New schema XID will be applied: db_id={}, current={}, new={}",
                                     db_id, current_xid, schema_xid);
-                            db_map[db_id][schema_xid] = ddls;
+                            db_map[db_id][schema_xid] = std::move(ops);
                         }
                     }
                 }
@@ -1293,7 +1299,7 @@ namespace springtail::pg_fdw {
 
     bool
     PgDDLMgr::_update_schemas(uint64_t db_id, const std::string &db_name,
-                              const std::map<uint64_t, nlohmann::json> &xid_map)
+                              const std::map<uint64_t, std::vector<proto::DDLOperation>> &xid_map)
     {
         // get the database name for the db_id; XXX should see if we can swtich to OID
 
@@ -1301,10 +1307,10 @@ namespace springtail::pg_fdw {
         std::vector<std::string> txn;
 
         try {
-            // generate a DDL statement for each JSON in the transaction
-            for (auto &[xid, ddls] : xid_map) {
-                for (const auto &ddl : ddls) {
-                    auto query_string = _gen_sql_from_json(conn, SPRINGTAIL_FDW_SERVER_NAME, ddl);
+            // generate a DDL statement for each operation in the transaction
+            for (auto &[xid, ops] : xid_map) {
+                for (const auto &op : ops) {
+                    auto query_string = _gen_sql_from_ddl(conn, SPRINGTAIL_FDW_SERVER_NAME, op);
                     if (!query_string.empty()) {
                         txn.push_back(query_string);
                     }
@@ -1351,121 +1357,100 @@ namespace springtail::pg_fdw {
         conn->end_transaction();
     }
 
-    PartitionInfo
-    _get_partition_info(const nlohmann::json &ddl){
-        uint64_t parent_table_id = 0;
-        std::string parent_namespace_name;
-        std::string parent_table_name;
-        std::string partition_key;
-        std::string partition_bound;
-
-        if (ddl.contains("parent_table_id") && !ddl.at("parent_table_id").is_null()) {
-            parent_table_id = ddl.at("parent_table_id").get<uint64_t>();
-        }
-
-        if (ddl.contains("parent_namespace_name") && !ddl.at("parent_namespace_name").is_null()) {
-            parent_namespace_name = ddl.at("parent_namespace_name").get<std::string>();
-        }
-
-        if (ddl.contains("parent_table_name") && !ddl.at("parent_table_name").is_null()) {
-            parent_table_name = ddl.at("parent_table_name").get<std::string>();
-        }
-
-        if (ddl.contains("partition_key") && !ddl.at("partition_key").is_null()) {
-            partition_key = ddl.at("partition_key").get<std::string>();
-        }
-
-        if (ddl.contains("partition_bound") && !ddl.at("partition_bound").is_null()) {
-            partition_bound = ddl.at("partition_bound").get<std::string>();
-        }
-
-        PartitionInfo partition_info(parent_table_id,
-                                     parent_namespace_name,
-                                     parent_table_name,
-                                     partition_key,
-                                     partition_bound);
-
-        return partition_info;
-    }
-
     std::string
-    PgDDLMgr::_gen_sql_from_json(LibPqConnectionPtr conn,
-                                 const std::string &server_name,
-                                 const nlohmann::json &ddl)
+    PgDDLMgr::_gen_sql_from_ddl(LibPqConnectionPtr conn,
+                                const std::string &server_name,
+                                const proto::DDLOperation &op)
     {
-        assert(ddl.is_object());
-        assert(ddl.contains("action"));
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "DDL operation: {}", get_action_name(op));
 
-        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "DDL JSON: {}", ddl.dump(4));
+        switch (op.operation_case()) {
 
-        // determine if this is a foreign table or regular table operation
-        // if partition_key is empty, then it's a foreign table, since it is a leaf table
-        PartitionInfo partition_info = _get_partition_info(ddl);
-        bool is_foreign_table_type = partition_info.partition_key().empty();
+        case proto::DDLOperation::kCreateTable: {
+            const auto &ct = op.create_table();
 
-        auto const &action = ddl.at("action");
-        if (action == "create") { // create table
-            // generate the CREATE TABLE statement
+            // if partition_key is absent or empty, it's a foreign (leaf) table
+            bool is_foreign_table_type = !ct.has_partition_key() || ct.partition_key().empty();
+
+            // Build partition info: CreateTableDDL has no parent info, only partition_key
+            PartitionInfo partition_info(0, "", "", ct.has_partition_key() ? ct.partition_key() : "", "");
+
+            // Build column list
             std::vector<PgFdwCommon::ColumnInfo> columns;
-
-            for (const auto &col : ddl.at("columns")) {
+            for (const auto &col : ct.columns()) {
                 auto fully_qualified_type_name = fmt::format("{}.{}",
-                                        conn->escape_identifier(col.at("type_namespace").get<std::string>()),
-                                        conn->escape_identifier(col.at("type_name").get<std::string>()));
-                columns.emplace_back(col.at("name"),
-                                     fully_qualified_type_name,
-                                     col.at("nullable"));
+                    conn->escape_identifier(col.type_namespace()),
+                    conn->escape_identifier(col.type_name()));
+                columns.emplace_back(col.name(), fully_qualified_type_name, col.nullable());
             }
 
-            return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns,
+            return PgFdwCommon::_gen_fdw_table_sql(server_name, ct.schema(), ct.table(), ct.tid(), columns,
                                                    partition_info, is_foreign_table_type,
                                                    [conn](const std::string &name) {
                                                         return conn->escape_identifier(name.c_str());
                                                    });
         }
 
-        else if (action == "rename") { // rename table
+        case proto::DDLOperation::kDropTable: {
+            const auto &dt = op.drop_table();
+            bool is_foreign_table_type = !dt.has_partition_key() || dt.partition_key().empty();
+            return fmt::format("DROP {} TABLE IF EXISTS {}.{};",
+                               is_foreign_table_type ? "FOREIGN" : "",
+                               conn->escape_identifier(dt.schema()),
+                               conn->escape_identifier(dt.table()));
+        }
+
+        case proto::DDLOperation::kRenameTable: {
+            const auto &rn = op.rename_table();
+            bool is_foreign_table_type = !rn.has_partition_key() || rn.partition_key().empty();
             std::string rename = fmt::format("ALTER {} TABLE {}.{} RENAME TO {};",
                                              is_foreign_table_type ? "FOREIGN" : "",
-                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
-                                             conn->escape_identifier(ddl.at("old_table").get<std::string>()),
-                                             conn->escape_identifier(ddl.at("table").get<std::string>()));
+                                             conn->escape_identifier(rn.old_schema()),
+                                             conn->escape_identifier(rn.old_table()),
+                                             conn->escape_identifier(rn.table()));
 
             // XXX it's not clear to me that we need to support a schema change here?
-            if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
+            if (rn.schema() != rn.old_schema()) {
                 return rename + fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
                                             is_foreign_table_type ? "FOREIGN" : "",
-                                            conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
-                                            conn->escape_identifier(ddl.at("table").get<std::string>()),
-                                            conn->escape_identifier(ddl.at("schema").get<std::string>()));
+                                            conn->escape_identifier(rn.old_schema()),
+                                            conn->escape_identifier(rn.table()),
+                                            conn->escape_identifier(rn.schema()));
             } else {
                 return rename;
             }
         }
 
-        else if (action == "drop") {  // drop table
-            return fmt::format("DROP {} TABLE IF EXISTS {}.{};",
+        case proto::DDLOperation::kSetNamespace: {
+            const auto &sns = op.set_namespace();
+            bool is_foreign_table_type = !sns.has_partition_key() || sns.partition_key().empty();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Set namespace: {}.{} -> {}", sns.old_schema(), sns.table(), sns.schema());
+            const auto schema = conn->escape_identifier(sns.schema());
+            const auto table = conn->escape_identifier(sns.table());
+            const auto old_schema = conn->escape_identifier(sns.old_schema());
+
+            return fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
                                is_foreign_table_type ? "FOREIGN" : "",
-                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
-                               conn->escape_identifier(ddl.at("table").get<std::string>()));
+                               old_schema, table, schema);
         }
+
 #if ENABLE_SCHEMA_MUTATES
         // XXX THIS CODE IS CURRENTLY DISABLED
-        else if (action == "col_add") { // alter table add column
-            auto &col = ddl.at("column");
+        case proto::DDLOperation::kColumnAdd: {
+            const auto &ca = op.column_add();
+            // ColumnAddDDL does not carry partition_key; treat as foreign table
+            bool is_foreign_table_type = true;
+            const auto &col = ca.column();
 
             std::string constraints;
-            std::string null_constraint = col.at("nullable").get<bool>()
-                ? "NULL"
-                : "NOT NULL";
-            if (col.contains("default")) {
-                constraints = fmt::format("{} {}", null_constraint,
-                                         col.at("default").get<std::string>());
+            std::string null_constraint = col.nullable() ? "NULL" : "NOT NULL";
+            if (col.has_default_value()) {
+                constraints = fmt::format("{} {}", null_constraint, col.default_value());
             } else {
                 constraints = null_constraint;
             }
 
-            uint32_t type_oid = col.at("type").get<uint32_t>();
+            uint32_t type_oid = col.type_oid();
             std::string type_name;
             auto it = _type_cache.find(type_oid);
             if (it != _type_cache.end()) {
@@ -1473,124 +1458,110 @@ namespace springtail::pg_fdw {
             }
             return fmt::format("ALTER {} TABLE {}.{} ADD COLUMN {} {} {};",
                                is_foreign_table_type ? "FOREIGN" : "",
-                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
-                               conn->escape_identifier(ddl.at("table").get<std::string>()),
-                               conn->escape_identifier(col.at("name").get<std::string>()),
+                               conn->escape_identifier(ca.schema()),
+                               conn->escape_identifier(ca.table()),
+                               conn->escape_identifier(col.name()),
                                type_name,
                                constraints);
         }
 
-        else if (action == "col_drop") {  // alter table drop column
+        case proto::DDLOperation::kColumnDrop: {
+            const auto &cd = op.column_drop();
+            // ColumnDropDDL does not carry partition_key; treat as foreign table
+            bool is_foreign_table_type = true;
             return fmt::format("ALTER {} TABLE {}.{} DROP COLUMN {};",
                                is_foreign_table_type ? "FOREIGN" : "",
-                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
-                               conn->escape_identifier(ddl.at("table").get<std::string>()),
-                               conn->escape_identifier(ddl.at("column").get<std::string>()));
+                               conn->escape_identifier(cd.schema()),
+                               conn->escape_identifier(cd.table()),
+                               conn->escape_identifier(cd.column_name()));
         }
 #endif /* ENABLE_SCHEMA_MUTATES */
 
-        else if (action == "col_rename") {
+        case proto::DDLOperation::kColumnRename: {
+            const auto &cr = op.column_rename();
+            // ColumnRenameDDL does not carry partition_key; treat as foreign table
+            bool is_foreign_table_type = true;
             return fmt::format("ALTER {} TABLE {}.{} RENAME COLUMN {} TO {};",
                                is_foreign_table_type ? "FOREIGN" : "",
-                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
-                               conn->escape_identifier(ddl.at("table").get<std::string>()),
-                               conn->escape_identifier(ddl.at("old_name").get<std::string>()),
-                               conn->escape_identifier(ddl.at("new_name").get<std::string>()));
+                               conn->escape_identifier(cr.schema()),
+                               conn->escape_identifier(cr.table()),
+                               conn->escape_identifier(cr.old_name()),
+                               conn->escape_identifier(cr.new_name()));
         }
 
 #if ENABLE_SCHEMA_MUTATES
-        else if (action == "col_nullable") {
-            auto &col = ddl.at("column");
+        case proto::DDLOperation::kColumnNullable: {
+            const auto &cn = op.column_nullable();
             return fmt::format("ALTER FOREIGN TABLE {}.{} ALTER COLUMN {} {} NOT NULL;",
-                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
-                               conn->escape_identifier(ddl.at("table").get<std::string>()),
-                               conn->escape_identifier(col.at("name").get<std::string>()),
-                               col.at("nullable").get<bool>() ? "DROP" : "SET");
+                               conn->escape_identifier(cn.schema()),
+                               conn->escape_identifier(cn.table()),
+                               conn->escape_identifier(cn.column_name()),
+                               cn.nullable() ? "DROP" : "SET");
         }
 #endif /* ENABLE_SCHEMA_MUTATES */
 
-        else if (action == "create_index") {
-            // TODO: do something?
-            LOG_ERROR("CREATE INDEX");
-            CHECK(false);
-            return "";
-        }
-        else if (action == "drop_index") {
-            // TODO: do something?
-            LOG_ERROR("DROP INDEX");
-            CHECK(false);
-            return "";
-        }
-        else if (action == "ns_create") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating schema with JSON: {}", ddl.dump());
-            const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
+        case proto::DDLOperation::kNamespaceCreate: {
+            const auto &nc = op.namespace_create();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating schema: {}", nc.name());
+            const auto escaped_schema = conn->escape_identifier(nc.name());
             return _get_create_schema_with_grants_query(escaped_schema);
         }
-        else if (action == "ns_alter") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Altering schema with JSON: {}", ddl.dump());
-            const auto old_schema = conn->escape_identifier(ddl.at("old_name").get<std::string>());
-            const auto new_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
 
+        case proto::DDLOperation::kNamespaceAlter: {
+            const auto &na = op.namespace_alter();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Altering schema: {} -> {}", na.old_name(), na.name());
+            const auto old_schema = conn->escape_identifier(na.old_name());
+            const auto new_schema = conn->escape_identifier(na.name());
             return _get_alter_schema_with_grants_query(old_schema, new_schema);
         }
-        else if (action == "ns_drop") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Dropping schema with JSON: {}", ddl.dump());
-            const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
+
+        case proto::DDLOperation::kNamespaceDrop: {
+            const auto &nd = op.namespace_drop();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Dropping schema: {}", nd.name());
+            const auto escaped_schema = conn->escape_identifier(nd.name());
             return fmt::format("DROP SCHEMA IF EXISTS {} CASCADE", escaped_schema);
         }
-        else if (action == "set_namespace") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Set namespace with JSON: {}", ddl.dump());
-            const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
-            const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
-            const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
 
-            return fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
-                               is_foreign_table_type ? "FOREIGN" : "",
-                               old_schema, table, schema);
-        }
-        else if (action == "ut_create") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating user type with JSON: {}", ddl.dump());
-            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
-            const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
-            const auto value_json_str = ddl.at("value").get<std::string>();
-            const auto type = ddl.at("type").get<int8_t>();
+        case proto::DDLOperation::kUsertypeCreate: {
+            const auto &utc = op.usertype_create();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Creating user type: {}.{}", utc.schema(), utc.name());
+            const auto escaped_schema = conn->escape_identifier(utc.schema());
+            const auto escaped_name = conn->escape_identifier(utc.name());
+            const auto &value_json_str = utc.value_json();
+            const auto type = utc.type();
 
             if (type == constant::USER_TYPE_EXTENSION) {
                 return "";
             }
             return _get_create_type_query(escaped_schema, escaped_name, value_json_str, conn);
         }
-        else if (action == "ut_drop") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Dropping user type with JSON: {}", ddl.dump());
-            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
-            const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
 
-            return fmt::format("DROP TYPE IF EXISTS {}.{} CASCADE", escaped_schema, escaped_name);
-        } else if (action == "ut_alter") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Altering user type with JSON: {}", ddl.dump());
+        case proto::DDLOperation::kUsertypeAlter: {
+            const auto &uta = op.usertype_alter();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Altering user type: {}.{}", uta.schema(), uta.name());
 
             // need to check if it is renamed
-            const auto old_name = conn->escape_identifier(ddl.at("old_name").get<std::string>());
-            const auto new_name = conn->escape_identifier(ddl.at("name").get<std::string>());
-            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto old_name = conn->escape_identifier(uta.old_name());
+            const auto new_name = conn->escape_identifier(uta.name());
+            const auto escaped_schema = conn->escape_identifier(uta.schema());
             if (old_name != new_name) {
                 return fmt::format("ALTER TYPE {}.{} RENAME TO {}", escaped_schema, old_name, new_name);
             }
 
             // need to check if schema has changed
-            const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
-            const auto new_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto old_schema = conn->escape_identifier(uta.old_schema());
+            const auto new_schema = conn->escape_identifier(uta.schema());
             if (old_schema != new_schema) {
                 return fmt::format("ALTER TYPE {}.{} SET SCHEMA {};",
                                    old_schema, new_name, new_schema);
             }
 
             // need to check if value has changed
-            const auto value_json_str = ddl.at("value").get<std::string>();
-            const auto old_value_json_str = ddl.at("old_value").get<std::string>();
+            const auto &value_json_str = uta.value_json();
+            const auto &old_value_json_str = uta.old_value_json();
             if (value_json_str != old_value_json_str) {
-                return gen_alter_enum_sql(ddl.at("schema").get<std::string>(),
-                                          ddl.at("name").get<std::string>(),
+                return gen_alter_enum_sql(uta.schema(),
+                                          uta.name(),
                                           nlohmann::json::parse(old_value_json_str),
                                           nlohmann::json::parse(value_json_str),
                                           conn);
@@ -1598,50 +1569,80 @@ namespace springtail::pg_fdw {
 
             // nothing to actually change in the FDW
             return {};
-        } else if (action == "attach_partition") {
-            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {}.{} {};",
-                                            conn->escape_identifier(ddl.at("schema")),
-                                            conn->escape_identifier(ddl.at("table")),
-                                            conn->escape_identifier(ddl.at("partition_schema")),
-                                            conn->escape_identifier(ddl.at("partition_name")),
-                                            ddl.at("partition_bound").get<std::string>());
-
-            return alter;
-        } else if (action == "detach_partition") {
-            std::string alter = fmt::format("ALTER TABLE {}.{} DETACH PARTITION {}.{};",
-                                            conn->escape_identifier(ddl.at("schema")),
-                                            conn->escape_identifier(ddl.at("table")),
-                                            conn->escape_identifier(ddl.at("partition_schema")),
-                                            conn->escape_identifier(ddl.at("partition_name")));
-
-            return alter;
-        } else if (action == "set_rls_enabled") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting RLS enabled with JSON: {}", ddl.dump());
-            const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
-            const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
-            bool rls_enabled = ddl.at("rls_enabled").get<bool>();
-
-            return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
-                               is_foreign_table_type ? "FOREIGN" : "",
-                               schema, table,
-                               rls_enabled ? "ENABLE" : "DISABLE");
-        } else if (action == "set_rls_forced") {
-            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting RLS forced with JSON: {}", ddl.dump());
-            const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
-            const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
-            bool rls_forced = ddl.at("rls_forced").get<bool>();
-
-            return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
-                               is_foreign_table_type ? "FOREIGN" : "",
-                               schema, table,
-                               rls_forced ? "FORCE" : "NO FORCE");
         }
 
-        // can't currently support other kinds of DDL mutations
-        LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
-        CHECK(false);
+        case proto::DDLOperation::kUsertypeDrop: {
+            const auto &utd = op.usertype_drop();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Dropping user type: {}.{}", utd.schema(), utd.name());
+            const auto escaped_schema = conn->escape_identifier(utd.schema());
+            const auto escaped_name = conn->escape_identifier(utd.name());
+            return fmt::format("DROP TYPE IF EXISTS {}.{} CASCADE", escaped_schema, escaped_name);
+        }
 
-        return {};
+        case proto::DDLOperation::kAttachPartition: {
+            const auto &ap = op.attach_partition();
+            return fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {}.{} {};",
+                               conn->escape_identifier(ap.schema()),
+                               conn->escape_identifier(ap.table()),
+                               conn->escape_identifier(ap.partition_schema()),
+                               conn->escape_identifier(ap.partition_name()),
+                               ap.partition_bound());
+        }
+
+        case proto::DDLOperation::kDetachPartition: {
+            const auto &dp = op.detach_partition();
+            return fmt::format("ALTER TABLE {}.{} DETACH PARTITION {}.{};",
+                               conn->escape_identifier(dp.schema()),
+                               conn->escape_identifier(dp.table()),
+                               conn->escape_identifier(dp.partition_schema()),
+                               conn->escape_identifier(dp.partition_name()));
+        }
+
+        case proto::DDLOperation::kSetRlsEnabled: {
+            const auto &rls = op.set_rls_enabled();
+            bool is_foreign_table_type = !rls.has_partition_key() || rls.partition_key().empty();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting RLS enabled: {}.{} = {}",
+                      rls.schema(), rls.table(), rls.rls_enabled());
+            const auto schema = conn->escape_identifier(rls.schema());
+            const auto table = conn->escape_identifier(rls.table());
+
+            return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
+                               is_foreign_table_type ? "FOREIGN" : "",
+                               schema, table,
+                               rls.rls_enabled() ? "ENABLE" : "DISABLE");
+        }
+
+        case proto::DDLOperation::kSetRlsForced: {
+            const auto &rls = op.set_rls_forced();
+            bool is_foreign_table_type = !rls.has_partition_key() || rls.partition_key().empty();
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting RLS forced: {}.{} = {}",
+                      rls.schema(), rls.table(), rls.rls_forced());
+            const auto schema = conn->escape_identifier(rls.schema());
+            const auto table = conn->escape_identifier(rls.table());
+
+            return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
+                               is_foreign_table_type ? "FOREIGN" : "",
+                               schema, table,
+                               rls.rls_forced() ? "FORCE" : "NO FORCE");
+        }
+
+        case proto::DDLOperation::kResync:
+        case proto::DDLOperation::kNoChange:
+        case proto::DDLOperation::kResyncPartitions:
+            // No SQL to generate for these operations
+            return {};
+
+        case proto::DDLOperation::OPERATION_NOT_SET:
+            LOG_ERROR("DDL operation not set");
+            CHECK(false);
+            return {};
+
+        default:
+            // can't currently support other kinds of DDL mutations
+            LOG_ERROR("Unhandled DDL operation: {}", get_action_name(op));
+            CHECK(false);
+            return {};
+        }
     }
 
     void

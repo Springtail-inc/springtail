@@ -1,9 +1,11 @@
+#include <common/ddl_helpers.hh>
 #include <common/time_trace.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/sync_tracker.hh>
 
+#include <ddl.pb.h>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>
@@ -250,8 +252,13 @@ namespace springtail::pg_log_mgr {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
                     entry.table_schema = TableMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, {PgExtnRegistry::get_instance()->comparator_func}, true, false);
+                    entry.update_schema(_db, tid, xidlsn);
+                } else {
+                    // Use create_schema when the sync tracker provides the schema directly,
+                    // since the system table cache may not yet reflect the post-resync schema
+                    // (swap_sync_table hasn't run yet).
+                    entry.create_schema(entry.table_schema);
                 }
-                entry.update_schema(_db, tid, xidlsn);
             }
 
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Create extent with row width: {}", entry.schema->row_size());
@@ -712,52 +719,38 @@ namespace springtail::pg_log_mgr {
                 PgMsgNamespace namespace_msg{table_msg.lsn, table_msg.namespace_id, table_msg.xid, table_msg.namespace_name};
 
                 // make sure that the namespace is created
-                std::string &&ns_ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
-                nlohmann::json ns_action = nlohmann::json::parse(ns_ddl_stmt).at("action");
-
-                if (ns_action.get<std::string>() != "no_change") {
-                    LOG_INFO("Table namespace created: {} {} {}", table_msg.table, table_msg.namespace_name, table_msg.namespace_id);
-                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ns_ddl_stmt);
+                auto ns_ddl_ops = server->create_namespace(_db, xidlsn, namespace_msg);
+                for (auto& op : ns_ddl_ops) {
+                    if (!op.has_no_change()) {
+                        LOG_INFO("Table namespace created: {} {} {}", table_msg.table, table_msg.namespace_name, table_msg.namespace_id);
+                        RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                    }
                 }
 
-                // Create table - ALWAYS returns JSON array
-                std::string ddl_stmt = server->create_table(_db, xidlsn, table_msg);
-                nlohmann::json ddl_array = nlohmann::json::parse(ddl_stmt);
+                // Create table - returns vector of DDLOperation
+                auto ddl_ops = server->create_table(_db, xidlsn, table_msg);
 
-                DCHECK(ddl_array.is_array());  // Always an array now
-
-                // Array structure: [CREATE TABLE, optional ATTACH PARTITION(s)...]
+                // Vector structure: [CREATE TABLE, optional ATTACH PARTITION(s)...]
                 // Only the first entry (CREATE TABLE) has a tid that needs to be cached
-                DCHECK(!ddl_array.empty());  // Should always have at least CREATE TABLE
+                DCHECK(!ddl_ops.empty());  // Should always have at least CREATE TABLE
 
                 // Process first entry (CREATE TABLE) and update exists cache
-                const auto& create_ddl = ddl_array[0];
-                DCHECK(create_ddl["action"].get<std::string>() == "create");
+                DCHECK(ddl_ops[0].has_create_table());
 
-                std::string create_ddl_str = nlohmann::to_string(create_ddl);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, create_ddl_str);
-
-                uint32_t tid = create_ddl["tid"].get<uint32_t>();
+                uint32_t tid = ddl_ops[0].create_table().tid();
                 _exists_cache->insert(_db, tid, true);
 
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
                           "Added CREATE TABLE DDL for table {} to FDW queue", tid);
 
-                // Process remaining entries (ATTACH PARTITION DDLs) - just add to RedisDDL
-                for (size_t i = 1; i < ddl_array.size(); i++) {
-                    const auto& attach_ddl = ddl_array[i];
-                    DCHECK(attach_ddl["action"].get<std::string>() == "attach_partition");
-
-                    std::string attach_ddl_str = nlohmann::to_string(attach_ddl);
-                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, attach_ddl_str);
-
-                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2,
-                              "Added ATTACH PARTITION DDL to FDW queue");
+                // Process all entries (CREATE TABLE + optional ATTACH PARTITION DDLs)
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
                 }
 
-                if (ddl_array.size() > 1) {
+                if (ddl_ops.size() > 1) {
                     LOG_INFO("Processed CREATE TABLE for {} and {} ATTACH PARTITION DDL(s)",
-                             tid, ddl_array.size() - 1);
+                             tid, ddl_ops.size() - 1);
                 }
                 break;
             }
@@ -767,24 +760,23 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "ALTER TABLE: xid={}, lsn={}, pg_xid={}, tid={}", xidlsn.xid, xidlsn.lsn,
                           table_msg.xid, table_msg.oid);
 
-                std::string &&ddl_stmt = server->alter_table(_db, xidlsn, table_msg);
+                auto ddl_ops = server->alter_table(_db, xidlsn, table_msg);
 
                 // check for re-sync
-                nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
-
-                if (action.get<std::string>() == "resync") {
-                    _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
-                } else if (action.get<std::string>() == "resync_partitions") {
-                    std::unordered_set<uint32_t> table_ids;
-                    table_ids.insert(table_msg.oid);
-                    nlohmann::json table_ids_json = nlohmann::json::parse(ddl_stmt).at("table_ids");
-                    for (auto table_id : table_ids_json.get<std::vector<uint32_t>>()) {
-                        table_ids.insert(table_id);
+                for (auto& op : ddl_ops) {
+                    if (op.has_resync()) {
+                        _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
+                    } else if (op.has_resync_partitions()) {
+                        std::unordered_set<uint32_t> table_ids;
+                        table_ids.insert(table_msg.oid);
+                        for (auto table_id : op.resync_partitions().table_ids()) {
+                            table_ids.insert(static_cast<uint32_t>(table_id));
+                        }
+                        // Mark the parent table for resync
+                        _mark_table_resync(table_ids, xidlsn, pg_xids);
+                    } else if (!op.has_no_change()) {
+                        RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
                     }
-                    // Mark the parent table for resync
-                    _mark_table_resync(table_ids, xidlsn, pg_xids);
-                } else if (action.get<std::string>() != "no_change") {
-                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
                 break;
             }
@@ -794,55 +786,68 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "DROP TABLE: xid={}, pg_xid={}, tid={}", xidlsn.xid,
                           drop_msg.xid, drop_msg.oid);
 
-                std::string &&ddl_stmt = server->drop_table(_db, xidlsn, drop_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                auto ddl_ops = server->drop_table(_db, xidlsn, drop_msg);
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                }
                 _exists_cache->insert(_db, drop_msg.oid, false);
                 break;
             }
         case PgMsgEnum::CREATE_NAMESPACE:
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
-                std::string &&ddl_stmt = server->create_namespace(_db, xidlsn, namespace_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                auto ddl_ops = server->create_namespace(_db, xidlsn, namespace_msg);
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                }
                 break;
             }
         case PgMsgEnum::ALTER_NAMESPACE:
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
-                std::string &&ddl_stmt = server->alter_namespace(_db, xidlsn, namespace_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                auto ddl_ops = server->alter_namespace(_db, xidlsn, namespace_msg);
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                }
                 break;
             }
         case PgMsgEnum::DROP_NAMESPACE:
             {
                 auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
-                std::string &&ddl_stmt = server->drop_namespace(_db, xidlsn, namespace_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                auto ddl_ops = server->drop_namespace(_db, xidlsn, namespace_msg);
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                }
                 break;
             }
         case PgMsgEnum::CREATE_TYPE:
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
-                std::string &&ddl_stmt = server->create_usertype(_db, xidlsn, type_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                auto ddl_ops = server->create_usertype(_db, xidlsn, type_msg);
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                }
                 break;
             }
         case PgMsgEnum::ALTER_TYPE:
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
-                std::string &&ddl_stmt = server->alter_usertype(_db, xidlsn, type_msg);
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                auto ddl_ops = server->alter_usertype(_db, xidlsn, type_msg);
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                }
                 break;
             }
         case PgMsgEnum::DROP_TYPE:
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
-                std::string &&ddl_stmt = server->drop_usertype(_db, xidlsn, type_msg);
-                auto json = nlohmann::json::parse(ddl_stmt);
-                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "DROP TYPE: xid={}, pg_xid={}, tid={}, ddl={}", xidlsn.xid,
-                          type_msg.xid, type_msg.oid, json.dump());
-                if (json.at("action").get<std::string>() != "no_change") {
-                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                auto ddl_ops = server->drop_usertype(_db, xidlsn, type_msg);
+                for (auto& op : ddl_ops) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "DROP TYPE: xid={}, pg_xid={}, tid={}, action={}", xidlsn.xid,
+                              type_msg.xid, type_msg.oid, get_action_name(op));
+                    if (!op.has_no_change()) {
+                        RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                    }
                 }
                 break;
             }
@@ -881,10 +886,12 @@ namespace springtail::pg_log_mgr {
                 auto &attach_partition_msg = std::get<PgMsgAttachPartition>(change->msg);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "ATTACH PARTITION: xid={}, pg_xid={}, tid={}", xidlsn.xid,
                     attach_partition_msg.xid, attach_partition_msg.table_id);
-                std::string &&ddl_stmt = server->attach_partition(_db, xidlsn, attach_partition_msg);
+                auto ddl_ops = server->attach_partition(_db, xidlsn, attach_partition_msg);
 
-                // Store the DDL statement for the Committer
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                // Store the DDL operations for the Committer
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                }
 
                 break;
             }
@@ -893,10 +900,12 @@ namespace springtail::pg_log_mgr {
                 auto &detach_partition_msg = std::get<PgMsgDetachPartition>(change->msg);
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "DETACH PARTITION: xid={}, pg_xid={}, tid={}", xidlsn.xid,
                     detach_partition_msg.xid, detach_partition_msg.table_id);
-                std::string &&ddl_stmt = server->detach_partition(_db, xidlsn, detach_partition_msg);
+                auto ddl_ops = server->detach_partition(_db, xidlsn, detach_partition_msg);
 
-                // Store the DDL statement for the Committer
-                RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, ddl_stmt);
+                // Store the DDL operations for the Committer
+                for (auto& op : ddl_ops) {
+                    RedisDDL::get_instance()->add_ddl(_db, xidlsn.xid, std::move(op));
+                }
 
                 break;
             }
@@ -1235,7 +1244,7 @@ namespace springtail::pg_log_mgr {
 
             // for operations at the SysTblMgr
             auto server = sys_tbl_mgr::Server::get_instance();
-            nlohmann::json ddls = nlohmann::json::array({});
+            std::vector<proto::DDLOperation> ddls;
             std::vector<uint32_t> table_ids;
 
             // issue the updates to the system tables
@@ -1260,8 +1269,9 @@ namespace springtail::pg_log_mgr {
                     drop_msg.oid = table_info.id();
                     drop_msg.namespace_name = table_info.namespace_name();
                     drop_msg.table = table_info.name();
-                    std::string &&ddl_stmt = server->drop_table(_db_id, XidLsn{xid}, drop_msg);
-                    ddls.emplace_back(ddl_stmt);
+                    auto drop_ddl_ops = server->drop_table(_db_id, XidLsn{xid}, drop_msg);
+                    ddls.insert(ddls.end(), std::make_move_iterator(drop_ddl_ops.begin()),
+                                std::make_move_iterator(drop_ddl_ops.end()));
                 } else {
 
                     LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "table_id {}", entry->table_id);
@@ -1287,12 +1297,11 @@ namespace springtail::pg_log_mgr {
                     roots->set_xid(xid);
 
                     // note: this will also invalidate the table's client cache entry
-                    auto ddl_str = server->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
+                    auto swap_ddl_ops = server->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
 
                     // store the ddl mutations for the FDWs
-                    auto ddl = nlohmann::json::parse(ddl_str);
-                    CHECK(ddl.is_array());
-                    ddls.insert(ddls.end(), ddl.begin(), ddl.end());
+                    ddls.insert(ddls.end(), std::make_move_iterator(swap_ddl_ops.begin()),
+                                std::make_move_iterator(swap_ddl_ops.end()));
                     table_ids.emplace_back(static_cast<uint32_t>(entry->table_id));
                 }
             }
