@@ -29,12 +29,18 @@ jobs:
 
   debug-build:
     uses: ./.github/workflows/rw-build-container.yml
+    permissions:
+      contents: read
+      packages: write
     with:
       base_image_tag: ${{ vars.IMAGE_TAG_DEBUG }}
       build_type: "debug"
 
   release-build-with-time-traces:
     uses: ./.github/workflows/rw-build-container.yml
+    permissions:
+      contents: read
+      packages: write
     with:
       base_image_tag: ${{ vars.IMAGE_TAG_RELEASE }}
       build_type: "release"
@@ -43,6 +49,10 @@ jobs:
   unit-test:
     uses: ./.github/workflows/rw-run-unit-test.yml
     needs: [ debug-build, prepare ]
+    permissions:
+      contents: read
+      packages: write
+      checks: write
     with:
       image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
       build_type: "debug"
@@ -51,6 +61,10 @@ jobs:
   multi-rounds-integration-test:
     uses: ./.github/workflows/rw-run-integration-test.yml
     needs: [ debug-build, prepare ]
+    permissions:
+      contents: read
+      packages: write
+      checks: write
     with:
       image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
       config_to_run: "nightly"
@@ -63,6 +77,10 @@ jobs:
   performance-test:
     uses: ./.github/workflows/rw-run-performance-test.yml
     needs: [ release-build-with-time-traces, prepare ]
+    permissions:
+      contents: read
+      packages: write
+      checks: write
     with:
       image_tag: ${{ needs.release-build-with-time-traces.outputs.output_image_tag }}
       system_settings_override: '.github/workflows/nightly.overrides.json'

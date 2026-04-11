@@ -30,6 +30,9 @@ jobs:
   release-build:
     uses: ./.github/workflows/release-build.yml
     needs: [ system-settings-check ]
+    permissions:
+      contents: read
+      packages: write
     with:
       num_procs: ${{ inputs.num_procs || 4 }}
       package_bucket_name: ${{ inputs.build_type == 'release' && 'prod-data-share.springtail.internal' || 'data-share.springtail.internal' }}

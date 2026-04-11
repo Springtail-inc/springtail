@@ -35,6 +35,11 @@ on:
       output_image_tag:
         description: "The tag of the built image. Ready to use for the next steps."
         value: ${{ jobs.build-container.outputs.output_image_tag }}
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build-container:
     name: Build Springtail Container
@@ -57,6 +62,13 @@ jobs:
         with:
           clean: true
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
       - name: Prepare Build
         id: prepare-build
         run: |
@@ -67,9 +79,6 @@ jobs:
             r=$(head /dev/urandom | tr -dc a-f0-9 | head -c6)
             output_image_tag="tmp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
           fi
-          
-          # Log in to GHCR
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           echo "output_image_tag=$output_image_tag" >> $GITHUB_OUTPUT
           
           # Figure out the build args (line separated for later use)
@@ -136,5 +145,4 @@ jobs:
         run: |
           docker logout ghcr.io
           rm -f $HOME/.ssh $HOME/.git-credentials
-
 
