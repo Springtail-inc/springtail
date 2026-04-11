@@ -31,6 +31,13 @@ on:
         type: boolean
         required: false
         default: false
+    secrets:
+      GHCR_TOKEN:
+        description: 'Optional token with access to private GHCR images used as CI base images.'
+        required: false
+      GHCR_USERNAME:
+        description: 'Optional username to pair with GHCR_TOKEN for private GHCR auth.'
+        required: false
     outputs:
       output_image_tag:
         description: "The tag of the built image. Ready to use for the next steps."
@@ -54,6 +61,8 @@ jobs:
       PYTHONUNBUFFERED: 1
       BASE_IMAGE_TAG: ${{ inputs.base_image_tag }}
       OUTPUT_IMAGE_TAG: ${{ inputs.output_image_tag }}
+      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME != '' && secrets.GHCR_USERNAME || github.actor }}
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || github.token }}
     outputs:
       output_image_tag: ${{ steps.prepare-build.outputs.output_image_tag }}
     steps:
@@ -66,8 +75,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          username: ${{ env.GHCR_USERNAME }}
+          password: ${{ env.GHCR_TOKEN }}
 
       - name: Prepare Build
         id: prepare-build
@@ -145,4 +154,3 @@ jobs:
         run: |
           docker logout ghcr.io
           rm -f $HOME/.ssh $HOME/.git-credentials
-

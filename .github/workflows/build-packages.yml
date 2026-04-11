@@ -24,12 +24,14 @@ permissions:
 jobs:
   system-settings-check:
     uses: ./.github/workflows/system-settings-check.yml
+    secrets: inherit
     with:
       canonical_copy: 'system.json.settings'
       target_files: 'prod.system.settings.json'
   release-build:
     uses: ./.github/workflows/release-build.yml
     needs: [ system-settings-check ]
+    secrets: inherit
     permissions:
       contents: read
       packages: write

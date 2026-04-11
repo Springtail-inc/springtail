@@ -22,6 +22,7 @@ jobs:
     uses: ./.github/workflows/rw-build-container.yml
     needs: [ system-settings-check ]
     if: ${{ github.event.pull_request.draft == false }}
+    secrets: inherit
     permissions:
       contents: read
       packages: write
@@ -35,6 +36,7 @@ jobs:
     uses: ./.github/workflows/rw-run-unit-test.yml
     needs: [ build ]
     if: ${{ github.event.pull_request.draft == false }}
+    secrets: inherit
     permissions:
       contents: read
       packages: write
@@ -49,6 +51,7 @@ jobs:
     uses: ./.github/workflows/rw-run-integration-test.yml
     needs: [ build ]
     if: ${{ github.event.pull_request.draft == false }}
+    secrets: inherit
     permissions:
       contents: read
       packages: write
@@ -64,6 +67,7 @@ jobs:
     uses: ./.github/workflows/rw-run-integration-test.yml
     needs: [ build ]
     if: ${{ github.event.pull_request.draft == false }}
+    secrets: inherit
     permissions:
       contents: read
       packages: write
@@ -79,6 +83,7 @@ jobs:
     uses: ./.github/workflows/rw-run-integration-test.yml
     needs: [ build ]
     if: ${{ github.event.pull_request.draft == false }}
+    secrets: inherit
     permissions:
       contents: read
       packages: write
@@ -154,6 +159,7 @@ jobs:
     needs: [ integration-test-join ]
     # Only if none of the tests is skipped
     if: ${{ always() && !cancelled() && github.event.pull_request.draft == false }}
+    secrets: inherit
     with:
       slack_webhook_url: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       # Need to create a new channel for PR notifications.
@@ -188,4 +194,3 @@ jobs:
           ]
         }
         
-
