@@ -78,6 +78,7 @@ jobs:
     uses: ./.github/workflows/rw-run-performance-test.yml
     needs: [ release-build-with-time-traces, prepare ]
     permissions:
+      id-token: write
       contents: read
       packages: write
       checks: write
