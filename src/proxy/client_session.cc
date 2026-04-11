@@ -780,7 +780,7 @@ namespace springtail::pg_proxy {
 
         // XXX debugging
         auto qs_deps = msg->qs_dependencies();
-        for (const auto& _ : qs_deps) {
+        for (const auto& qs : qs_deps) {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Query dependency: {}", _id, qs->to_string());
         }
 
