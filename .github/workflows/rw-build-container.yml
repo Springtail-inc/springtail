@@ -51,7 +51,7 @@ jobs:
   build-container:
     name: Build Springtail Container
     runs-on: ubuntu-22.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CI_BUILD_TYPE: ${{ inputs.build_type }}
       REGISTRY_URI: ghcr.io/springtail-inc
