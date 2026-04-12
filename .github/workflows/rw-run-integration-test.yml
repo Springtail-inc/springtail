@@ -109,7 +109,7 @@ jobs:
         run: |
           git config --global --add safe.directory ${CI_WORKSPACE}
           # Override some settings in the config file
-          .github/workflows/scripts/merge_system_settings.py system.json.settings ${SYSTEM_SETTINGS_OVERRIDE} system.json.test
+          python3 .github/workflows/scripts/merge_system_settings.py system.json.settings ${SYSTEM_SETTINGS_OVERRIDE} system.json.test
 
           mkdir -p /opt/springtail/pids
           # Make sure we are using the correct config for Redis
