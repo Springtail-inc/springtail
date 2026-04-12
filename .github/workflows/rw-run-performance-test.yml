@@ -84,6 +84,15 @@ jobs:
         with:
           clean: true
 
+      - name: Checkout workflow assets
+        uses: actions/checkout@v4
+        if: inputs.reuse_code == true
+        with:
+          clean: true
+          path: .ci-workflow-assets
+          sparse-checkout: |
+            .github/workflows
+
       - name: Reuse existing code
         if: inputs.reuse_code == true
         run: |
@@ -93,8 +102,17 @@ jobs:
       - name: Prepare Tests
         run: |
           git config --global --add safe.directory ${CI_WORKSPACE}
+          workflow_repo_root="."
+          if [ -d .ci-workflow-assets/.github/workflows ]; then
+            workflow_repo_root=".ci-workflow-assets"
+          fi
+          merge_script="${workflow_repo_root}/.github/workflows/scripts/merge_system_settings.py"
+          override_file="${SYSTEM_SETTINGS_OVERRIDE}"
+          if [ ! -f "${override_file}" ] && [ -f "${workflow_repo_root}/${SYSTEM_SETTINGS_OVERRIDE}" ]; then
+            override_file="${workflow_repo_root}/${SYSTEM_SETTINGS_OVERRIDE}"
+          fi
           # Override some settings in the config file
-          .github/workflows/scripts/merge_system_settings.py system.json.settings ${SYSTEM_SETTINGS_OVERRIDE} system.json.test
+          python3 "${merge_script}" system.json.settings "${override_file}" system.json.test
 
           mkdir -p /opt/springtail/pids
           # Make sure we are using the correct config for Redis
