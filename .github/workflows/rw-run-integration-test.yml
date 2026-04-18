@@ -22,10 +22,6 @@ on:
         type: string
         required: false
         default: "1"
-      s3_log_prefix:
-        description: 'The S3 prefix for logs. This is the folder inside the S3 bucket where logs will be stored.'
-        type: string
-        required: true
       build_type:
         description: 'The type of build to base the tests on. "release" or "debug". The type of build need to match the base image type.'
         type: string
@@ -55,20 +51,7 @@ on:
         type: boolean
         required: false
         default: false
-    secrets:
-      aws_role_arn:
-        description: "The ARN of the role to assume."
-        required: true
-      aws_ecr_docker_password:
-        description: "The password for the ECR docker registry."
-        required: true
     outputs:
-      test_log_s3_uri:
-        description: "The full S3 prefix where the test logs are stored."
-        value: ${{ jobs.test.outputs.test_log_s3_uri }}
-      springtail_log_s3_uri:
-        description: "The full S3 prefix where the springtail service logs are stored."
-        value: ${{ jobs.test.outputs.springtail_log_s3_uri }}
       skipped_tests:
         description: "The number of skipped tests during the integration tests."
         value: ${{ jobs.test.outputs.skipped_tests }}
@@ -78,25 +61,21 @@ on:
 jobs:
   test:
     name: integration-test
-    runs-on: ${{ inputs.reuse_code && inputs.shapshot_alias != '' && format('warp-ubuntu-latest-arm64-4x;snapshot.key={0}', inputs['snapshot_alias']) || 'warp-ubuntu-latest-arm64-4x' }}
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: ${{ inputs.timeout_minutes }}
     container:
-      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}
+      image: ghcr.io/springtail-inc/${{ inputs.image_tag }}
       credentials:
-        username: AWS
-        password: ${{ secrets.aws_ecr_docker_password }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       options: >-
         --init
         -v /var/run/docker.sock:/var/run/docker.sock
     outputs:
-      test_log_s3_uri: ${{ steps.run-test.outputs.test_log_s3_uri }}
-      springtail_log_s3_uri: ${{ steps.run-test.outputs.springtail_log_s3_uri }}
       skipped_tests: ${{ steps.run-test.outputs.skipped_tests }}
     env:
       CI_WORKSPACE: /__w/springtail/springtail
       CI_BUILD_TYPE: ${{ inputs.build_type }}
-      S3_LOGS_PREFIX_FULL: "s3://devsupport.springtail.internal/${{ inputs.s3_log_prefix }}"
-      ECR_REPO_URI: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}
       IMAGE_TAG: ${{ inputs.image_tag }}
       SYSTEM_SETTINGS_OVERRIDE: ${{ inputs.system_settings_override }}
       VCPKG_FORCE_SYSTEM_BINARIES: 1
@@ -120,24 +99,35 @@ jobs:
         with:
           clean: true
 
+      - name: Checkout workflow assets
+        uses: actions/checkout@v4
+        if: inputs.reuse_code == true
+        with:
+          clean: true
+          path: .ci-workflow-assets
+          sparse-checkout: |
+            .github/workflows
+
       - name: Reuse existing code
         if: inputs.reuse_code == true
         run: |
           echo "Reusing existing code from /home/dev/springtail"
           rsync -a /home/dev/springtail/ .
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.aws_role_arn }}
-          role-session-name: tempSession
-          aws-region: us-east-1
-
       - name: Prepare Tests
         run: |
           git config --global --add safe.directory ${CI_WORKSPACE}
+          workflow_repo_root="."
+          if [ -d .ci-workflow-assets/.github/workflows ]; then
+            workflow_repo_root=".ci-workflow-assets"
+          fi
+          merge_script="${workflow_repo_root}/.github/workflows/scripts/merge_system_settings.py"
+          override_file="${SYSTEM_SETTINGS_OVERRIDE}"
+          if [ ! -f "${override_file}" ] && [ -f "${workflow_repo_root}/${SYSTEM_SETTINGS_OVERRIDE}" ]; then
+            override_file="${workflow_repo_root}/${SYSTEM_SETTINGS_OVERRIDE}"
+          fi
           # Override some settings in the config file
-          .github/workflows/scripts/merge_system_settings.py system.json.settings ${SYSTEM_SETTINGS_OVERRIDE} system.json.test
+          python3 "${merge_script}" system.json.settings "${override_file}" system.json.test
 
           mkdir -p /opt/springtail/pids
           # Make sure we are using the correct config for Redis
@@ -252,23 +242,13 @@ jobs:
           
             _TIMESTAMP=$(date +%s)
           
-            # Test logs
-            log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.log" 
-            log_s3_key="${S3_LOGS_PREFIX_FULL}/${log_file}"
-            aws s3 cp tmplog $log_s3_key
-            echo "*** Integration Test Log S3 Key: $log_s3_key"
+            # Save test logs locally for artifact upload
             mv tmplog integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.log
-            echo "test_log_s3_uri=${log_s3_key}" >> $GITHUB_OUTPUT
           
             # Springtail service logs
-            springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}-${INTEGRATION_TEST_CONFIG}.tar.gz"
             output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../${CI_BUILD_TYPE})
             fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
-            springtail_log_s3_key="${S3_LOGS_PREFIX_FULL}/${springtail_log_file}"
-            aws s3 cp $fname $springtail_log_s3_key
-            echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
             mv $fname springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.tar.gz
-            echo "springtail_log_s3_uri=${springtail_log_s3_key}" >> $GITHUB_OUTPUT
           
             # If the current iteration of test failed, break out of the loop for now
             if [ "$_LOG_FLAG" = "failed" ]; then
@@ -324,57 +304,45 @@ jobs:
           
           _TIMESTAMP=$(date +%s)
           
-          # Test log
-          log_file="proxy-regress-${GITHUB_SHORT_SHA}-${_TIMESTAMP}-${_LOG_FLAG}.log" 
-          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
-          aws s3 cp proxy_regress.log $log_s3_key
-          echo "*** Proxy Test Log S3 Key: $log_s3_key"
+          # Save proxy test log locally for artifact upload
+          if [ -f proxy_regress.log ]; then
+            mv proxy_regress.log "proxy-regress-${_TIMESTAMP}-${_LOG_FLAG}.log"
+          fi
           
           # Springtail service logs (proxy)
-          springtail_proxy_log_file="proxy-springtail-svc-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.tar.gz"
-          # tar all logs under the Springtail log path
-          # only do the taring and uploading if there are something inside the log path
-          # checks if the log path is empty
           if [ "$(ls -A ${SPRINGTAIL_LOG_PATH})" ]; then
-            tar -czf $springtail_proxy_log_file ${SPRINGTAIL_LOG_PATH}/*
-            springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_proxy_log_file}"
-            aws s3 cp $springtail_proxy_log_file $springtail_log_s3_key
-            echo "*** Springtail Proxy Logs S3 Key: $springtail_log_s3_key"
+            tar -czf "proxy-springtail-svc-${_TIMESTAMP}.tar.gz" ${SPRINGTAIL_LOG_PATH}/*
           else
-            echo "*** No Springtail Proxy Logs to found inside ${SPRINGTAIL_LOG_PATH}"
+            echo "*** No Springtail Proxy Logs found inside ${SPRINGTAIL_LOG_PATH}"
           fi
 
-          # Find the file matching this name exactly: `regression.diff.pg.out`
-          # under the $TMPDIR directory (recursive) and upload it to S3
+          # Find regression diff files and copy them to the workspace for artifact upload
           regression_pg_diff_file=$(find /tmp -name "regression.diff.pg.out")
-          # Only upload to S3 if the file exists
           if [ -f "$regression_pg_diff_file" ]; then
-              regression_pg_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_pg.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
-              aws s3 cp $regression_pg_diff_file $regression_pg_diff_s3_key
-              echo "*** PG Regression Diff S3 Key: $regression_pg_diff_s3_key"
+              cp $regression_pg_diff_file "regression_pg.diff.${_TIMESTAMP}.out"
           fi
-          # Find the file matching this name exactly: `regression.diff.proxy.out`
-          # under the $TMPDIR directory (recursive) and upload it to S3
           regression_proxy_diff_file=$(find /tmp -name "regression.diff.proxy.out")
-          # Only upload to S3 if the file exists
           if [ -f "$regression_proxy_diff_file" ]; then
-              regression_proxy_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_proxy.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
-              aws s3 cp $regression_proxy_diff_file $regression_proxy_diff_s3_key
-              echo "*** Proxy Regression Diff S3 Key: $regression_proxy_diff_s3_key"
+              cp $regression_proxy_diff_file "regression_proxy.diff.${_TIMESTAMP}.out"
           fi
+
           # Eventually fail the step
           if [ "$_LOG_FLAG" = "failed" ]; then
-            # Find the file matching this name exactly: `regression.result.proxy.out`
-            # under the $TMPDIR directory (recursive) and upload it to S3
             regression_result_diff_file=$(find /tmp -name "regression_result.diff.out")
-            # Only upload to S3 if the file exists
             if [ -f "$regression_result_diff_file" ]; then
-                regression_result_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_result.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
-                aws s3 cp $regression_result_diff_file $regression_result_diff_s3_key
-                echo "*** Proxy Regression Result Diff S3 Key: $regression_result_diff_s3_key"
+                cp $regression_result_diff_file "regression_result.diff.${_TIMESTAMP}.out"
             fi
             exit 1
           fi
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.run_proxy_test && (success() || failure()) }}
+        with:
+          name: "Proxy Test Logs - ${{ inputs.config_to_run }}"
+          path: |
+            ./python/testing/proxy/proxy-regress-*.log
+            ./python/testing/proxy/proxy-springtail-svc-*.tar.gz
+            ./python/testing/proxy/regression_*.out
 
       - name: Clean up Volume and Network
         if: always()

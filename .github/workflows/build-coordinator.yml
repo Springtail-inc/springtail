@@ -15,36 +15,20 @@ permissions:
   id-token: write
   contents: read
   checks: write
+  packages: write
 
 jobs:
   build:
-    runs-on: warp-ubuntu-latest-arm64-4x-spot
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: 35
     container:
-      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.build_type == 'release'  && vars.RELEASE_BUILDER_IMAGE_VERSION  || vars.BUILDER_IMAGE_VERSION }}
+      image: ghcr.io/springtail-inc/${{ inputs.build_type == 'release'  && vars.RELEASE_BUILDER_IMAGE_VERSION  || vars.BUILDER_IMAGE_VERSION }}
       credentials:
-        username: AWS
-        password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
-    env:
-      PACKAGE_BUCKET_NAME: ${{ inputs.build_type == 'release' && 'prod-data-share.springtail.internal' || 'data-share.springtail.internal' }}
-      COORDINATOR_S3_PREFIX: stc
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: install-aws-cli-action
-        uses: unfor19/install-aws-cli-action@v1
-        with:
-          version: 2                         # default
-          verbose: false                     # default
-          arch: arm64
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.DEV_AWS_ROLE_ARN }}
-          role-session-name: tempSession
-          aws-region: us-east-1
 
       - name: Build
         run: |
@@ -66,14 +50,8 @@ jobs:
           echo "log_rotation_count: 10" >> stc/coordinator/config.yaml
           tar -czf stc.tar.gz stc
 
-      - name: Upload Coordinator
-        run: |
-          # generate a name with timestamp  
-          TIMESTAMP=$(date +%s)
-          name="stc-${TIMESTAMP}.tar.gz"
-          # Add this name to an current file
-          echo $name > current
-          aws s3 cp stc.tar.gz s3://${PACKAGE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/${name}
-          aws s3 cp current s3://${PACKAGE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/current
-          rm stc.tar.gz
-          rm current
+      - name: Upload Coordinator Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'Coordinator Package'
+          path: stc.tar.gz
