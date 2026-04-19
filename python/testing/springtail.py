@@ -635,8 +635,11 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
         for log in glob.glob(logs):
             shutil.copy(log, tmp_logs_dir)
 
-        # dump the system tables
-        run_command(os.path.join(build_dir, 'src/storage/dump_system_tables'), ['1'], os.path.join(tmp_logs_dir, 'system_table.dump'));
+        # dump the system tables (best-effort; may fail if daemons aren't running)
+        try:
+            run_command(os.path.join(build_dir, 'src/storage/dump_system_tables'), ['1'], os.path.join(tmp_logs_dir, 'system_table.dump'))
+        except Exception as e:
+            logging.warning(f"Failed to dump system tables (continuing without): {e}")
 
         # create the tarball
         run_command('tar', ['-czf', tarball, '-C', tmp_dir, 'logs'])
