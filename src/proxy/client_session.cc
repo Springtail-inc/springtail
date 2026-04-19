@@ -782,6 +782,7 @@ namespace springtail::pg_proxy {
         auto qs_deps = msg->qs_dependencies();
         for ([[maybe_unused]] const auto& qs : qs_deps) {
             LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[C:{}] Query dependency: {}", _id, qs->to_string());
+            (void)qs; // suppress unused variable warning
         }
 
         // add message to front of queue

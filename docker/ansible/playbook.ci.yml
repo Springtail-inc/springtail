@@ -4,6 +4,7 @@
   roles:
     - role: common
       install_additional_packages: false
+      install_aws_cli: false
     - role: python
     - role: custom-pg
     - role: postgres-config
