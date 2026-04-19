@@ -221,7 +221,15 @@ jobs:
           python3 ./springtail.py -f ../../system.json.test --load-redis --build-dir ../../${CI_BUILD_TYPE}
           python3 ./springtail.py -f ../../system.json.test --install-triggers --build-dir ../../${CI_BUILD_TYPE}
           python3 ./springtail.py --start -f ../../system.json.test -b ../../${CI_BUILD_TYPE} -s data_init.sql
-          python3 ./springtail.py --start -f ../../system.json.test -b ../../${CI_BUILD_TYPE} --check
+          if ! python3 ./springtail.py --start -f ../../system.json.test -b ../../${CI_BUILD_TYPE} --check; then
+            echo "*** Startup failed, dumping daemon logs"
+            output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../${CI_BUILD_TYPE}) || true
+            fname=$(echo $output | cut -f2 -d':' | xargs | head -1)
+            if [ -f "$fname" ]; then
+              mv $fname springtail-startup-failure-${_LOG_SHA}.tar.gz
+            fi
+            exit 1
+          fi
           
           # Run integration tests
           set +e

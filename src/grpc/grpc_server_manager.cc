@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <thread>
 
 #include <common/json.hh>
 #include <common/logging.hh>
@@ -52,18 +53,15 @@ GrpcServerManager::addService(grpc::Service* service)
     _services.push_back(service);
 }
 
-void
-GrpcServerManager::startup()
+std::unique_ptr<grpc::ServerBuilder>
+GrpcServerManager::_create_builder(const std::string& address)
 {
-    grpc::ServerBuilder builder;
-    std::string address = "0.0.0.0:" + std::to_string(_port);
+    auto builder = std::make_unique<grpc::ServerBuilder>();
 
-    // Configure resource quota
     grpc::ResourceQuota rq;
-    LOG_INFO("Setting gRPC server max threads to {}", _worker_thread_count);
     rq.SetMaxThreads(_worker_thread_count);
-    builder.SetResourceQuota(rq);
-    builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
+    builder->SetResourceQuota(rq);
+    builder->AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
 
     if (_ssl) {
         grpc::SslServerCredentialsOptions::PemKeyCertPair key_cert_pair = {_server_key,
@@ -73,20 +71,36 @@ GrpcServerManager::startup()
         opts.pem_key_cert_pairs.push_back(key_cert_pair);
         opts.client_certificate_request =
             GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_BUT_DONT_VERIFY;
-        auto creds = grpc::SslServerCredentials(opts);
-        builder.AddListeningPort(address, creds);
+        builder->AddListeningPort(address, grpc::SslServerCredentials(opts));
     } else {
-        builder.AddListeningPort(address, grpc::InsecureServerCredentials());
+        builder->AddListeningPort(address, grpc::InsecureServerCredentials());
     }
 
-    // Register all services with the builder
     for (auto service : _services) {
-        builder.RegisterService(service);
+        builder->RegisterService(service);
     }
 
-    _server = builder.BuildAndStart();
+    return builder;
+}
+
+void
+GrpcServerManager::startup()
+{
+    std::string address = "0.0.0.0:" + std::to_string(_port);
+    LOG_INFO("Setting gRPC server max threads to {}", _worker_thread_count);
+
+    // Retry startup in case the port is briefly unavailable after a force-kill
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        auto builder = _create_builder(address);
+        _server = builder->BuildAndStart();
+        if (_server) {
+            break;
+        }
+        LOG_WARN("Failed to start gRPC server on {} (attempt {}/5), retrying in 1s...", address, attempt + 1);
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
     if (!_server) {
-        throw std::runtime_error("Failed to start GRPC server");
+        throw std::runtime_error("Failed to start GRPC server on " + address + " after 5 attempts");
     }
     LOG_INFO("Server listening on {}", address);
 }
