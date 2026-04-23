@@ -55,6 +55,22 @@ pg_mblen_cstr(const char *mbstr)
     return pg_mblen(mbstr);
 }
 
+int
+pg_mblen_unbounded(const char *mbstr)
+{
+    return pg_mblen(mbstr);
+}
+
+int
+pg_mblen_range(const char *mbstr, const char *end)
+{
+    int len = pg_mblen(mbstr);
+    if (end && mbstr + len > end) {
+        return end - mbstr;
+    }
+    return len;
+}
+
 char *lowerstr_with_len(const char *str, int len) {
     if (!str || len <= 0) {
         auto *empty = (char *)palloc(1);
@@ -227,6 +243,26 @@ int t_isalpha(const char *p) {
     if (!p || !*p) return 0;
     auto c = (unsigned char)*p;
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+int t_isalnum_with_len(const char *ptr, int len) {
+    if (!ptr || len <= 0) return 0;
+    return t_isalnum(ptr);
+}
+
+int t_isspace_with_len(const char *p, int len) {
+    if (!p || len <= 0) return 0;
+    return t_isspace(p);
+}
+
+int t_isdigit_with_len(const char *p, int len) {
+    if (!p || len <= 0) return 0;
+    return t_isdigit(p);
+}
+
+int t_isalpha_with_len(const char *p, int len) {
+    if (!p || len <= 0) return 0;
+    return t_isalpha(p);
 }
 
 char *str_tolower(const char *buff, size_t nbytes, Oid collid) {
