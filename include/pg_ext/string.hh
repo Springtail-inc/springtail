@@ -62,6 +62,7 @@ extern "C" PGEXT_API char *upperstr_with_len(const char *str, int len);
 extern "C" PGEXT_API int pg_snprintf(char *str, size_t count, const char *fmt, ...);
 extern "C" PGEXT_API int pg_database_encoding_max_length(void);
 extern "C" PGEXT_API int pg_mblen(const char *mbstr);
+extern "C" PGEXT_API int pg_mblen_cstr(const char *mbstr);
 extern "C" PGEXT_API int pg_mbstrlen_with_len(const char *mbstr, int len);
 extern "C" PGEXT_API int pg_mb2wchar_with_len(const char *mbstr, wchar_t *wstr, int len);
 extern "C" PGEXT_API int pg_wchar2mb_with_len(const wchar_t *wstr, char *mbstr, int len);

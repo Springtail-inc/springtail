@@ -49,6 +49,12 @@ pg_mblen(const char *mbstr)
     return len;
 }
 
+int
+pg_mblen_cstr(const char *mbstr)
+{
+    return pg_mblen(mbstr);
+}
+
 char *lowerstr_with_len(const char *str, int len) {
     if (!str || len <= 0) {
         auto *empty = (char *)palloc(1);
