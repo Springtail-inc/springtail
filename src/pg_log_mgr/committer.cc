@@ -1,3 +1,5 @@
+#include <fmt/ranges.h>
+
 #include <common/ddl_helpers.hh>
 #include <common/time_trace.hh>
 #include <ddl.pb.h>
@@ -405,6 +407,32 @@ namespace springtail::committer {
 
         Coordinator::get_instance()->register_thread(daemon_type, "committer");
 
+        // Pre-collect index requests for this batch and register min_index_xid
+        // BEFORE the per-xid commit loop runs. The vacuumer's cutoff_xid is
+        // min(min_fdw_xid, last_committed_xid, min_index_xid); without an
+        // upfront registration, last_committed_xid can advance past final_xid
+        // while min_index_xid is still unregistered, letting the vacuumer
+        // hole-punch extents that the upcoming index build / reconciliation
+        // will need to follow via prev_offset. insert_index_xid is an
+        // idempotent zadd, and Indexer::build / Indexer::drop will redundantly
+        // re-register at line 144 / 160 (which is the authoritative path for
+        // recover_indexes after a restart).
+        std::list<proto::IndexProcessRequest> combined_index_requests;
+        for (auto& result : batch->xid_results()) {
+            uint64_t xid = result->xact().xid();
+            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
+            if (!index_requests.empty()) {
+                combined_index_requests.splice(combined_index_requests.end(), index_requests);
+            }
+        }
+        for (const auto& index_request : combined_index_requests) {
+            const auto& action = index_request.action();
+            if (action == "create_index" || action == "drop_index") {
+                RedisDDL::get_instance()->insert_index_xid(db_id, final_xid);
+                break;
+            }
+        }
+
         // process each XID in the batch
         // Note: xid_results() is not thread-safe, but safe here since all workers are done
         for (auto& result : batch->xid_results()) {
@@ -512,29 +540,19 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
         }
 
-        // Collect all index requests across all XIDs in the batch
-        std::list<proto::IndexProcessRequest> combined_index_requests;
-        for (auto& result : batch->xid_results()) {
-            uint64_t xid = result->xact().xid();
-
-            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
-            if (!index_requests.empty()) {
-                // Append to combined list
-                combined_index_requests.splice(combined_index_requests.end(), index_requests);
-            }
-        }
-
-        // Process all index requests once at the final XID
+        // Process all index requests once at the final XID. The list was
+        // collected before the commit loop above so that min_index_xid could
+        // be registered upfront; here we hand the same list to the indexer.
         if (!combined_index_requests.empty()) {
-            auto final_xid = _completed_xids[db_id];
+            auto completed_final_xid = _completed_xids[db_id];
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processing {} index requests for batch at final_xid {}",
-                      combined_index_requests.size(), final_xid);
+                      combined_index_requests.size(), completed_final_xid);
 
             // Handle all index operations at final_xid
-            _indexer->process_requests(db_id, final_xid, combined_index_requests);
+            _indexer->process_requests(db_id, completed_final_xid, combined_index_requests);
 
             // Check and notify vacuumer about dropped indexes (use final_xid for all)
-            _expire_index_drops(db_id, combined_index_requests, final_xid);
+            _expire_index_drops(db_id, combined_index_requests, completed_final_xid);
         }
 
         // clear the table cache for this batch
@@ -982,6 +1000,21 @@ namespace springtail::committer {
         XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
         Extent extent(*wc_extent->data);
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "xid={} rows={}", xid.xid, extent.row_count());
+
+        // Defense-in-depth: the producer (pg_log_reader) and the consumer (this
+        // path) must agree on the pg-log batch schema for this (db, tid). If
+        // they don't, op_f / wc_fields point at the wrong byte offsets and the
+        // op switch below silently mis-reads (we've seen "Invalid operation: 0"
+        // from this when a resync swap raced an in-flight pg_xid). Catch it
+        // here at the source of the misread instead.
+        if (extent.header().row_size != wc_schema->row_size()) {
+            LOG_ERROR("wc-extent row_size mismatch: db={} tid={} xid={}:{} producer_row_size={} consumer_row_size={} consumer_columns=[{}]",
+                      db_id, tid, xid.xid, xid.lsn,
+                      extent.header().row_size, wc_schema->row_size(),
+                      fmt::join(wc_schema->column_order(), ","));
+        }
+        DCHECK_EQ(extent.header().row_size, wc_schema->row_size())
+            << "wc-extent row_size mismatch — schema-version mismatch (resync race?)";
 
         // To add internal_row_id as part of INSERTS. Other mutations will have
         // internal_row_id as part of wc_extent as-is

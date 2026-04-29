@@ -1299,6 +1299,17 @@ namespace springtail::pg_log_mgr {
                     // note: this will also invalidate the table's client cache entry
                     auto swap_ddl_ops = server->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
 
+                    // Synchronously cap valid_until on any cached pre-resync schema for
+                    // this tid so the very next add_mutation on this thread either MISSes
+                    // and re-fetches from sys_tbl_mgr, or HITs a freshly-cached new
+                    // version. Without this, the committer thread's later call to
+                    // record_schema_change (committer.cc:847) leaves a window after
+                    // SyncTracker::clear_tables (above) but before the cap is applied,
+                    // during which add_mutation falls into the cache path and stamps a
+                    // stale ExtentSchemaPtr into TableEntry::schema. The committer's
+                    // later call becomes idempotent.
+                    TableMgr::get_instance()->record_schema_change(_db_id, entry->table_id, XidLsn{xid});
+
                     // store the ddl mutations for the FDWs
                     ddls.insert(ddls.end(), std::make_move_iterator(swap_ddl_ops.begin()),
                                 std::make_move_iterator(swap_ddl_ops.end()));
