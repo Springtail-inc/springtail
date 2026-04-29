@@ -577,6 +577,13 @@ namespace springtail::committer {
             _reconcile_index(idx_state, end_xid);
         }
 
+        // Drop the min_index_xid pin only after every IndexState bucketed
+        // under reconcile_xid is done. The Redis sorted set keys this entry
+        // by xid, so a single drop_index/create_index sharing reconcile_xid
+        // would otherwise yank the pin while the rest of the list is still
+        // walking prev_offset chains the vacuumer could now punch.
+        RedisDDL::get_instance()->remove_index_xid(db_id, reconcile_xid);
+
         // Clean up if entries are empty
         xid_map.erase(xid_it); // Remove processed xid entry
         if (xid_map.empty()) {
@@ -708,9 +715,6 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Initiating Index commit: {}:{}", db_id, index_id);
             _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid, idx_state._look_aside_root);
         }
-
-        // Remove XID from the tracker
-        RedisDDL::get_instance()->remove_index_xid(db_id, idx_state._idx._xid);
     }
 
     void Indexer::_remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key)
