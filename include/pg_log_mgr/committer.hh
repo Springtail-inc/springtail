@@ -5,6 +5,7 @@
 #include <pg_log_mgr/index_requests_manager.hh>
 #include <pg_log_mgr/table_copy_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
+#include <ddl.pb.h>
 #include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/mutable_table.hh>
@@ -88,7 +89,7 @@ namespace springtail::committer {
         /**
          * Clear the SysTblMgr::Client cache for any tables with DDL mutations.
          */
-        void _invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls);
+        void _invalidate_systbl_cache(uint64_t db, const std::vector<proto::DDLOperation> &completed_ddls);
 
         /**
          * @brief Expire dropped table dirs
@@ -97,7 +98,7 @@ namespace springtail::committer {
          * @param completed_ddls DDLs processed
          * @param committed_xid  XID at which ddls were processed
          */
-        void _expire_table_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t committed_xid);
+        void _expire_table_drops(uint64_t db_id, const std::vector<proto::DDLOperation> &completed_ddls, uint64_t committed_xid);
 
         /**
          * @brief Expire dropped index paths

@@ -23,7 +23,8 @@ def generate_tests(test_folder: str,
                    build_dir: str,
                    test_params: Optional[dict],
                    overlay: Optional[str],
-                   valgrind_daemons: list[str] = []) -> list[TestSet]:
+                   valgrind_daemons: list[str] = [],
+                   exclude_test_sets: list[str] = []) -> list[TestSet]:
     """
     Generates a list of TestSet objects based on the provided configuration and test inputs.
 
@@ -35,6 +36,7 @@ def generate_tests(test_folder: str,
         build_dir (str): Top level build directory.
         test_params (dict | None): Optional test parameters for modifying test environment.
         overlay (str | None): Optional overlay name used for the tests.
+        exclude_test_sets (list[str]): Test set names to drop from the resolved list.
 
     Returns:
         list[TestSet]: A list of TestSet objects ready for execution.
@@ -44,7 +46,8 @@ def generate_tests(test_folder: str,
         f'Generate test: test_folder: {test_folder}, '
         f'test_set: {"ALL" if test_set is None else test_set}, '
         f'test_files: {", ".join(test_files) if len(test_files) != 0 else "ALL"}, '
-        f'overlay: {overlay}'
+        f'overlay: {overlay}, '
+        f'exclude_test_sets: {exclude_test_sets if exclude_test_sets else "NONE"}'
     )
 
     test_sets = []
@@ -57,6 +60,13 @@ def generate_tests(test_folder: str,
                 logging.error(f"Test set directory {test_set_file_path} does not exists")
                 raise ValueError(f"Test set directory {test_set_file_path} does not exists")
             test_sets.append(t)
+
+    for excluded in exclude_test_sets:
+        excluded_path = os.path.join(test_folder, excluded)
+        if not os.path.isdir(excluded_path):
+            logging.error(f"Excluded test set directory {excluded_path} does not exist")
+            raise ValueError(f"Excluded test set directory {excluded_path} does not exist")
+    test_sets = [ts for ts in test_sets if ts not in exclude_test_sets]
 
     tests = []
     for ts in test_sets:
@@ -89,7 +99,8 @@ def generate_tests_for_overlay(test_folder: str,
                                test_files: list[str],
                                default_config: dict,
                                overlay: Optional[str],
-                               valgrind_daemons: list[str] = []) -> list[TestSet]:
+                               valgrind_daemons: list[str] = [],
+                               exclude_test_sets: list[str] = []) -> list[TestSet]:
     """
     Generates a list of TestSet objects using overlay-specific configurations.
 
@@ -106,6 +117,7 @@ def generate_tests_for_overlay(test_folder: str,
         test_files (list[str]): List of test file names to process. If empty, all files will be included.
         default_config (dict): Default configuration stored in system_json_path.
         overlay (str | None): Optional overlay name used for the tests.
+        exclude_test_sets (list[str]): Test set names to drop from the resolved list.
 
     Returns:
         list[TestSet]: A list of TestSet objects configured with the specified overlay.
@@ -144,7 +156,7 @@ def generate_tests_for_overlay(test_folder: str,
             json.dump(merged_config, f, indent=2)
 
     # generate tests
-    return generate_tests(test_folder, test_set, test_files, config_json_path, build_dir, overlay_params, overlay, valgrind_daemons)
+    return generate_tests(test_folder, test_set, test_files, config_json_path, build_dir, overlay_params, overlay, valgrind_daemons, exclude_test_sets)
 
 
 def try_generate_junit(junit_file: str, test_sets: list[TestSet]) -> None:
@@ -249,7 +261,12 @@ if __name__ == "__main__":
                     logging.error(f'Configuration "{args.config}": test_sets is empty')
                     raise ValueError(f'Configuration "{args.config}" test_sets is empty')
 
-            tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, [], default_config, overlay, args.valgrind)
+            exclude_test_sets = overlay_item.get('exclude_test_sets', [])
+            if not isinstance(exclude_test_sets, list) or not all(isinstance(x, str) for x in exclude_test_sets):
+                logging.error(f'Configuration "{args.config}": exclude_test_sets must be a list of strings')
+                raise ValueError(f'Configuration "{args.config}" exclude_test_sets must be a list of strings')
+
+            tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, [], default_config, overlay, args.valgrind, exclude_test_sets)
     else:
         test_sets = [args.test_set] if args.test_set is not None else None
         tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, args.test_case, default_config, args.overlay, args.valgrind)

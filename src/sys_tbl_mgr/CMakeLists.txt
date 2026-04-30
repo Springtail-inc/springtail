@@ -41,7 +41,7 @@ add_library(springtail_sys_tbl_mgr ${SYS_TBL_MGR_SOURCES})
 target_include_directories(springtail_sys_tbl_mgr PUBLIC ${CMAKE_BINARY_DIR}/src PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_sys_tbl_mgr
   PUBLIC springtail_common springtail_grpc springtail_storage springtail_xid_mgr
-  PRIVATE proto_sys_tbl_mgr
+  PRIVATE proto_sys_tbl_mgr proto_ddl
   PRIVATE Boost::thread)
 
 # add the library target
@@ -57,7 +57,7 @@ add_library(springtail_sch_mem_cache ${SCH_MEM_CACHE_SOURCES})
 target_include_directories(springtail_sch_mem_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_sch_mem_cache
   PUBLIC springtail_common
-  PRIVATE Boost::thread)
+  PRIVATE springtail_redis Boost::thread)
 
 # file system check utility
 add_executable(file_system_check test/file_system_check.cc)

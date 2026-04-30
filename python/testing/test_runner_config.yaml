@@ -43,6 +43,8 @@ configs:
   nightly:
     - overlay: ~
       test_sets: 'all'
+      # query_benchmark is intended for the release build, not debug
+      exclude_test_sets: [ 'query_benchmark' ]
     - overlay: 'small_log_rotate'
       test_sets: [ 'recovery' ]
     - overlay: 'small_log_rotate_with_streaming'

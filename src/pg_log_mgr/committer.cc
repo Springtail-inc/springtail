@@ -1,4 +1,8 @@
+#include <fmt/ranges.h>
+
+#include <common/ddl_helpers.hh>
 #include <common/time_trace.hh>
+#include <ddl.pb.h>
 #include <pg_log_mgr/committer.hh>
 #include <redis/db_state_change.hh>
 #include <storage/vacuumer.hh>
@@ -403,6 +407,32 @@ namespace springtail::committer {
 
         Coordinator::get_instance()->register_thread(daemon_type, "committer");
 
+        // Pre-collect index requests for this batch and register min_index_xid
+        // BEFORE the per-xid commit loop runs. The vacuumer's cutoff_xid is
+        // min(min_fdw_xid, last_committed_xid, min_index_xid); without an
+        // upfront registration, last_committed_xid can advance past final_xid
+        // while min_index_xid is still unregistered, letting the vacuumer
+        // hole-punch extents that the upcoming index build / reconciliation
+        // will need to follow via prev_offset. insert_index_xid is an
+        // idempotent zadd, and Indexer::build / Indexer::drop will redundantly
+        // re-register at line 144 / 160 (which is the authoritative path for
+        // recover_indexes after a restart).
+        std::list<proto::IndexProcessRequest> combined_index_requests;
+        for (auto& result : batch->xid_results()) {
+            uint64_t xid = result->xact().xid();
+            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
+            if (!index_requests.empty()) {
+                combined_index_requests.splice(combined_index_requests.end(), index_requests);
+            }
+        }
+        for (const auto& index_request : combined_index_requests) {
+            const auto& action = index_request.action();
+            if (action == "create_index" || action == "drop_index") {
+                RedisDDL::get_instance()->insert_index_xid(db_id, final_xid);
+                break;
+            }
+        }
+
         // process each XID in the batch
         // Note: xid_results() is not thread-safe, but safe here since all workers are done
         for (auto& result : batch->xid_results()) {
@@ -413,9 +443,9 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processing batch XID: {}@{}", db_id, xid);
 
             // get DDL changes for this XID
-            nlohmann::json completed_ddls = RedisDDL::get_instance()->get_ddls_xid(db_id, xid);
+            std::vector<proto::DDLOperation> completed_ddls = RedisDDL::get_instance()->get_ddls_xid(db_id, xid);
 
-            if (!completed_ddls.is_null()) {
+            if (!completed_ddls.empty()) {
                 // pre-commit the DDLs to be applied to the FDWs
                 RedisDDL::get_instance()->precommit_ddl(db_id, xid, completed_ddls);
                 _has_ddl_precommit = true;
@@ -435,7 +465,7 @@ namespace springtail::committer {
                 }
 
                 // Check and notify vacuumer about dropped tables
-                if (!completed_ddls.is_null()) {
+                if (!completed_ddls.empty()) {
                     _expire_table_drops(db_id, completed_ddls, xid);
                 }
 
@@ -446,11 +476,11 @@ namespace springtail::committer {
                 if (is_last_xid) {
                     if (batch->table_cache().empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
-                        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null(),
+                        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.empty(),
                                 result->timestamp(), result->get_tracker());
                     } else {
                         // commit the completed XID without xlog update because table data has not been persisted (fsync).
-                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), true,
+                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.empty(), true,
                                 result->timestamp(), result->get_tracker());
                         _table_sync_processor->add(final_xid, std::move(tables_to_sync));
                     }
@@ -463,7 +493,7 @@ namespace springtail::committer {
                     }
                 } else {
                     // for intermediate XIDs, just record the mapping
-                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
+                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.empty(),
                             result->timestamp(), result->get_tracker(), table_ids);
                 }
             } else {
@@ -471,17 +501,17 @@ namespace springtail::committer {
                     if (batch->table_cache().empty()) {
                         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "No table mutations in batch for db {} xid: {}", db_id, xid);
                         // don't commit, but record any DDL changes to the history
-                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
+                        xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.empty(),
                                 result->timestamp(), result->get_tracker(), table_ids);
                     } else {
                         // commit the completed XID without xlog update
-                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.is_null(), false,
+                        xid_mgr::XidMgrServer::get_instance()->commit_xid_no_xlog(db_id, pg_xid, xid, !completed_ddls.empty(), false,
                                 result->timestamp(), result->get_tracker(), table_ids);
                         _table_sync_processor->add(batch->get_final_xid(), tables_to_sync);
                     }
                 } else {
                     // don't commit, but record any DDL changes to the history
-                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null(),
+                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.empty(),
                             result->timestamp(), result->get_tracker(), table_ids);
                 }
             }
@@ -510,29 +540,19 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "XID completed: {}@{}", db_id, xid);
         }
 
-        // Collect all index requests across all XIDs in the batch
-        std::list<proto::IndexProcessRequest> combined_index_requests;
-        for (auto& result : batch->xid_results()) {
-            uint64_t xid = result->xact().xid();
-
-            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
-            if (!index_requests.empty()) {
-                // Append to combined list
-                combined_index_requests.splice(combined_index_requests.end(), index_requests);
-            }
-        }
-
-        // Process all index requests once at the final XID
+        // Process all index requests once at the final XID. The list was
+        // collected before the commit loop above so that min_index_xid could
+        // be registered upfront; here we hand the same list to the indexer.
         if (!combined_index_requests.empty()) {
-            auto final_xid = _completed_xids[db_id];
+            auto completed_final_xid = _completed_xids[db_id];
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Processing {} index requests for batch at final_xid {}",
-                      combined_index_requests.size(), final_xid);
+                      combined_index_requests.size(), completed_final_xid);
 
             // Handle all index operations at final_xid
-            _indexer->process_requests(db_id, final_xid, combined_index_requests);
+            _indexer->process_requests(db_id, completed_final_xid, combined_index_requests);
 
             // Check and notify vacuumer about dropped indexes (use final_xid for all)
-            _expire_index_drops(db_id, combined_index_requests, final_xid);
+            _expire_index_drops(db_id, combined_index_requests, completed_final_xid);
         }
 
         // clear the table cache for this batch
@@ -584,7 +604,7 @@ namespace springtail::committer {
                                           uint64_t db_id)
     {
         uint64_t completed_xid = result->swap().xid();
-        nlohmann::json ddls = result->swap().ddls();
+        const std::vector<proto::DDLOperation>& ddls = result->swap().ddls();
         auto swapped_tids = result->swap().tids();
 
         LOG_DEBUG(
@@ -594,8 +614,11 @@ namespace springtail::committer {
 
         auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
 
-        // Table sync should always have DDL operations
-        CHECK(!ddls.is_null()) << "TABLE_SYNC should have DDL operations";
+        // DDLs may be empty when all tables in the sync were invalidated (e.g. generated columns
+        // detected during copy), in which case copy_info is nullptr and no DDLs are produced.
+        if (ddls.empty()) {
+            LOG_INFO("TABLE_SYNC has no DDL operations for db {} xid {}", db_id, completed_xid);
+        }
 
         // Invalidate schema cache for tables with DDL changes during table sync
         _invalidate_systbl_cache(db_id, ddls);
@@ -669,8 +692,8 @@ namespace springtail::committer {
 
         // check if there were DDL mutations as part of this txn, invalidate the schema cache
         // accordingly
-        nlohmann::json completed_ddls = RedisDDL::get_instance()->get_ddls_xid(db_id, xid);
-        if (!completed_ddls.is_null()) {
+        std::vector<proto::DDLOperation> completed_ddls = RedisDDL::get_instance()->get_ddls_xid(db_id, xid);
+        if (!completed_ddls.empty()) {
             _invalidate_systbl_cache(db_id, completed_ddls);
         }
 
@@ -793,33 +816,31 @@ namespace springtail::committer {
     }
 
     void
-    Committer::_expire_table_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t committed_xid)
+    Committer::_expire_table_drops(uint64_t db_id, const std::vector<proto::DDLOperation> &completed_ddls, uint64_t committed_xid)
     {
-        for (auto& ddl: completed_ddls) {
-            if (ddl.contains("tid") && ddl.contains("action")) {
-                uint64_t tid = ddl["tid"].get<uint64_t>();
-                auto action = ddl["action"].get<std::string>();
-                if (action == "drop") {
-                    auto dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
-                    if (dropped_table_dir.has_value()) {
-                        Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir.value(), committed_xid);
-                    }
+        for (const auto& ddl: completed_ddls) {
+            if (ddl.has_drop_table()) {
+                uint64_t tid = ddl.drop_table().tid();
+                auto dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
+                if (dropped_table_dir.has_value()) {
+                    Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir.value(), committed_xid);
                 }
             }
         }
     }
 
     void
-    Committer::_invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls)
+    Committer::_invalidate_systbl_cache(uint64_t db, const std::vector<proto::DDLOperation> &completed_ddls)
     {
         auto server = sys_tbl_mgr::Server::get_instance();
-        for (auto ddl : completed_ddls) {
-            if (!ddl.contains("tid")) {
+        for (const auto& ddl : completed_ddls) {
+            auto tid_opt = springtail::get_table_id(ddl);
+            if (!tid_opt.has_value()) {
                 continue; // mutation doesn't reference a specific table
             }
 
-            uint64_t tid = ddl["tid"].get<uint64_t>();
-            XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
+            uint64_t tid = tid_opt.value();
+            XidLsn ddl_xid(ddl.xid(), ddl.lsn());
             server->invalidate_table(db, tid, ddl_xid);
 
             // Invalidate the extent schema cache for this table
@@ -979,6 +1000,21 @@ namespace springtail::committer {
         XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
         Extent extent(*wc_extent->data);
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "xid={} rows={}", xid.xid, extent.row_count());
+
+        // Defense-in-depth: the producer (pg_log_reader) and the consumer (this
+        // path) must agree on the pg-log batch schema for this (db, tid). If
+        // they don't, op_f / wc_fields point at the wrong byte offsets and the
+        // op switch below silently mis-reads (we've seen "Invalid operation: 0"
+        // from this when a resync swap raced an in-flight pg_xid). Catch it
+        // here at the source of the misread instead.
+        if (extent.header().row_size != wc_schema->row_size()) {
+            LOG_ERROR("wc-extent row_size mismatch: db={} tid={} xid={}:{} producer_row_size={} consumer_row_size={} consumer_columns=[{}]",
+                      db_id, tid, xid.xid, xid.lsn,
+                      extent.header().row_size, wc_schema->row_size(),
+                      fmt::join(wc_schema->column_order(), ","));
+        }
+        DCHECK_EQ(extent.header().row_size, wc_schema->row_size())
+            << "wc-extent row_size mismatch — schema-version mismatch (resync race?)";
 
         // To add internal_row_id as part of INSERTS. Other mutations will have
         // internal_row_id as part of wc_extent as-is

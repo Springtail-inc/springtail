@@ -20,14 +20,14 @@
     path: /tmp/springtail-pg.tar.gz
   register: pg_tarball
 
-- name: Download Custom PG .deb packages from URL
+- name: Download Custom PG source from URL
   ansible.builtin.get_url:
     url: "{{ custom_pg_package_url }}"
     dest: /tmp/springtail-pg.tar.gz
     mode: '0644'
   when: not pg_tarball.stat.exists
 
-- name: Install PG runtime dependencies
+- name: Install PG build dependencies
   ansible.builtin.apt:
     name:
       - libreadline-dev
@@ -40,36 +40,38 @@
       - liblz4-dev
       - libzstd-dev
       - uuid-dev
+      - bison
+      - flex
     state: present
 
-- name: Install Custom PG from .deb packages
+- name: Build and install Custom PG from source
   ansible.builtin.shell: |
     set -e
     cd /tmp
-    mkdir -p postgres_apt
-    tar xzf springtail-pg.tar.gz -C postgres_apt
-    cd postgres_apt
-
-    # Install packages in dependency order, skipping debug symbol (.ddeb) packages
-    dpkg -i libpq5_*.deb || apt-get install -f -y
-    dpkg -i libpq-dev_*.deb || apt-get install -f -y
-    dpkg -i libecpg6_*.deb libecpg-compat3_*.deb libpgtypes3_*.deb libecpg-dev_*.deb || apt-get install -f -y
-    dpkg -i postgresql-client-16_*.deb || apt-get install -f -y
-    dpkg -i postgresql-16_*.deb || apt-get install -f -y
-    dpkg -i postgresql-server-dev-16_*.deb || apt-get install -f -y
-
-    # Optional PL language packages — install if present
-    dpkg -i postgresql-plpython3-16_*.deb 2>/dev/null || true
-    dpkg -i postgresql-plperl-16_*.deb 2>/dev/null || true
-    dpkg -i postgresql-pltcl-16_*.deb 2>/dev/null || true
-    dpkg -i postgresql-doc-16_*.deb 2>/dev/null || true
-
-    # Fix any remaining dependency issues
-    apt-get install -f -y
-
-    # Clean up
+    tar xzf springtail-pg.tar.gz
+    cd postgresql-16.9
+    ./configure \
+      --prefix=/usr/lib/postgresql/16 \
+      --bindir=/usr/lib/postgresql/16/bin \
+      --datadir=/usr/share/postgresql/16 \
+      --sysconfdir=/etc/postgresql-common \
+      --libdir=/usr/lib/postgresql/16/lib \
+      --includedir=/usr/include/postgresql/16 \
+      --with-openssl \
+      --with-libxml \
+      --with-libxslt \
+      --with-icu \
+      --with-uuid=e2fs \
+      --with-lz4 \
+      --with-zstd \
+      --with-systemd \
+      --with-pgport=5432
+    make -j$(nproc) world
+    make install-world
+    # Link system zoneinfo as PG timezone data (source tarball lacks timezone source files)
+    ln -sfn /usr/share/zoneinfo /usr/share/postgresql/16/timezone
     cd /tmp
-    rm -rf postgres_apt springtail-pg.tar.gz
+    rm -rf postgresql-16.9 springtail-pg.tar.gz
 
 - name: Enable PG16
   ansible.builtin.copy:
