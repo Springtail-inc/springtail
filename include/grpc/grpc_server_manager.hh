@@ -23,6 +23,7 @@ public:
     void shutdown();
 
 private:
+    std::unique_ptr<grpc::ServerBuilder> _create_builder(const std::string& address);
     static std::string read_file_contents(const std::string& path);
 
     int _worker_thread_count = 0;

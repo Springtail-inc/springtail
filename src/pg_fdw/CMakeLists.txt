@@ -101,6 +101,7 @@ target_link_libraries(springtail_pg_ddl
     PRIVATE springtail_sys_tbl_mgr_client
     PRIVATE Boost::thread
     nlohmann_json::nlohmann_json
+    proto_ddl
     gRPC::grpc++
     protobuf::libprotobuf
 )

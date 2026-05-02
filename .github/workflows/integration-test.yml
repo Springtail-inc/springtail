@@ -1,0 +1,36 @@
+name: Integration Tests
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  checks: write
+
+jobs:
+  debug-build:
+    uses: ./.github/workflows/rw-build-container.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+    with:
+      base_image_tag: ${{ vars.IMAGE_TAG_DEBUG }}
+      build_type: "debug"
+
+  integration-test:
+    uses: ./.github/workflows/rw-run-integration-test.yml
+    needs: [ debug-build ]
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+      checks: write
+    with:
+      image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
+      config_to_run: "nightly"
+      system_settings_override: '.github/workflows/nightly.overrides.json'
+      iterations: "1"
+      build_type: "debug"
+      reuse_code: true
+      timeout_minutes: 120

@@ -1,5 +1,6 @@
 #include <common/common.hh>
 #include <common/constants.hh>
+#include <common/ddl_helpers.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/redis_types.hh>
@@ -17,14 +18,18 @@ namespace {
             RedisClient& redis,
             uint64_t db_id,
             uint64_t xid,
-            nlohmann::json ddls
+            const std::vector<proto::DDLOperation>& ddls
             )
     {
-        nlohmann::json op;
-        op["db_id"] = db_id;
-        op["xid"] = xid;
-        op["ddls"] = ddls;
-        std::string value = nlohmann::to_string(op);
+        proto::DDLBatch batch;
+        batch.set_db_id(db_id);
+        batch.set_xid(xid);
+        for (const auto& ddl : ddls) {
+            *batch.add_operations() = ddl;
+        }
+
+        std::string value;
+        batch.SerializeToString(&value);
 
         std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT,
                                                 Properties::get_db_instance_id());
@@ -40,16 +45,16 @@ namespace springtail {
     void
     RedisDDL::add_ddl(uint64_t db_id,
                       uint64_t xid,
-                      const std::string &ddl)
+                      proto::DDLOperation ddl)
     {
         // Store DDL in in-memory cache for fast access by Committer
         {
             std::unique_lock<std::shared_mutex> lock(_ddl_cache_mutex);
-            _ddl_cache[db_id][xid].push_back(nlohmann::json::parse(ddl));
+            _ddl_cache[db_id][xid].push_back(std::move(ddl));
         }
     }
 
-    nlohmann::json
+    std::vector<proto::DDLOperation>
     RedisDDL::get_ddls_xid(uint64_t db_id,
                            uint64_t xid)
     {
@@ -60,16 +65,12 @@ namespace springtail {
             if (db_it != _ddl_cache.end()) {
                 auto xid_it = db_it->second.find(xid);
                 if (xid_it != db_it->second.end()) {
-                    nlohmann::json ddls;
-                    for (const auto &ddl : xid_it->second) {
-                        ddls.push_back(ddl);
-                    }
-                    return ddls;
+                    return xid_it->second;
                 }
             }
         }
-        // Return null if not found (no DDLs for this XID)
-        return nlohmann::json();
+        // Return empty vector if not found (no DDLs for this XID)
+        return {};
     }
 
 
@@ -104,9 +105,9 @@ namespace springtail {
     void
     RedisDDL::precommit_ddl(uint64_t db_id,
                             uint64_t xid,
-                            nlohmann::json ddls)
+                            std::vector<proto::DDLOperation> ddls)
     {
-        LOG_INFO("RedisDDL::precommit_ddl: db_id={}, xid={}, ddls={}", db_id, xid, ddls.dump());
+        LOG_INFO("RedisDDL::precommit_ddl: db_id={}, xid={}, ddls_count={}", db_id, xid, ddls.size());
 
         // Move DDLs to Redis pre-commit phase for crash recovery
         _precommit(*_redis, db_id, xid, ddls);
@@ -161,32 +162,32 @@ namespace springtail {
 
         for (const auto &entry : commit_map) {
             const auto &key = entry.first;
-            nlohmann::json ddls = nlohmann::json::parse(entry.second);
+            proto::DDLBatch batch;
+            batch.ParseFromString(entry.second);
 
             // iterate through the DDL statements and see if any
             // result in the addition or removal of a table/schema
             // or the renaming of a table and add them to the table set for this db
-            for (auto ddl: ddls.at("ddls")) {
-                assert(ddl.is_object());
-                assert(ddl.contains("action"));
-                auto &action = ddl.at("action");
-
-                // only care about create, drop and rename
-                if (action == "create") {
-                    auto schema = ddl.at("schema").get<std::string>();
-                    auto table = ddl.at("table").get<std::string>();
-                    RedisDbTables::add_table(ts, db_id, table, schema);
-                } else if (action == "drop") {
-                    auto schema = ddl.at("schema").get<std::string>();
-                    auto table = ddl.at("table").get<std::string>();
-                    RedisDbTables::remove_table(ts, db_id, table, schema);
-                } else if (action == "rename") {
-                    auto schema = ddl.at("schema").get<std::string>();
-                    auto table = ddl.at("table").get<std::string>();
-                    auto old_schema = ddl.at("old_schema").get<std::string>();
-                    auto old_table = ddl.at("old_table").get<std::string>();
-                    RedisDbTables::remove_table(ts, db_id, old_table, old_schema);
-                    RedisDbTables::add_table(ts, db_id, table, schema);
+            for (const auto& ddl : batch.operations()) {
+                switch (ddl.operation_case()) {
+                    case proto::DDLOperation::kCreateTable: {
+                        const auto& ct = ddl.create_table();
+                        RedisDbTables::add_table(ts, db_id, ct.table(), ct.schema());
+                        break;
+                    }
+                    case proto::DDLOperation::kDropTable: {
+                        const auto& dt = ddl.drop_table();
+                        RedisDbTables::remove_table(ts, db_id, dt.table(), dt.schema());
+                        break;
+                    }
+                    case proto::DDLOperation::kRenameTable: {
+                        const auto& rt = ddl.rename_table();
+                        RedisDbTables::remove_table(ts, db_id, rt.old_table(), rt.old_schema());
+                        RedisDbTables::add_table(ts, db_id, rt.table(), rt.schema());
+                        break;
+                    }
+                    default:
+                        break;
                 }
             }
 
@@ -237,7 +238,7 @@ namespace springtail {
     }
 
 
-    std::vector<nlohmann::json>
+    std::vector<proto::DDLBatch>
     RedisDDL::get_next_ddls(const std::string &fdw_id)
     {
         // retrieve the next set of DDLs to apply for the given FDW; this blocks
@@ -249,13 +250,15 @@ namespace springtail {
             return {};
         }
 
-        std::vector<nlohmann::json> ddls;
+        std::vector<proto::DDLBatch> batches;
         do {
-            ddls.push_back(nlohmann::json::parse(*value));
+            proto::DDLBatch batch;
+            batch.ParseFromString(*value);
+            batches.push_back(std::move(batch));
             value = queue.try_pop("active");
         } while (value != nullptr);
 
-        return ddls;
+        return batches;
     }
 
     void

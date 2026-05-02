@@ -1,0 +1,254 @@
+syntax = "proto3";
+
+package springtail.proto;
+
+// Column definition used in CREATE TABLE DDL
+message DDLColumn {
+  string name = 1;
+  uint32 type_oid = 2;
+  string type_name = 3;
+  string type_namespace = 4;
+  bool nullable = 5;
+  optional string default_value = 6;
+}
+
+// ============================================================================
+// Table operations
+// ============================================================================
+
+message CreateTableDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  repeated DDLColumn columns = 6;
+  optional string partition_key = 7;
+  bool is_resync = 8;
+}
+
+message DropTableDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  optional uint64 parent_table_id = 4;
+  optional string partition_key = 5;
+  optional string partition_bound = 6;
+}
+
+message RenameTableDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  string old_table = 6;
+  string old_schema = 7;
+  optional string partition_key = 8;
+}
+
+message SetNamespaceDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  string old_schema = 6;
+  optional string partition_key = 7;
+  optional string partition_bound = 8;
+  optional uint64 parent_table_id = 9;
+}
+
+message SetRlsEnabledDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  optional string partition_key = 6;
+}
+
+message SetRlsForcedDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  optional string partition_key = 6;
+}
+
+message ColumnAddDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  DDLColumn column = 6;
+}
+
+message ColumnDropDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  string column_name = 6;
+}
+
+message ColumnRenameDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  string old_name = 6;
+  string new_name = 7;
+}
+
+message ColumnNullableDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  string column_name = 6;
+  bool nullable = 7;
+}
+
+message ResyncDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+}
+
+message NoChangeDDL {
+  uint64 tid = 1;
+  string schema = 2;
+  string table = 3;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+}
+
+message ResyncPartitionsDDL {
+  uint64 parent_table_id = 1;
+  repeated uint64 table_ids = 2;
+}
+
+// ============================================================================
+// Namespace operations
+// ============================================================================
+
+message NamespaceCreateDDL {
+  uint64 id = 1;
+  string name = 2;
+}
+
+message NamespaceAlterDDL {
+  uint64 id = 1;
+  string name = 2;
+  string old_name = 3;
+}
+
+message NamespaceDropDDL {
+  uint64 id = 1;
+  string name = 2;
+}
+
+// ============================================================================
+// User type operations
+// ============================================================================
+
+message UserTypeCreateDDL {
+  uint64 id = 1;
+  string name = 2;
+  string value_json = 3;
+  int32 type = 4;
+  uint64 namespace_id = 5;
+  string schema = 6;
+}
+
+message UserTypeAlterDDL {
+  uint64 id = 1;
+  string name = 2;
+  string value_json = 3;
+  int32 type = 4;
+  uint64 namespace_id = 5;
+  string schema = 6;
+  string old_name = 7;
+  string old_value_json = 8;
+  string old_schema = 9;
+}
+
+message UserTypeDropDDL {
+  uint64 id = 1;
+  string name = 2;
+  string schema = 3;
+}
+
+// ============================================================================
+// Partition operations
+// ============================================================================
+
+message AttachPartitionDDL {
+  string schema = 1;
+  string table = 2;
+  string partition_schema = 3;
+  string partition_name = 4;
+  string partition_bound = 5;
+}
+
+message DetachPartitionDDL {
+  string schema = 1;
+  string table = 2;
+  string partition_schema = 3;
+  string partition_name = 4;
+}
+
+// ============================================================================
+// Top-level DDL operation with oneof discriminator
+// ============================================================================
+
+message DDLOperation {
+  uint64 xid = 1;
+  uint64 lsn = 2;
+
+  oneof operation {
+    // Table operations (10-29)
+    CreateTableDDL      create_table       = 10;
+    DropTableDDL        drop_table         = 11;
+    RenameTableDDL      rename_table       = 12;
+    SetNamespaceDDL     set_namespace      = 13;
+    SetRlsEnabledDDL   set_rls_enabled    = 14;
+    SetRlsForcedDDL     set_rls_forced     = 15;
+    ColumnAddDDL        column_add         = 16;
+    ColumnDropDDL       column_drop        = 17;
+    ColumnRenameDDL     column_rename      = 18;
+    ColumnNullableDDL   column_nullable    = 19;
+    ResyncDDL           resync             = 20;
+    NoChangeDDL         no_change          = 21;
+    ResyncPartitionsDDL resync_partitions  = 22;
+
+    // Namespace operations (30-39)
+    NamespaceCreateDDL  namespace_create   = 30;
+    NamespaceAlterDDL   namespace_alter    = 31;
+    NamespaceDropDDL    namespace_drop     = 32;
+
+    // User type operations (40-49)
+    UserTypeCreateDDL   usertype_create    = 40;
+    UserTypeAlterDDL    usertype_alter     = 41;
+    UserTypeDropDDL     usertype_drop      = 42;
+
+    // Partition operations (50-59)
+    AttachPartitionDDL  attach_partition   = 50;
+    DetachPartitionDDL  detach_partition   = 51;
+  }
+}
+
+// Envelope wrapping a batch of DDL operations for a single transaction
+message DDLBatch {
+  uint64 db_id = 1;
+  uint64 xid = 2;
+  repeated DDLOperation operations = 3;
+}

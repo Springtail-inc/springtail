@@ -514,12 +514,12 @@ def start_proxy(props : Properties, build_dir : str, restart: bool = False, valg
                   pid_path=props.get_pid_path(), log_path=props.get_log_path())
 
 
-def wait_for_running(props : Properties) -> None:
+def wait_for_running(props : Properties, timeout : int = 600) -> None:
     """Wait for the system to be in a running state."""
     # Wait for the system to be in a running state
     for db_config in props.get_db_configs():
         id = db_config['id']
-        props.wait_for_state('running', id, 'failed')
+        props.wait_for_state('running', id, 'failed', timeout=timeout)
 
 
 def execute_startup_sql(props : Properties, sql_file : str) -> None:
@@ -635,8 +635,11 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
         for log in glob.glob(logs):
             shutil.copy(log, tmp_logs_dir)
 
-        # dump the system tables
-        run_command(os.path.join(build_dir, 'src/storage/dump_system_tables'), ['1'], os.path.join(tmp_logs_dir, 'system_table.dump'));
+        # dump the system tables (best-effort; may fail if daemons aren't running)
+        try:
+            run_command(os.path.join(build_dir, 'src/storage/dump_system_tables'), ['1'], os.path.join(tmp_logs_dir, 'system_table.dump'))
+        except Exception as e:
+            logging.warning(f"Failed to dump system tables (continuing without): {e}")
 
         # create the tarball
         run_command('tar', ['-czf', tarball, '-C', tmp_dir, 'logs'])
@@ -732,7 +735,8 @@ def start(config_file: str,
           do_init: bool = True,
           postgres_only: bool = False,
           do_fdw_install: bool = True,
-          valgrind_daemons: List[str] = []) -> None:
+          valgrind_daemons: List[str] = [],
+          startup_timeout: int = 600) -> None:
     """Main function to start the Springtail system."""
     # must do init if we are performing cleanup
     if do_cleanup:
@@ -790,7 +794,7 @@ def start(config_file: str,
 
         # wait for running state
         print("\nWaiting for running state...")
-        wait_for_running(props)
+        wait_for_running(props, timeout=startup_timeout)
 
         # start the fdw daemons (e.g., ddl manager to import schemas)
         print("\nStarting FDW daemons...")
@@ -968,6 +972,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-x', '--start-xid', type=int, required=False, help='Start the system at a specific XID')
     parser.add_argument('--no-cleanup', action='store_true', help="Start without reinitializing the system")
     parser.add_argument('--postgres-only', action='store_true', help="Start postgres only, don't start springtail FDW")
+    parser.add_argument('--startup-timeout', type=int, required=False, default=600, help='Timeout in seconds for waiting for system to reach running state')
     parser.add_argument('--start', action=argparse.BooleanOptionalAction, help="Start the Springtail system")
     parser.add_argument('--status', action=argparse.BooleanOptionalAction, help="Check the status of the Springtail daemons")
     parser.add_argument('--kill', action=argparse.BooleanOptionalAction, help="Kill the Springtail daemons")
@@ -1035,7 +1040,8 @@ def main() -> None:
         if args.start:
             start(args.config_file, args.build_dir, args.sql_file,
                   do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup,
-                  postgres_only=args.postgres_only)
+                  postgres_only=args.postgres_only,
+                  startup_timeout=args.startup_timeout)
 
     except Exception as e:
         print(f"Caught error: {e}")
