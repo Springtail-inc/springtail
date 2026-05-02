@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/common.hh>
+#include <ddl.pb.h>
 #include <fmt/ranges.h>
 #include <proto/pg_copy_table.pb.h>
 
@@ -41,7 +42,7 @@ namespace springtail::committer {
          */
         class SwapMsg {
         public:
-            SwapMsg(uint64_t xid, nlohmann::json &&ddls, std::vector<uint32_t>&& tids)
+            SwapMsg(uint64_t xid, std::vector<proto::DDLOperation> &&ddls, std::vector<uint32_t>&& tids)
                 : _xid(xid),
                   _ddls(std::move(ddls)),
                   _tids(std::move(tids))
@@ -51,7 +52,7 @@ namespace springtail::committer {
                 return _xid;
             }
 
-            const nlohmann::json &ddls() const {
+            const std::vector<proto::DDLOperation> &ddls() const {
                 return _ddls;
             }
 
@@ -61,7 +62,7 @@ namespace springtail::committer {
 
         private:
             uint64_t _xid;
-            nlohmann::json _ddls;
+            std::vector<proto::DDLOperation> _ddls;
             std::vector<uint32_t> _tids;
         };
 

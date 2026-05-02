@@ -8,6 +8,7 @@
 #include <common/json.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
+#include <ddl.pb.h>
 #include <pg_fdw/pg_ddl_mgr.hh>
 #include <test/services.hh>
 #include <xid_mgr/xid_mgr_client.hh>
@@ -158,37 +159,35 @@ namespace {
         RedisMgr::SubscriberPtr _subscriber;
         std::string _fdw_key{fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), _fdw_id_str)};
 
-        nlohmann::json _create_table_ddl(uint64_t xid, const std::string &schema_name, const std::string &table_name,
+        std::string _create_table_ddl(uint64_t xid, const std::string &schema_name, const std::string &table_name,
                     uint32_t table_oid, std::vector<std::tuple<std::string, uint32_t, bool>> columns) {
-            nlohmann::json create_table_json = {
-                { "db_id", 1 },
-                { "xid", xid },
-                { "ddls", nlohmann::json::array(
-                    {
-                    {
-                            { "action", "create" },
-                            { "schema", schema_name },
-                            { "table", table_name },
-                            // any number
-                            { "tid", table_oid },
-                            { "columns", nlohmann::json::array({}) }
-                        }
-                    })
-                }
-            };
-            for (auto item: columns) {
-                std::string name = std::get<0>(item);
+            proto::DDLBatch batch;
+            batch.set_db_id(1);
+            batch.set_xid(xid);
+
+            auto* op = batch.add_operations();
+            op->set_xid(xid);
+            op->set_lsn(0);
+            auto* ct = op->mutable_create_table();
+            ct->set_tid(table_oid);
+            ct->set_schema(schema_name);
+            ct->set_table(table_name);
+            ct->set_rls_enabled(false);
+            ct->set_rls_forced(false);
+
+            for (const auto& item : columns) {
+                const std::string& name = std::get<0>(item);
                 uint32_t type_oid = std::get<1>(item);
                 bool nullable = std::get<2>(item);
-                nlohmann::json column_json = {
-                    {"name", name},
-                    // any number in numerical order
-                    {"type", type_oid},
-                    {"nullable", nullable}
-                };
-                create_table_json["/ddls/0/columns"_json_pointer].push_back(column_json);
+                auto* col = ct->add_columns();
+                col->set_name(name);
+                col->set_type_oid(type_oid);
+                col->set_nullable(nullable);
             }
-            return create_table_json;
+
+            std::string serialized;
+            batch.SerializeToString(&serialized);
+            return serialized;
         }
 
         void _verify_table_exists(const std::string &schema_name, const std::string &table_name) {
@@ -249,9 +248,9 @@ namespace {
             {"col1", 25, true},
             {"col2", 16, false}
         };
-        nlohmann::json json_ddl = _create_table_ddl(12, "public", "test", 1, columns);
+        std::string serialized_ddl = _create_table_ddl(12, "public", "test", 1, columns);
 
-        _redis_client_data->lpush(_fdw_key, nlohmann::to_string(json_ddl));
+        _redis_client_data->lpush(_fdw_key, serialized_ddl);
         redis_notification.wait_for_notifications();
 
         _verify_table_exists("public", "test");

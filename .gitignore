@@ -32,3 +32,6 @@ _temp
 .claude
 .terraform
 .terraform.tfstate.lock.info
+.agent-system/
+.artifacts/
+requirements/

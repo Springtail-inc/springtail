@@ -89,3 +89,4 @@
     unzip -q /tmp/awscliv2.zip -d /tmp
     /tmp/aws/install --update
     rm -f /tmp/awscliv2.zip
+  when: install_aws_cli | default(true)

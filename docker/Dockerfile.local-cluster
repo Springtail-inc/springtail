@@ -11,6 +11,8 @@ RUN apt-get update && \
 # Copy over the ansible assets
 COPY docker/ansible/ /var/ansible/
 COPY ./ca_certs /certs
+# Copy local PG tarball if present (for local builds)
+COPY docker/postgresql-16*.tar.gz /tmp/springtail-pg.tar.gz
 # Run Ansible playbook to install additional dependencies
 RUN ansible-playbook /var/ansible/playbook.local-cluster.yml \
     --connection=local \

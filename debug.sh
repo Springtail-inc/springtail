@@ -35,8 +35,9 @@ cmake -B debug -S . \
 # build the code
 cd debug
 if command -v nproc >/dev/null 2>&1; then
-    ncpus=$(nproc)
+    ncpus=$(( $(nproc) / 2 ))
+    ncpus=$(( ncpus > 0 ? ncpus : 1 ))
 else
-    ncpus=4
+    ncpus=2
 fi
 make -j${ncpus} $1 $2

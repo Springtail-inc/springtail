@@ -225,7 +225,7 @@ class AwsHelper:
         # Ensure local directory exists
         os.makedirs(local_dir, exist_ok=True)
 
-        # List objects in S3 bucket within test_files directory (all should be .gz files)
+        # List objects in S3 bucket within the given s3_path directory (all should be .gz files)
         self.logger.info('Retrieve test file list from S3')
         if s3_path[-1] != '/':
             s3_path += '/'

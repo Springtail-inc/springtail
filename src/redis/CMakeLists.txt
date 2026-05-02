@@ -12,6 +12,7 @@ target_link_libraries(springtail_redis
            fmt::fmt
            redis++::redis++
            nlohmann_json::nlohmann_json
+           proto_ddl
 )
 
 springtail_unit_test(test_redis

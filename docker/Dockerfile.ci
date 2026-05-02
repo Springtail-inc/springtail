@@ -46,8 +46,9 @@ RUN cd ${CI_BUILD_TYPE} && \
     pip3 install --break-system-packages -r python/performance/requirements.txt && \
     rm -rf $CI_WORKSPACE /home/dev/${CI_BUILD_TYPE}/src /home/dev/external/vcpkg/buildtrees /home/dev/external/vcpkg/packages /home/dev/external/vcpkg/downloads
 
-# Pull back the libpg_query
-RUN cd /home/dev/external && git clone https://github.com/Springtail-inc/libpg_query.git
+# Pull back the libpg_query (cmake FetchContent already populates it via the
+# external/ symlink during the build above; only clone if it isn't there)
+RUN cd /home/dev/external && [ -d libpg_query/.git ] || git clone https://github.com/Springtail-inc/libpg_query.git
 
 # Set tini as the container's entrypoint
 ENTRYPOINT ["/tini", "--"]

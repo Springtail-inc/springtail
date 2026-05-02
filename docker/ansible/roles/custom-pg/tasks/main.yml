@@ -15,25 +15,63 @@
       - sysstat
     state: present
 
-- name: Download Custom PG build from Custom URL
+- name: Check if PG tarball already exists (from local build)
+  ansible.builtin.stat:
+    path: /tmp/springtail-pg.tar.gz
+  register: pg_tarball
+
+- name: Download Custom PG source from URL
   ansible.builtin.get_url:
     url: "{{ custom_pg_package_url }}"
-    dest: /tmp/springtail-pg.tar
+    dest: /tmp/springtail-pg.tar.gz
     mode: '0644'
+  when: not pg_tarball.stat.exists
 
-- name: Copy to remote host
-  ansible.builtin.copy:
-    src: /tmp/springtail-pg.tar
-    dest: /tmp/springtail-pg.tar
+- name: Install PG build dependencies
+  ansible.builtin.apt:
+    name:
+      - libreadline-dev
+      - zlib1g-dev
+      - libssl-dev
+      - libxml2-dev
+      - libxslt1-dev
+      - libicu-dev
+      - libsystemd-dev
+      - liblz4-dev
+      - libzstd-dev
+      - uuid-dev
+      - bison
+      - flex
+    state: present
 
-- name: Install Custom PG build
+- name: Build and install Custom PG from source
   ansible.builtin.shell: |
-    export DEBIAN_FRONTEND=noninteractive
+    set -e
     cd /tmp
-    tar xvf springtail-pg.tar
-    dpkg -i libpq5_16.9-1.pgdg24.04+1_arm64.deb postgresql-client-16_16.9-1.pgdg24.04+1_arm64.deb
-    dpkg -i postgresql-16_16.9-1.pgdg24.04+1_arm64.deb
-    rm -f /tmp/*.tar /tmp/*.deb /tmp/*.ddeb
+    tar xzf springtail-pg.tar.gz
+    cd postgresql-16.9
+    ./configure \
+      --prefix=/usr/lib/postgresql/16 \
+      --bindir=/usr/lib/postgresql/16/bin \
+      --datadir=/usr/share/postgresql/16 \
+      --sysconfdir=/etc/postgresql-common \
+      --libdir=/usr/lib/postgresql/16/lib \
+      --includedir=/usr/include/postgresql/16 \
+      --with-openssl \
+      --with-libxml \
+      --with-libxslt \
+      --with-icu \
+      --with-uuid=e2fs \
+      --with-lz4 \
+      --with-zstd \
+      --with-systemd \
+      --with-pgport=5432
+    make -j$(nproc) world
+    make install-world
+    # Link system zoneinfo as PG timezone data (source tarball lacks timezone source files)
+    ln -sfn /usr/share/zoneinfo /usr/share/postgresql/16/timezone
+    cd /tmp
+    rm -rf postgresql-16.9 springtail-pg.tar.gz
 
 - name: Enable PG16
   ansible.builtin.copy:

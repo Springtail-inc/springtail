@@ -1,5 +1,5 @@
 # The Dockerfile for CI build & tests (for GitHub Actions)
-ARG BASE_IMAGE=381492230138.dkr.ecr.us-east-1.amazonaws.com/devsupport:invalid
+ARG BASE_IMAGE=ghcr.io/springtail-inc/devsupport:invalid
 FROM ${BASE_IMAGE}
 
 ARG CI_BUILD_TYPE
@@ -26,9 +26,9 @@ RUN ln -s /home/dev/debug debug && \
 
 RUN if [ "$SPRINGTAIL_INCLUDE_TIME_TRACES" = "false" ]; then unset SPRINGTAIL_INCLUDE_TIME_TRACES ; fi && \
     if [ "$CI_BUILD_TYPE" = "debug" ]; then \
-        cmake -B "debug" -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
+    cmake -B "debug" -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
     else \
-        cmake -B "release" -S . -D'CMAKE_BUILD_TYPE=Release' -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1 -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
+    cmake -B "release" -S . -D'CMAKE_BUILD_TYPE=Release' -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1 -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
     fi && \
     rm -rf  /home/dev/external/vcpkg/buildtrees /home/dev/external/vcpkg/packages /home/dev/external/vcpkg/downloads
 

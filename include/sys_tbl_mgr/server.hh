@@ -3,6 +3,7 @@
 #include <common/init.hh>
 #include <common/singleton.hh>
 
+#include <ddl.pb.h>
 #include <grpc/grpc_server_manager.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <storage/xid.hh>
@@ -21,67 +22,67 @@ public:
     /**
      * @brief Create table API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
     /**
      * @brief Alter table API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
     /**
      * @brief Drop table API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
     /**
      * @brief Create namespace API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
     /**
      * @brief Alter namespace API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
     /**
      * @brief Drop namespace API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
     /**
      * @brief Create user type API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
     /**
      * @brief Alter user type API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
     /**
      * @brief Drop user type API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
     /**
      * @brief Attach partition API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg);
 
     /**
      * @brief Detach partition API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg);
 
     /**
@@ -165,7 +166,7 @@ public:
     /**
      * @brief Swap and sync table  API cal
      */
-    std::string
+    std::vector<proto::DDLOperation>
     swap_sync_table(const proto::NamespaceRequest &namespace_req,
                     const proto::TableRequest &create_req,
                     const std::vector<proto::IndexRequest> &index_reqs,
@@ -475,8 +476,17 @@ private:
      *
      * @return A vector of ColumnHistory objects containing the history events for the child partition tables.
      */
-    nlohmann::json _generate_partition_updates(const proto::TableRequest& request,
-                                               const proto::ColumnHistory& history);
+    proto::DDLOperation _generate_partition_updates(const proto::TableRequest& request,
+                                                    const proto::ColumnHistory& history,
+                                                    const XidLsn& xid);
+
+    /**
+     * Result of comparing old and new schemas during ALTER TABLE.
+     */
+    struct SchemaUpdateResult {
+        proto::ColumnHistory history;
+        proto::DDLOperation operation;
+    };
 
     /**
      * Helper function to extract a change entry for a schema by comparing the old and new
@@ -484,13 +494,21 @@ private:
      * @param old_schema The schema before the alteration.
      * @param new_schema The schema after the alteration.
      * @param xid The XID/LSN at which the alteration occurred.
-     * @param ddl The JSON object to which the DDL statement will be added.
+     * @param tid The table ID.
+     * @param schema_name The schema/namespace name.
+     * @param table_name The table name.
+     * @param rls_enabled Whether RLS is enabled.
+     * @param rls_forced Whether RLS is forced.
      */
-    proto::ColumnHistory _generate_update(
+    SchemaUpdateResult _generate_update(
         const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
         const google::protobuf::RepeatedPtrField<proto::TableColumn>& new_schema,
         const XidLsn& xid,
-        nlohmann::json& ddl);
+        uint64_t tid,
+        const std::string& schema_name,
+        const std::string& table_name,
+        bool rls_enabled,
+        bool rls_forced);
 
     // CACHE FOR NAMESPACES
 
@@ -660,10 +678,10 @@ private:
      * @param xid XID for visibility
      * @return DDL JSON object for ATTACH PARTITION
      */
-    nlohmann::json _generate_attach_partition_ddl(uint64_t db_id,
-                                                   const TableCacheRecordPtr& child_info,
-                                                   uint64_t parent_table_id,
-                                                   const XidLsn& xid);
+    proto::DDLOperation _generate_attach_partition_ddl(uint64_t db_id,
+                                                       const TableCacheRecordPtr& child_info,
+                                                       uint64_t parent_table_id,
+                                                       const XidLsn& xid);
 
     /**
      * Generate ATTACH PARTITION DDLs for all direct children (non-recursive)
@@ -679,7 +697,7 @@ private:
                                      uint64_t parent_table_id,
                                      const XidLsn& xid,
                                      uint64_t parent_snapshot_xid,
-                                     std::vector<nlohmann::json>& ddl_array_out);
+                                     std::vector<proto::DDLOperation>& ddl_array_out);
 
     /**
      * Performs a create_table() assuming that the correct locks are already held.
@@ -694,7 +712,7 @@ private:
      * @param request Table request containing table metadata, columns, partition info, and snapshot XID
      * @return JSON array of DDL objects (CREATE + optional ATTACH + optional child ATTACHes)
      */
-    nlohmann::json _create_table(const proto::TableRequest& request);
+    std::vector<proto::DDLOperation> _create_table(const proto::TableRequest& request);
 
     /**
      * Performs a drop_table() assuming that the correct locks are already held.
@@ -704,7 +722,7 @@ private:
      *
      * @return ddl to be applied
      */
-    nlohmann::json _drop_table(const proto::DropTableRequest& request, bool is_resync=false);
+    proto::DDLOperation _drop_table(const proto::DropTableRequest& request, bool is_resync=false);
 
     /**
      * Performs an update_roots() assuming that the correct locks are already held.
@@ -749,27 +767,27 @@ private:
     /**
      * Helper for updating the namespace_names table.
      */
-    nlohmann::json _mutate_namespace(uint64_t db,
-                                     uint64_t ns_id,
-                                     std::optional<std::string> name,
-                                     const XidLsn& xid,
-                                     bool exists);
+    proto::DDLOperation _mutate_namespace(uint64_t db,
+                                         uint64_t ns_id,
+                                         std::optional<std::string> name,
+                                         const XidLsn& xid,
+                                         bool exists);
 
     std::optional<std::pair<proto::IndexInfo, XidLsn>> _find_cached_index(
         uint64_t db_id, uint64_t index_id, const XidLsn& xid, std::optional<uint64_t> tid);
 
     /**
      * @brief Helper for updating the usertype table.
-     * @return nlohmann::json DDL json for ddl mgr
+     * @return base DDLOperation with xid/lsn set (caller sets the oneof action)
      */
-    nlohmann::json _mutate_usertype(uint64_t db_id,
-                                    uint64_t type_id,
-                                    const std::string &name,
-                                    uint64_t ns_id,
-                                    int8_t type,
-                                    const std::string &value_json,
-                                    const XidLsn xid,
-                                    bool active);
+    proto::DDLOperation _mutate_usertype(uint64_t db_id,
+                                          uint64_t type_id,
+                                          const std::string &name,
+                                          uint64_t ns_id,
+                                          int8_t type,
+                                          const std::string &value_json,
+                                          const XidLsn xid,
+                                          bool active);
 
     /**
      * Retrieve the current read XID for a db.

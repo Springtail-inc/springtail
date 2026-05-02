@@ -16,6 +16,9 @@ export VCPKG_FORCE_SYSTEM_BINARIES=1
 echo "Starting SSH..."
 service ssh start
 
-# Keep the container running in the foreground
-tail -f /dev/null
-#/usr/sbin/sshd -D
+# If a command was passed, run it; otherwise keep the container running
+if [ $# -gt 0 ]; then
+    exec "$@"
+else
+    tail -f /dev/null
+fi
