@@ -6,6 +6,35 @@ It achieves this by replicating data from your existing PostgreSQL instance and 
 
 The system is composed of several cooperating daemons (proxy, log manager, write cache, system table manager, XID manager) that communicate over gRPC, with Redis used for configuration and state management.
 
+## Benefits
+
+Springtail provides significant advantages over traditional Postgres read replicas:
+
+- **Instant scale-up:** Springtail separates storage from compute, allowing additional replicas to spin up in seconds without requiring a new copy of the data.
+- **Cost-efficiency:** Only pay for what you use — reduce compute resources when they're not needed, saving on peak provisioning costs.
+- **Built-in optimization:** Springtail's proxy handles load balancing and connection pooling, so you don't need to manage these services separately.
+- **No downtime:** Bring replicas online quickly without the downtime of snapshot creation or synchronization delays.
+
+## Key features
+
+Springtail enhances performance and efficiency through several key capabilities:
+
+- **Scalable compute:** Increase or decrease compute capacity as your workload changes, reducing unnecessary overhead.
+- **Scalable storage:** Independently scales storage from compute, allowing faster setup and efficient data access.
+- **Optimized ingest pipeline:** Reduces replication lag and ensures that reads receive the most up-to-date snapshot of the data.
+- **Built-in proxy:** Automatically manages load balancing and connection pooling, simplifying replica management.
+- **Custom storage format:** Optimizes storage for fast primary key access patterns, reducing latency on common database operations.
+
+## Use cases
+
+Springtail replicas are well-suited for traditional read replica workloads:
+
+- **Nightly batch jobs:** Efficiently process recurring large-scale operations without impacting your primary database.
+- **ETL jobs:** Seamlessly handle extract, transform, and load processes with scalable compute.
+- **Read-heavy operations:** Handle large queries, such as SaaS dashboards or table scans, without overloading your primary instance.
+
+Any read-only transaction that might cause contention on your primary database is an ideal candidate for Springtail.
+
 ## Prerequisites
 
 - Docker and Docker Compose
