@@ -110,9 +110,11 @@ namespace {
             for (int i = 0; i < iterations; i++) {
                 std::unique_lock<std::mutex> lock(_mx);
                 uint64_t xid = client->get_committed_xid(1, 0);
-                auto now = std::chrono::system_clock::now();
-                auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
-                server->commit_xid(1, 1, xid + 1, false, timestamp.count());
+                // Monotonic by construction. system_clock can step backward
+                // (NTP, container clock skew) which would trip the server's
+                // monotonic-timestamp invariant.
+                uint64_t timestamp = ++_next_timestamp;
+                server->commit_xid(1, 1, xid + 1, false, timestamp);
             }
 
             LOG_INFO("Thread: {}, finished", thread_id);
@@ -121,6 +123,9 @@ namespace {
         std::vector<std::jthread> _threads;
         std::unique_ptr<Subscriber> _subscriber;
         std::mutex _mx;
+        uint64_t _next_timestamp = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
     };
 
     TEST_F(XidMgr_Test, ThreadedTest)
@@ -150,12 +155,9 @@ namespace {
         xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
         uint64_t xid = client->get_committed_xid(1, 0);
 
-        auto now = std::chrono::system_clock::now();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
-
-        server->commit_xid(1, 1, xid + 1, false, timestamp.count());
-        server->commit_xid(1, 1, xid + 2, false, timestamp.count());
-        server->commit_xid(1, 1, xid + 3, false, timestamp.count());
+        server->commit_xid(1, 1, xid + 1, false, ++_next_timestamp);
+        server->commit_xid(1, 1, xid + 2, false, ++_next_timestamp);
+        server->commit_xid(1, 1, xid + 3, false, ++_next_timestamp);
 
         sleep(1);
 
