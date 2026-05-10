@@ -255,6 +255,12 @@ psql -h localhost -p 55432 -U postgres
 ./cluster down all
 ```
 
+## Quick Start: Production Deployment
+
+In a production deployment, each Springtail host runs a `coordinator` process that supervises the daemons for one service tier (`ingestion`, `fdw`, or `proxy`), installs binaries from S3, monitors component liveness via Redis, and reacts to lifecycle state changes (startup, reload, drain, shutdown) driven by the controller.
+
+For details on starting Springtail, adding replica (FDW) nodes, removing replica nodes, and stopping Springtail, see [`python/coordinator/README.md`](python/coordinator/README.md).
+
 ## License
 
 This project is licensed under the Elastic License 2.0 (ELv2).
