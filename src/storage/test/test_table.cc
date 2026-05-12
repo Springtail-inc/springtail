@@ -260,6 +260,51 @@ namespace {
     uint64_t Table_Test::_db_id = 1;
     std::filesystem::path Table_Test::_base_dir;
 
+    TEST_P(Table_Test, CreateVacant) {
+        auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // Register the table in sys_tbl_mgr but do NOT create any data files
+        // (skip _create_mtable / finalize). The table directory will not exist.
+        _init_sys_tbls(target_xid, 9999, "test_create_vacant");
+        server->commit_xid(1, 1, target_xid, false, 0);
+
+        // Roots all UNKNOWN_EXTENT; primary (0), one secondary (1), look-aside (max).
+        std::vector<TableRoot> roots = {
+            {0, constant::UNKNOWN_EXTENT},
+            {1, constant::UNKNOWN_EXTENT},
+            {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT}
+        };
+
+        auto table = _create_table(9999, target_xid, roots);
+
+        // Sanity: confirm the table is truly vacant (directory does not exist).
+        ASSERT_FALSE(std::filesystem::exists(table->get_dir_path()));
+
+        auto key = _create_key("aaaa");
+
+        // Primary index: search ops + iterator comparison must not crash.
+        ASSERT_TRUE(table->has_primary());
+        ASSERT_TRUE(table->empty());
+        ASSERT_TRUE(table->primary_lookup(key) == constant::UNKNOWN_EXTENT);
+        ASSERT_TRUE(table->lower_bound(key) == table->end());
+        ASSERT_TRUE(table->upper_bound(key) == table->end());
+        ASSERT_TRUE(table->inverse_lower_bound(key) == table->end());
+        ASSERT_TRUE(table->begin() == table->end());
+
+        // Secondary index (id 1): used to throw because _secondary_indexes was empty.
+        ASSERT_TRUE(table->lower_bound(key, 1) == table->end(1));
+        ASSERT_TRUE(table->upper_bound(key, 1) == table->end(1));
+        ASSERT_TRUE(table->inverse_lower_bound(key, 1) == table->end(1));
+        ASSERT_TRUE(table->begin(1) == table->end(1));
+
+        // index() should return nullptr for both primary and secondary on a vacant table.
+        ASSERT_TRUE(table->index(0) == nullptr);
+        ASSERT_TRUE(table->index(1) == nullptr);
+    }
+
     TEST_P(Table_Test, CreateEmpty) {
         auto client = XidMgrClient::get_instance();
         auto server = xid_mgr::XidMgrServer::get_instance();
