@@ -5,6 +5,13 @@ lifecycle of every springtail service running on a host. One coordinator runs
 per host and is responsible for a single service type: `ingestion`, `fdw`, or
 `proxy`.
 
+> **Note:** the coordinator is intended as a *reference example* of how to
+> deploy Springtail end-to-end (binary install from S3, systemd-managed
+> postgres, Redis-driven lifecycle, SNS notifications, etc.). It encodes the
+> assumptions of one particular deployment — paths, AWS services, secret
+> layout, systemd unit naming, and so on — and will likely need to be
+> adjusted (or replaced) to match a different target environment.
+
 The coordinator:
 
 1. Downloads and installs binaries from S3 (production only).
@@ -87,10 +94,11 @@ Flags:
 5. **Build the scheduler and register components.** A `ComponentFactory`
    produces the `Component` objects for the selected service. For `fdw`, the
    coordinator first calls `Production.install_pgfdw` to install the
-   `springtail_fdw` extension into the local PostgreSQL, then waits for the
-   ingestion service to be reachable (pings `XidMgrClient` and
-   `SysTblMgrClient` until both respond) before starting postgres and the
-   FDW daemons.
+   `springtail_fdw` extension into the local PostgreSQL (see
+   [Host PostgreSQL prerequisites](#host-postgresql-prerequisites) for what
+   this assumes about the cluster), then waits for the ingestion service to
+   be reachable (pings `XidMgrClient` and `SysTblMgrClient` until both
+   respond) before starting postgres and the FDW daemons.
 6. **Start components in order.** `Scheduler.start_all` launches each
    component by ascending `startup_order` and waits for each to be running
    before moving on. Once everything is up, the coordinator state is set to
@@ -141,16 +149,86 @@ config record under the Redis hash `<db_instance_id>:fdw`.
 The coordinator does not provision new hosts itself — that is the
 responsibility of the controller / infrastructure layer. From the
 coordinator's perspective, adding a replica is simply "stand up a new host
-and start an FDW coordinator on it." The flow is:
+and start an FDW coordinator on it." See
+[Host PostgreSQL prerequisites](#host-postgresql-prerequisites) first for
+what each FDW host must have in place before the coordinator can run; the
+flow below assumes those prerequisites are met.
+
+### Host PostgreSQL prerequisites
+
+The FDW coordinator does not install or initialize PostgreSQL — it expects
+a specific cluster to already be running on the host. The local-cluster
+ansible at `local-cluster/opt/springtail/helpers/customize-pg.yml` is the
+canonical reference for how that cluster is laid down; the requirements
+below summarize what the coordinator itself actually depends on.
+
+**1. The custom (patched) PostgreSQL 16 build.** Springtail does not run on
+stock PostgreSQL. The FDW host must run the patched PG 16 fork (currently
+`postgresql-16.9`, distributed as `springtail-pg.tar.gz`), which adds RLS
+support for foreign tables that the `springtail_fdw` extension relies on.
+The reference build is in `docker/ansible/roles/custom-pg/tasks/main.yml`:
+it downloads the tarball from `custom_pg_package_url`, configures with
+`--prefix=/usr/lib/postgresql/16` (with `--bindir` / `--datadir` /
+`--libdir` under that prefix), and runs `make install-world`.
+
+`install_pgfdw` and `PostgresComponent` discover the install layout at
+runtime via `pg_config --sharedir`, `--pkglibdir`, `--bindir`, and
+`--version`, so **the `pg_config` first on the coordinator's PATH must
+resolve to the custom build**. If a stock `pg_config` shadows it, the FDW
+extension files will be copied into the wrong cluster.
+
+**2. Cluster naming driven by the FDW superuser.** The data directory,
+systemd unit, OS owner, and environment file are all named after the
+`fdw_superuser` username pulled from AWS Secrets Manager (secret
+`sk/{org_id}/{account_id}/aws/dbi/{db_instance_id}/primary_db_password`,
+read via `Properties.get_role(DB_USER_ROLE_FDW)`). Throughout this section
+`{fdw_user}` is that username and `{pg_version}` is the PG major version
+returned by `pg_config --version` (currently `16`):
+
+| What | Path / name |
+| --- | --- |
+| Data directory | `/var/lib/postgresql/{pg_version}/{fdw_user}` |
+| `pg_hba.conf` | `/var/lib/postgresql/{pg_version}/{fdw_user}/pg_hba.conf` |
+| `postmaster.pid` | `/var/lib/postgresql/{pg_version}/{fdw_user}/postmaster.pid` (overridable via the `-f` flag) |
+| Environment file | `/etc/postgresql/{pg_version}/{fdw_user}/environment` |
+| systemd unit | `postgresql-{fdw_user}.service` |
+
+The OS user `{fdw_user}` must exist and have passwordless sudo — the
+coordinator runs `sudo cp`, `sudo systemctl start/stop ...`, and
+`sudo -u {fdw_user} psql ...` for liveness and connection-count probes.
+
+The maintenance database that `is_alive` / `get_connection_count` connect
+to comes from `PGDATABASE` (defaults to `__springtail` in the env-driven
+path, `postgres` when properties are loaded from a `config.yaml`) and must
+already exist in the cluster.
+
+**3. What `install_pgfdw` mutates on every coordinator start/reload.** It
+does not create the cluster, but it does modify it on each invocation (see
+`python/coordinator/production.py:201`):
+
+- Copies the FDW extension into the cluster's `sharedir/extension`
+  (`springtail_fdw--1.0.sql`, `springtail_fdw.control`) and the shared
+  library into `pkglibdir` as `springtail_fdw.so`.
+- Removes any stale `libspringtail_pgext.so` from the springtail install's
+  `shared-lib` directory.
+- Rewrites the local-auth line in `pg_hba.conf` to `scram-sha-256`.
+- Writes the springtail runtime env vars (the `ENV_VARS` list in
+  `production.py` — Redis, AWS, mount, FDW, `LD_LIBRARY_PATH`) into the
+  postgres environment file so the systemd unit picks them up.
+- Stops postgres, so the scheduler can start it cleanly under the refreshed
+  environment in the next step of the startup sequence.
+
+### Flow
 
 1. **Provision an FDW config record.** Add the new FDW to
    `system.json` under `fdws` (or insert it directly into Redis at
    `<db_instance_id>:fdw` and `<db_instance_id>:fdw_ids`). Newly added FDW
    configs are written with `state = "initialize"` (see
    `Properties._load_redis`).
-2. **Provision the host.** Bring up an EC2 instance (or equivalent) that
-   has PostgreSQL installed locally and has the springtail environment
-   variables set. The coordinator requires:
+2. **Provision the host.** Bring up an EC2 instance (or equivalent) with
+   the custom PostgreSQL cluster configured per
+   [Host PostgreSQL prerequisites](#host-postgresql-prerequisites) and the
+   springtail environment variables set. The coordinator requires:
    - `SERVICE_NAME=fdw`
    - `FDW_ID=<the new fdw id>`
    - `INSTANCE_KEY` (used as part of the coordinator-state record key)
