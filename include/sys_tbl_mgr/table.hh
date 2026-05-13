@@ -184,6 +184,10 @@ namespace indexer_helpers {
                     const Tracker& tb = b;
 
                     if (ta == tb) {
+                        // Vacant table: both trackers carry null btrees; nothing more to compare.
+                        if (a._btree == nullptr) {
+                            return true;
+                        }
                         return (a._btree_i == a._btree->end() || a._page_i == b._page_i);
                     }
                     return false;
@@ -496,8 +500,8 @@ namespace indexer_helpers {
          */
         Iterator end(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false)
         {
-            // check for vacant table
-            if (index_id == constant::INDEX_PRIMARY && _primary_index == nullptr) {
+            // check for vacant table - return a vacant iterator regardless of index type
+            if (_primary_index == nullptr) {
                 return Iterator(this);
             }
             return Iterator(this, index_id, index_only);
@@ -511,6 +515,11 @@ namespace indexer_helpers {
         BTreePtr index(uint32_t idx) const {
             if (idx == 0) {
                 return _primary_index;
+            }
+            // Vacant table: _secondary_indexes is empty; return null instead of throwing,
+            // matching the primary-index behavior on a vacant table.
+            if (_primary_index == nullptr) {
+                return nullptr;
             }
             return _secondary_indexes.at(idx).first;
         }
