@@ -12,7 +12,7 @@ docker==7.1.0
 fastapi==0.120.2
 h11==0.16.0
 hiredis==3.2.1
-idna==3.10
+idna==3.15
 jmespath==1.0.1
 linkify-it-py==2.0.3
 markdown-it-py==4.0.0
