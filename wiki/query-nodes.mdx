@@ -1,0 +1,45 @@
+---
+title: "Query Nodes"
+---
+
+# FDW Node Architecture Overview
+
+An FDW node is a managed replication-and-query endpoint that hosts a dedicated Postgres instance and a small set of Springtail services responsible for keeping that instance synchronized with the primary system. The node is designed to be self-starting, self-monitoring, and capable of controlled shutdown to avoid disrupting active client traffic.
+
+## Core components
+
+### Postgres (FDW database instance)
+The local Postgres service on the FDW node is the execution environment for:
+- FDW-side databases and schemas
+- Foreign tables that reference primary-side data
+- Select locally-created objects required to support schema shape, partitioning, and metadata consistency
+
+This Postgres instance is the target that all schema and security replication converges on.
+
+### FDW extension (query interface inside Postgres)
+The FDW node’s Postgres instance is extended with a Springtail-provided Foreign Data Wrapper implemented as a **shared library** loaded into Postgres (installed as a Postgres extension). This extension provides the read path by:
+- Integrating with Postgres’ FDW APIs so queries can reference foreign tables normally.
+- Interpreting and planning **read-only** access through the foreign-table definitions created during schema import.
+- Acting as the boundary where SQL executed on the FDW node is translated into remote reads against the primary-side data source(s), while preserving Postgres semantics for query parsing and execution.
+
+In short: Postgres provides the SQL surface area, and the FDW shared library provides the mechanism that makes those SQL statements resolve to remote data.
+
+### Coordinator (process supervisor)
+The coordinator is the control-plane process on the node. It is responsible for:
+- Starting the node’s components in the correct order
+- Waiting for upstream dependencies to be available before enabling replication services
+- Monitoring liveness/health and restarting components when failures occur
+- Orchestrating controlled state transitions (including draining before shutdown)
+
+### XID Subscriber
+The XID Subscriber is a background service that participates in the system’s transaction/XID coordination. On an FDW node it runs alongside the DDL Manager and supports consistent progress tracking and coordination with the rest of the platform.
+
+### DDL Manager
+The DDL Manager is the data-plane replication worker for schema and access-control state on the FDW node. It is responsible for:
+- Bootstrapping FDW-side databases (creating databases/schemas, installing prerequisites, and importing foreign schema)
+- Applying ongoing DDL change batches delivered asynchronously
+- Running periodic synchronization of roles, role memberships, policies, and ownership metadata from the primary into the FDW node
+
+## How the pieces fit together
+
+At runtime, the coordinator ensures Postgres is healthy, then brings up the XID Subscriber and DDL Manager. The DDL Manager continuously updates the FDW Postgres instance so that the set of schemas and foreign tables available for query remains aligned with the primary. When client queries arrive, Postgres parses and plans them normally, and the FDW shared library implements the foreign-table access that performs remote reads. The coordinator monitors all components for liveness and takes corrective action (restart or controlled shutdown) when required, making the FDW node behave as a resilient, operationally-managed service.

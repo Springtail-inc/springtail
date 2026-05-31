@@ -1,0 +1,168 @@
+---
+title: "Local Cluster Deployment"
+---
+
+Local Cluster Deployment
+====
+
+This section provides a step-by-step guide to deploying the system in a local cluster environment using Docker. This
+setup is ideal for development, testing, and small-scale production environments.
+
+## Prerequisites
+
+- Docker
+- Docker Compose
+- Python3
+- AWS CLI
+- Base container image for Springtail Service *
+    - More on this in the "Building a Base Image" section below.
+- Check out the `springtail` repository to your local machine.
+
+## Cluster Building Flow
+
+```mermaid
+flowchart TD
+    Z[Start Mock AWS Service]
+    Y[Start Redis Service]
+    X[Start Local Primary DB]
+    Z --> A
+    Y --> A
+    X --> A
+    A[Build Springtail Package] --> G[Upload Package to Local AWS S3]
+    G --> F[Launch Bootstrap Container: <br>set secrets, set Redis config, amend shared Env files etc]
+    F -- read shared Env files / Redis config --> M[Launch Ingestion Container]
+    F -- read shared Env files / Redis config ---> N[Launch Proxy Container]
+    F -- read shared Env files / Redis config --> Q[Launch FDW Container]
+    M --> J[Join & Wait]
+    N --> J
+    Q --> J
+```
+
+## Building a Base Image
+
+The Springtail service need a set of dependencies to run. These dependencies are packaged into a base container image,
+which is then used to build the service containers. The local cluster will assume the existence of such base image.
+
+All the steps below assume you are at the root of `springtail` repository.
+
+In the `local-cluster/env` directory, there is a `env.setup` file that defines the name of the base image to use.
+
+```
+IMAGE=local-cluster-img:latest
+```
+
+So you may want to build an image with the tag `local-cluster-img:latest` before starting the local cluster.
+
+```shell
+$ docker build -t local-cluster-img:latest -f local-cluster/Dockerfile.base .
+```
+
+## Working with Local Cluster
+
+### Launching the Cluster
+
+1. First build a springtail package. You can reuse an existing package if you have one though.
+
+```shell
+$ ./cluster build-package <out-dir>
+```
+
+2. Start the local cluster. You can specify the full package path on your local machine (the tarball file generated from
+   the previous step).
+
+```shell
+$ ./cluster up <full-package-path>
+```
+
+3. It takes a few minutes (usually less than 2) to start the cluster. You can check the status by:
+
+```shell
+$ ./cluster status
+```
+
+### Managing / Interacting with the Cluster
+
+Once all containers are up and running, you can `shell` into any container. For example:
+
+```shell
+$ ./cluster sh <name>
+```
+
+The container names are:
+
+- `proxy`
+- `ingestion`
+- `fdw`
+- `controller`
+
+By default, the `springtail-coordinator` service is not started. You can start it by (inside a container):
+
+   ```shell
+   $ systemctl start springtail-coordinator
+   ```
+
+### Tearing Down the Cluster
+
+To tear down the Springtail containers,
+
+```shell
+$ ./cluster down
+```
+
+To tear down everything including the supporting services (Redis, local AWS mock, local DB),
+
+```shell
+$ ./cluster down all
+```
+
+## Internals
+
+This section explains what happens under the hood when you run the above commands.
+
+### Building the Package
+
+The `./cluster build-package <out-dir>` command does the following:
+Start a temporary build container from the image identified by `BASE_BUILDER_IMAGE_TAG` in the `cluster` script, which
+resides in the DevSupport ECR repo.
+If the BASE_BUILDER_IMAGE_TAG is not available locally it will try to pull from the remote repo, thus requiring AWS SSO
+configured.
+It saves the package into the `<out-dir>` directory on the host machine.
+The package is a tarball file named `springtail-<date-version>-<system-settings-gitsha>.tar.gz`.
+
+### Starting the Cluster
+
+The `./cluster up <full-package-path>` command does the following:
+It sets the `<full-package-path>` to the `PACKAGE_FILE_NAME` environment variable, making it available to the build
+process of all the containers.
+Then it starts the supporting local services, like the AWS mock, Redis, and a local PostgreSQL database serving as
+primary DB. Then it uploads the package to the local mock S3 service.
+Then it launches a bootstrap container that sets up shared environment files, secrets, and Redis configuration.
+Specifically, the bootstrap process will add new env vars into `./env/.env` file.
+Finally, it launches the main service containers: `proxy`, `ingestion`, and `fdw`, picking up all the env files in the
+`./env` directory.
+
+### Service Initializations
+
+#### local-cluster-bootstrap
+
+This runs *before* any service container is started. It does the following:
+
+1. Set up shared environment files in the `./env` directory, which will be picked up by all service containers;
+2. Set up Redis configuration, creating a default user and password, and saving the config to `./env/redis.env`;
+3. Set up secrets, creating a self-signed certificate for HTTPS, and saving the secrets to `./env/secrets.env`;
+
+In summary, this is setting up the supporting environment for the service containers to run.
+
+#### "CloudInit" Script
+
+For each service container, upon startup, it runs a `init-services` script, managed by supervisord, that does the
+following:
+
+1. Download S3 package and extract it, moving the coordinator to the `/opt/springtail` directory as the bootstrap
+   coordinator;
+2. Make sure all necessary directories exist, creating them if needed;
+3. For `fdw` specifically, it triggers an Ansible script to customize the PostgreSQL;
+   This is akin to the EC2's `userdata` script (CloudInit), which is used to initialize a container.
+
+
+

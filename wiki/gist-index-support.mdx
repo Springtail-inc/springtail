@@ -1,0 +1,412 @@
+---
+title: "GIST Index support"
+---
+
+## Overview
+
+> **Note:** This feature is currently a work in progress. Index building and maintenance are partially implemented. Currently in branch: SPR-1036-GiST
+
+GiST (Generalized Search Tree) support enables efficient indexing for geometric data types, range types, and other complex data structures. GiST is a balanced tree structure that allows custom operator classes to define how data is organized and searched within the index.
+
+The implementation uses PostgreSQL's GiST opclass methods (compress, penalty, union, picksplit, consistent) to build and maintain a tree structure where:
+- **Leaf nodes** store the actual indexed values and references to table rows
+- **Internal (branch) nodes** store predicates (bounding boxes, ranges, etc.) that cover all entries in their subtrees
+
+Currently supports various GiST opclasses including `gist_point_ops` for geometric point data.
+
+---
+
+## Key Components
+
+### Index Building
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| GiST Helpers | `src/storage/gist_helpers.cc` | Opclass method invocation (compress, penalty, union, picksplit) |
+| GiST Schema Builder | `src/sys_tbl_mgr/schema_helpers.cc` | Creates GiST index schema |
+| GiST Index Root | `src/sys_tbl_mgr/mutable_table.cc` | Initializes MutableBTree configured for GiST storage |
+| Insertion Logic | `src/storage/mutable_btree.cc` | Penalty-based subtree selection and insertion |
+| Cache Layer | `src/storage/cache.cc` | GiST-specific page insertion with subtree selection |
+
+### GiST Index Schema
+
+GiST indexes use the same schema structure as regular B-tree indexes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| Indexed columns | Various | One or more columns with GiST-compatible types |
+| `__springtail_internal_row_id` | UINT64 | Reference to the source row |
+
+**Internal nodes** additionally store:
+- **Predicate/Union keys**: Compressed representations (e.g., bounding boxes) covering all child entries
+- **Child page ID**: Reference to the child page
+
+### GiST Data Structure
+
+```cpp
+struct GistEntry {
+    std::vector<uintptr_t> keys;  // Datum per indexed column (compressed)
+    bool leafkey;                  // true for leaf entries, false for internal
+    uint64_t internal_row_id;      // For leaf: row pointer; for internal: child page ID
+};
+```
+
+### Supported Opclass Methods
+
+| Method | Support Number | Purpose |
+|--------|---------------|---------|
+| `GIST_CONSISTENT` | 1 | Determine if entry satisfies query predicate |
+| `GIST_UNION` | 2 | Compute union/bounding predicate of entries |
+| `GIST_COMPRESS` | 3 | Convert leaf value to compressed index representation |
+| `GIST_DECOMPRESS` | 4 | Convert index representation back to original form |
+| `GIST_PENALTY` | 5 | Compute penalty for inserting entry into subtree |
+| `GIST_PICKSPLIT` | 6 | Split overflowing page into two |
+| `GIST_EQUAL` | 7 | Check equality of keys |
+| `GIST_DISTANCE` | 8 | Compute distance for KNN searches |
+
+---
+
+## Data Flow
+
+### Index Building
+
+```
+INDEX CREATION
+      │
+      ▼
+Server::_create_index()
+  → Validates opclass compatibility
+  → _upsert_index_name() persists metadata
+      │
+      ▼
+MutableTable::create_gist_index_root()
+  → Creates schema via create_gist_index_schema()
+  → Initializes MutableBTree with INDEX_TYPE_GIST
+  → Stores opclass names for each indexed column
+      │
+      ▼
+Indexer::_build_index()
+  → Detects INDEX_TYPE_GIST
+  → Calls build logic (to be implemented)
+```
+
+### Index Insertion
+
+```
+INSERT/UPDATE Operation
+      │
+      ▼
+MutableBTree::insert()
+  → Detects INDEX_TYPE_GIST
+  → extract_gist_entry_from_tuple()
+      ├─ For each indexed column:
+      │  ├─ make_datum_from_field() converts Springtail field to Datum
+      │  └─ Invokes GIST_COMPRESS via opclass method
+      └─ Returns GistEntry with compressed keys
+      │
+      ▼
+Page::insert_gist()
+  → Marks page as dirty
+  → Delegates to StorageCache::Page::insert_gist()
+      │
+      ▼
+StorageCache::Page::gist_choose_subtree()
+  → For each child page (internal nodes):
+      ├─ read_branch_entry_from_row() extracts child predicate
+      ├─ compute_gist_penalty() calculates insertion cost
+      └─ Selects child with minimum penalty
+  → Returns iterator to chosen subtree
+      │
+      ▼
+StorageCache::Page::insert_gist()
+  → Inserts tuple into chosen extent/subtree
+  → (Split logic and tree rebalancing: TBD)
+```
+
+### Incremental Maintenance
+
+```
+MutableTable::apply_mutation<INSERT/DELETE>()
+  → index_mutation_handler() checks index type via _index_lookup
+  → For GIST: follows standard insertion path
+  → For DELETE: removal logic (to be implemented)
+```
+
+---
+
+## Implementation
+
+### GistEntry Extraction
+
+Converts table tuple to compressed GiST index entry:
+
+```cpp
+// gist_helpers.cc - extract_gist_entry_from_tuple()
+GistEntry extract_gist_entry_from_tuple(TuplePtr tuple, ExtentSchemaPtr schema,
+                                        const std::vector<std::string>& opclass_names) {
+    GistEntry out;
+    out.leafkey = true;
+
+    for (std::size_t idx = 0; idx < opclass_names.size(); ++idx) {
+        if (opclass_names[idx] == "EMPTY") continue;
+
+        // Get raw datum from field
+        FieldPtr field = tuple->field(idx);
+        Datum raw = make_datum_from_field(field, tuple->row());
+
+        // Apply GIST_COMPRESS
+        auto opclass_method = PgExtnRegistry::get_instance()
+            ->get_opclass_method_by_method_name(opclass_names[idx], GIST_COMPRESS);
+
+        if (opclass_method.function_ptr) {
+            GISTENTRY entry;
+            entry.key = raw;
+            entry.leafkey = true;
+
+            Datum compressed = DirectFunctionCall1(func, PointerGetDatum(&entry));
+            GISTENTRY *retval = (GISTENTRY *) DatumGetPointer(compressed);
+            out.keys.push_back(retval ? retval->key : raw);
+        } else {
+            out.keys.push_back(raw);
+        }
+    }
+    return out;
+}
+```
+
+### Penalty Computation
+
+Determines best subtree for insertion using opclass penalty method:
+
+```cpp
+// gist_helpers.cc - compute_gist_penalty()
+double compute_gist_penalty(const GistEntry& existing_entry,
+                           const GistEntry& new_entry,
+                           const std::vector<std::string>& opclass_names) {
+    double total_penalty = 0.0;
+
+    for (std::size_t idx = 0; idx < opclass_names.size(); ++idx) {
+        auto opclass_method = PgExtnRegistry::get_instance()
+            ->get_opclass_method_by_method_name(opclass_names[idx], GIST_PENALTY);
+        if (!opclass_method.function_ptr) continue;
+
+        GISTENTRY orig;
+        orig.key = existing_entry.keys[idx];
+        orig.leafkey = existing_entry.leafkey;
+
+        GISTENTRY newe;
+        newe.key = new_entry.keys[idx];
+        newe.leafkey = new_entry.leafkey;
+
+        float penalty = 0.0;
+        DirectFunctionCall3(func, PointerGetDatum(&orig),
+                           PointerGetDatum(&newe), PointerGetDatum(&penalty));
+        total_penalty += penalty;
+    }
+    return total_penalty;
+}
+```
+
+### Subtree Selection
+
+Chooses optimal child page for insertion based on penalty:
+
+```cpp
+// cache.cc - StorageCache::Page::gist_choose_subtree()
+Iterator gist_choose_subtree(const GistEntry& entry, ExtentSchemaPtr schema,
+                             const std::vector<std::string>& opclass_names) {
+    double best_penalty = std::numeric_limits<double>::max();
+    auto best_it = _extents.end();
+
+    for (auto it = _extents.begin(); it != _extents.end(); ++it) {
+        auto extent = it->make_safe_extent(_file, _database_id);
+        auto &&row = (*extent)->back();  // Branch tuple at end
+
+        GistEntry child = gist_helpers::read_branch_entry_from_row(row, schema, opclass_names);
+        double p = gist_helpers::compute_gist_penalty(child, entry, opclass_names);
+
+        if (p < best_penalty) {
+            best_penalty = p;
+            best_it = it;
+        }
+    }
+
+    // Return iterator to chosen extent
+    auto chosen_extent = best_it->make_dirty_safe_extent(_file, _database_id);
+    return Iterator(this, best_it, std::move(chosen_extent), ...);
+}
+```
+
+### Union Computation (for Internal Nodes)
+
+Computes bounding predicate covering all child entries:
+
+```cpp
+// gist_helpers.cc - compute_union()
+void compute_union(const std::vector<GistEntry>& entries, GistEntry& union_entry,
+                   const std::vector<std::string>& opclass_names) {
+    union_entry.leafkey = false;  // Union creates internal node entry
+
+    for (std::size_t idx = 0; idx < opclass_names.size(); ++idx) {
+        auto opclass_method = PgExtnRegistry::get_instance()
+            ->get_opclass_method_by_method_name(opclass_names[idx], GIST_UNION);
+        if (!opclass_method.function_ptr) continue;
+
+        // Prepare GistEntryVector with all entries for this column
+        GistEntryVector* vec = ...;  // Allocate
+        vec->n = entries.size();
+
+        for (size_t i = 0; i < entries.size(); ++i) {
+            vec->vector[i].key = entries[i].keys[idx];
+            vec->vector[i].leafkey = entries[i].leafkey;
+        }
+
+        int out_size = 0;
+        Datum result = DirectFunctionCall2(func, PointerGetDatum(vec),
+                                          PointerGetDatum(&out_size));
+        union_entry.keys.push_back(result);
+    }
+}
+```
+
+### Schema Creation
+
+GiST index schema currently delegates to standard index schema:
+
+```cpp
+// schema_helpers.cc - create_gist_index_schema()
+ExtentSchemaPtr create_gist_index_schema(ExtentSchemaPtr base_schema,
+                                         const std::vector<uint32_t>& index_columns,
+                                         uint64_t index_id,
+                                         const ExtensionCallback& extension_callback,
+                                         const Index& index) {
+    // Currently uses standard index schema
+    return create_index_schema(base_schema, index_columns, index_id, extension_callback);
+
+    // Future: May need custom schema for internal node predicates
+}
+```
+
+### MutableBTree Insertion
+
+```cpp
+// mutable_btree.cc - MutableBTree::insert()
+void MutableBTree::insert(TuplePtr value) {
+    if (_index_type == constant::INDEX_TYPE_GIST) {
+        LOG_INFO("Inserting value into GIST index");
+
+        // Extract and compress entry
+        GistEntry entry = gist_helpers::extract_gist_entry_from_tuple(
+            value, _leaf_schema, _opclass_names);
+
+        // Insert via page
+        NodePtr node = std::make_shared<Node>(nullptr, _root);
+        node->page->insert_gist(entry, value);
+
+        return;
+    }
+
+    // Standard B-tree insertion...
+}
+```
+
+---
+
+## Path to Completion
+
+The following work remains to complete GiST index support:
+
+### 1. **Index Building** - Full initial index build
+   - Implement `Indexer::_build_gist_index()` to iterate table and build initial tree
+   - Handle tree construction with proper internal node creation using UNION
+   - Implement reconciliation logic for mutations after initial build XID
+
+### 2. **Page Splitting** - Handle overflow during insertion
+   - Implement `compute_picksplit()` to split overflowing pages
+   - Currently commented out in `gist_helpers.cc`
+   - Use `GIST_PICKSPLIT` opclass method to partition entries
+   - Update parent nodes with new predicates after split
+   - Maintain tree balance
+
+### 3. **Tree Navigation** - Complete subtree selection
+   - Current implementation only handles single-level selection
+   - Need recursive descent for multi-level trees
+   - Proper leaf node detection and insertion
+
+### 4. **Index Scanning** - Query execution using GiST index
+   - Implement `GIST_CONSISTENT` method invocation for query predicates
+   - Create GiST iterator for index scans
+   - Support various search operators (<@, &&, ~, etc.)
+   - Implement KNN search using `GIST_DISTANCE` method
+
+### 5. **Deletion and Maintenance**
+   - Implement entry removal from GiST tree
+   - Handle internal node updates when children change
+   - Tree rebalancing and page merging
+   - Vacuum support for GiST indexes
+
+### 6. **Internal Node Management**
+   - Proper storage and retrieval of internal node predicates
+   - Union computation during page splits and merges
+   - Predicate updates when child pages change
+
+### 7. **Opclass Validation**
+   - Implement validation in `Server::_check_gist_index_columns()`
+   - Similar to GIN's `ALLOWED_GIN_OPS` list
+   - Verify required methods are available for each opclass
+
+### 8. **Testing**
+   - End-to-end testing with `gist_point_ops` and geometric queries
+   - Test files exist in `python/testing/proxy/tests/sql/gist.sql`
+   - Validate tree structure and correctness
+   - Performance testing with large datasets
+
+---
+
+## Current Status
+
+**Implemented:**
+- ✅ GistEntry structure and helper functions
+- ✅ Opclass method invocation framework (compress, penalty, union)
+- ✅ Basic insertion path with penalty-based subtree selection
+- ✅ Schema creation infrastructure
+- ✅ Field ↔ Datum conversion utilities
+
+**Partially Implemented:**
+- ⚠️ Page insertion (single-level only, no splits)
+- ⚠️ Union computation (implemented but not used in tree building)
+
+**Not Implemented:**
+- ❌ Full index building (Indexer integration)
+- ❌ Page splitting (picksplit)
+- ❌ Multi-level tree navigation
+- ❌ Index scanning and query execution
+- ❌ Deletion and maintenance
+- ❌ Internal node management
+
+---
+
+## Design Notes
+
+### Differences from B-tree Indexes
+
+Unlike B-tree indexes which store (key, value) pairs:
+- **Leaf nodes** store compressed representations of indexed values
+- **Internal nodes** store predicates (unions/bounds) rather than actual values
+- **Insertion** uses penalty-based selection rather than key comparison
+- **Splitting** uses custom picksplit logic rather than median split
+
+### Opclass Integration
+
+GiST heavily relies on PostgreSQL opclass methods:
+- `PgExtnRegistry` provides access to extension-defined opclass methods
+- Each indexed column can have a different opclass
+- Methods operate on `Datum` values (PostgreSQL's internal representation)
+- Conversion between Springtail's `Field` types and `Datum` is crucial
+
+### Storage Considerations
+
+- **Leaf entries**: Store compressed keys + internal_row_id
+- **Branch entries**: Store union predicates + child page ID
+- Current schema treats both uniformly; may need distinction for internal nodes
+- Extent-based storage may need adaptation for variable-sized predicates

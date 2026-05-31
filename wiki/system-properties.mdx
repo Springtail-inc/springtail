@@ -1,0 +1,69 @@
+---
+title: "System Properties"
+---
+
+# Properties Component
+
+The Properties class is shared by all backend processes and is responsible for accessing and managing configuration and system properties in the Springtail system.
+
+## Setup
+
+This component can be initialized in two ways:
+* through properties file override
+* through Redis
+
+For properties file override it is required to configure `SPRINGTAIL_PROPERTIES_FILE` environment variable that contains properties file like `system.json.settings`. This file is designed for running a minimalistic setup in the development environment. This file will be loaded into Redis and all the information for accessing Redis will come from this file.
+
+To run the services through Redis without properties file, it is required to setup a number of environment variables:
+
+```C++
+REDIS_HOSTNAME
+REDIS_USER
+REDIS_PASSWORD
+REDIS_USER_DATABASE_ID
+REDIS_CONFIG_DATABASE_ID
+REDIS_PORT
+REDIS_SSL
+ORGANIZATION_ID
+ACCOUNT_ID
+DATABASE_INSTANCE_ID
+INSTANCE_KEY
+LUSTRE_DNS_NAME
+LUSTRE_MOUNT_NAME
+MOUNT_POINT
+FDW_ID
+```
+
+With the exception of `INSTANCE_KEY` and `FDW_ID`, these environment variables will be all setup in the same way, while `INSTANCE_KEY` and `FDW_ID` will be different per server process and FDW instance.
+
+The information in these environment variables will be used to access Redis and read the rest of the configuration from there.
+
+## Configuration
+
+The configuration consists of multiple components and is stored in JSON format in Redis. All top level keys created in Redis are prefixed with the value of `DATABASE_INSTANCE_ID` followed by ":". It will be stored in `instance_config` hash under `system_settings` key. The value of the system settings is a JSON string that contains configuration for different system components that belong to one or more processes.
+
+Here is a list of various configuration components and what they belong to:
+
+1. `logging` - common for all processes
+2. `iopool` - only for processes accessing data storage
+3. `write_cache` - only for log manager that implements ingestion pipelin
+4. `sys_tbl_mgr` - only for processes accessing data storage
+5. `storage` - only for processes accessing data storage
+6. `log_mgr` - only for log manager process
+7. `fs` - only for processes accessing data storage
+8. `extension_config` - only for FDW processes
+9. `proxy` - only for proxy
+10. `aws_users_override` - common for all process, for testing in local development environment only, it prevents **Properties** component from accessing AWS
+11. `otel` - Open Telemetry configuration used by all processes
+
+## Functionality
+
+**Properties** class provides a variety of get and set API calls for accessing and manipulating the data stored in Redis configuration database. Upon startup, it will read all the data from Redis and store them internally. The data that it is going to manage are all stored with `DATABASE_INSTANCE_ID` prefix in the key.
+
+## Redis Cache
+
+A very important part of **Properties** is **RedisCache**. This component actually stores all the data read from Redis and **Properties** class accesses all the data through this cache. To keep up to date with the changes in Redis, the cache registers for generic notifications from Redis  and updates the internal storage as notifications are delivered. Also, when the data are changed by **Properties**, the change will be applied to the cache first and then propagated by the cache to Redis.
+
+**RedisCache** also delivers an important Redis data update notification mechanism. It allows system services to register with RedisCache for notifications and be notified when updates happen.
+
+

@@ -1,0 +1,27 @@
+---
+title: 'Glossary'
+---
+
+<ParamField path="Database">
+  A single database that runs on a database instance.
+</ParamField>
+
+<ParamField path="Database instance">
+  Database host machine, may contain multiple databases.
+</ParamField>
+
+<ParamField path="Logical replication">
+  Replication at the level of operations; describes the operation, the arguments and data (e.g., an `UPDATE` is applied to row X setting column Y = Z).
+</ParamField>
+
+<ParamField path="Physical replication">
+  Replication of the on-disk data structures after an operation has been applied.
+</ParamField>
+
+<ParamField path="Primary database (DB)">
+  The customer's database within a database instance that is being replicated. The source of truth for data for all copies of that database.
+</ParamField>
+
+<ParamField path="Write-ahead log (WAL)">
+  Log used by a database to log database operations. Used for recovery replay or replication.
+</ParamField>

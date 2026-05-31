@@ -1,0 +1,159 @@
+---
+title: "Query Node Lifecycle"
+---
+
+# FDW Node Lifecycle (Coordinator, Postgres, XID Subscriber, DDL Manager)
+
+This document describes the runtime lifecycle of an FDW node and how its major components are started, monitored, drained, and stopped. It focuses on the operational behavior of the FDW service as a whole, including the local Postgres process, the XID Subscriber, and the DDL Manager.
+
+## 1. Components on an FDW node
+
+An FDW node runs a small set of cooperating processes:
+
+- **Postgres (FDW database instance)**  
+  The local Postgres instance that hosts FDW-side databases, schemas, foreign tables, and any locally-materialized objects required for correct partitioning and metadata behavior.  
+  **NOTE:** the version of the local Postgres node is a custom-patched build.  It is patched to allow row-level security policies on foreign-tables.
+
+- **XID Subscriber**  
+  A background service that participates in transaction/XID coordination for the system. On the FDW node it runs alongside the DDL Manager and helps the overall platform reason about replication progress and safe advancement.
+
+- **DDL Manager**  
+  The service responsible for:
+  - Initializing and maintaining replicated databases on the FDW Postgres instance.
+  - Importing schemas into FDW databases.
+  - Applying ongoing DDL changes delivered asynchronously.
+  - Running periodic synchronization for security/ownership-related replication.
+
+- **Coordinator (supervisor/launcher)**  
+  The service wrapper responsible for starting and supervising the above processes, restarting them on failure, and executing controlled shutdown workflows (including draining).
+
+---
+
+## 2. Startup lifecycle
+
+### 2.1 Coordinator boot and environment readiness
+When the FDW node starts, the coordinator performs basic environment validation (paths, logging configuration, required configuration availability). In production environments it may also update installed binaries and ensure the FDW extension artifacts are present on the host.
+
+### 2.2 Ensuring a runnable FDW-capable Postgres
+Before starting FDW-specific Springtail services, the node ensures the local Postgres instance is running. If it is not running, the coordinator starts it and waits until it is healthy.
+
+The FDW node’s Postgres must be healthy before any downstream components can function, because:
+- The DDL Manager must connect to Postgres to create FDW-side databases and apply DDL.
+- The system expects the FDW node to become query-ready only after Postgres is usable.
+
+### 2.3 Dependency wait: ingestion readiness
+After Postgres is running, the coordinator waits for upstream ingestion-side dependencies to become reachable. This includes the services that provide the metadata and coordination information needed by the FDW node to initialize and track replication progress.
+
+This step prevents the FDW node from starting replication logic before the rest of the system can serve the required metadata and coordination APIs.
+
+### 2.4 Starting FDW services in order
+Once dependencies are ready, the FDW node starts its Springtail services in a defined order:
+
+1. **Postgres** (if not already running)
+2. **XID Subscriber**
+3. **DDL Manager**
+
+This order ensures:
+- The XID Subscriber and DDL Manager can immediately connect to Postgres.
+- Replication coordination can begin before DDL application tries to advance state.
+
+### 2.5 Service enters steady-state running
+After successful startup:
+- The coordinator marks the service as running.
+- Ongoing supervision begins (see Monitoring and Recovery).
+
+---
+
+## 3. Steady-state behavior
+
+### 3.1 Continuous supervision and health checks
+While running, the coordinator:
+- Monitors liveness heartbeats/timeout signals for the FDW-related services.
+- Periodically checks that each component is alive.
+- Tracks database-state changes for informational and operational visibility.
+- Triggers restarts when failures are detected, with protection against tight crash loops.
+
+### 3.2 DDL Manager activity during steady state
+In steady state, the DDL Manager performs two concurrent responsibilities:
+
+- **Incremental schema change application**  
+  Consumes queued change batches and applies them transactionally to the FDW Postgres instance, then records progress.
+
+- **Periodic synchronization loop**  
+  Periodically reconciles role membership, policies, and ownership-related state from the primary into the FDW databases.
+
+### 3.3 XID Subscriber activity during steady state
+The XID Subscriber runs continuously and participates in the broader coordination mechanisms for XID tracking and progress. Operationally, it is treated as a first-class FDW component that must be running and healthy for the FDW node to be considered healthy.
+
+---
+
+## 4. Failure handling and restart behavior
+
+### 4.1 Failure detection sources
+The coordinator can detect component failures via:
+- Explicit liveness timeout signals (e.g., missed heartbeats).
+- Direct process health checks indicating a component is not alive.
+- Failure notifications delivered through a pub/sub mechanism.
+
+### 4.2 Restart policy
+When the coordinator detects failures:
+- It attempts to restart the FDW service components.
+- It tracks repeated failures to detect instability.
+- If a component repeatedly fails too many times within a short window, the coordinator shifts from immediate restart to a backoff-and-retry model to avoid constant churn.
+
+This approach keeps the FDW node available when possible, but prevents uncontrolled restart loops when a persistent configuration or environmental issue exists.
+
+---
+
+## 5. Controlled shutdown via draining
+
+FDW nodes support a controlled shutdown sequence designed to avoid interrupting active client traffic.
+
+### 5.1 Enter draining state
+A controlled shutdown begins by transitioning the FDW node’s service state to **draining**. This is an administrative signal that the FDW node should stop serving new work and prepare to stop safely.
+
+### 5.2 Wait for client connections to drain
+After entering **draining**, the coordinator waits until the FDW Postgres instance has **no active client connections** remaining (i.e., all proxy/client sessions have disconnected).
+
+The goal is to avoid:
+- Terminating long-running queries mid-flight.
+- Cutting off active SQL sessions that depend on the FDW node.
+
+### 5.3 Stop FDW services
+Once connections have drained to zero, the coordinator shuts down FDW services in a controlled manner. This brings down:
+- The DDL Manager
+- The XID Subscriber
+- The FDW Postgres instance if it is managed as part of the FDW service
+
+### 5.4 Transition to stopped state
+After shutdown completes, the coordinator ensures the FDW node is in the **stopped** state. If the state transition does not occur promptly, it forces the state to stopped to guarantee that external controllers observe a consistent final state.
+
+### 5.5 Cleanup of FDW replication coordination state
+As part of stopping, the FDW node cleans up replication coordination tracking associated with the FDW identity, such as:
+- Pending DDL queue entries for this FDW node.
+- Per-FDW progress tracking entries used for DDL/XID coordination.
+- Other FDW-specific bookkeeping data that should not persist across a node stop/replacement.
+
+This cleanup reduces the risk of:
+- Stale work being applied after restart in an unexpected context.
+- Inaccurate minimum-progress calculations caused by dead FDW participants.
+
+### 5.6 Coordinator remains alive (optional idle mode)
+In some operational modes, after all FDW services are stopped the coordinator may remain running and enter an idle loop. This allows the node to remain manageable and responsive to external state changes (for example, a subsequent command to restart services) without requiring the coordinator itself to exit.
+
+---
+
+## 6. Summary state model
+
+An FDW node typically transitions through these phases:
+
+1. **Boot / initialization**
+2. **Postgres running and healthy**
+3. **Dependencies reachable**
+4. **XID Subscriber running**
+5. **DDL Manager running**
+6. **Steady-state supervision**
+7. **Draining (on controlled shutdown)**
+8. **Stopped (services down, state finalized, coordination cleaned up)**
+
+This lifecycle ensures the FDW node becomes operational only when dependencies are available, stays resilient under failures via restart logic, and can be taken offline safely through draining.

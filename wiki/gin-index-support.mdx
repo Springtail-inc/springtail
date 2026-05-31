@@ -1,0 +1,309 @@
+---
+title: "GIN Index support"
+---
+
+## Overview
+
+> **Note:** This feature is currently a work in progress. Index building and maintenance are complete; scan implementation is partially implemented.  Currently in the branches: SPR-1035-GIN-support-2 (build), SPR-1035-GIN-support-2-scan (scan)
+
+GIN (Generalized Inverted Index) support enables efficient text similarity searches using trigram-based indexing. The implementation tokenizes text column values into 3-character trigrams and stores them in an inverted index structure, mapping each trigram to the rows containing it.
+
+The index schema stores entries as `(column_position, token, internal_row_id)` tuples, allowing multi-column GIN indexes where each column's trigrams are distinguished by position.
+
+Currently, only `gin_trgm_ops` opclass is supported, enabling `LIKE` and `ILIKE` query operators.
+
+---
+
+## Key Components
+
+### Index Building
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Trigram Helpers | `src/pg_ext/trgm_helpers.cc` | Extracts trigrams from text values using opclass `extractValue` |
+| GIN Schema Builder | `src/sys_tbl_mgr/schema_helpers.cc` | Creates the 3-column GIN index schema |
+| GIN Index Root | `src/sys_tbl_mgr/mutable_table.cc` | Initializes BTree configured for GIN storage |
+| Index Builder | `src/pg_log_mgr/indexer.cc` | Full build with reconciliation |
+
+### Index Scanning (in-progress)
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Query Helpers | `src/pg_fdw/trgm_query_helpers.cc` | Extracts trigrams from query using opclass `extractQuery` |
+| GINSecondary Iterator | `src/sys_tbl_mgr/table.cc` | Iterates GIN index with row deduplication |
+| FDW Integration | `src/pg_fdw/pg_fdw_mgr.cc` | Routes LIKE/ILIKE operators to GIN index scan |
+
+### GIN Index Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `__springtail_idx_position` | UINT32 | Column position in the table |
+| `__springtail_gin_idx_token` | TEXT | Trigram token (3-byte string) |
+| `__springtail_internal_row_id` | UINT64 | Reference to the source row |
+
+### Supported Operators
+
+| Operator | Strategy Number | Description |
+|----------|-----------------|-------------|
+| `LIKE` (`~~`) | 3 | Case-sensitive pattern matching |
+| `ILIKE` (`~~*`) | 4 | Case-insensitive pattern matching |
+
+---
+
+## Data Flow
+
+### Index Building
+
+```
+INDEX CREATION
+      │
+      ▼
+Server::_create_index()
+  → _check_gin_index_columns() validates opclass
+  → _upsert_index_name() persists metadata
+      │
+      ▼
+Indexer::_build_index()
+  → Detects INDEX_TYPE_GIN
+  → Calls _build_gin_index()
+      │
+      ▼
+Indexer::_build_gin_index()
+  (builds index at the XID x1 in a separate thread in Indexer)
+  → create_gin_index_root() initializes BTree
+  → For each row, for each indexed column:
+      → extract_trgm_from_value() extracts trigrams
+      → Insert (position, token, row_id) into BTree
+
+RECONCILIATION
+      │
+      ▼
+  → committer triggers process_index_reconciliation()
+      → Calls _reconcile_index()
+      → Reconciles index using new mutations happed post XID x1
+      → Insert (position, token, row_id) into BTree for inserts/updates
+      → Remove (position, token, row_id) from BTree for deletes
+
+INCREMENTAL MAINTENANCE
+      │
+      ▼
+MutableTable::apply_mutation<INSERT/DELETE>()
+  → index_mutation_handler() checks index type via _index_lookup
+  → For GIN: extracts trigrams, inserts/removes tuples
+  → For BTree: standard key-value operation
+```
+
+### Index Scanning (in-progress)
+
+```
+QUERY: SELECT * FROM t WHERE col LIKE '%pattern%'
+      │
+      ▼
+FDW::_init_quals()
+  → Selects GIN index with matching column
+      │
+      ▼
+FDW::_set_scan_iterators()
+  → extract_gin_keys_from_string() extracts query trigrams
+  → Table::begin(index_id, tokens)
+      │
+      ▼
+Table::Iterator (GINSecondary)
+  → Iterates BTree entries matching tokens
+  → Deduplicates rows via _visited_internal_row_ids
+  → Resolves row location via look_aside_index
+  → Returns matching table rows
+```
+
+---
+
+## Implementation
+
+### Index Creation
+
+GIN index creation validates opclass before persisting metadata:
+
+```cpp
+// server.cc - Server::_check_gin_index_columns()
+for (auto& idx_column : index_info.columns()) {
+    if (std::ranges::find(ALLOWED_GIN_OPS, idx_column.opclass()) == std::end(ALLOWED_GIN_OPS)) {
+        LOG_ERROR("Unsupported opclass '{}' for GIN index column", idx_column.opclass());
+        return false;
+    }
+}
+```
+
+### Trigram Extraction (Build)
+
+Unpacks PostgreSQL packed trigram integers to 3-byte strings:
+
+```cpp
+// trgm_helpers.cc - unpack_trigram_int_to_string()
+std::string unpack_trigram_int_to_string(uint32_t v) {
+    unsigned char b1 = (v >> 16) & 0xFF;
+    unsigned char b2 = (v >> 8) & 0xFF;
+    unsigned char b3 = v & 0xFF;
+    return std::string({b1, b2, b3});
+}
+
+// trgm_helpers.cc - extract_trgm_from_value()
+auto&& extract_func = PgExtnRegistry::get_instance()
+    ->get_opclass_method_func_ptr_by_method_name(opclass, method_strategy_number);
+Datum result = extract_func(fcinfo);
+Datum *entries = reinterpret_cast<Datum *>(DatumGetPointer(result));
+```
+
+### Full Index Build and reconciliation
+
+Iterates table rows and inserts trigram tuples:
+
+```cpp
+// indexer.cc - Indexer::_build_gin_index()
+for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
+    auto&& row = *row_i;
+    for (int i = 0; i < idx_cols.size(); i++) {
+        auto&& tokens = extract_trgm_from_value(col_field->get_text(&row),
+                column.opclass(), GIN_EXTRACTVALUE);
+
+        for (auto& token : tokens) {
+            // Key: (column_position, trigram_token, internal_row_id)
+            key_fields->at(0) = std::make_shared<ConstTypeField<uint32_t>>(pos);
+            key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(token);
+            key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+            root->insert(std::make_shared<FieldTuple>(key_fields, nullptr));
+        }
+    }
+}
+
+Reconciliation
+// indexer.cc - Indexer::_reconcile_index()
+auto&& tokens = extract_trgm_from_value(std::string(col_field->get_text(&row)), column.opclass(), GIN_EXTRACTVALUE);
+
+for (auto& token: tokens) {
+    // Set idx_position, token, internal_row_id
+    key_fields->at(0) = std::make_shared<ConstTypeField<uint32_t>>(pos);
+    key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(token);
+    key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
+    auto tuple = std::make_shared<FieldTuple>(key_fields, nullptr);
+    ---
+    // for inserts/updates
+    idx_state._root->insert(tuple);
+      and 
+    // For deletes
+    idx_state._root->remove(tuple);
+}
+
+```
+
+### Incremental Maintenance
+
+Mutation handler distinguishes GIN from BTree indexes:
+
+```cpp
+// mutable_table.cc - index_mutation_handler()
+if (index_lookup.at(index_id).index_type == constant::INDEX_TYPE_GIN) {
+    auto&& tokens = extract_trgm_from_value(col_field->get_text(&row),
+            column.opclass, GIN_EXTRACTVALUE);
+    for (auto& token : tokens) {
+        key_fields->at(0) = std::make_shared<ConstTypeField<uint32_t>>(pos);
+        key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(token);
+        key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+        if constexpr (op == IndexOperation::Insert)
+            idx.first->insert(tuple);
+        else
+            idx.first->remove(tuple);
+    }
+}
+```
+
+### Schema Creation
+
+GIN index schema defines three key columns:
+
+```cpp
+// schema_helpers.cc - create_gin_index_schema()
+SchemaColumn idx_position_c(constant::INDEX_POSITION_FIELD, 0, SchemaType::UINT32, 0, false);
+SchemaColumn idx_gin_token_c(constant::INDEX_GIN_TOKEN_FIELD, 0, SchemaType::TEXT, 0, false);
+SchemaColumn internal_row_id(constant::INTERNAL_ROW_ID, 0, SchemaType::UINT64, 0, false);
+
+return base_schema->create_index_schema({},
+    { idx_position_c, idx_gin_token_c, internal_row_id },
+    gin_index_keys, extension_callback);
+```
+
+### Trigram Extraction (Query)
+
+Invokes opclass `extractQuery` for search pattern:
+
+```cpp
+// trgm_query_helpers.cc - extract_gin_keys_from_string()
+Oid procOid = get_opfamily_proc(opfamily, inputType, inputType, GIN_EXTRACTQUERY_PROC);
+
+Datum *keys = (Datum *) DatumGetPointer(
+    FunctionCall7Coll(&flinfo, collation, queryDatum,
+        PointerGetDatum(&nkeys),
+        UInt16GetDatum(op_strategy_number),
+        PointerGetDatum(&partial_matches),
+        PointerGetDatum(&extra_data),
+        PointerGetDatum(&nullFlags),
+        PointerGetDatum(&searchMode)));
+```
+
+### GIN Iterator (in-progress)
+
+Deduplicates rows and resolves physical location:
+
+```cpp
+// table.cc - GINSecondary::update_page()
+while (true) {
+    auto&& index_row = *_btree_i;
+    internal_row_id = _internal_row_id_f->get_uint64(&index_row);
+
+    // Skip already visited rows (same row may match multiple trigrams)
+    if (!_visited_internal_row_ids.contains(internal_row_id)) {
+        _visited_internal_row_ids.emplace(internal_row_id);
+        break;
+    }
+    ++_btree_i;
+}
+
+// Resolve row location via look-aside index
+_look_aside_key_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+auto lookup_tuple = std::make_shared<FieldTuple>(_look_aside_key_fields, nullptr);
+auto&& lookup_i = look_aside_index->lower_bound(lookup_tuple);
+```
+
+### FDW Query Routing (in-progress)
+
+Routes LIKE/ILIKE operators to GIN index:
+
+```cpp
+// pg_fdw_mgr.cc - _iter_start()
+case LIKE:
+case ILIKE:
+    auto search_key = tuple->to_string();
+    auto tokens = extract_gin_keys_from_string(search_key, "gin_trgm_ops",
+            100, TRGM_LIKE_STRATEGY_NUMBER);
+    state->iter_start.emplace(state->table->begin(state->index->id,
+            state->index_only_scan, tokens));
+    state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
+    break;
+
+// pg_fdw_mgr.cc - _is_valid_qual()
+case TEXTOID:
+    return (op == EQUALS || op == NOT_EQUALS || op == LIKE || op == ILIKE);
+```
+
+---
+
+## Path to Completion
+
+The following work remains to complete GIN index support:
+
+1. **Scan Implementation** - The `GINSecondary` iterator currently iterates all index entries. It needs to:
+   - Filter entries to only those matching the extracted query tokens
+   - Implement proper token intersection logic (all query trigrams must match)
+
+2. **Query Optimization** - The FDW currently uses hardcoded `gin_trgm_ops` and collation. This should be derived from the index metadata.
+
+3. **Testing** - End-to-end testing of LIKE/ILIKE queries using GIN indexes.

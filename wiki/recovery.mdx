@@ -1,0 +1,118 @@
+---
+title: "Recovery"
+---
+
+# Replication Log Recovery (High-Level Process)
+
+This document describes the recovery process for the replication logging pipeline. It focuses on how replication messages are durably logged, how committed transactions are identified and tracked, and how the log manager starts in a recovery-oriented mode to find the most recent safe commit point before resuming normal ingestion.
+
+## 1. What is persisted during normal operation
+
+### 1.1 Logging replication messages (durable staging)
+As replication messages arrive from the upstream Postgres replication stream, they are appended to a local replication log on disk. This log is written sequentially and is designed to support:
+- Restart safety (ability to resume after crash)
+- Ordered replay (the log is read back in the same message order)
+- Message boundary reconstruction (messages may be fragmented during transport)
+
+The replication log acts as the durable “source of truth” for downstream processing, insulating the rest of the system from connection interruptions and process crashes.
+
+### 1.2 Logging committed transactions (committed XIDs)
+Alongside (or derived from) replication message logging, the system identifies **commit boundaries** and records the fact that a transaction has committed. Conceptually, this produces a durable record of:
+- The transaction identifier (XID) that reached commit
+- The corresponding position in the replication stream/log that makes that commit “safe”
+- Any minimal metadata required to re-establish correct ordering and restart positions
+
+The key purpose of persisting commit information is to establish an unambiguous recovery point: after restart, the system can find the last fully committed transaction that is guaranteed present in the local log.
+
+---
+
+## 2. Why recovery must anchor on commits
+
+Replication streams deliver changes in transactional order, but correctness depends on respecting commit semantics:
+- Changes that occur before commit should not be considered durable/applicable as a completed unit until the commit is observed.
+- A crash may occur after some data has been written but before it is flushed, or after it is flushed but before higher-level state is updated.
+- A restart must safely choose a point that avoids “losing” committed work and avoids “inventing” commits that were never durably captured.
+
+Therefore, recovery is driven by locating the most recent **committed** transaction that is known to be safely represented in the local replication log.
+
+---
+
+## 3. Startup behavior in recovery mode
+
+When the log manager starts, it may enter a recovery-oriented startup path if it detects that:
+- A replication log already exists from a previous run, and/or
+- The previous run did not shut down cleanly, and/or
+- There is evidence that downstream consumers may not have fully processed all logged data
+
+In this recovery state, the immediate goal is not to start consuming new replication messages, but to **reconcile the log** and establish a correct resume point.
+
+---
+
+## 4. Recovery scanning: finding the latest committed entry
+
+### 4.1 Sequential scan of the replication log
+Recovery proceeds by scanning the existing replication log from a known start point (typically the beginning of the active log segment or the last known safe offset). The scan treats the log as an ordered stream of framed replication messages.
+
+During the scan, the recovery logic:
+- Reconstructs message boundaries (including messages that were logged in parts)
+- Interprets message types sufficiently to detect transactional structure
+- Tracks transaction lifecycle markers (begin, changes, commit)
+
+The scan does not need to fully re-apply data changes. Its primary objective is to locate **the last commit record that is complete and consistent**.
+
+### 4.2 Validating commit completeness
+Because a crash can happen mid-write, recovery must be conservative. It treats the “latest committed entry” as valid only if:
+- The commit marker is fully present in the log (not truncated)
+- The log framing around it is consistent
+- The commit can be understood as a complete boundary in the message stream
+
+If the scan encounters a partial/truncated message at the end of the file, the recovery process treats that tail as unsafe and does not advance the “latest committed” point beyond the last verified commit.
+
+### 4.3 Establishing the safe resume point
+Once the scan completes, recovery produces a safe resume point consisting of:
+- The latest committed transaction identifier (XID)
+- The corresponding durable log position (or equivalent marker) associated with that commit
+
+This resume point is then used to:
+- Restart downstream processing at a consistent boundary
+- Determine what portion of the log is safe to keep and what tail may need to be truncated/ignored
+- Ensure that acknowledgments back to the upstream replication source align with what is durably captured
+
+---
+
+## 5. Transition from recovery to normal operation
+
+After determining the latest committed entry, the log manager transitions to normal operation:
+
+1. **Finalize log state**
+   - Any unsafe trailing log region after the last valid commit is treated as not authoritative.
+   - The system ensures the active log is in a consistent state for appends and reads.
+
+2. **Resume downstream replay**
+   - Message processing can resume from the last committed boundary forward.
+   - Any transactions after the last committed boundary are treated as incomplete and will be re-derived from the upstream stream as needed.
+
+3. **Reconnect and continue ingestion**
+   - The replication connection can be re-established to continue streaming from the correct upstream position.
+   - New incoming messages are appended after the recovered safe boundary.
+
+---
+
+## 6. Outcome guarantees
+
+This recovery approach provides the following guarantees:
+
+- **No loss of committed work** that was durably logged: recovery anchors on the last verified commit present on disk.
+- **No reliance on in-memory state**: decisions are based on the persisted log and commit markers.
+- **Safe handling of truncated tails**: partial messages at the end of the log are not treated as committed progress.
+- **Consistent transactional boundaries**: resumption occurs at commit boundaries, preserving transaction semantics for downstream consumers.
+
+---
+
+## 7. Summary
+
+Recovery is driven by two persisted facts:
+1. Replication messages are durably staged in a sequential replication log.
+2. Committed transactions (XIDs) are detectable and tracked so the system can identify the last safe commit.
+
+On startup, the log manager enters a recovery state when needed, scans the replication log to find the most recent fully committed entry, and uses that commit boundary as the safe point from which to resume normal ingestion and message processing.

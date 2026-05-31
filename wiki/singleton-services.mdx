@@ -1,0 +1,455 @@
+---
+title: "Singleton Services"
+---
+
+# Singleton Template Class
+
+## Overview
+
+The `Singleton` template class provides a thread-safe singleton pattern implementation with optional threading support and lifecycle management. This class is part of the `springtail` namespace and is designed to ensure that only one instance of a derived class exists throughout the application's lifetime.
+
+## Features
+
+- **Thread-safe initialization** using `std::call_once`
+- **Optional threading support** with automatic thread naming
+- **Service registration** integration with centralized shutdown management through `ServiceRegistry`
+- **Protected lifecycle hooks** for derived class customization
+- **Deleted copy/move semantics** to prevent duplication
+- **Atomic shutdown flag** for safe thread termination
+
+## Class Template
+
+```cpp
+template <typename T>
+class Singleton
+```
+
+The template parameter `T` should be the derived class that inherits from `Singleton<T>` (CRTP pattern).
+
+## Public Interface
+
+### Static Methods
+
+#### `get_instance()`
+
+```cpp
+static T* get_instance()
+```
+
+Returns the singleton instance of type `T`. Creates the instance on first call using thread-safe initialization.
+
+**Returns:** Pointer to the singleton instance
+
+**Thread Safety:** Yes
+
+**Example:**
+```cpp
+MyService* service = MyService::get_instance();
+```
+
+#### `shutdown()`
+
+```cpp
+static void shutdown()
+```
+
+Performs cleanup and destruction of the singleton instance. Can be called multiple times safely (only executes once). This method:
+1. Sets the shutdown flag
+2. Signals thread termination if a thread exists
+3. Joins the thread
+4. Calls internal cleanup
+5. Deletes the instance
+
+**Thread Safety:** Yes
+
+### Instance Methods
+
+#### `start_thread()`
+
+```cpp
+void start_thread()
+```
+
+Starts a dedicated thread for the singleton instance. The thread executes the `_internal_run()` method. Thread name is automatically set based on the service ID or type name.
+
+**Example:**
+```cpp
+MyService::get_instance()->start_thread();
+```
+
+## Protected Interface
+
+Derived classes should override these methods to customize behavior:
+
+### `_internal_run()`
+
+```cpp
+virtual void _internal_run()
+```
+
+Main execution function for the singleton's thread. Must be overridden if `start_thread()` is used. Should periodically check `_is_shutting_down()` to enable graceful termination.
+
+**Example:**
+```cpp
+void _internal_run() override {
+    while (!_is_shutting_down()) {
+        // Perform work
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+```
+
+### `_internal_thread_shutdown()`
+
+```cpp
+virtual void _internal_thread_shutdown()
+```
+
+Called during shutdown before the thread is joined. Use this to wake up blocking operations (e.g., notify condition variables).
+
+**Example:**
+```cpp
+void _internal_thread_shutdown() override {
+    _condition.notify_all();
+}
+```
+
+### `_internal_shutdown()`
+
+```cpp
+virtual void _internal_shutdown()
+```
+
+Called during shutdown after the thread has been joined. Use this for cleanup of resources.
+
+**Example:**
+```cpp
+void _internal_shutdown() override {
+    _connection.close();
+}
+```
+
+### `_is_shutting_down()`
+
+```cpp
+bool _is_shutting_down() const
+```
+
+Returns whether the singleton is in the shutdown process.
+
+**Returns:** `true` if shutting down, `false` otherwise
+
+### Constructor
+
+```cpp
+explicit Singleton(ServiceId service_id = ServiceId::ServiceInvalidId)
+```
+
+Protected constructor that can only be called by derived classes. Optionally registers the service for centralized shutdown management.
+
+**Parameters:**
+- `service_id`: Service identifier for registration (default: `ServiceId::ServiceInvalidId`)
+
+### Static Utility Methods
+
+#### `_assert_instance()`
+
+```cpp
+static void _assert_instance()
+```
+
+Asserts that the singleton instance has been created. Terminates if not.
+
+#### `_has_instance()`
+
+```cpp
+static bool _has_instance()
+```
+
+Checks if the singleton instance exists.
+
+**Returns:** `true` if instance exists, `false` otherwise
+
+## ServiceId Enum
+
+`ServiceId` uniquely identifies a logical service within the Springtail system.
+
+These identifiers are used for:
+
+- Dependency ordering
+- Thread naming
+- Coordinated shutdown
+- Service registration
+
+The `ServiceId` enum defines service identifiers for various components in the system:
+
+```cpp
+enum class ServiceId : int32_t {
+    ServiceInvalidId = -1,
+    ServiceRegisterId = 0,
+    DatabaseMgrId,
+    UserMgrId,
+    ProxyServerId,
+    // ... additional service IDs
+    ServiceCountId
+}
+```
+
+`ServiceInvalidId` is reserved for non-registered or internal services.
+
+## Helper Functions
+
+### `get_type_name<T>()`
+
+```cpp
+template <typename T>
+std::string get_type_name()
+```
+
+Extracts the type name from compiler-generated strings.
+
+**Returns:** String representation of type `T`
+
+### Service Registration
+
+```cpp
+void springtail_register_service(ServiceId service_id, ShutdownFunc fn)
+const std::string& springtail_get_service_name(ServiceId id)
+```
+
+Functions for registering services and retrieving service names.
+
+### `springtail_register_service()`
+
+Registers a service shutdown callback with the global service registry.
+
+- Services are shut down in dependency order.
+- Registration is idempotent and enforced per service ID.
+- Typically invoked automatically by `Singleton`.
+
+Registered shutdown functions are executed during `springtail_shutdown()`.
+
+### `springtail_get_service_name()`
+
+Returns a human-readable name for a given `ServiceId`.
+
+Used for:
+
+- Logging
+- Thread naming
+- Debug output
+
+If a service ID is invalid, `"Invalid"` is returned.
+
+## Singleton Framework
+
+The `Singleton<T>` template provides a thread-safe, lifecycle-aware singleton implementation designed for long-lived system services.
+
+### Key Properties
+
+- Lazy exactly-once initialization
+- Exactly-once shutdown
+- Optional background thread
+- Dependency-aware cleanup
+- Integrated with service registry
+
+## Singleton Lifecycle
+
+### Instance Creation
+
+- The instance is created on first call to `get_instance()`.
+- Creation is guarded by `std::call_once`.
+- The derived class must have a default constructor.
+
+### Thread Management
+
+Singletons may optionally run a dedicated thread.
+
+To enable threading:
+
+- Call `start_thread()`.
+- Implement `_internal_run()`.
+
+Thread behavior:
+
+- Thread name is derived from `ServiceId`.
+- If no valid `ServiceId` exists, the type name is used.
+- Names are truncated to 15 characters to satisfy pthread limits.
+
+### Shutdown Semantics
+
+Shutdown is global and idempotent.
+
+When `shutdown()` is called:
+
+1. `_shutting_down` is set to true.
+2. `_internal_thread_shutdown()` is invoked.
+3. The thread is joined (if started).
+4. `_internal_shutdown()` is invoked.
+5. The instance is destroyed.
+
+Shutdown occurs exactly once, even if called multiple times.
+
+## Overrides in Derived Classes
+
+Derived classes may need to implement overrides for the following hooks. Some of these functions are for running and shutting down
+the internal thread, while another is simply for internal shutdown.
+
+### `_internal_run`
+
+Executed in the background thread.
+
+Must be overridden if `start_thread()` is used.
+
+---
+
+### `_internal_thread_shutdown`
+
+Used to wake or unblock the background thread prior to joining.
+
+Typical use cases:
+
+- Notifying condition variables
+- Closing file descriptors
+- Signaling event loops
+
+It does not have to be overriden, but if it is, it should signal termination for the thread run by this singleton service.
+
+### `_internal_shutdown`
+
+Final cleanup hook.
+
+Used for:
+
+- Releasing resources
+- Stopping dependent components
+- Final state updates
+
+If there are other threads owned by this service, this is the place to signal their termination and join them. 
+
+## Shutdown State Checking
+
+### `_is_shutting_down`
+
+Returns `true` if shutdown has been initiated.
+
+Intended for use inside `_internal_run()` loops to allow cooperative termination.
+
+## Constructor Behavior
+
+The `Singleton` constructor accepts an optional `ServiceId`.
+
+If a valid `ServiceId` is provided:
+
+- The service is automatically registered for shutdown.
+- The shutdown order is dependency-aware and is a part of the initialization framework.
+
+Default value for service id is `ServiceInvalidId`. This value ensures that the service **won't be registered** with initialization framework. It will be up to the user to figure out when and how to invoke `shutdown()` function.
+
+## Type Name Utility
+
+### `get_type_name<T>`
+
+Returns a demangled type name extracted from `__PRETTY_FUNCTION__`.
+
+Used internally for:
+
+- Thread naming fallback
+- Diagnostics
+
+Not intended as a stable ABI feature.
+
+## Typical Usage Pattern
+
+1. Define a service class inheriting from `Singleton<T>`.
+2. If you want this class to be a part of the global shutdown sequence, then you need to do the following:
+  * create a new service id in `ServiceId` enum
+  * in the constructor pass this new service id to `Singleton` constructor
+  * in `init.cc` file, setup dependencies for this service on the other existing services, for the very least it should depend on `ServiceRegisterId` because this is the id of the service that provides initialization and shutdown for Springtail base functionality
+  * in `init.cc` file, add the name of the new service to service names map `dependencies_names`
+3. Optionally start a background thread.
+4. Let the framework manage lifecycle and shutdown if the service id is assigned, otherwise manage it yourself.
+
+Shutdown is coordinated globally via `springtail_shutdown()`.
+
+Here is the usage example.
+
+```cpp
+class MyService : public springtail::Singleton<MyService> {
+    friend class springtail::Singleton<MyService>;
+
+protected:
+    MyService() : Singleton(springtail::ServiceId::MyServiceId) {
+        // Initialize your service
+    }
+
+    void _internal_run() override {
+        while (!_is_shutting_down()) {
+            // Process work
+            process_requests();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    void _internal_thread_shutdown() override {
+        // Wake up any blocking operations
+        _request_queue.notify_all();
+    }
+
+    void _internal_shutdown() override {
+        // Cleanup resources
+        _cleanup();
+    }
+
+public:
+    void process_request(const Request& req) {
+        // Public API
+    }
+
+private:
+    void process_requests() {
+        // Internal processing
+    }
+};
+
+// Usage
+int main() {
+
+    springtail_init(false);
+
+    // Get instance and start thread
+    MyService::get_instance()->start_thread();
+    
+    // Use the service
+    MyService::get_instance()->process_request(request);
+    
+    // Shutdown (typically called from a signal handler)
+    springtail_shutdown();
+}
+```
+
+## Thread Safety
+
+- Instance creation is thread-safe via `std::call_once`
+- Shutdown is thread-safe via `std::call_once`
+- The `_shutting_down` flag is atomic for safe cross-thread access
+- Derived classes are responsible for their own thread-safety
+
+## Design Considerations
+
+- No double initialization
+- No double shutdown
+- Deterministic shutdown order
+- Thread-safe lifecycle transitions
+- No dependency cycles allowed
+- Uses the Curiously Recurring Template Pattern (CRTP) for static polymorphism
+- Derived classes should friend `Singleton<T>` to allow private constructor access
+- All copy and move operations are explicitly deleted
+- Instance is created on first `get_instance()` call
+- Services can self-register for centralized shutdown
+
+This framework is designed for:
+
+- Long-lived system services
+- Daemons and infrastructure components
+- Deterministic startup/shutdown

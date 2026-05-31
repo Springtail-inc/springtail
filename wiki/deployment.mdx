@@ -1,0 +1,21 @@
+---
+title: "Deployment"
+---
+
+Deployment
+====
+
+This section provides guidelines and best practices for deploying the system in various environments. It covers topics such as infrastructure requirements, configuration settings, scaling strategies, and monitoring solutions to ensure optimal performance and reliability.
+We will cover the following topics:
+
+ - Local Cluster Deployment (docker based)
+ - AWS EC2 Based Deployment
+
+In both deployment models, we are grouping the services into three separate groups:
+
+ - Ingestion Node / Container
+ - Proxy Node / Container
+ - FDW Node(s) / Container(s)
+
+where there can be multiple FDW nodes depending on the scale of the deployment. 
+All the nodes containers share a Redis Cache and a Storage Layer underneath.

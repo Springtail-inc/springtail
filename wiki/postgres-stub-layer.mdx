@@ -1,0 +1,844 @@
+---
+title: "Postgres Stub layer"
+---
+
+# pg_ext: PostgreSQL Compatibility Library
+
+## Overview
+
+The `pg_ext` library provides a minimal reimplementation of PostgreSQL internal APIs, enabling Springtail to execute functions from PostgreSQL extensions without requiring a full PostgreSQL backend. It creates a compatible runtime environment for extension code that expects PostgreSQL's data types, memory management, and function call interface.
+
+**Location:** Source files in `src/pg_ext/`, Headers in `include/pg_ext/`
+
+**Purpose:**
+- Provide PostgreSQL-compatible data structures (Datum, text, arrays, etc.)
+- Implement function call interface (`DirectFunctionCall*()`)
+- Emulate PostgreSQL memory context system
+- Support extension-defined types and operators
+
+---
+
+## Architecture
+
+### Core Components
+
+```
+Source files (src/pg_ext/):           Header files (include/pg_ext/):
+├── fmgr.cc                           ├── fmgr.hh
+├── memory.cc                         ├── memory.hh
+├── string.cc                         ├── string.hh
+├── array.cc                          ├── array.hh
+├── numeric.cc                        ├── numeric.hh
+├── date.cc                           ├── date.hh
+├── jsonb.cc                          ├── jsonb.hh
+├── error.cc                          ├── error.hh
+├── node.cc                           ├── node.hh
+├── hash.cc                           ├── hash.hh
+├── list.cc                           ├── list.hh
+├── parser.cc                         ├── parser.hh
+├── heaptuple.cc                      ├── heaptuple.hh
+├── pqformat.cc                       ├── pqformat.hh
+├── bit.cc                            ├── bit.hh
+├── float.cc                          ├── float.hh
+├── guc.cc                            ├── guc.hh
+├── extn_registry.cc                  ├── extn_registry.hh
+└── extn_parser.cc                    └── extn_parser.hh
+```
+
+**Components:**
+- **fmgr**: Function manager (DirectFunctionCall* wrappers)
+- **memory**: Memory contexts (palloc, pfree, TopMemoryContext)
+- **string**: Text type and string utilities
+- **array**: PostgreSQL array handling
+- **numeric**: Numeric type support
+- **date**: Date/time types
+- **jsonb**: JSONB type support
+- **error**: Error reporting (ereport, elog)
+- **node**: PostgreSQL node types
+- **hash**: Hash functions
+- **list**: PostgreSQL list structures
+- **parser**: libpg_query integration
+- **heaptuple**: Heap tuple representation
+- **pqformat**: Wire protocol formatting
+- **bit**: Bit string operations
+- **float**: Float type utilities
+- **guc**: GUC (configuration) stubs
+- **extn_registry**: Extension registry (covered separately)
+- **extn_parser**: Extension SQL parsing
+
+---
+
+## Function Manager (fmgr)
+
+### Overview
+Provides macros and functions for calling PostgreSQL functions with a compatible calling convention.
+
+**Files:** `src/pg_ext/fmgr.cc`, `include/pg_ext/fmgr.hh`
+
+### Key Macros
+
+#### LOCAL_FCINFO()
+Allocates stack-local FunctionCallInfo structure:
+
+```cpp
+#define LOCAL_FCINFO(name, nargs) \
+    FunctionCallInfoBaseData name##data; \
+    FunctionCallInfo name = &name##data
+```
+
+**Usage:**
+```cpp
+LOCAL_FCINFO(fcinfo, 2);  // Allocate fcinfo for 2 arguments
+```
+
+#### InitFunctionCallInfoData()
+Initialize FunctionCallInfo structure:
+
+```cpp
+void InitFunctionCallInfoData(FunctionCallInfo fcinfo,
+                              FmgrInfo* flinfo,
+                              int nargs,
+                              Oid collation,
+                              void* context,
+                              void* resultinfo);
+```
+
+### DirectFunctionCall Family
+
+Convenience functions for calling PostgreSQL functions:
+
+#### DirectFunctionCall1()
+```cpp
+Datum DirectFunctionCall1(PGFunction func, Datum arg1);
+```
+
+**Implementation:**
+```cpp
+Datum DirectFunctionCall1(PGFunction func, Datum arg1) {
+    LOCAL_FCINFO(fcinfo, 1);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 1, 0, nullptr, nullptr);
+
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
+
+    return func(fcinfo);
+}
+```
+
+**Example:**
+```cpp
+// Call int4in("12345")
+PGFunction int4in_func = (PGFunction)get_type_func("int4in");
+Datum result = DirectFunctionCall1(int4in_func, CStringGetDatum("12345"));
+int32_t value = DatumGetInt32(result);  // value = 12345
+```
+
+#### DirectFunctionCall2()
+```cpp
+Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2);
+```
+
+**Example:**
+```cpp
+// Call int4add(42, 10)
+Datum result = DirectFunctionCall2(int4add_func,
+                                  Int32GetDatum(42),
+                                  Int32GetDatum(10));
+// result = 52
+```
+
+#### DirectFunctionCall3()
+```cpp
+Datum DirectFunctionCall3(PGFunction func, Datum arg1, Datum arg2, Datum arg3);
+```
+
+#### Collation Variants
+For functions that require collation (string operations):
+
+```cpp
+Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1);
+Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2);
+Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
+Datum DirectFunctionCall7Coll(PGFunction func, Oid collation, ...);  // For GIN extractQuery
+```
+
+**Example:**
+```cpp
+// Case-insensitive text comparison
+Datum result = DirectFunctionCall2Coll(texteq_func,
+                                      DEFAULT_COLLATION_OID,
+                                      text1_datum,
+                                      text2_datum);
+```
+
+### Datum Type Conversions
+
+Macros for converting between C types and Datum:
+
+```cpp
+// Integer conversions
+#define Int32GetDatum(x)     ((Datum)(x))
+#define DatumGetInt32(x)     ((int32_t)(x))
+#define Int64GetDatum(x)     ((Datum)(x))
+#define DatumGetInt64(x)     ((int64_t)(x))
+
+// Pointer conversions
+#define PointerGetDatum(x)   ((Datum)(x))
+#define DatumGetPointer(x)   ((void*)(x))
+
+// Boolean conversions
+#define BoolGetDatum(x)      ((Datum)((x) ? 1 : 0))
+#define DatumGetBool(x)      ((bool)(x))
+
+// Float conversions
+#define Float4GetDatum(x)    /* implementation */
+#define DatumGetFloat4(x)    /* implementation */
+#define Float8GetDatum(x)    /* implementation */
+#define DatumGetFloat8(x)    /* implementation */
+
+// String conversions
+#define CStringGetDatum(x)   PointerGetDatum(x)
+#define DatumGetCString(x)   ((char*)DatumGetPointer(x))
+
+// Object ID
+#define ObjectIdGetDatum(x)  ((Datum)(x))
+#define DatumGetObjectId(x)  ((Oid)(x))
+```
+
+---
+
+## Memory Management
+
+### Overview
+PostgreSQL uses a memory context system for allocation tracking and bulk deallocation. `pg_ext` provides a simplified implementation.
+
+**Files:** `src/pg_ext/memory.cc`, `include/pg_ext/memory.hh`
+
+### MemoryContext Class
+
+```cpp
+class MemoryContext {
+public:
+    MemoryContext(MemoryContext* parent,
+                  std::string_view name,
+                  size_t init_size,
+                  size_t max_size);
+
+    void* alloc(size_t size);
+    void free(void* ptr);
+    void reset();  // Free all allocations
+    void delete_context();
+
+private:
+    std::string _name;
+    size_t _init_size;
+    size_t _max_size;
+    MemoryContext* _parent;
+
+    std::map<size_t, std::unique_ptr<MemoryBlock>> _blocks;
+    std::unordered_map<char*, std::unique_ptr<MemoryBlock>> _large_allocs;
+};
+```
+
+### Global Memory Context
+
+```cpp
+extern MemoryContext TopMemoryContext;
+```
+
+The global `TopMemoryContext` is the root of all memory contexts:
+
+```cpp
+// In memory.cc
+MemoryContext TopMemoryContext(nullptr, "TopMemoryContext", 8192, 1048576);
+```
+
+### Allocation Functions
+
+#### palloc()
+Allocate memory from a memory context:
+
+```cpp
+void* palloc(size_t size);
+void* palloc0(size_t size);  // Zero-initialized
+```
+
+**Implementation:**
+```cpp
+void* palloc(size_t size) {
+    return TopMemoryContext.alloc(size);
+}
+
+void* palloc0(size_t size) {
+    void* ptr = palloc(size);
+    memset(ptr, 0, size);
+    return ptr;
+}
+```
+
+**Example:**
+```cpp
+// Allocate 1024 bytes
+char* buffer = (char*)palloc(1024);
+// Use buffer...
+pfree(buffer);
+```
+
+#### pfree()
+Free memory allocated by palloc:
+
+```cpp
+void pfree(void* ptr);
+```
+
+#### repalloc()
+Reallocate memory:
+
+```cpp
+void* repalloc(void* ptr, size_t size);
+```
+
+### Memory Blocks
+
+Internal structure for memory management:
+
+```cpp
+struct MemoryBlock {
+    size_t size;     // Total size of block
+    size_t pos;      // Current position
+    char* memory;    // Allocated memory
+
+    MemoryBlock(size_t size);
+    size_t remaining() const { return size - pos; }
+};
+```
+
+### Usage Notes
+
+- Extension functions expect `palloc()` for allocations
+- Memory contexts are simplified compared to PostgreSQL
+- No support for memory context switching or hierarchies
+- All allocations go to `TopMemoryContext`
+
+---
+
+## String and Text Types
+
+### Overview
+PostgreSQL's `text` type is a variable-length binary string with a 4-byte header.
+
+**Files:** `src/pg_ext/string.cc`, `include/pg_ext/string.hh`
+
+### Text Structure
+
+```cpp
+struct varlena {
+    int32_t vl_len_;  // Length including header (bit 0 = compressed flag)
+    char vl_dat[1];   // Flexible array member
+};
+
+typedef struct varlena text;
+```
+
+### String Utilities
+
+#### cstring_to_text()
+Convert C string to PostgreSQL text:
+
+```cpp
+text* cstring_to_text(const char* str);
+text* cstring_to_text_with_len(const char* str, int len);
+```
+
+**Implementation:**
+```cpp
+text* cstring_to_text(const char* str) {
+    int len = strlen(str);
+    return cstring_to_text_with_len(str, len);
+}
+
+text* cstring_to_text_with_len(const char* str, int len) {
+    text* result = (text*)palloc(len + VARHDRSZ);
+    SET_VARSIZE(result, len + VARHDRSZ);
+    memcpy(VARDATA(result), str, len);
+    return result;
+}
+```
+
+**Example:**
+```cpp
+text* my_text = cstring_to_text("Hello, World!");
+```
+
+#### cstring_to_text_auto()
+Wrapper that handles const correctness:
+
+```cpp
+text* cstring_to_text_auto(const char* str);
+```
+
+#### text_to_cstring()
+Convert text to C string:
+
+```cpp
+char* text_to_cstring(const text* t);
+```
+
+**Implementation:**
+```cpp
+char* text_to_cstring(const text* t) {
+    int len = VARSIZE_ANY_EXHDR(t);
+    char* result = (char*)palloc(len + 1);
+    memcpy(result, VARDATA_ANY(t), len);
+    result[len] = '\0';
+    return result;
+}
+```
+
+**Example:**
+```cpp
+char* cstr = text_to_cstring(my_text);
+printf("%s\n", cstr);
+pfree(cstr);
+```
+
+### Macros
+
+```cpp
+// Get size of varlena (excluding header)
+#define VARSIZE_ANY_EXHDR(ptr) (VARSIZE_ANY(ptr) - VARHDRSZ)
+
+// Get data pointer
+#define VARDATA_ANY(ptr)       ((char*)(ptr) + VARHDRSZ)
+#define VARDATA(ptr)           VARDATA_ANY(ptr)
+
+// Set size (including header)
+#define SET_VARSIZE(ptr, len)  (((varlena*)(ptr))->vl_len_ = (len))
+
+// Variable header size
+#define VARHDRSZ  sizeof(int32_t)
+```
+
+---
+
+## Array Support
+
+### Overview
+Support for PostgreSQL's array type.
+
+**Files:** `src/pg_ext/array.cc`, `include/pg_ext/array.hh`
+
+### ArrayType Structure
+
+```cpp
+struct ArrayType {
+    int32_t vl_len_;        // varlena header
+    int ndim;               // Number of dimensions
+    int32_t dataoffset;     // Offset to data
+    Oid elemtype;           // Element type OID
+    int* dim;               // Dimension sizes
+    int* lbound;            // Lower bounds
+    char* data;             // Element data
+};
+```
+
+### Array Functions
+
+```cpp
+// Get array element
+Datum array_get_element(ArrayType* array, int n);
+
+// Get number of elements
+int array_length(ArrayType* array);
+
+// Iterate array
+void array_foreach(ArrayType* array, void (*callback)(Datum, void*), void* context);
+```
+
+---
+
+## Numeric Type
+
+### Overview
+PostgreSQL's arbitrary-precision numeric type.
+
+**Files:** `src/pg_ext/numeric.cc`, `include/pg_ext/numeric.hh`
+
+### Numeric Structure
+
+```cpp
+struct NumericData {
+    int ndigits;        // Number of digits
+    int weight;         // Weight of first digit
+    int sign;           // Sign (positive/negative/NaN)
+    int dscale;         // Display scale
+    int16_t* digits;    // Digit array
+};
+
+typedef NumericData* Numeric;
+```
+
+### Numeric Functions
+
+```cpp
+// Convert numeric to int64
+int64_t numeric_to_int64(Numeric num);
+
+// Convert numeric to double
+double numeric_to_double(Numeric num);
+
+// Convert int64 to numeric
+Numeric int64_to_numeric(int64_t value);
+```
+
+---
+
+## Date and Time Types
+
+### Overview
+PostgreSQL date/time types and operations.
+
+**Files:** `src/pg_ext/date.cc`, `include/pg_ext/date.hh`
+
+### Types
+
+```cpp
+typedef int32_t DateADT;        // Days since 2000-01-01
+typedef int64_t Timestamp;      // Microseconds since 2000-01-01 00:00:00
+typedef int64_t TimestampTz;    // Timestamp with timezone
+typedef int64_t TimeADT;        // Microseconds since midnight
+typedef Interval IntervalADT;   // Time interval
+
+struct Interval {
+    int64_t time;    // Microseconds
+    int32_t day;     // Days
+    int32_t month;   // Months
+};
+```
+
+### Date/Time Functions
+
+```cpp
+// Current timestamp
+Timestamp GetCurrentTimestamp();
+
+// Date arithmetic
+Timestamp timestamp_add_interval(Timestamp ts, Interval* interval);
+
+// Conversions
+DateADT timestamp_to_date(Timestamp ts);
+Timestamp date_to_timestamp(DateADT date);
+```
+
+---
+
+## Error Handling
+
+### Overview
+PostgreSQL error reporting system.
+
+**Files:** `src/pg_ext/error.cc`, `include/pg_ext/error.hh`
+
+### Error Levels
+
+```cpp
+#define DEBUG5    10
+#define DEBUG4    11
+#define DEBUG3    12
+#define DEBUG2    13
+#define DEBUG1    14
+#define LOG       15
+#define NOTICE    18
+#define WARNING   19
+#define ERROR     20
+#define FATAL     21
+#define PANIC     22
+```
+
+### ereport Macro
+
+```cpp
+#define ereport(level, rest) \
+    do { \
+        if (level >= ERROR) { \
+            springtail_error_handler rest; \
+        } else { \
+            springtail_log_handler rest; \
+        } \
+    } while(0)
+```
+
+**Usage:**
+```cpp
+if (invalid_input) {
+    ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+             errmsg("Invalid input value: %d", value)));
+}
+```
+
+### elog Macro
+
+```cpp
+#define elog(level, ...) \
+    do { \
+        if (level >= ERROR) { \
+            throw std::runtime_error(fmt::format(__VA_ARGS__)); \
+        } else { \
+            LOG_INFO(__VA_ARGS__); \
+        } \
+    } while(0)
+```
+
+**Usage:**
+```cpp
+elog(ERROR, "Failed to process request: %s", error_msg);
+```
+
+---
+
+## StringInfo (pqformat)
+
+### Overview
+Dynamic string buffer for building messages.
+
+**Files:** `src/pg_ext/pqformat.cc`, `include/pg_ext/pqformat.hh`
+
+### StringInfoData Structure
+
+```cpp
+struct StringInfoData {
+    char* data;      // Buffer
+    int len;         // Current length
+    int maxlen;      // Allocated size
+    int cursor;      // Read cursor
+};
+
+typedef StringInfoData* StringInfo;
+```
+
+### StringInfo Functions
+
+```cpp
+// Initialize
+void initStringInfo(StringInfoData* str);
+void resetStringInfo(StringInfoData* str);
+
+// Append operations
+void appendStringInfo(StringInfoData* str, const char* fmt, ...);
+void appendStringInfoChar(StringInfoData* str, char ch);
+void appendBinaryStringInfo(StringInfoData* str, const char* data, int datalen);
+void appendBinaryStringInfoNT(StringInfoData* str, const char* data, int datalen);
+
+// Enlarge buffer
+void enlargeStringInfo(StringInfoData* str, int needed);
+```
+
+**Example:**
+```cpp
+StringInfoData buf;
+initStringInfo(&buf);
+
+appendStringInfo(&buf, "Value: %d, Name: %s", 42, "test");
+appendStringInfoChar(&buf, '\n');
+
+// Use buf.data
+pfree(buf.data);
+```
+
+---
+
+## Node Types
+
+### Overview
+PostgreSQL's node type system for parse trees and plans.
+
+**Files:** `src/pg_ext/node.cc`, `include/pg_ext/node.hh`
+
+### Node Structure
+
+```cpp
+struct Node {
+    NodeTag type;  // Node type identifier
+};
+
+enum NodeTag {
+    T_Invalid = 0,
+    T_List,
+    T_Integer,
+    T_String,
+    T_SelectStmt,
+    // ... many more
+};
+```
+
+### Node Functions
+
+```cpp
+Node* copyObject(const Node* node);
+bool equal(const Node* a, const Node* b);
+char* nodeToString(const Node* node);
+```
+
+---
+
+## List Support
+
+### Overview
+PostgreSQL's doubly-linked list implementation.
+
+**Files:** `src/pg_ext/list.cc`, `include/pg_ext/list.hh`
+
+### List Structure
+
+```cpp
+struct ListCell {
+    union {
+        void* ptr_value;
+        int int_value;
+        Oid oid_value;
+    } data;
+    ListCell* next;
+};
+
+struct List {
+    NodeTag type;       // T_List
+    int length;
+    ListCell* head;
+    ListCell* tail;
+};
+```
+
+### List Functions
+
+```cpp
+// Create
+List* list_make1(void* datum1);
+List* list_make2(void* datum1, void* datum2);
+List* lappend(List* list, void* datum);
+List* lcons(void* datum, List* list);
+
+// Access
+void* linitial(const List* list);
+void* lsecond(const List* list);
+void* llast(const List* list);
+
+// Iteration
+#define foreach(cell, list) \
+    for ((cell) = list_head(list); (cell) != NULL; (cell) = lnext(list, cell))
+```
+
+**Example:**
+```cpp
+List* mylist = NIL;
+mylist = lappend(mylist, some_pointer);
+mylist = lappend(mylist, another_pointer);
+
+ListCell* cell;
+foreach(cell, mylist) {
+    void* item = lfirst(cell);
+    // Process item...
+}
+```
+
+---
+
+## Integration with Springtail
+
+### Type System Integration
+
+Extension types are stored in Springtail's type system through `create_usertype()`:
+
+```cpp
+// In pg_copy_table.cc
+PgMsgUserType msg;
+msg.oid = enum_type_oid;
+msg.name = extn_type_name;
+msg.type = constant::USER_TYPE_EXTENSION;
+
+server->create_usertype(db_id, {xid, 0}, msg);
+```
+
+### Comparator Integration
+
+Extension operators are used in Springtail comparisons:
+
+```cpp
+// In field.cc
+ExtensionContext ctx;
+ctx.type_oid = field->type_oid;
+ctx.op_str = operator_symbol;
+
+return PgExtnRegistry::comparator_func(&ctx, lhs_binary, rhs_binary);
+```
+
+---
+
+## Limitations
+
+### Not Implemented
+
+PostgreSQL features NOT implemented in pg_ext:
+1. **Transaction Management**: No MVCC, snapshot isolation
+2. **Catalog Access**: No pg_catalog queries
+3. **SPI (Server Programming Interface)**: No SQL execution from C functions
+4. **Triggers**: No trigger mechanism
+5. **Full Memory Context Tree**: Simplified single-level context
+6. **Signal Handling**: No PostgreSQL signal handlers
+7. **Shared Memory**: No PostgreSQL shared memory segments
+8. **TOAST**: No out-of-line storage for large values
+9. **Vacuum**: No MVCC cleanup
+10. **Write-Ahead Log**: No WAL integration
+
+### Compatibility Notes
+
+- Extension functions must not rely on PostgreSQL backend state
+- SPI-using extensions will NOT work
+- Trigger-based extensions will NOT work
+- Extensions accessing pg_catalog may fail
+- Extension functions assuming PostgreSQL memory semantics may leak memory
+
+---
+
+## Adding New pg_ext Support
+
+To add support for a new PostgreSQL feature:
+
+1. **Identify Required APIs**: Determine what PostgreSQL functions the extension uses
+2. **Create Stub Implementation**: Add stubs in appropriate `src/pg_ext/*.cc` file
+3. **Add Type Definitions**: Add necessary structs/types in `include/pg_ext/*.hh`
+4. **Implement Core Logic**: Implement minimal functionality needed by extensions
+5. **Test with Extension**: Verify extension functions work correctly
+
+**Example: Adding Support for Range Types**
+
+1. Create header file `include/pg_ext/range.hh`:
+```cpp
+// include/pg_ext/range.hh
+struct RangeType {
+    Oid rangetypid;
+    char flags;
+    Datum lower;
+    Datum upper;
+};
+
+Datum range_in(const char* str, Oid rangetypid);
+char* range_out(RangeType* range);
+bool range_contains(RangeType* range, Datum element);
+```
+
+2. Create source file `src/pg_ext/range.cc`:
+```cpp
+// src/pg_ext/range.cc
+#include <pg_ext/range.hh>
+
+Datum range_in(const char* str, Oid rangetypid) {
+    // Parse range string "[lower,upper)"
+    // Create RangeType structure
+    // Return as Datum
+}
+
+// ... implement other functions
+```
+
+---

@@ -1,0 +1,641 @@
+---
+title: "PgExtnRegistry API Reference"
+---
+
+# PgExtnRegistry API Reference
+
+## Overview
+
+`PgExtnRegistry` is a singleton class that manages PostgreSQL extension metadata and function pointers. It serves as the central registry for all loaded extensions, providing lookup and invocation APIs for extension types, operators, and operator classes.
+
+**Location:** `src/pg_ext/extn_registry.cc`, `include/pg_ext/extn_registry.hh`
+
+**Key Responsibilities:**
+- Load extension shared libraries via `dlopen()`
+- Maintain mappings from OIDs and names to function pointers
+- Provide type conversion utilities (binary ↔ Datum ↔ string)
+- Support opclass method invocation for GIN/GIST indexes
+- Enable extension operator comparisons
+
+---
+
+## Core Data Structures
+
+### PgType
+Represents a PostgreSQL type with its I/O functions:
+
+```cpp
+struct PgType {
+    uint32_t oid;           // PostgreSQL type OID
+    std::string typinput;   // Text input function name (e.g., "int4in")
+    std::string typoutput;  // Text output function name (e.g., "int4out")
+    std::string typreceive; // Binary receive function name (e.g., "int4recv")
+    std::string typsend;    // Binary send function name (e.g., "int4send")
+};
+```
+
+### PgOpsClass
+Represents an operator class (e.g., `gin_trgm_ops`, `gist_point_ops`):
+
+```cpp
+struct PgOpsClass {
+    uint32_t oid;                // OpClass OID from pg_opclass
+    std::string name;            // OpClass name (e.g., "gin_trgm_ops")
+    std::string schema;          // Schema name (e.g., "public")
+    std::string access_method;   // Access method: "gin" or "gist"
+    std::string family;          // OpFamily name
+};
+```
+
+### PgOpsClassMethod
+Represents a support function for an operator class:
+
+```cpp
+struct PgOpsClassMethod {
+    uint32_t input_type_oid;     // Input type OID
+    std::string input_type;      // Input type name
+    uint32_t key_type_oid;       // Key type OID (for index storage)
+    std::string key_type;        // Key type name
+    int support_number;          // Support proc number (1-11)
+    std::string function_name;   // Function name (e.g., "gin_extract_value_trgm")
+    void* function_ptr;          // dlsym() loaded function pointer
+};
+```
+
+**Support Numbers (from `constants.hh`):**
+
+**GIN:**
+- `GIN_COMPARE = 1` - Compare function
+- `GIN_EXTRACTVALUE = 2` - Extract keys from indexed value
+- `GIN_EXTRACTQUERY = 3` - Extract keys from query
+- `GIN_CONSISTENT = 4` - Check if entry matches query
+- `GIN_COMPARE_PARTIAL = 5` - Partial match comparison
+- `GIN_TRICONSISTENT = 6` - Ternary consistency check
+- `GIN_OPTIONS = 7` - Index options
+
+**GIST:**
+- `GIST_CONSISTENT = 1` - Check consistency
+- `GIST_UNION = 2` - Union/merge predicates
+- `GIST_COMPRESS = 3` - Compress leaf value
+- `GIST_DECOMPRESS = 4` - Decompress value
+- `GIST_PENALTY = 5` - Calculate insertion penalty
+- `GIST_PICKSPLIT = 6` - Split page algorithm
+- `GIST_EQUAL = 7` - Equality check
+- `GIST_DISTANCE = 8` - Distance for KNN
+- `GIST_FETCH = 9` - Fetch tuple
+- `GIST_OPTIONS = 10` - Index options
+- `GIST_SORTSUPPORT = 11` - Sort support
+
+---
+
+## Library Management
+
+### init_libraries()
+Load an extension shared library and register it.
+
+```cpp
+void init_libraries(uint64_t db_id,
+                    const std::string& extension,
+                    const std::string& extension_lib_path);
+```
+
+**Parameters:**
+- `db_id`: Database ID
+- `extension`: Extension name (e.g., "pg_trgm")
+- `extension_lib_path`: Full path to .so file (e.g., "/usr/lib/postgresql/16/lib/pg_trgm.so")
+
+**Behavior:**
+- Calls `dlopen(lib_path, RTLD_NOW | RTLD_GLOBAL)`
+- Stores library handle in `_library_map[extension]`
+- Throws error if library cannot be loaded
+
+**Example:**
+```cpp
+auto registry = PgExtnRegistry::get_instance();
+registry->init_libraries(16384, "pg_trgm", "/usr/lib/postgresql/16/lib/pg_trgm.so");
+```
+
+---
+
+## Type Management APIs
+
+### add_type()
+Register an extension type and its I/O functions.
+
+```cpp
+void add_type(const std::string& extension,
+              uint32_t oid,
+              const std::string& typinput,
+              const std::string& typoutput,
+              const std::string& typreceive,
+              const std::string& typsend);
+```
+
+**Parameters:**
+- `extension`: Extension name
+- `oid`: PostgreSQL type OID
+- `typinput`: Text input function name
+- `typoutput`: Text output function name
+- `typreceive`: Binary receive function name
+- `typsend`: Binary send function name
+
+**Behavior:**
+- Uses `dlsym()` to load all four I/O functions from extension library
+- Stores functions in `_type_func_name_to_func` map
+- Stores type metadata in `_type_oid_to_type` map
+
+**Example:**
+```cpp
+registry->add_type("pg_trgm", 16385, "gtrgmin", "gtrrgmout", "gtrgmrecv", "gtrgmsend");
+```
+
+---
+
+### get_type_by_oid()
+Retrieve type metadata by OID.
+
+```cpp
+PgType get_type_by_oid(uint32_t oid) const;
+```
+
+**Returns:** `PgType` structure or empty struct if not found
+
+**Example:**
+```cpp
+PgType type = registry->get_type_by_oid(16385);
+std::cout << "Type input function: " << type.typinput << std::endl;
+```
+
+---
+
+### get_type_func_by_type_name()
+Get a type I/O function by name.
+
+```cpp
+void* get_type_func_by_type_name(const std::string& type_name) const;
+```
+
+**Parameters:**
+- `type_name`: Function name (e.g., "int4in", "gtrgmrecv")
+
+**Returns:** Function pointer or `nullptr` if not found
+
+---
+
+### binary_to_datum()
+Convert binary wire format to PostgreSQL Datum using `typreceive` function.
+
+```cpp
+Datum binary_to_datum(const std::span<const char>& value,
+                      Oid pg_oid,
+                      int32_t atttypmod) const;
+```
+
+**Parameters:**
+- `value`: Binary data from PostgreSQL wire protocol
+- `pg_oid`: Type OID
+- `atttypmod`: Type modifier (e.g., varchar length)
+
+**Returns:** `Datum` representation of the value
+
+**Implementation:**
+```cpp
+Datum PgExtnRegistry::binary_to_datum(const std::span<const char>& value,
+                                      Oid pg_oid,
+                                      int32_t atttypmod) const {
+    auto type = get_type_by_oid(pg_oid);
+    auto typreceive = get_type_func_by_type_name(type.typreceive);
+
+    // Create StringInfo for binary data
+    StringInfoData string;
+    initStringInfo(&string);
+    appendBinaryStringInfoNT(&string, value.data(), value.size());
+
+    // Call typreceive function
+    PGFunction typreceive_func = (PGFunction)typreceive;
+    Datum result = DirectFunctionCall3(typreceive_func,
+                                      PointerGetDatum(&string),
+                                      ObjectIdGetDatum(0),
+                                      Int32GetDatum(atttypmod));
+    return result;
+}
+```
+
+**Example:**
+```cpp
+// Convert binary point data to Datum
+std::span<const char> binary_point = get_binary_data();
+Datum point_datum = registry->binary_to_datum(binary_point, POINTOID, -1);
+```
+
+---
+
+### datum_to_string()
+Convert Datum to string representation using `typoutput` function.
+
+```cpp
+std::string datum_to_string(Datum value, Oid pg_oid) const;
+```
+
+**Parameters:**
+- `value`: Datum to convert
+- `pg_oid`: Type OID
+
+**Returns:** String representation of the value
+
+**Implementation:**
+```cpp
+std::string PgExtnRegistry::datum_to_string(Datum value, Oid pg_oid) const {
+    auto type = get_type_by_oid(pg_oid);
+    auto typoutput = get_type_func_by_type_name(type.typoutput);
+
+    // Call typoutput function
+    PGFunction typoutput_func = (PGFunction)typoutput;
+    Datum result = DirectFunctionCall1(typoutput_func, value);
+    const char* str = DatumGetCString(result);
+
+    return std::string(str);
+}
+```
+
+**Example:**
+```cpp
+// Convert point datum to string "(1.5,2.3)"
+std::string point_str = registry->datum_to_string(point_datum, POINTOID);
+```
+
+---
+
+## Operator Management APIs
+
+### add_operator()
+Register an extension operator.
+
+```cpp
+void add_operator(const std::string& extension,
+                  uint32_t oid,
+                  const std::string& oper_name,
+                  const std::string& proc_name);
+```
+
+**Parameters:**
+- `extension`: Extension name
+- `oid`: Operator OID from `pg_operator`
+- `oper_name`: Operator symbol (e.g., "=", "<@", "&&")
+- `proc_name`: Implementation function name
+
+**Behavior:**
+- Uses `dlsym()` to load operator function from extension library
+- Stores in `_oper_name_to_func` and `_proc_name_to_func` maps
+- Stores OID mappings in `_oper_oid_to_name` and `_proc_oid_to_name`
+
+**Example:**
+```cpp
+registry->add_operator("pg_trgm", 3636, "%", "similarity");
+```
+
+---
+
+### get_operator_func_by_oid()
+Get operator function by OID.
+
+```cpp
+void* get_operator_func_by_oid(uint32_t oid) const;
+```
+
+**Returns:** Function pointer or `nullptr` if not found
+
+---
+
+### get_operator_func_by_oper_name()
+Get operator function by operator symbol.
+
+```cpp
+void* get_operator_func_by_oper_name(const char* oper_name) const;
+```
+
+**Parameters:**
+- `oper_name`: Operator symbol (e.g., "=", "%", "<@")
+
+**Returns:** Function pointer or `nullptr` if not found
+
+**Example:**
+```cpp
+void* similarity_func = registry->get_operator_func_by_oper_name("%");
+```
+
+---
+
+### get_operator_func_by_proc_name()
+Get operator function by procedure name.
+
+```cpp
+void* get_operator_func_by_proc_name(const std::string& proc_name) const;
+```
+
+**Example:**
+```cpp
+void* func = registry->get_operator_func_by_proc_name("similarity");
+```
+
+---
+
+### comparator_func()
+Compare two values using an extension operator.
+
+```cpp
+static bool comparator_func(const ExtensionContext* context,
+                           const std::span<const char>& lhval,
+                           const std::span<const char>& rhval);
+```
+
+**Parameters:**
+- `context`: Contains `type_oid` and `op_str` (operator name)
+- `lhval`: Left-hand value (binary format)
+- `rhval`: Right-hand value (binary format)
+
+**Returns:** Boolean result of comparison
+
+**Implementation:**
+```cpp
+bool PgExtnRegistry::comparator_func(const ExtensionContext* context,
+                                     const std::span<const char>& lhval,
+                                     const std::span<const char>& rhval) {
+    auto extn_registry = PgExtnRegistry::get_instance();
+
+    // Convert binary to Datum
+    Datum left_datum = extn_registry->binary_to_datum(lhval, context->type_oid, -1);
+    Datum right_datum = extn_registry->binary_to_datum(rhval, context->type_oid, -1);
+
+    // Get operator function
+    auto operator_func = extn_registry->get_operator_func_by_oper_name(context->op_str);
+
+    // Invoke operator
+    PGFunction operator_func_ptr = (PGFunction)operator_func;
+    Datum result = DirectFunctionCall3(operator_func_ptr, left_datum, right_datum,
+                                      ObjectIdGetDatum(0));
+
+    return DatumGetBool(result);
+}
+```
+
+**Example:**
+```cpp
+// Compare two PostGIS geometries for equality
+ExtensionContext ctx;
+ctx.type_oid = GEOMETRYOID;
+ctx.op_str = "=";
+
+bool equal = PgExtnRegistry::comparator_func(&ctx, geometry1_binary, geometry2_binary);
+```
+
+---
+
+## Operator Class APIs
+
+### add_opclass()
+Register an operator class method.
+
+```cpp
+void add_opclass(const std::string& extension,
+                 PgOpsClass opclass,
+                 PgOpsClassMethod method);
+```
+
+**Parameters:**
+- `extension`: Extension name
+- `opclass`: OpClass metadata
+- `method`: Method metadata including support number and function name
+
+**Behavior:**
+- Uses `dlsym()` to load support function
+- Stores in nested map: `_opclass_function_map[opclass_name][support_number]`
+
+**Example:**
+```cpp
+PgOpsClass gin_trgm;
+gin_trgm.name = "gin_trgm_ops";
+gin_trgm.access_method = "gin";
+
+PgOpsClassMethod extractvalue;
+extractvalue.support_number = GIN_EXTRACTVALUE;
+extractvalue.function_name = "gin_extract_value_trgm";
+
+registry->add_opclass("pg_trgm", gin_trgm, extractvalue);
+```
+
+---
+
+### get_opclass_method_by_method_name()
+Retrieve an opclass method by name and support number.
+
+```cpp
+PgOpsClassMethod get_opclass_method_by_method_name(const std::string& opclass_name,
+                                                    int support_number);
+```
+
+**Parameters:**
+- `opclass_name`: OpClass name (e.g., "gin_trgm_ops")
+- `support_number`: Support procedure number (e.g., `GIN_EXTRACTVALUE = 2`)
+
+**Returns:** `PgOpsClassMethod` structure with function pointer, or empty struct if not found
+
+**Example:**
+```cpp
+auto method = registry->get_opclass_method_by_method_name("gin_trgm_ops", GIN_EXTRACTVALUE);
+if (method.function_ptr) {
+    PGFunction func = (PGFunction)method.function_ptr;
+    // Use function...
+}
+```
+
+---
+
+### get_opclass_method_func_ptr_by_method_name()
+Get opclass method function pointer (static convenience method).
+
+```cpp
+static void* get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name,
+                                                        int support_number);
+```
+
+**Returns:** Function pointer or `nullptr` if not found
+
+**Example:**
+```cpp
+void* func = PgExtnRegistry::get_opclass_method_func_ptr_by_method_name("gist_point_ops",
+                                                                        GIST_COMPRESS);
+```
+
+---
+
+### invoke_opclass_method()
+Invoke an opclass method with a single Datum argument.
+
+```cpp
+static Datum invoke_opclass_method(const std::string& opclass_name,
+                                   int support_number,
+                                   Datum value);
+```
+
+**Parameters:**
+- `opclass_name`: OpClass name
+- `support_number`: Support procedure number
+- `value`: Input Datum
+
+**Returns:** Result Datum
+
+**Implementation:**
+```cpp
+Datum PgExtnRegistry::invoke_opclass_method(const std::string& opclass_name,
+                                           int support_number,
+                                           Datum value) {
+    auto method = get_instance()->get_opclass_method_by_method_name(opclass_name,
+                                                                     support_number);
+    if (!method.function_ptr) {
+        LOG_ERROR("Failed to find opclass method");
+        return Datum();
+    }
+
+    PGFunction operator_func_ptr = (PGFunction)method.function_ptr;
+    Datum result = DirectFunctionCall1(operator_func_ptr, value);
+    return result;
+}
+```
+
+**Example:**
+```cpp
+// Compress a point for GIST index
+GISTENTRY entry;
+entry.key = point_datum;
+entry.leafkey = true;
+
+Datum compressed = PgExtnRegistry::invoke_opclass_method("gist_point_ops",
+                                                         GIST_COMPRESS,
+                                                         PointerGetDatum(&entry));
+```
+
+---
+
+## Internal Data Structures
+
+### Registry Maps
+
+```cpp
+private:
+    // Library handles
+    std::unordered_map<std::string, void*> _library_map;
+    // extension_name → dlopen() handle
+
+    // Type mappings
+    std::unordered_map<uint32_t, PgType> _type_oid_to_type;
+    // type_oid → PgType
+
+    std::unordered_map<std::string, void*> _type_func_name_to_func;
+    // function_name → function_ptr
+
+    // Operator mappings
+    std::unordered_map<uint32_t, std::string> _oper_oid_to_name;
+    // operator_oid → operator_name
+
+    std::unordered_map<uint32_t, std::string> _proc_oid_to_name;
+    // proc_oid → proc_name
+
+    std::unordered_map<std::string, void*> _oper_name_to_func;
+    // operator_name → function_ptr
+
+    std::unordered_map<std::string, void*> _proc_name_to_func;
+    // proc_name → function_ptr
+
+    // Opclass mappings
+    std::unordered_map<std::string,
+                       std::unordered_map<int, PgOpsClassMethod>> _opclass_function_map;
+    // opclass_name → (support_number → PgOpsClassMethod)
+```
+
+---
+
+## Usage Patterns
+
+### Pattern 1: Type I/O Conversion
+
+```cpp
+// Binary (wire protocol) → Datum → String
+std::span<const char> binary_data = ...;
+Datum datum = registry->binary_to_datum(binary_data, type_oid, -1);
+std::string text = registry->datum_to_string(datum, type_oid);
+```
+
+### Pattern 2: Opclass Method Invocation
+
+```cpp
+// Get method, check validity, invoke
+auto method = registry->get_opclass_method_by_method_name(opclass, support_num);
+if (method.function_ptr) {
+    PGFunction func = (PGFunction)method.function_ptr;
+    Datum result = DirectFunctionCall1(func, input_datum);
+    // Process result...
+}
+```
+
+### Pattern 3: Extension Operator Comparison
+
+```cpp
+// Setup context
+ExtensionContext ctx;
+ctx.type_oid = custom_type_oid;
+ctx.op_str = "=";
+
+// Compare
+bool result = PgExtnRegistry::comparator_func(&ctx, lhs_binary, rhs_binary);
+```
+
+---
+
+## Thread Safety
+
+**Current Status:** Not thread-safe
+- `dlopen()` and `dlsym()` calls are not synchronized
+- Registry maps are accessed without locks
+- Singleton instance is not thread-safe
+
+**Recommendations:**
+- Initialize all extensions before starting worker threads
+- Treat registry as read-only after initialization
+- Add mutex protection if runtime extension loading is needed
+
+---
+
+## Error Handling
+
+All lookup methods log errors and return `nullptr` / empty struct on failure:
+
+```cpp
+void* func = registry->get_operator_func_by_oid(invalid_oid);
+// Logs: "Failed to find operator function by oid: <oid>"
+// Returns: nullptr
+```
+
+**Best Practice:** Always check for `nullptr` before using function pointers:
+
+```cpp
+void* func = registry->get_type_func_by_type_name("some_func");
+if (!func) {
+    // Handle error
+    return;
+}
+PGFunction pg_func = (PGFunction)func;
+// Safe to use
+```
+
+---
+
+## Performance Considerations
+
+1. **Function Pointer Caching:** Frequently-used functions should be cached at call site
+2. **OID Lookups:** Type/operator OID lookups involve map lookups; cache results when possible
+3. **Datum Conversions:** Binary ↔ Datum conversions invoke extension functions; minimize conversions
+4. **dlsym() Cost:** Symbol lookups are relatively expensive; done once during registration
+
+---
+

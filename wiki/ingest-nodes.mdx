@@ -1,0 +1,23 @@
+---
+title: "Ingest Nodes"
+---
+
+The ingest nodes are responsible for synchronizing the replica data with the primary database data.  There are two different key states of operation -- `INITIALIZE` and `RUNNING`.
+
+# Initialization
+
+When the system is started in the `INITIALIZE` state, the ingest node performs the following actions:
+
+1. Connect to the logical replication slot and begin capturing the stream of mutations.
+1. Capture the set of tables to synchronize and copy them to the replica storage.
+1. Play forward any in-flight changes since the table snapshots were captured to ensure we have a consistent snapshot of the entire system.
+1. Move into the RUNNING state.
+
+# Running
+
+When the system is started in the `RUNNING` state, the ingest node performs the following actions:
+
+1. Connect to the logical replication slot and begin capturing the stream of mutations.
+1. Perform any [recovery](/recovery) required to bring the system to a consistent snapshot.
+1. Play forward any changes recorded into the local log since recovery began.
+1. Move into a steady-state operation of [processing messages](/message-processing).

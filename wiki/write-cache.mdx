@@ -1,0 +1,253 @@
+---
+title: "Write Cache"
+---
+
+# Write Cache
+
+## Overview
+
+The Write Cache is a transactional in-memory (with disk spillover) cache that temporarily stores uncommitted database changes from PostgreSQL replication before they are committed and indexed into Springtail's storage layer. It serves as a critical component in Springtail's replication pipeline, bridging the gap between PostgreSQL's transaction model and Springtail's versioned storage system.
+
+## Purpose
+
+The Write Cache serves several key purposes:
+
+1. **Transaction Buffering**: Stores uncommitted data (extents) from PostgreSQL replication streams while transactions are in-flight
+2. **XID Translation**: Maps PostgreSQL transaction IDs (pg_xid) to Springtail transaction IDs (xid), handling subtransactions
+3. **Query Acceleration**: Enables query nodes to access recently committed data before it has been fully indexed ("hurry-ups")
+4. **Memory Management**: Automatically spills to disk when memory pressure exceeds configurable watermarks
+5. **Transaction Isolation**: Maintains proper visibility semantics by organizing data by transaction and table
+
+## Architecture
+
+### Data Structure Hierarchy
+
+The Write Cache uses a multi-level tree structure for efficient lookup and organization:
+
+```
+ROOT (per database)
+  └─> XID Nodes (Postgres transaction IDs)
+       └─> TABLE Nodes (table IDs)
+            └─> EXTENT Nodes (LSN-ordered extents)
+                 └─> Data (in-memory or on-disk)
+```
+
+### Key Components
+
+#### WriteCacheServer (`write_cache_server.hh/cc`)
+- **Singleton** server managing the entire write cache system
+- Maintains a map of `WriteCacheIndex` instances, one per database
+- Handles memory watermark management (high/low thresholds)
+- Decides when to spill extents to disk based on memory pressure
+- Exposes gRPC service via `WriteCacheService`
+- **Location**: `include/write_cache/write_cache_server.hh`, `src/write_cache/write_cache_server.cc`
+
+Key responsibilities:
+- Adding extents: `add_extent(db_id, tid, pg_xid, lsn, data)`
+- Committing transactions: `commit(db_id, xid, pg_xids, metadata)`
+- Aborting transactions: `abort(db_id, pg_xid)` or `abort(db_id, pg_xids)`
+- Memory tracking: monitors `_current_memory_bytes` against watermarks
+
+#### WriteCacheIndex (`write_cache_index.hh/cc`)
+- **Per-database** index containing partitioned table data
+- Uses **8 partitions** by default (configurable) to enable parallel access
+- Each partition is a `WriteCacheTableSet` managing a subset of tables
+- Partitioning strategy: `table_id % num_partitions`
+- Tracks total memory usage across all partitions
+- **Location**: `include/write_cache/write_cache_index.hh`, `src/write_cache/write_cache_index.cc`
+
+#### WriteCacheTableSet (`write_cache_table_set.hh/cc`)
+- **Per-partition** implementation of the core index logic
+- Maintains the tree structure: ROOT → XID → TABLE → EXTENT
+- Manages two critical mappings:
+  - `_xid_map`: Maps Springtail XID → Postgres XID(s) (multimap for subtransactions)
+  - `_xid_ts_map`: Maps Springtail XID → Metadata (commit timestamps)
+- Thread-safe with shared mutexes for concurrent reads
+- **Location**: `include/write_cache/write_cache_table_set.hh`, `src/write_cache/write_cache_table_set.cc`
+
+#### WriteCacheIndexNode (`write_cache_index_node.hh/cc`)
+- **Generic tree node** used at all levels of the hierarchy
+- Types: `ROOT`, `XID`, `TABLE`, `EXTENT`, `EXTENT_ON_DISK`
+- Contains:
+  - `id`: XID, table ID, or LSN depending on level
+  - `data`: ExtentPtr for in-memory extents
+  - `data_offset`, `data_size`: For disk-based extents
+  - `children`: Ordered set of child nodes (sorted by ID)
+- Thread-safe with shared mutex for concurrent access
+- **Location**: `include/write_cache/write_cache_index_node.hh`, `src/write_cache/write_cache_index_node.cc`
+
+#### WriteCacheService (`write_cache_service.hh/cc`)
+- **gRPC service** implementation exposing write cache functionality
+- Implements the `proto::WriteCache` service interface
+- RPC methods:
+  - `Ping()`: Health check
+  - `GetExtents()`: Retrieve extents for a table at a given XID
+  - `ListTables()`: Get list of tables modified in a transaction
+  - `EvictTable()`: Remove specific table data from cache
+  - `EvictXid()`: Remove all data for a transaction
+- **Location**: `include/write_cache/write_cache_service.hh`, `src/write_cache/write_cache_service.cc`
+
+#### WriteCacheClient (`write_cache_client.hh/cc`)
+- **Singleton** client for query nodes to access the write cache
+- Communicates with `WriteCacheServer` via gRPC
+- Used by pg_fdw (Foreign Data Wrapper) for "hurry-up" queries
+- Provides extent caching via shared memory (`ShmCache`)
+- **Location**: `include/write_cache/write_cache_client.hh`, `src/write_cache/write_cache_client.cc`
+
+### Protocol Definition
+
+The gRPC API is defined in `src/proto/write_cache.proto`:
+- **Extent**: Contains xid, xid_seq (LSN), and data
+- **GetExtentsRequest/Response**: Paginated extent retrieval
+- **ListTablesRequest/Response**: Paginated table list retrieval
+- **EvictTableRequest**: Remove table from cache
+- **EvictXidRequest**: Remove transaction from cache
+
+## Transaction Lifecycle
+
+### 1. Data Ingestion (Write Path)
+
+**Component**: `PgLogReader` (`src/pg_log_mgr/pg_log_reader.cc`)
+
+1. PostgreSQL replication stream is parsed by `PgLogReader`
+2. For each INSERT/UPDATE/DELETE operation:
+   - Data is accumulated into extents per table
+   - `WriteCacheServer::add_extent(db_id, tid, pg_xid, lsn, extent)` is called
+   - Extent is added to the tree under the appropriate pg_xid and table
+3. Memory is tracked; if high watermark is exceeded, `_store_to_disk` flag is set
+4. Subsequent extents are written to disk files named by pg_xid
+
+### 2. Transaction Commit
+
+**Component**: `PgLogReader::Batch` (`src/pg_log_mgr/pg_log_reader.cc`)
+
+1. When a COMMIT record is received:
+   - All accumulated extents for the transaction are already in the write cache
+   - `WriteCacheServer::commit(db_id, xid, pg_xids, metadata)` is called
+   - Maps Springtail XID to all associated Postgres XIDs (handling subtransactions)
+   - Stores metadata including:
+     - `pg_commit_ts`: PostgreSQL commit timestamp
+     - `local_begin_ts`: Local transaction start time
+     - `local_commit_ts`: Local transaction commit time
+2. Mapping is replicated across all partitions for efficient lookup
+
+### 3. Transaction Abort
+
+**Component**: `PgLogReader::Batch` (`src/pg_log_mgr/pg_log_reader.cc`)
+
+1. When an ABORT record is received:
+   - `WriteCacheServer::abort(db_id, pg_xid)` is called
+   - All extents for the pg_xid are removed from the tree
+   - Memory is freed and tracked
+   - Associated disk files are deleted
+
+### 4. Data Consumption (Read Path)
+
+**Component**: `PgFdwMgr` (`src/pg_fdw/pg_fdw_mgr.cc`)
+
+1. Query nodes use `WriteCacheClient` to fetch recent data
+2. "Hurry-up" queries check the write cache for data not yet in the main index
+3. `WriteCacheClient::get_extents(db_id, tid, xid, count, cursor, commit_ts)`:
+   - Sends gRPC request to `WriteCacheService`
+   - Retrieves up to `count` extents starting from `cursor`
+   - Returns extents and associated commit timestamp
+4. Extents may be served from memory or read from disk transparently
+
+### 5. Data Eviction
+
+**Component**: `Committer` (`src/pg_log_mgr/committer.cc`)
+
+1. After data has been committed to the main storage system:
+   - `WriteCacheServer::evict_xid(db_id, xid)` is called
+   - Removes all data for the transaction from cache
+   - Frees memory and deletes disk files
+   - Prevents cache from growing unbounded
+
+## Memory Management
+
+### Watermark System
+
+The write cache uses a two-level watermark system to manage memory:
+
+- **High Watermark** (`memory_high_watermark_bytes`): When exceeded, new extents are written to disk
+- **Low Watermark** (`memory_low_watermark_bytes`): When memory drops below this, writing to memory resumes
+- **Current Memory** (`_current_memory_bytes`): Tracked atomically across all operations
+
+Configuration is specified in `Properties::WRITE_CACHE_CONFIG`:
+```json
+{
+  "disk_storage_dir": "/path/to/storage",
+  "memory_high_watermark_bytes": 10737418240,  // 10GB
+  "memory_low_watermark_bytes": 8589934592,    // 8GB
+  "rpc_config": { ... }
+}
+```
+
+### Disk Spillover
+
+When `_store_to_disk` is true:
+
+1. Extents are written to files in `_disk_storage_dir/db_id/pg_xid`
+2. Tree nodes store `data_offset` and `data_size` instead of extent data
+3. `EXTENT_ON_DISK` node type marks disk-based extents
+4. On read, extents are transparently loaded from disk via `IOMgr`
+
+### Partitioning for Concurrency
+
+- Default: **8 partitions** per database
+- Tables are hashed by `table_id % num_partitions`
+- Enables parallel access to different tables
+- Each partition has independent locking
+- Memory accounting is aggregated across partitions
+
+## Integration Points
+
+### Components That Write to Write Cache
+
+1. **PgLogReader** (`src/pg_log_mgr/pg_log_reader.cc`)
+   - Primary writer: adds extents during replication
+   - Commits/aborts transactions based on WAL records
+   - Main entry point: `Batch::commit()` and `Batch::abort()`
+
+### Components That Read from Write Cache
+
+1. **PgFdwMgr** (`src/pg_fdw/pg_fdw_mgr.cc`)
+   - Query execution: retrieves recent uncommitted/recently-committed data
+   - Uses `WriteCacheClient::get_extents()` for hurry-up queries
+   - Maximum fetch size: `MAX_WRITE_CACHE_EXTENTS = 10`
+
+2. **Committer** (`src/pg_log_mgr/committer.cc`)
+   - Manages write cache evictions after data is persisted
+   - Maintains `_write_cache_evictions` map per database
+   - Calls `evict_xid()` during cleanup
+
+### Thread Safety
+
+- All data structures use `std::shared_mutex` for concurrent access
+- Read operations (get_extents, list_tables) use shared locks
+- Write operations (add_extent, commit, abort) use unique locks
+- Memory tracking uses `std::atomic<uint64_t>`
+
+## Testing
+
+Test files are located in `src/write_cache/test/`:
+
+1. **test_wc_index.cc**: Unit tests for WriteCacheIndex and WriteCacheTableSet
+2. **test_wc_server.cc**: Integration tests for WriteCacheServer and gRPC service
+
+## Performance Considerations
+
+1. **Partitioning**: 8-way partitioning reduces lock contention for multi-table transactions
+2. **Ordered Sets**: Extents are stored in LSN order for efficient range queries
+3. **Memory Tracking**: Atomic counters avoid lock overhead for memory accounting
+4. **Disk I/O**: Extents are written/read asynchronously via `IOMgr`
+5. **Pagination**: Get operations support cursor-based pagination to limit memory overhead
+
+## Key Invariants
+
+1. Every pg_xid maps to at most one Springtail xid
+2. A Springtail xid may map to multiple pg_xids (subtransactions)
+3. Extents within a table are ordered by LSN
+4. Memory accounting must be exact for watermark enforcement
+5. Disk files are named by pg_xid and deleted on abort/evict
+6. All partitions must be updated on commit for correct lookups

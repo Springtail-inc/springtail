@@ -1,0 +1,38 @@
+---
+title: "Performance"
+---
+
+# Using `perf` and `pbench` for performance testing
+
+Performance testing of the system can be done by using tools like `perf` and `pgbench`. We use `perf` to attach to the process whose performance needs to be evaluated. Two performance critical components in the system are `proxy` (data access) and `pg_log_mgr_daemon` (for data replication). Here are the instructions for running performance test, collecting `perf` output, and post-processing it.
+
+1. Start you test environment. Make sure the system is up, end to end. If you are only interested in looking at performance of the ingestion pipeline, running `proxy` is not required. It is better to run each part of the service in its own virtual machine so that the performance of different components does not interfere which the performance of the service whose you are trying to evaluate.
+
+2. Log into the virtual machine of the service and run:
+```
+sudo perf record -g -p <process id>
+```
+
+3. Generate load on the primary database directly or through the proxy:
+```
+# run pgbench init
+pgbench -i -s 10 <db name> -h <host name> -p <port> -U <user name>
+# run pgbench load test
+pgbench -c 10 -j 10 -T 120 <db name> -h <host name> -p <port> -U <user name>
+```
+* What we basically do here is running 10 database clients in 10 separate threads (one per thread) for 120 seconds. There are other options available for `pgbench`. All the information is available on this page: [pgbench](https://www.postgresql.org/docs/18/pgbench.html). When running directly against primary database, configure this database host name and port. When running against proxy, configure the host name and port that belong to proxy.
+
+4. Once `pgbench` is done, stopr `perf record` command and post-process the data it collected using the following command:
+```
+sudo perf script -f > out.perf
+```
+
+5. The output file we created in the previous step needs to be folded. There is a tool that does it:
+```
+# download the tool
+git clone https://github.com/brendangregg/FlameGraph.git
+# run the tool
+<path to the tool install dir>/FlameGraph/stackcollapse-perf.pl out.perf > out.folded
+```
+
+6. The output file we produced in the previous step can now be used to view as a flame graph. Go to this URL: [https://www.speedscope.app/] and drag and drop the file.

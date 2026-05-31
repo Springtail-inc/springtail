@@ -1,0 +1,1072 @@
+---
+title: "System Metadata"
+---
+
+# Schema Management Architecture
+
+## Table of Contents
+1. [Overview](#overview)
+2. [System Tables](#system-tables)
+3. [Schema Information Management](#schema-information-management)
+4. [Caching Architecture](#caching-architecture)
+5. [System Table Manager](#system-table-manager)
+6. [Data Flow](#data-flow)
+7. [Key Design Patterns](#key-design-patterns)
+
+---
+
+## Overview
+
+The Springtail schema management system provides versioned metadata tracking for all database objects including tables, schemas, indexes, and user-defined types. The architecture is designed to support:
+
+- **Multi-Version Concurrency Control (MVCC)**: Every metadata entry is versioned by transaction ID (XID) and Log Sequence Number (LSN)
+- **Multi-Process Caching**: Shared memory caches enable efficient metadata sharing across processes
+- **DDL Evolution Tracking**: Complete history of schema changes over time
+- **Client-Server Architecture**: Centralized management via gRPC with distributed caching
+
+The system consists of three primary components:
+1. **System Tables**: Persistent storage of metadata on disk
+2. **Caching Layers**: Multi-level caches (in-process and shared memory)
+3. **System Table Manager**: Service layer managing reads, writes, and synchronization
+
+---
+
+## System Tables
+
+System tables are special metadata tables that track information about user tables, schemas, and indexes. They are stored on disk and managed by the storage engine like regular tables, but contain metadata rather than user data.
+
+### The Eight System Tables
+
+Defined in `include/sys_tbl_mgr/system_tables.hh`:
+
+#### 1. TableNames (ID: 1)
+Tracks all tables in the database.
+
+**Data Columns:**
+- `namespace_id` - Schema/namespace ID
+- `name` - Table name
+- `table_id` - Unique table identifier
+- `xid`, `lsn` - Transaction version
+- `exists` - Deletion marker (soft delete)
+- `parent_table_id` - For partitioned tables
+- `partition_key` - Partition key expression
+- `partition_bound` - Partition bounds
+- `rls_enabled` - Row-level security flag
+- `rls_forced` - Force RLS for table owner
+- `internal_row_id` - Internal identifier
+
+**Primary Index:** `(table_id, xid, lsn)`
+
+**Secondary Index:** `(namespace_id, name, xid, lsn)` - For lookup by qualified name
+
+#### 2. TableRoots (ID: 2)
+Stores B-tree root extent IDs and table statistics at each XID.
+
+**Data Columns:**
+- `table_id` - Table identifier
+- `index_id` - Index identifier (0 = primary)
+- `xid` - Transaction version
+- `extent_id` - Root extent ID of the B-tree
+- `snapshot_xid` - Snapshot identifier for consistency
+- `end_offset` - Data file offset after sync
+- `internal_row_id` - Internal identifier
+
+**Primary Index:** `(table_id, index_id, xid)`
+
+**Purpose:** Enables accessing a table's B-tree root at any historical XID.
+
+#### 3. Indexes (ID: 3)
+Maps which columns participate in which indexes.
+
+**Data Columns:**
+- `table_id` - Table identifier
+- `index_id` - Index identifier
+- `xid`, `lsn` - Transaction version
+- `position` - Position in index (0-based)
+- `column_id` - Column position in table
+- `internal_row_id` - Internal identifier
+
+**Primary Index:** `(table_id, index_id, xid, lsn, position)`
+
+**Purpose:** Multiple rows per index define the column ordering.
+
+#### 4. Schemas (ID: 4)
+Column definitions for all tables.
+
+**Data Columns:**
+- `table_id` - Table identifier
+- `position` - Column position (can have gaps)
+- `xid`, `lsn` - Transaction version
+- `exists` - Column active/dropped flag
+- `name` - Column name
+- `type` - Springtail internal type (SchemaType)
+- `pg_type` - PostgreSQL type OID
+- `nullable` - NULL constraint
+- `default` - Default value expression
+- `update_type` - Type of change (ADD, DROP, MODIFY)
+- `internal_row_id` - Internal identifier
+
+**Primary Index:** `(table_id, position, xid, lsn)`
+
+**Purpose:** Tracks column history, allowing schema evolution tracking.
+
+#### 5. TableStats (ID: 5)
+Table statistics at each XID.
+
+**Data Columns:**
+- `table_id` - Table identifier
+- `xid` - Transaction version
+- `row_count` - Number of rows
+- `last_internal_row_id` - Last assigned row ID
+- `internal_row_id` - Internal identifier
+
+**Primary Index:** `(table_id, xid)`
+
+**Purpose:** Used for query planning and optimization.
+
+#### 6. IndexNames (ID: 6)
+Secondary index metadata and lifecycle state.
+
+**Data Columns:**
+- `table_id` - Table identifier
+- `index_id` - Index identifier
+- `xid`, `lsn` - Transaction version
+- `namespace_id` - Schema/namespace ID
+- `name` - Index name
+- `state` - Lifecycle state (NOT_READY, READY, DELETED, BEING_DELETED)
+- `is_unique` - Uniqueness constraint
+- `internal_row_id` - Internal identifier
+
+**Primary Index:** `(table_id, index_id, xid, lsn)`
+
+**Purpose:** Tracks index build status and metadata.
+
+#### 7. NamespaceNames (ID: 7)
+Database schemas/namespaces from PostgreSQL.
+
+**Data Columns:**
+- `namespace_id` - Unique namespace identifier
+- `name` - Namespace name (e.g., "public")
+- `xid`, `lsn` - Transaction version
+- `exists` - Deletion marker
+- `internal_row_id` - Internal identifier
+
+**Primary Index:** `(namespace_id, xid, lsn)`
+
+**Secondary Index:** `(name, xid, lsn)` - For lookup by name
+
+#### 8. UserTypes (ID: 8)
+User-defined types (primarily enums).
+
+**Data Columns:**
+- `type_id` - Type identifier
+- `namespace_id` - Schema containing the type
+- `name` - Type name
+- `value` - JSON-encoded type values
+- `xid`, `lsn` - Transaction version
+- `type` - Type category ('E' for enum)
+- `exists` - Deletion marker
+- `internal_row_id` - Internal identifier
+
+**Primary Index:** `(type_id, xid, lsn)`
+
+**Purpose:** Stores enum values and other user-defined type information.
+
+### Key Concepts
+
+**XID/LSN Versioning:**
+- Every metadata entry is stamped with `(xid, lsn)` pair
+- Enables querying metadata at any historical transaction
+- Critical for MVCC and consistency
+
+**Soft Deletes:**
+- The `exists` flag marks objects as deleted without physical removal
+- Allows historical queries to see deleted objects at past XIDs
+- Physical cleanup can happen during maintenance
+
+**Snapshot XID:**
+- Stored in TableRoots and TableNames for partitioned tables
+- Represents the XID at which table data was synchronized
+- Used for schema version matching during data reads
+
+---
+
+## Schema Information Management
+
+Schema information describes the structure of a table (columns, types, indexes) at a specific point in time.
+
+### SchemaMetadata Structure
+
+Defined in `include/storage/schema.hh`:
+
+```cpp
+struct SchemaMetadata {
+    XidRange access_range;      // XID range where this schema is valid
+    XidRange target_range;      // XID range for change history
+    std::vector<SchemaColumn> columns;  // Current column definitions
+    std::vector<SchemaColumn> history;  // Historical changes
+    std::vector<Index> indexes;         // Index definitions
+};
+```
+
+### SchemaColumn
+
+Each column is described by:
+- **Identity**: `name`, `position`, `xid`, `lsn`
+- **Type Information**: `type` (internal), `pg_type` (PostgreSQL OID)
+- **Constraints**: `nullable`, `pkey_position`, `default_value`
+- **Type Metadata**: `type_name`, `type_namespace`, `collation`, `type_category`
+- **Lifecycle**: `exists`, `update_type`
+
+### Index Structure
+
+```cpp
+struct Index {
+    uint64_t id;                    // Index identifier
+    std::string schema;             // Schema name
+    std::string name;               // Index name
+    uint64_t table_id;              // Table identifier
+    bool is_unique;                 // Uniqueness constraint
+    uint8_t state;                  // Lifecycle state
+    std::vector<Column> columns;    // Index column mappings
+};
+```
+
+Each `Index::Column` contains:
+- `idx_position` - Position in index (0-based)
+- `position` - Column position in table
+
+### Schema Change Tracking
+
+The `update_type` field tracks the nature of each change:
+- `NEW_COLUMN` - Column added
+- `REMOVE_COLUMN` - Column dropped
+- `NAME_CHANGE` - Column renamed
+- `NULLABLE_CHANGE` - NULL constraint changed
+- `RESYNC` - Table resynchronized
+- `NEW_INDEX` - Index added
+- `DROP_INDEX` - Index dropped
+- `NO_CHANGE` - No modification
+
+**History Tracking:**
+- The `history` vector in `SchemaMetadata` tracks all changes in XID order
+- Each entry represents a schema modification event
+- Enables replaying schema evolution for synchronization
+
+---
+
+## Caching Architecture
+
+The system employs a multi-level caching strategy to minimize disk I/O and RPC overhead.
+
+### 1. Shared Memory Cache (ShmCache)
+
+**Location:** `include/sys_tbl_mgr/shm_cache.hh`, `src/sys_tbl_mgr/shm_cache.cc`
+
+**Purpose:** Cross-process caching of serialized metadata using Boost interprocess shared memory.
+
+#### Architecture
+
+**Technology Stack:**
+- `boost::interprocess::managed_shared_memory` - Shared memory segment
+- `boost::interprocess::named_sharable_mutex` - Cross-process locking
+- `boost::multi_index_container` - LRU eviction tracking
+
+**Five Global Cache Instances:**
+1. `SHM_CACHE_ROOTS` (`"springtail.roots"`) - Table roots and statistics
+2. `SHM_CACHE_SCHEMAS` (`"springtail.schemas"`) - Schema metadata
+3. `SHM_CACHE_USERTYPES` (`"springtail.usertypes"`) - User-defined types
+4. `SHM_CACHE_TABLE_IDS` (`"springtail.table_ids"`) - Table ID lookups
+5. `SHM_CACHE_EXTENTS` (`"springtail.extents"`) - Extent metadata
+
+#### Cache Data Structure
+
+```
+Key: (DbId, ObjId)
+Value: vector<Message> sorted by XID/LSN
+
+Message {
+    XidLsn xid;
+    vector<char> serialized_data;  // Protobuf message
+    bool dropped;                   // Deletion marker
+}
+```
+
+**Key Features:**
+
+1. **Serialized Storage**: Stores protobuf-serialized messages for portability
+2. **XID Versioning**: Multiple versions per object, sorted by XID/LSN
+3. **LRU Eviction**: Automatically evicts least-recently-used entries when memory fills
+4. **Dropped Markers**: Can mark objects as dropped without removal
+5. **Memory Management**: Auto-evicts when free memory falls below 30% (target: 50%)
+
+#### XID Lifecycle Management
+
+**Committed XID Tracking:**
+```cpp
+void update_committed_xid(DbId db, Xid xid, bool has_schema_changes, bool real_commit);
+std::optional<Xid> get_committed_xid(DbId db, Xid schema_xid);
+```
+
+- Tracks the last committed XID per database
+- Records whether schema changes occurred
+- Maintains XID history to prevent accessing stale schemas
+
+**Keep-Alive Mechanism:**
+```cpp
+static constexpr std::chrono::duration XID_KEEP_ALIVE_PERIOD = 60ms;
+void keep_alive();
+bool is_alive();
+```
+
+- Must call `keep_alive()` or `update_committed_xid()` every 60ms
+- Prevents using stale committed XIDs from crashed processes
+- Timestamp-based freshness checking
+
+**Pending XID Tracking:**
+```cpp
+std::vector<Xid> get_pending_xids(DbId db, Xid last_committed_xid);
+void reset_pending_xids(DbId db);
+```
+
+- Tracks XIDs that have modified metadata but haven't yet committed
+- Used during crash recovery and consistency checks
+
+#### XID History
+
+Optionally tracks schema change history:
+```cpp
+struct XidHistoryEntry {
+    Xid schema_xid;              // XID where schema changed
+    Xid latest_real_commit_xid;  // Last real commit before this change
+};
+```
+
+- Survives `finalize()` to track schema evolution
+- Used to find appropriate committed XID for a given schema XID
+- Cleaned up via `cleanup_xid_history()`
+
+### 2. In-Process Schema Cache (SchemaCache)
+
+**Location:** `include/sys_tbl_mgr/schema_cache.hh`, `src/sys_tbl_mgr/schema_cache.cc`
+
+**Purpose:** In-process LRU cache of constructed `SchemaMetadata` objects (not serialized).
+
+#### Architecture
+
+**Cache Entry:**
+```cpp
+struct SchemaEntry {
+    XidLsn start_xid;              // When this schema version became valid
+    SchemaMetadataPtr schema;      // Constructed schema object
+    bool fetching;                 // Currently being populated
+    bool invalidated;              // Marked invalid by DDL
+    std::condition_variable cond;  // Coordination for concurrent fetches
+};
+```
+
+**Key:** `(db_id, table_id)`
+
+**Capacity:** Default 128 entries (configurable)
+
+#### Features
+
+1. **LRU Eviction**: Removes least-recently-used schemas when capacity exceeded
+2. **Lazy Loading**: Populates on demand via callback function
+3. **Invalidation**: Marks schemas invalid when DDL detected
+4. **Index Mapping**: Tracks `(db_id, index_id) -> table_id` for drop-index invalidation
+5. **Concurrent Fetch Coordination**: Uses condition variables to prevent duplicate fetches
+
+#### Invalidation Strategies
+
+**Table Invalidation:**
+```cpp
+void invalidate_table(uint64_t db, uint64_t tid, const XidLsn &xid);
+```
+- Marks the schema entry as ending at the provided XID
+- Future accesses beyond this XID will trigger re-fetch
+
+**Index Invalidation:**
+```cpp
+void invalidate_by_index(uint64_t db, uint64_t index_id, const XidLsn &xid);
+```
+- Uses index-to-table mapping to find affected table
+- Invalidates table schema
+
+**Database Invalidation:**
+```cpp
+void invalidate_db(uint64_t db, const XidLsn &xid);
+```
+- Invalidates all tables in the database
+- Called when DDL changes detected at FDW level
+
+### 3. Generic Message Cache (MsgCache)
+
+**Location:** `include/sys_tbl_mgr/msg_cache.hh`
+
+**Purpose:** Template-based foundation for ShmCache, providing generic serialized message caching.
+
+**Design Pattern:**
+- Uses traits-based design for customization
+- Supports any allocator (regular or shared memory)
+- LRU eviction via Boost multi-index container
+- Thread-safe via template mutex parameter
+
+### Caching Strategy Summary
+
+| Cache Level | Scope | Data Format | Eviction | Use Case |
+|------------|-------|-------------|----------|----------|
+| **ShmCache** | Cross-process | Protobuf serialized | LRU + memory threshold | Share metadata between FDW workers |
+| **SchemaCache** | Single process | Constructed objects | LRU (128 entries) | Fast in-memory access to schemas |
+| **Server Uncommitted Caches** | Server only | Native structures | Manual (on finalize) | Track pending DDL changes |
+
+**Data Flow:**
+1. Client checks in-process SchemaCache
+2. On miss, checks ShmCache
+3. On miss, RPCs to server
+4. Server checks uncommitted caches, then disk
+5. Response propagates back: Server → SHM → SchemaCache → Client
+
+---
+
+## System Table Manager
+
+The `sys_tbl_mgr` is a gRPC service that manages reading and writing system tables.
+
+### Architecture - Two Modes
+
+#### Server-Side (`SystemTableMgrServer`)
+
+**Location:** `include/sys_tbl_mgr/server.hh`, `src/sys_tbl_mgr/server.cc`
+
+**Purpose:** Manages read/write access to system tables within the server process.
+
+**Key Responsibilities:**
+1. Handle CREATE/ALTER/DROP table/index/namespace/type operations
+2. Maintain uncommitted caches for pending transactions
+3. Persist system tables to disk on finalize
+4. Manage XID progression and synchronization
+5. Serve gRPC requests from clients
+
+#### Client-Side (`SystemTableMgrClient`)
+
+**Location:** `include/sys_tbl_mgr/client.hh`, `src/sys_tbl_mgr/client.cc`
+
+**Purpose:** Remote access to system tables via gRPC from FDW processes.
+
+**Key Responsibilities:**
+1. Proxy read requests to server
+2. Maintain local caches (SchemaCache + SHM caches)
+3. Handle invalidation notifications
+4. Coordinate with multiple worker processes
+
+### gRPC Service Definition
+
+**Location:** `proto/sys_tbl_mgr.proto`
+
+```protobuf
+service SysTblMgr {
+    rpc Ping() returns (Empty);
+    rpc GetRoots(GetRootsRequest) returns (GetRootsResponse);
+    rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
+    rpc GetTargetSchema(GetTargetSchemaRequest) returns (GetSchemaResponse);
+    rpc Exists(ExistsRequest) returns (Empty);
+    rpc GetUserType(GetUserTypeRequest) returns (GetUserTypeResponse);
+}
+```
+
+**RPC Methods:**
+- `Ping`: Health check
+- `GetRoots`: Fetch table roots and stats at XID
+- `GetSchema`: Fetch table schema at XID
+- `GetTargetSchema`: Fetch schema with change history between XIDs
+- `Exists`: Check if table exists at XID
+- `GetUserType`: Fetch user-defined type at XID
+
+### Server-Side Uncommitted Caches
+
+The server maintains multiple in-memory caches for uncommitted DDL changes:
+
+#### 1. Table Cache (`_table_cache`)
+```cpp
+struct TableCacheRecord {
+    uint64_t id, xid, lsn, namespace_id;
+    std::string name;
+    bool rls_enabled, rls_forced, exists;
+    std::optional<uint64_t> parent_table_id;
+    std::optional<std::string> partition_key, partition_bound;
+};
+```
+**Map:** `DB → Table ID → XID/LSN → TableCacheRecord`
+
+**Purpose:** Track table metadata during CREATE/ALTER TABLE before commit.
+
+#### 2. Roots Cache (`_roots_cache`)
+```cpp
+using RootsCacheRecord = std::shared_ptr<proto::GetRootsResponse>;
+```
+**Map:** `DB → Table ID → XID/LSN → RootsCacheRecord`
+
+**Purpose:** Track table roots and statistics during data synchronization.
+
+#### 3. Schema Cache (`_schema_cache`)
+```cpp
+using ColumnIdToInfoMap = std::map<uint32_t, std::vector<proto::ColumnHistory>>;
+```
+**Map:** `DB → Table ID → Column ID → vector<ColumnHistory>`
+
+**Purpose:** Track column additions, drops, and modifications during ALTER TABLE.
+
+#### 4. Index Cache (`_index_cache`)
+```cpp
+struct IndexCacheItem {
+    XidLsn xid;
+    proto::IndexInfo info;
+};
+```
+**Map:** `DB → Table ID → Index ID → vector<IndexCacheItem>`
+
+**Purpose:** Track index definitions during CREATE/DROP INDEX.
+
+#### 5. Namespace Caches
+- `_namespace_id_cache`: Map `DB → Namespace ID → XID/LSN → NamespaceRecord`
+- `_namespace_name_cache`: Map `DB → Namespace Name → XID/LSN → NamespaceRecord`
+
+**Purpose:** Track namespace changes during CREATE/ALTER/DROP SCHEMA.
+
+#### 6. User Type Cache (`_usertype_id_cache`)
+**Map:** `DB → Type ID → XID/LSN → UserTypeRecord`
+
+**Purpose:** Track user-defined type changes during CREATE/ALTER/DROP TYPE.
+
+#### 7. Table Existence Cache (`_table_existence_cache`)
+
+**Special Property:** **Persists across `finalize()` calls**
+
+```cpp
+struct TableExistenceRange {
+    XidLsn start_xid_lsn;  // First XID where table exists (inclusive)
+    XidLsn end_xid_lsn;    // First XID where table no longer exists (exclusive)
+};
+```
+**Map:** `DB → Table ID → vector<TableExistenceRange>`
+
+**Purpose:**
+- Track table lifecycle across drops and recreates (resync operations)
+- Survives finalize to support historical queries
+- Protected by dedicated `_table_existence_cache_mutex`
+
+### Server Lifecycle Operations
+
+#### DDL Operations
+```cpp
+std::string create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
+std::string alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
+std::string drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
+
+proto::IndexProcessRequest create_index(...);
+proto::IndexProcessRequest drop_index(...);
+void set_index_state(...);
+
+std::string create_namespace(...);
+std::string create_usertype(...);
+```
+
+**Behavior:**
+- Populate uncommitted caches
+- Do NOT write to disk
+- Return DDL JSON for DDL manager
+
+#### Synchronization Operations
+```cpp
+void update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata);
+```
+
+**Purpose:** Record table roots and stats after data sync.
+
+#### Transaction Finalization
+```cpp
+void finalize(uint64_t db_id, uint64_t xid, bool call_sync);
+void sync(uint64_t db_id, uint64_t xid);
+```
+
+**Actions:**
+1. Write all uncommitted caches to system tables on disk
+2. Flush system tables to disk (if `call_sync=true` or via separate `sync()`)
+3. Update committed XID in SHM caches with schema change flags
+4. Clear uncommitted caches (except `_table_existence_cache`)
+
+**Note:** `finalize()` can be called without `sync()` for async persistence.
+
+#### Transaction Abort
+```cpp
+void revert(uint64_t db_id, uint64_t xid);
+```
+
+**Actions:**
+1. Discard all uncommitted changes for the given XID
+2. Clear entries from all uncommitted caches
+3. No disk writes
+
+#### Cache Invalidation
+```cpp
+void invalidate_table(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+void invalidate_db(uint64_t db_id, const XidLsn &xid);
+```
+
+**Purpose:** Propagate DDL changes to in-process SchemaCache.
+
+### Client-Side Operations
+
+The `Client` singleton provides a simplified interface:
+
+```cpp
+TableMetadataPtr get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid);
+std::shared_ptr<const SchemaMetadata> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+SchemaMetadataPtr get_target_schema(uint64_t db_id, uint64_t table_id,
+                                    const XidLsn &access_xid, const XidLsn &target_xid);
+bool exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+std::shared_ptr<UserType> get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid);
+```
+
+**Client Caching Strategy:**
+1. Check in-process SchemaCache
+2. On miss, check SHM cache
+3. On miss, issue gRPC call to server
+4. Cache response in both SHM and SchemaCache
+5. Return to caller
+
+**Cache Registration:**
+```cpp
+void use_roots_cache(std::shared_ptr<ShmCache> c);
+void use_schema_cache(std::shared_ptr<ShmCache> c);
+void use_usertype_cache(std::shared_ptr<ShmCache> c);
+```
+
+Allows client to opt-in to specific SHM caches.
+
+---
+
+## Data Flow
+
+### Schema Read Flow (FDW → Server)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ FDW (PostgreSQL Foreign Data Wrapper)                       │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Access table schema
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ TableMgrClient (client-side)                                │
+│  get_schema(db_id, table_id, xid)                           │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Check SchemaCache (in-process)
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ SchemaCache::get()                                          │
+│  - Cache hit? Return constructed SchemaMetadata             │
+│  - Cache miss? Call populate function                       │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Cache miss
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Client::get_schema() - Check SHM Cache                      │
+│  - ShmCache hit? Deserialize protobuf, return               │
+│  - ShmCache miss? Issue gRPC call                           │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ gRPC: GetSchemaRequest
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ sys_tbl_mgr::Service (server-side gRPC handler)             │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Route to Server
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Server::get_schema(db_id, table_id, xid)                    │
+│  - Acquire read lock (_read_mutex)                          │
+│  - Check uncommitted caches first                           │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Not in uncommitted caches
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Read from System Tables (via SystemTableMgr)                │
+│  - Read Schemas table: columns at XID                       │
+│  - Read Indexes table: indexes at XID                       │
+│  - Read IndexNames table: index metadata                    │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Construct SchemaMetadata
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ SchemaMetadata object constructed                           │
+│  - columns: vector<SchemaColumn>                            │
+│  - indexes: vector<Index>                                   │
+│  - access_range: XID validity range                         │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Serialize to protobuf
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ proto::GetSchemaResponse                                    │
+│  - Serialized schema columns                                │
+│  - Serialized indexes                                       │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ gRPC response
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Client receives response                                    │
+│  - Store in SHM cache (for other processes)                 │
+│  - Store in SchemaCache (for local reuse)                   │
+│  - Return SchemaMetadataPtr to caller                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Table Roots Read Flow
+
+```
+FDW
+  ↓
+TableMgrClient::get_roots(db_id, table_id, xid)
+  ↓
+Check SHM cache (springtail.roots)
+  ↓ (miss)
+gRPC: GetRootsRequest
+  ↓
+Server::get_roots()
+  ↓
+Check _roots_cache (uncommitted)
+  ↓ (miss)
+Read TableRoots system table
+  ↓
+Read TableStats system table
+  ↓
+Construct TableMetadata
+  ↓
+Serialize to proto::GetRootsResponse
+  ↓
+Return via gRPC
+  ↓
+Client stores in SHM cache
+  ↓
+Return TableMetadataPtr
+```
+
+### DDL Write Flow (CREATE TABLE)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ PostgreSQL Event Trigger                                    │
+│  - Captures CREATE TABLE event                              │
+│  - Sends PgMsgTable via replication stream                  │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Replication message
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Server::create_table(db_id, xid, msg)                       │
+│  - Acquire write lock (_write_mutex)                        │
+│  - Assign new table_id                                      │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Populate uncommitted caches
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ _table_cache[db][table_id][xid] = TableCacheRecord          │
+│  - name, namespace_id, exists=true, etc.                    │
+└─────────────────────────────────────────────────────────────┘
+                     │
+┌─────────────────────────────────────────────────────────────┐
+│ _schema_cache[db][table_id][col_id] = vector<ColumnHistory> │
+│  - For each column in the table                             │
+└─────────────────────────────────────────────────────────────┘
+                     │
+┌─────────────────────────────────────────────────────────────┐
+│ _index_cache[db][table_id][PRIMARY_INDEX] = IndexCacheItem  │
+│  - Primary index definition                                 │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Generate DDL JSON for DDL manager
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Return DDL JSON string                                      │
+│  - DDL manager will track and apply on commit               │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Transaction commits...
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Server::finalize(db_id, xid, call_sync=true)                │
+│  - Acquire unique lock on _write_mutex                      │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Persist to disk
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Write to System Tables                                      │
+│  - TableNames: Insert (table_id, name, xid, exists=true)    │
+│  - Schemas: Insert (table_id, col, xid) for each column     │
+│  - Indexes: Insert (table_id, PRIMARY_INDEX, xid)           │
+│  - IndexNames: Insert (PRIMARY_INDEX, state=READY)          │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Sync to disk
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ SystemTable::sync() for each modified system table          │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Update SHM caches
+                     ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ ShmCache::update_committed_xid(db, xid, has_schema_changes=true) │
+│  - Records schema change at this XID                             │
+│  - Updates committed XID timestamp                               │
+└────────────────────┬─────────────────────────────────────────────┘
+                     │
+                     │ Clear uncommitted caches
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ _table_cache.clear(db)                                      │
+│ _schema_cache.clear(db)                                     │
+│ _index_cache.clear(db)                                      │
+│ ... (but NOT _table_existence_cache)                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Cache Invalidation Flow
+
+When DDL changes occur, caches must be invalidated:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ DDL Operation Committed (e.g., ALTER TABLE ADD COLUMN)      │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ DDL manager notifies FDW
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ FDW detects schema change at new XID                        │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Invalidate local cache
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Client::invalidate_table(db_id, table_id, xid)              │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ Propagate to SchemaCache
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ SchemaCache::invalidate_table(db, tid, xid)                 │
+│  - Marks schema entry as ending at xid                      │
+│  - Future access beyond xid triggers refetch                │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     │ SHM cache already updated by Server during finalize
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ ShmCache has new schema version cached                      │
+│  - Next get_schema(xid > old_xid) will hit SHM cache        │
+│  - Or fetch from server if not in SHM                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Points:**
+- Server updates SHM cache during `finalize()` with new schema
+- Clients invalidate local SchemaCache when notified
+- Next access automatically fetches new schema from SHM or server
+- Multi-process coordination via SHM ensures consistency
+
+---
+
+## Key Design Patterns
+
+### 1. Two-Level Client Caching
+
+**Pattern:** Client maintains both SHM cache (cross-process, serialized) and SchemaCache (in-process, deserialized).
+
+**Benefits:**
+- SHM cache enables sharing between FDW worker processes
+- SchemaCache provides fast in-memory access without deserialization
+- Reduces RPC overhead significantly
+
+**Trade-off:** Memory overhead for duplicate storage, mitigated by LRU eviction.
+
+### 2. Uncommitted vs. Committed Data Separation
+
+**Pattern:** Server maintains separate caches for uncommitted DDL changes.
+
+**Benefits:**
+- Allows querying pending changes without disk I/O
+- Clean separation between in-flight and committed metadata
+- Enables atomic commit via `finalize()`
+
+**Implementation:**
+- Uncommitted: `_table_cache`, `_schema_cache`, `_index_cache`, etc.
+- Committed: System tables on disk, SHM caches
+- Cleared on `finalize()` or `revert()`
+
+### 3. XID/LSN Versioning
+
+**Pattern:** Every metadata entry tagged with `(xid, lsn)`.
+
+**Benefits:**
+- Enables querying schema at any historical point (MVCC)
+- Supports concurrent transactions without locking
+- Critical for consistency in distributed system
+
+**Example:** Reading table at XID 100 returns schema as of XID 100, even if XID 150 has altered it.
+
+### 4. LRU Eviction with XID History Preservation
+
+**Pattern:** SHM cache uses LRU for memory management but preserves XID history.
+
+**Benefits:**
+- Prevents memory exhaustion
+- Retains critical XID commit information
+- Allows detecting dropped objects without full history
+
+**Implementation:**
+- Message data evicted via LRU
+- XID history retained via `_xid_history_map`
+- `keep_alive()` ensures timestamp freshness
+
+### 5. Lazy Evaluation
+
+**Pattern:** SchemaCache populates on-demand via callback.
+
+**Benefits:**
+- Defers expensive construction until needed
+- Allows server to control fetch logic
+- Reduces memory footprint for unused schemas
+
+**Implementation:**
+```cpp
+SchemaMetadataPtr get(uint64_t db, uint64_t tid, const XidLsn &xid, PopulateFn populate);
+```
+
+Callback invoked only on cache miss.
+
+### 6. Persistent Table Existence Cache
+
+**Pattern:** `_table_existence_cache` survives `finalize()` calls.
+
+**Benefits:**
+- Supports resync operations (drop and recreate table)
+- Enables fast existence checks without disk I/O
+- Tracks complete table lifecycle across multiple creation/deletion cycles
+
+**Implementation:**
+```cpp
+std::map<DbId, std::map<TableId, vector<TableExistenceRange>>> _table_existence_cache;
+```
+
+Each range represents one lifecycle: `[start_xid, end_xid)`.
+
+### 7. Index-to-Table Mapping
+
+**Pattern:** SchemaCache maintains `(db, index_id) -> table_id` mapping.
+
+**Benefits:**
+- Enables invalidation during DROP INDEX when table_id not provided
+- PostgreSQL event trigger doesn't provide table_id for index drops
+- Efficient schema cache invalidation
+
+**Implementation:**
+```cpp
+std::map<std::pair<uint64_t, uint64_t>, uint64_t> _index_map;  // (db, index_id) -> table_id
+```
+
+### 8. Soft Deletes with `exists` Flag
+
+**Pattern:** Mark objects as deleted with `exists=false` rather than physical deletion.
+
+**Benefits:**
+- Historical queries can see deleted objects at past XIDs
+- Simplifies MVCC implementation
+- Avoids complex deletion cascade logic
+
+**Trade-off:** Requires periodic cleanup (garbage collection).
+
+### 9. Write-Through Caching
+
+**Pattern:** Server writes to both uncommitted cache AND system tables simultaneously.
+
+**Benefits:**
+- Ensures consistency between cache and disk
+- Simplifies finalize logic (just flush to disk)
+- Enables fast queries during transaction
+
+**Implementation:**
+```cpp
+void _set_table_info(uint64_t db_id, TableCacheRecordPtr table_info) {
+    // Write to _table_cache
+    _table_cache[db_id][table_id][xid] = table_info;
+    // Write to TableNames system table
+    _write_table_names_entry(...);
+}
+```
+
+### 10. XID Heartbeat Mechanism
+
+**Pattern:** Require periodic `keep_alive()` calls to validate committed XIDs.
+
+**Benefits:**
+- Prevents using stale XIDs from crashed processes
+- Simple liveness detection
+- No complex distributed consensus required
+
+**Implementation:**
+- `XID_KEEP_ALIVE_PERIOD = 60ms`
+- `is_alive()` checks timestamp freshness
+- `get_committed_xid()` fails if not alive
+
+---
+
+## Appendix: Key File Reference
+
+### Core Headers
+
+- `include/sys_tbl_mgr/system_tables.hh` - System table schemas and helper classes
+- `include/sys_tbl_mgr/shm_cache.hh` - Shared memory cache interface
+- `include/sys_tbl_mgr/schema_cache.hh` - In-process schema cache
+- `include/sys_tbl_mgr/server.hh` - Server-side management
+- `include/sys_tbl_mgr/client.hh` - Client-side RPC interface
+- `include/sys_tbl_mgr/table.hh` - Table interface and SchemaMetadata definition
+- `include/sys_tbl_mgr/msg_cache.hh` - Generic message cache template
+- `include/storage/schema.hh` - SchemaColumn, Index, SchemaMetadata definitions
+
+### Implementations
+
+- `src/sys_tbl_mgr/system_tables.cc` - System table schema definitions
+- `src/sys_tbl_mgr/shm_cache.cc` - Shared memory cache implementation
+- `src/sys_tbl_mgr/schema_cache.cc` - In-process cache implementation
+- `src/sys_tbl_mgr/server.cc` - Server logic and DDL handling
+- `src/sys_tbl_mgr/client.cc` - Client logic and RPC implementation
+
+### Protocol Definitions
+
+- `proto/sys_tbl_mgr.proto` - gRPC service and message definitions
+
+---
+
+## Summary
+
+The Springtail schema management architecture provides a robust, versioned metadata system supporting MVCC, DDL evolution tracking, and efficient multi-process access. Key strengths include:
+
+1. **Multi-Version Concurrency Control**: Every metadata entry versioned by XID/LSN
+2. **Three-Tier Caching**: SHM (cross-process) → SchemaCache (in-process) → Disk
+3. **Uncommitted Change Tracking**: Server-side caches for pending transactions
+4. **Historical Queries**: Access schema at any past XID via version tracking
+5. **Efficient Invalidation**: Targeted cache invalidation on DDL changes
+6. **Cross-Process Coordination**: Shared memory enables worker process efficiency
+
+The system balances performance (multi-level caching, lazy evaluation) with correctness (MVCC versioning, atomic commits) to provide a scalable foundation for PostgreSQL FDW schema management.

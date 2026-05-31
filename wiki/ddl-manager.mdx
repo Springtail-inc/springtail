@@ -1,0 +1,233 @@
+---
+title: "DDL Manager"
+---
+
+# DDL Manager (FDW) — Architecture and Runtime Behavior
+
+This document describes how the DDL Manager operates, how it initializes databases on the Foreign Data Wrapper (FDW) Postgres node, and how it continuously applies schema and security-related changes originating from the primary system. It focuses on runtime behavior and component interactions.
+
+## 1. High-level responsibility
+
+The DDL Manager is the component responsible for keeping an FDW Postgres instance synchronized with:
+- **Logical schema structure** (schemas, tables, partition parents, foreign tables, user-defined enum types).
+- **Ongoing DDL mutations** (create/rename/drop objects and other supported schema changes).
+- **Security and ownership state** (roles, role memberships, row-level security policies, and table owners).
+
+It does this by:
+- Performing **initial bootstrap** of each replicated database on the FDW node.
+- Listening for and applying **incremental DDL change batches** emitted through Redis queues.
+- Running a periodic **synchronization loop** that replicates security/ownership metadata from the primary Postgres to the FDW Postgres.
+
+---
+
+## 2. Startup sequence and initialization
+
+### 2.1 Startup entry and configuration
+On startup, the DDL Manager is initialized with:
+- A unique FDW instance identifier.
+- Credentials for a privileged “DDL manager user” that can create/alter/drop objects and manage roles/policies on the FDW node.
+- A proxy user password used when creating replicated login roles on the FDW node.
+- FDW connection settings (host/port and an optional database name prefix).
+
+The startup process also:
+- Initializes internal caches (notably a small connection cache for FDW DB connections).
+- Starts auxiliary services needed for correctness (such as collecting transaction/XID related information elsewhere in the system).
+- Registers Redis-based watchers for dynamic configuration/state changes (notably, which databases should be replicated and their lifecycle state).
+
+### 2.2 System type discovery (FDW node bootstrap prerequisite)
+Before creating or importing anything, the DDL Manager populates an internal cache of Postgres system-defined types by querying the FDW Postgres instance. This lets it later generate correct table column types when producing CREATE statements for certain objects that must exist locally (e.g., partition parent tables).
+
+### 2.3 Discover replicated databases
+The DDL Manager retrieves from central configuration/Redis the set of database IDs that should be replicated to this FDW instance. For each configured database ID, it creates an internal tracking entry and begins watching the database’s runtime state.
+
+### 2.4 Database state-driven creation
+Databases are not always immediately created. Instead, the DDL Manager reacts to database state:
+- When a database transitions into the **running** state, the DDL Manager performs full initialization on the FDW node (drop/create, schema setup, imports, etc.).
+- When a database leaves the **running** state, the DDL Manager removes it from the FDW node and cleans up associated runtime metadata.
+
+This makes database creation/removal deterministic and tied to operational readiness.
+
+---
+
+## 3. Creating and initializing a replicated database on the FDW node
+
+When a database becomes eligible (running), the DDL Manager performs initialization in several broad phases.
+
+### 3.1 Drop and recreate the FDW-side database
+The FDW Postgres node maintains a distinct database per replicated source database (optionally with a prefix applied). Initialization begins by:
+- Dropping the FDW-side database (if present).
+- Creating it again as a clean target for import and future updates.
+
+This ensures the FDW database is rebuilt consistently from a known-good baseline during initial sync.
+
+### 3.2 Connect into the new FDW database and prepare prerequisites
+After creating the database, the DDL Manager connects into that database and performs prerequisite setup:
+- Ensures required extensions exist (environment-dependent extensions as configured).
+- Recreates the FDW extension in the database.
+- Recreates the foreign server object used as the import source, including FDW-specific options such as identifiers and the current schema “watermark” XID.
+
+### 3.3 Determine which schemas to replicate
+The DDL Manager computes the set of schemas to replicate based on configuration. This can include:
+- Explicit schema allowlists.
+- Schema names derived from included tables.
+- An “all schemas” mode.
+
+If no schemas are configured for replication, the database initialization effectively becomes a no-op for schema import.
+
+### 3.4 Create schemas locally on FDW node
+For each schema selected for replication, the DDL Manager ensures the schema exists on the FDW node.
+
+### 3.5 Create local objects that must exist as regular tables (partition parents)
+Some partitioning constructs require local (non-foreign) tables to exist on the FDW node so that foreign leaf partitions can attach or behave correctly. During initialization, the DDL Manager generates and executes the necessary DDL so that:
+- Partition parent tables (and other required non-leaf partition objects, depending on the partition structure) exist as regular tables.
+- These objects carry identifying metadata so they can later be recognized and validated.
+
+### 3.6 Create user-defined enum types (where applicable)
+If the replicated schema contains user-defined enum types that need to exist on the FDW node, they are created before importing foreign tables. This is necessary because imported foreign tables may reference those types, and Postgres requires the types to exist at parse/plan time.
+
+### 3.7 Import foreign schema
+With schemas created (and prerequisite local objects in place), the DDL Manager imports the foreign schema into the FDW database. This creates foreign tables that map to primary-side tables (subject to partitioning rules and the object selection rules from configuration).
+
+### 3.8 Initialize Row-Level Security (RLS) flags on FDW objects
+After import, the DDL Manager scans the system’s schema metadata to determine which tables require row-level security enabled and/or forced, then applies the corresponding RLS settings on the FDW node.
+
+### 3.9 Record the baseline schema watermark (schema XID)
+Initialization is anchored to a committed transaction identifier (schema XID). After initialization succeeds:
+- The DDL Manager records this schema XID in Redis as the FDW’s applied watermark for that database.
+- It updates its internal per-database “latest applied” XID.
+
+This watermarking is critical for allowing incremental DDL application to resume correctly from the baseline.
+
+---
+
+## 4. Continuous DDL change replication (schema mutations)
+
+### 4.1 DDL change production and queueing (upstream)
+DDL statements are produced upstream and coordinated through Redis. The overall coordination model is:
+- DDL changes are associated with a specific database and a specific transaction identifier (XID).
+- Changes are delivered to FDW instances through a queue keyed by FDW identity.
+- FDWs report progress by writing back the latest schema XID they have successfully applied.
+
+The DDL Manager acts as the FDW-side consumer that processes these queued change batches.
+
+### 4.2 Main DDL processing loop
+The DDL Manager runs a dedicated long-lived thread that:
+- Blocks waiting for the next set of DDL batches from Redis.
+- Receives one or more entries, each belonging to a single database and schema XID, containing a list of DDL JSON objects.
+
+For each received batch:
+- The DDL Manager determines whether the XID has already been applied (based on its per-database latest applied watermark).
+- If already applied, it will acknowledge the entry without updating progress (to clear redundant queue items).
+- If not yet applied, it schedules the work for execution.
+
+### 4.3 Per-database ordering and pending DDL behavior
+DDL batches are applied in schema XID order per database. If a database is not currently in the running state:
+- The DDL Manager stores incoming DDL batches in a per-database pending map keyed by XID.
+- When the database later transitions to running, pending entries greater than the current initialized watermark are queued for execution.
+
+This prevents applying schema mutations to databases that are not yet initialized or are being removed.
+
+### 4.4 Thread pool execution model
+Actual DDL application is performed via a small thread pool that accepts per-database work items. Each work item corresponds to a specific database and a range of schema XIDs to apply.
+
+Key properties:
+- Work is grouped by database so that a single task can apply multiple XIDs in sequence.
+- Execution uses a database-scoped lock to ensure the database cannot be concurrently removed while DDL is being applied.
+- DDL statements are executed within a transaction on the FDW database so the batch is atomic from the FDW’s perspective.
+
+### 4.5 Generating executable SQL and applying it
+Incoming DDL payloads are JSON objects describing the intended mutation. The DDL Manager:
+- Converts each supported DDL JSON object into one SQL statement (or a small set of statements where required).
+- Filters out unsupported or no-op operations (some objects may not require action on the FDW node depending on partitioning and object type).
+- Appends an update to the FDW server metadata so that the FDW database itself records the most recently applied schema XID.
+
+All statements for the scheduled batch are executed in-order within a single transaction. If the transaction succeeds:
+- The DDL Manager updates Redis with the new schema XID watermark for that database.
+- Its internal latest applied watermark advances accordingly.
+
+If the transaction fails:
+- The DDL Manager treats this as a fatal replication failure for that batch and triggers rollback/requeue behavior via Redis coordination so that the system can retry or recover.
+
+---
+
+## 5. Periodic security/ownership and policy synchronization
+
+Schema structure replication alone is insufficient for correct access control and query behavior. The DDL Manager therefore runs a separate periodic synchronization thread that reconciles FDW-side security state with primary-side security state.
+
+### 5.1 Purpose of the sync thread
+The sync thread is responsible for ensuring the FDW node reflects the primary node’s:
+- Roles (create/alter/drop).
+- Role membership grants and revocations.
+- Row-level security policies (create/drop/update).
+- Table ownership changes.
+
+This is done independently of the incremental DDL queue and runs continuously at a configurable interval.
+
+### 5.2 How the sync thread operates
+At each interval, for each active/running replicated database:
+- It connects to the primary Postgres database for that database name.
+- It connects to the corresponding FDW database.
+- It opens a transaction on both connections.
+- It queries the primary for detected diffs against a snapshot history (diff-oriented approach).
+- It applies the necessary changes to the FDW database.
+- It updates/cleans the primary-side diff history entries once changes are successfully applied.
+
+If any error occurs while applying changes:
+- Both transactions are rolled back.
+- The system relies on the next sync iteration to retry once underlying dependencies are satisfied (for example, if a table required for a policy is not yet present on the FDW node).
+
+### 5.3 First-pass initialization behavior
+On the first successful sync pass after startup, the DDL Manager resets diff history tracking so that:
+- The FDW starts from a clean security/ownership baseline.
+- Subsequent sync iterations only apply incremental changes.
+
+After the initial sync completes successfully, the FDW instance transitions into the normal “running” state in system configuration.
+
+### 5.4 Dependency awareness for policies and ownership changes
+Some security or ownership changes depend on objects existing in the FDW database (e.g., policies require the target table to exist). The sync process therefore:
+- Verifies necessary objects exist before applying certain changes.
+- If a required object does not exist yet, it removes or defers the diff entry so it does not repeatedly fail.
+- Uses transactional protection so partial changes do not leave FDW state inconsistent.
+
+---
+
+## 6. Lifecycle events and shutdown behavior
+
+### 6.1 Database set changes
+The set of databases replicated by this FDW instance can change dynamically. When the configured database list changes:
+- Databases no longer present are removed (including dropping the FDW-side database and clearing local tracking).
+- Newly added databases are registered and initialized when they enter the running state.
+
+### 6.2 Database state transitions
+When a database leaves running state:
+- It is removed from the FDW node.
+- DDL queues for that database are cleared.
+- Connection cache entries are evicted.
+- Local history metadata is removed on a best-effort basis.
+
+When a database enters running state:
+- It is fully re-initialized on the FDW node and then begins consuming queued DDL mutations.
+
+### 6.3 Shutdown
+On shutdown, the DDL Manager:
+- Signals the sync thread to wake and exit.
+- Joins the main DDL thread and sync thread.
+- Stops accepting or processing new DDL work.
+- Removes Redis watchers and clears internal database tracking.
+- Transitions the FDW instance’s global state to stopped.
+
+---
+
+## 7. Summary of interactions with FDW Postgres
+
+The FDW Postgres node is treated as a managed replica target, and the DDL Manager uses it for:
+- Creating/dropping whole databases for replication targets.
+- Creating schemas, extensions, and foreign server definitions.
+- Importing foreign schema into local schemas.
+- Creating required local tables/types that must exist prior to foreign imports.
+- Applying transactional DDL batches generated from queued changes.
+- Periodically reconciling security/ownership configuration to mirror the primary.
+
+This design splits synchronization into two complementary paths:
+- **DDL queue path** for structural schema mutations in near-real-time.
+- **Periodic sync path** for security and ownership metadata that is handled as diff-based reconciliation.

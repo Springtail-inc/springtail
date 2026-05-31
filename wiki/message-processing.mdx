@@ -1,0 +1,69 @@
+---
+title: "Message Processing"
+---
+
+# Postgres Replication Message Processing (High-Level Flow)
+
+This document describes, at a high level, how a single Postgres replication message moves through the system: from a logical replication connection, into the log manager for durable staging, and then into message-stream parsing to produce structured events for downstream processing.
+
+## 1. Major roles in the pipeline
+
+### Replication connection (CDC ingress)
+A dedicated replication connection maintains a streaming session to Postgres and receives a continuous sequence of logical replication records. Each incoming record has:
+- An ordering position (log sequence position)
+- A message type (data change, transactional boundary, schema-related, etc.)
+- A raw payload, which may arrive fragmented across multiple network reads
+
+The replication connection is responsible for maintaining continuity, reconnect behavior, and producing a clean stream of replication payload bytes plus the metadata needed to order and acknowledge progress.
+
+### Log manager (durable staging + coordination)
+The log manager sits immediately downstream of the replication connection. Its responsibilities are to:
+- Persist incoming replication messages to local durable storage in a sequential log format.
+- Ensure that acknowledgment back to Postgres happens only after durability guarantees are met.
+- Provide a stable “replayable” source of replication data for downstream consumers, including restart recovery after failures.
+
+This stage decouples ingestion reliability from downstream processing speed and isolates transient parsing or indexing failures from the replication session.
+
+### Message stream processing (structured event extraction)
+Message-stream processing is the layer that takes the raw bytes from the staged log and interprets them into higher-level, typed events such as:
+- Transaction boundaries (begin/commit)
+- Row-level changes (insert/update/delete)
+- Metadata and schema-change related events
+- Other logical replication message categories relevant to the system
+
+It incrementally parses the byte stream, reconstructs message boundaries, and emits structured events to later stages.
+
+---
+
+## 2. End-to-end lifecycle of a single replication message
+
+### Step 1: Receive message bytes over the replication stream
+The replication connection continuously reads from the logical replication stream. A “message” in this context may not be delivered as one contiguous read; payloads can be fragmented. The connection layer:
+- Collects incoming bytes
+- Preserves ordering
+- Associates each produced chunk with the message context necessary for later reassembly (including the total message length and current offset within the message)
+
+At this stage the data is still an uninterpreted replication payload (raw bytes plus positional metadata).
+
+### Step 2: Forward to log manager for durable append
+Each message (or message fragment) is forwarded to the log manager, which appends it to a durable log file in a format that supports later sequential reading and recovery.
+
+Key properties of this append stage:
+- The log is written sequentially for throughput and simplicity.
+- Message framing information is preserved so downstream readers can locate message boundaries.
+- The log manager accounts for the fact that some messages may arrive in parts and ensures the log can still represent the original message correctly.
+
+### Step 3: Acknowledge replication progress only after durability
+Acknowledging progress to Postgres is tied to durability, not just receipt. The log manager ensures that:
+- Replication progress is advanced only when the written bytes have been flushed to durable storage.
+- The “ack position” reflects committed progress in a way that is safe to resume from during restarts.
+
+This prevents situations where Postgres believes the consumer has safely processed data that was only buffered in memory and could be lost on crash.
+
+### Step 4: Sequential log reading (decoupled consumer)
+Downstream processing reads replication data from the staged log rather than directly from the replication connection. This decoupling provides:
+- Replay capability after restart (the log is the source of truth)
+- Backpressure control (read rate can differ from ingest rate within bounded buffering)
+- A clean separation between “durable ingestion” and “semantic interpretation”
+
+

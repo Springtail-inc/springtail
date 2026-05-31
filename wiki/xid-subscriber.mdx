@@ -1,0 +1,78 @@
+---
+title: "XID Subscriber"
+---
+
+# PgXidSubscriberMgr
+
+## Overview
+
+`PgXidSubscriberMgr` is a singleton service that manages subscriptions to transaction ID (XID) commit push notifications from the XID manager. It acts as a bridge between the XID manager and the PostgreSQL Foreign Data Wrapper (pg_fdw) by maintaining shared memory caches that enable efficient inter-process communication.
+
+## Architecture
+
+- **Design Pattern**: Singleton (`include/pg_fdw/pg_xid_subscriber_mgr.hh:22`)
+- **Execution Model**: Runs as a dedicated daemon process with its own main thread and a pool of worker threads
+- **Location**: `src/pg_fdw/pg_xid_subscriber_daemon.cc`
+
+## gRPC Streaming Subscription
+
+### Streaming RPC Protocol
+
+The manager uses **gRPC server-side streaming** to receive real-time XID commit notifications from the XID manager:
+
+- **Service**: `XidManager::Subscribe(SubscribeRequest) returns (stream XidPushResponse)` (`src/proto/xid_manager.proto:40`)
+- **Pattern**: Single request initiates a long-lived stream that continuously pushes commit events
+- **Message Format**: Each `XidPushResponse` contains:
+  - `db_id`: Database identifier
+  - `xid`: Transaction ID
+  - `has_schema_changes`: Whether the transaction modified schema
+  - `real_commit`: Distinguishes full commits from recorded transactions
+  - `table_ids`: List of tables modified (for recorded commits only)
+
+**Key characteristics:**
+
+1. **Asynchronous Reactor**: Inherits from `ClientReadReactor` for non-blocking, event-driven streaming
+2. **Lifecycle Management**: gRPC manages object lifetime from `StartCall()` until `OnDone()` callback
+3. **Thread Safety**: Callbacks execute on gRPC's internal thread pool, requiring careful synchronization
+
+**Stream Termination** (`src/xid_mgr/xid_mgr_subscriber.cc:75-86`):
+- `OnDone(const grpc::Status&)` called when stream ends (graceful or error)
+- Signals completion to allow safe destruction
+- Disconnect callback invoked to notify subscriber
+
+## Core Responsibilities
+
+### 1. Transaction Notification Handling
+
+The manager subscribes to the XID manager to receive push notifications when transactions commit. It handles two types of commits:
+
+- **Real Commits** (`real_commit = true`): Full transaction commits that trigger proactive cache population
+- **Recorded Commits** (`real_commit = false`): Transactions with pending mutations that need tracking for write cache lookups
+
+### 2. Shared Memory Cache Management
+
+Maintains five IPC caches populated via shared memory for use by pg_fdw processes:
+
+| Cache | Purpose |
+|-------|---------|
+| **Roots Cache** | Table root metadata |
+| **Schema Cache** | Table schema definitions |
+| **User Type Cache** | User-defined type information |
+| **Table IDs Cache** | Maps (DbId, Xid) → modified table IDs |
+| **Extents Cache** | Stores table mutation extents from write cache |
+
+
+### 3. Asynchronous Cache Population
+
+- When a real commit notification arrives, the manager enqueues a populate job (`src/pg_fdw/pg_xid_subscriber_mgr.cc:96`)
+- Worker threads (`src/pg_fdw/pg_xid_subscriber_mgr.cc:185-234`) process the queue and make RPC calls to fetch:
+  - Table roots via `get_roots()`
+  - Table schemas via `get_schema()`
+  - User type definitions via `get_usertype()`
+- The main subscriber thread remains non-blocking while workers populate caches in the background
+
+## Integration Points
+
+- **XID Manager**: Receives push notifications via `XidMgrSubscriber` using gRPC server-side streaming
+- **System Table Manager**: Uses `sys_tbl_mgr::Client` to fetch metadata
+- **PostgreSQL FDW**: Provides cached data to pg_fdw processes running in separate address spaces

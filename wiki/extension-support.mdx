@@ -1,0 +1,423 @@
+---
+title: "Extension Support"
+---
+
+# PostgreSQL Extension Support System
+
+## Overview
+
+Springtail provides a comprehensive PostgreSQL extension support system that enables loading and using PostgreSQL extensions (e.g., `pg_trgm`, PostGIS) within the Springtail replica. The system dynamically loads extension shared libraries, registers their types, operators, and operator classes, and provides a PostgreSQL-compatible runtime environment for executing extension functions.
+
+**Key Capabilities:**
+- Dynamic loading of PostgreSQL extension shared libraries (`.so` files)
+- Registration of extension types, operators, and operator classes
+- Invocation of extension functions through a compatibility layer
+- Support for GIN and GiST index opclasses (e.g., `gin_trgm_ops`, `gist_point_ops`)
+- PostgreSQL-compatible memory management and function call interface
+
+---
+
+## Architecture Components
+
+### 1. Extension Registry (`PgExtnRegistry`)
+**Location:** `src/pg_ext/extn_registry.cc`, `include/pg_ext/extn_registry.hh`
+
+Central registry that manages all loaded extensions. Singleton pattern ensures global access.
+
+**Responsibilities:**
+- Load extension shared libraries using `dlopen()`
+- Query PostgreSQL system catalogs for extension metadata
+- Maintain mappings of OIDs to function pointers
+- Provide lookup APIs for types, operators, and opclass methods
+
+### 2. PostgreSQL Compatibility Layer (`pg_ext/`)
+**Location:** `src/pg_ext/` and `include/pg_ext/`
+
+Minimal reimplementation of PostgreSQL internal APIs to provide a compatible runtime environment for extension functions.
+
+**Components:**
+- **fmgr**: Function manager - `DirectFunctionCall*()` wrappers
+- **memory**: Memory context management (`TopMemoryContext`, `palloc`, `pfree`)
+- **string**: String utilities (`text` type, `cstring_to_text()`)
+- **array**: PostgreSQL array handling
+- **numeric**: Numeric type support
+- **date/time**: Date and time types
+- **jsonb**: JSONB type support
+- **error**: Error reporting (`ereport`, `elog`)
+- **node**: PostgreSQL node types
+- **hash**: Hash functions
+- **list**: PostgreSQL list structures
+
+### 3. Extension Initialization
+**Location:** `src/pg_repl/pg_copy_table.cc::init_pg_extn_registry()`
+
+Initialization flow during database setup that loads extensions configured in `system.json.settings`.
+
+**Process:**
+1. Read extension configuration from `Properties::EXTENSION_CONFIG`
+2. For each extension:
+   - Load shared library (`.so` file)
+   - Load types from `pg_type` system catalog
+   - Load operators from `pg_operator` system catalog
+   - Load opclasses from `pg_opclass` system catalog
+3. Create extension type definitions in Springtail system tables
+
+---
+
+## Extension Loading Flow
+
+```
+Application Startup
+      │
+      ▼
+PgCopyTable::init_pg_extn_registry(db_id, xid)
+  → Reads extension config from system.json
+  → For each extension:
+      │
+      ├─→ PgExtnRegistry::init_libraries()
+      │     ├─ dlopen() loads extension .so file
+      │     └─ Stores library handle in _library_map
+      │
+      ├─→ _load_extn_types()
+      │     ├─ Queries pg_type for extension types
+      │     ├─ For each type:
+      │     │   ├─ dlsym() loads type I/O functions (typinput, typoutput, typreceive, typsend)
+      │     │   └─ PgExtnRegistry::add_type()
+      │     └─ Creates extension types in Server::create_usertype()
+      │
+      ├─→ _load_extn_operators()
+      │     ├─ Queries pg_operator for extension operators
+      │     ├─ For each operator:
+      │     │   ├─ dlsym() loads operator implementation function
+      │     │   └─ PgExtnRegistry::add_operator()
+      │     └─ Stores operator_name → function_ptr mappings
+      │
+      └─→ _load_extn_opclasses()
+            ├─ Queries pg_opclass for GIN/GIST opclasses
+            ├─ For each opclass method (compress, penalty, union, etc.):
+            │   ├─ dlsym() loads support function
+            │   └─ PgExtnRegistry::add_opclass()
+            └─ Stores (opclass_name, support_number) → method mappings
+```
+
+---
+
+## Configuration
+
+Extension configuration is stored in `system.json` under the `extension_config` key:
+
+```json
+{
+  "extension_config": {
+    "lib_path": "/usr/lib/postgresql/16/lib/",
+    "<db_id>": {
+      "pg_trgm": {},
+      "postgis": {}
+    }
+  }
+}
+```
+
+**Fields:**
+- `lib_path`: Directory containing PostgreSQL extension `.so` files
+- `<db_id>`: Database ID (as string) mapping to list of extension names
+- Extension names must match the `.so` filename (e.g., `pg_trgm` → `pg_trgm.so`)
+
+---
+
+## Extension Registry API
+
+### Type Management
+
+```cpp
+// Add extension type and its I/O functions
+void add_type(const std::string& extension,
+              uint32_t oid,
+              const std::string& typinput,
+              const std::string& typoutput,
+              const std::string& typreceive,
+              const std::string& typsend);
+
+// Get type metadata by OID
+PgType get_type_by_oid(uint32_t oid) const;
+
+// Get type I/O function by name
+void* get_type_func_by_type_name(const std::string& type_name) const;
+
+// Convert binary → Datum using typreceive
+Datum binary_to_datum(const std::span<const char>& value, Oid pg_oid, int32_t atttypmod) const;
+
+// Convert Datum → string using typoutput
+std::string datum_to_string(Datum value, Oid pg_oid) const;
+```
+
+### Operator Management
+
+```cpp
+// Add extension operator
+void add_operator(const std::string& extension,
+                  uint32_t oid,
+                  const std::string& oper_name,
+                  const std::string& proc_name);
+
+// Get operator function by OID
+void* get_operator_func_by_oid(uint32_t oid) const;
+
+// Get operator function by operator name (e.g., "=", "<@")
+void* get_operator_func_by_oper_name(const char* oper_name) const;
+
+// Compare two values using extension operator
+static bool comparator_func(const ExtensionContext* context,
+                           const std::span<const char>& lhval,
+                           const std::span<const char>& rhval);
+```
+
+### Operator Class Management
+
+```cpp
+// Add opclass method (e.g., GIN extractValue, GIST compress)
+void add_opclass(const std::string& extension,
+                 PgOpsClass opclass,
+                 PgOpsClassMethod method);
+
+// Get opclass method by name and support number
+PgOpsClassMethod get_opclass_method_by_method_name(const std::string& opclass_name,
+                                                    int support_number);
+
+// Invoke opclass method
+static Datum invoke_opclass_method(const std::string& opclass_name,
+                                   int support_number,
+                                   Datum value);
+```
+
+---
+
+## Usage Examples
+
+### Example 1: Trigram Extraction (GIN)
+
+```cpp
+// Extract trigrams from text using pg_trgm extension
+#include <pg_ext/extn_registry.hh>
+
+std::vector<std::string> extract_trigrams(const std::string& text) {
+    auto registry = PgExtnRegistry::get_instance();
+
+    // Convert string to PostgreSQL text datum
+    Datum text_datum = PointerGetDatum(cstring_to_text_auto(text.c_str()));
+
+    // Get GIN extractValue method for gin_trgm_ops
+    auto method = registry->get_opclass_method_by_method_name("gin_trgm_ops", GIN_EXTRACTVALUE);
+
+    // Invoke extractValue function
+    PGFunction func = (PGFunction)method.function_ptr;
+    int32_t nentries = 0;
+    Datum result = DirectFunctionCall3(func, text_datum,
+                                      PointerGetDatum(&nentries),
+                                      PointerGetDatum(nullptr));
+
+    // Process result...
+    Datum* entries = (Datum*) DatumGetPointer(result);
+    std::vector<std::string> trigrams;
+    for (int i = 0; i < nentries; i++) {
+        // Unpack trigram integer to 3-byte string
+        uint32_t trgm_int = DatumGetInt32(entries[i]);
+        trigrams.push_back(unpack_trigram_int_to_string(trgm_int));
+    }
+
+    return trigrams;
+}
+```
+
+### Example 2: GIST Compress (Geometric)
+
+```cpp
+// Compress point for GIST index using gist_point_ops
+GistEntry compress_point(const Point& point) {
+    auto registry = PgExtnRegistry::get_instance();
+
+    // Convert point to datum
+    Datum point_datum = PointPGetDatum(&point);
+
+    // Get GIST compress method
+    auto method = registry->get_opclass_method_by_method_name("gist_point_ops", GIST_COMPRESS);
+
+    // Setup GISTENTRY
+    GISTENTRY entry;
+    entry.key = point_datum;
+    entry.leafkey = true;
+
+    // Invoke compress function
+    PGFunction func = (PGFunction)method.function_ptr;
+    Datum compressed = DirectFunctionCall1(func, PointerGetDatum(&entry));
+
+    // Extract compressed result
+    GISTENTRY* result = (GISTENTRY*) DatumGetPointer(compressed);
+    return GistEntry{result->key, true};
+}
+```
+
+### Example 3: Extension Type Comparison
+
+```cpp
+// Compare two extension type values (e.g., PostGIS geometries)
+bool compare_extension_values(const std::span<const char>& lhs,
+                             const std::span<const char>& rhs,
+                             uint32_t type_oid,
+                             const char* operator_name) {
+    ExtensionContext context;
+    context.type_oid = type_oid;
+    context.op_str = operator_name;
+
+    return PgExtnRegistry::comparator_func(&context, lhs, rhs);
+}
+```
+
+---
+
+## System Catalog Queries
+
+The extension registry queries PostgreSQL system catalogs to discover extension metadata:
+
+### Type Query
+```sql
+SELECT t.oid AS type_oid,
+       split_part(t.typinput::regproc::text, '.', 2) AS type_input,
+       split_part(t.typoutput::regproc::text, '.', 2) AS type_output,
+       split_part(t.typreceive::regproc::text, '.', 2) AS type_receive,
+       split_part(t.typsend::regproc::text, '.', 2) AS type_send
+FROM pg_type t
+WHERE t.oid IN (
+    SELECT objid FROM pg_depend d
+    JOIN pg_extension e ON e.oid = d.refobjid
+    WHERE e.extname = '<extension_name>'
+      AND d.deptype = 'e'
+      AND d.classid = 'pg_type'::regclass
+);
+```
+
+### Operator Query
+```sql
+SELECT opr.oid AS oper_oid,
+       opr.oprname AS oper_name,
+       proc.proname AS proc_name
+FROM pg_operator opr
+JOIN pg_proc proc ON proc.oid = opr.oprcode
+WHERE proc.oid IN (
+    SELECT objid FROM pg_depend d
+    JOIN pg_extension e ON e.oid = d.refobjid
+    WHERE e.extname = '<extension_name>'
+      AND d.deptype = 'e'
+      AND d.classid = 'pg_proc'::regclass
+);
+```
+
+### Opclass Query
+```sql
+SELECT am.amname AS access_method,
+       opc.opcname AS opclass_name,
+       ap.amprocnum AS support_number,
+       p.proname AS support_function_name
+FROM pg_opclass opc
+JOIN pg_am am ON am.oid = opc.opcmethod
+JOIN pg_opfamily opf ON opf.oid = opc.opcfamily
+LEFT JOIN pg_amproc ap ON ap.amprocfamily = opf.oid
+LEFT JOIN pg_proc p ON p.oid = ap.amproc
+LEFT JOIN pg_extension ext ON ext.oid = (
+    SELECT refobjid FROM pg_depend WHERE objid = opc.oid
+)
+WHERE am.amname IN ('gin', 'gist')
+  AND ext.extname = '<extension_name>';
+```
+
+---
+
+## Integration Points
+
+### 1. Index Building
+**File:** `src/pg_log_mgr/indexer.cc`
+
+Uses extension registry to invoke opclass methods during index construction:
+- GIN: `extractValue` to tokenize values
+- GIST: `compress` to encode leaf entries
+
+### 2. Index Scanning
+**File:** `src/pg_fdw/pg_fdw_mgr.cc`
+
+Uses extension registry for query execution:
+- GIN: `extractQuery` to extract search keys from query patterns
+- GIST: `consistent` to filter index entries (future)
+
+### 3. Index Maintenance
+**File:** `src/sys_tbl_mgr/mutable_table.cc`
+
+Uses extension registry for incremental updates:
+- Applies opclass methods to new/modified rows
+- Maintains index consistency
+
+### 4. Storage Layer
+**Files:** `src/storage/gist_helpers.cc`, `src/storage/mutable_btree.cc`
+
+Direct integration with extension registry for GIST operations:
+- `extract_gist_entry_from_tuple()`: Compress leaf values
+- `compute_gist_penalty()`: Calculate insertion cost
+- `compute_union()`: Merge predicates for internal nodes
+
+---
+
+## Implementation Notes
+
+### Dynamic Linking
+- Uses `dlopen(RTLD_NOW | RTLD_GLOBAL)` for eager symbol resolution
+- RTLD_GLOBAL required for cross-extension symbol visibility
+- Extension `.so` files must be compiled with PostgreSQL headers
+
+### Memory Management
+- Extension functions expect PostgreSQL memory contexts
+- `pg_ext/memory.cc` provides `TopMemoryContext` and `palloc/pfree`
+- Memory contexts are simplified compared to full PostgreSQL
+
+### Function Call Interface
+- `DirectFunctionCall*()` macros wrap extension function calls
+- FunctionCallInfo structure provides arguments and context
+- Collation and null handling supported
+
+### Type System Integration
+- Extension types stored in Springtail system tables
+- Binary format compatibility with PostgreSQL wire protocol
+- Datum abstraction layer for type-agnostic operations
+
+---
+
+## Limitations and Future Work
+
+### Current Limitations
+1. **Limited pg_ext Coverage**: Not all PostgreSQL internal APIs are implemented
+2. **No Extension Updates**: Extension changes require restart
+3. **Single-threaded dlopen**: Library loading not thread-safe
+4. **No Unloading**: Extensions cannot be dynamically unloaded
+
+---
+
+### Common Issues
+
+**Issue:** `Failed to load library: undefined symbol`
+- **Cause:** Extension .so missing dependencies
+- **Fix:** Ensure all PostgreSQL libraries are in `LD_LIBRARY_PATH`
+
+**Issue:** `Failed to find function PGFunction <name>`
+- **Cause:** Function name mismatch or not exported
+- **Fix:** Verify function exists in .so using `nm -D <extension>.so`
+
+**Issue:** `No extension configuration found`
+- **Cause:** Missing or malformed `extension_config` in system.json
+- **Fix:** Add proper configuration with db_id and extension names
+
+---
+
+## Related Documentation
+
+- [GIN Index Implementation](https://github.com/Springtail-inc/springtail/wiki/GIN-Index-support) - GIN index with extension support
+- [GIST Index Implementation](https://github.com/Springtail-inc/springtail/wiki/GIST-Index-support) - GIST index with extension support
+- pg_ext Library Reference - PostgreSQL compatibility layer
+- Extension Registry API - Detailed API documentation

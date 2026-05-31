@@ -1,0 +1,48 @@
+---
+title: "User Management"
+---
+
+# User Management
+
+## Overview
+This document describes how user credentials are sourced and managed, the roles expected in the secrets store, and how authorization is performed for client and server logins. It focuses on behavioral and operational aspects rather than implementation details.
+
+## Retrieving Users from Secrets Mgr
+- Secrets are centrally stored and periodically fetched by the user-management component. The component queries the secrets provider and constructs an in-memory set of users and their associated data.  Currently the AWS Secrets Mgr is supported.
+- For each secret entry the system extracts: username, password (or secret blob), role, and password-type metadata. Only entries with an approved role are incorporated into the active user set.
+- After secret retrieval, the system periodically queries the primary database to determine the set of databases each user is allowed to connect to, producing a mapping of username → allowed databases.
+- Changes in secrets are applied incrementally: existing users are updated if credentials change, new users are added, and removed users are discarded.
+
+## Roles in the Secrets Manager
+The secrets entries include a role attribute that determines how the credential is used by the proxy. Typical roles are:
+
+- **Primary DB login (replication role)**: Credentials used as the canonical login for the primary database. These credentials are used by the system to perform privileged queries (such as discovering user-to-database grants) and to validate global configuration. This role represents the primary authoritative login for administrative queries.
+
+- **Database user (database role)**: Credentials for application or end-user database accounts. These entries are mapped to application users and are associated with the set of databases the user may connect to. These are the credentials used for authenticating client sessions that request access to a particular database.
+
+- **FDW proxy (proxy-to-fdw role)**: A special credential used when the proxy needs to authenticate to replica on behalf of a client session. The FDW proxy password is used as the server-side password when establishing connections to replica nodes, allowing controlled access to read-only replicas.
+
+Notes on role behavior:
+- The FDW proxy entry is a shared credential that the system can attach to per-user server-side logins when interacting with replicas; it is not the client-visible password for end users.
+- The database user entries include metadata listing which databases the user is permitted to access. That mapping is authoritative for request-time authorization checks and is updated periodically by querying the Primary for databases to which the user has **connect** privileges.
+
+## Password Types and Handling
+- Secrets may indicate different storage formats or authentication schemes (plain text, MD5, SCRAM, etc.). The system preserves the indicated type and uses it to drive the authentication exchange with clients or servers.
+- For SCRAM-style credentials, the system maintains the derived keys necessary to complete the SCRAM exchange without exposing raw passwords.
+
+## Authorization Flow (Client and Server)
+- When a client initiates a session, the proxy examines the requested username and database and resolves them against the active user set.
+- If the username exists and is allowed for the requested database, the proxy proceeds with the authentication exchange using the stored credential material and the appropriate authentication mechanism.
+- The client-facing authentication verifies the client’s presented proof (for SCRAM) or password (for MD5/TEXT) using stored keys or password hashes from the user record.
+- Once the client is authenticated, the proxy may perform a server-side login to a database instance on behalf of the client. The proxy selects the correct credential material depending on the destination instance and role:
+  - For replicas, the proxy may reuse the FDW-proxy credential where applicable.
+  - For primary writes or actions requiring the user's identity, the proxy uses the database-user credential mapped to that username.
+- The proxy always authenticates against the Primary database first to ensure the ability of the user to connect.
+- Throughout authentication, the system logs and records high-level events (auth success/failure) and enforces policy such as database access restrictions.
+
+## Updates and Invalidation
+- When secrets change, the user set is reconciled: passwords and permitted database lists are updated. If a user's credential changes, any pooled server sessions that would reuse the old credential are prevented from being reused and are evicted as necessary.
+- If a user entry is removed or a database becomes unavailable, the system invalidates affected pooled sessions and ensures future allocations do not use stale credential material.
+
+## Summary
+User management centralizes credentials in a secrets provider, classifies secret entries by role, and applies these credentials to client- and server-side authentication flows. The system ensures safety via validation, eviction on invalidation, and synchronized updates so authorization remains correct and robust during secret changes.
