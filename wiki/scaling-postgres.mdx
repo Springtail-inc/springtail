@@ -1,0 +1,123 @@
+---
+title: "Scaling Postgres"
+---
+
+Modern databases provide multiple approaches to scaling and managing greater load and query throughput. Traditionally, scaling methods are categorized into two main types:
+
+1. **Vertical scaling** - Scaling up by increasing resources on a single machine
+
+2. **Horizontal scaling** - Scaling out by adding more machines (nodes)
+
+This guide will discuss the pros and cons of each approach.
+
+## Vertical scaling (scaling up)
+
+Vertical scaling, or scaling up, involves increasing the resources of a single database instance. In cloud environments like Amazon RDS, this typically means:
+
+1. Increasing CPU capacity
+
+2. Adding more RAM
+
+3. Upgrading to faster storage (e.g., from gp2 to io1 in AWS)
+
+4. Expanding storage capacity
+
+In a cloud environment, CPU and RAM are commonly bundled as a machine instance type and are typically scaled by doubling the instance type (e.g., going from a Large to X-Large).
+
+<Tabs>
+  <Tab title="Advantages">
+    ### Advantages of vertical scaling
+
+    * Avoids modifications to application logic or database schema
+
+    * Maintains data consistency and ACID properties
+
+    * Suitable for workloads that require strong consistency and complex transactions
+  </Tab>
+
+  <Tab title="Disadvantages">
+    ### Disadvantages of vertical scaling
+
+    * Performance ceiling: There's a limit to how much a single machine can be scaled up
+
+    * Cost inefficiency: Larger instances often come with exponential cost increases
+
+    * Downtime during upgrades: Scaling up often requires instance restarts
+
+    * Limited fault tolerance: A single instance remains a single point of failure
+  </Tab>
+</Tabs>
+
+## Horizontal scaling (scaling out)
+
+Horizontal scaling involves distributing the database load across multiple servers.
+
+Few truly horizontally scalable databases exist, but these databases run on multiple nodes, typically distributing queries across multiple compute nodes and using a mix of shared storage layer along with locally cached data.
+
+Traditional databases like PostgreSQL are not designed for native horizontal scaling, but some strategies can be employed:
+
+1. **Read replicas** - Offload read operations to multiple read-only database instances
+
+2. **Sharding** - Splitting data across multiple database instances based on a partition key
+
+3. **Connection pooling** - Efficiently manage and distribute database connections
+
+<Tabs>
+  <Tab title="Advantages">
+    ### Advantages of horizontal scaling
+
+    * Scale beyond the limits of a single machine
+
+    * Improved fault tolerance and availability
+
+    * More cost-effective at large deployments
+  </Tab>
+
+  <Tab title="Disadvantages">
+    ### Disadvantages of horizontal scaling
+
+    * Increased complexity in application logic and database management
+
+    * Potential for data inconsistency across nodes
+
+    * May require significant changes to existing applications
+
+    * May require migration from existing database
+  </Tab>
+</Tabs>
+
+## Migrating to horizontally scalable solutions
+
+When vertical scaling reaches its limits, organizations may need to migrate to a horizontally scalable solution. This process can be disruptive:
+
+<Card title="Downtime" icon="face-diagonal-mouth" horizontal={true}>
+  &#x20;Migration often requires significant downtime for data transfer and verification.
+</Card>
+
+<Card title="Application changes" icon="code" horizontal={true}>
+  Code may need to be rewritten to accommodate new data access patterns.
+</Card>
+
+<Card title="Data consistency challenges" icon="not-equal" horizontal={true}>
+  Ensuring data integrity across a distributed system is complex.
+</Card>
+
+<Card title="Performance tuning" icon="gauge-simple-min" horizontal={true}>
+  New bottlenecks may emerge in a distributed environment.
+</Card>
+
+<Card title="Operational complexity" icon="comment-question" horizontal={true}>
+  Managing a distributed database requires new skills and tools.
+</Card>
+
+<Card title="Cost of migration" icon="bolt" horizontal={true}>
+  Both in terms of new infrastructure and engineering effort.
+</Card>
+
+## Springtail's approach
+
+Springtail recognizes the challenges in migrating an application to a new database. There are often compatibility issues with the new database that require extensive testing, in addition to the time and complexity of performing the migration.&#x20;
+
+Springtail solves this problem by leveraging a scalable set of distributed read-replicas. The set of Springtail replicas can dynamically grow or shrink as demand necessitates; providing throughput when needed, and reducing costs during periods of low usage.
+
+Learn more about Springtail's architecture [here](/architecture).

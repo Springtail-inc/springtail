@@ -1,0 +1,54 @@
+---
+title: "Database Instances and Pooling"
+---
+
+# Database Instance Management
+
+## Overview
+This document describes how database instances are managed in the system, how replica sets and primary sets are organized, and how server-side session pools are configured and maintained. The descriptions are written at a high level and focus on runtime behavior.
+
+## Instance Lifecycle
+- **Provisioning**: Instances are provisioned and registered with the system as active members of a pool. Each instance advertises its connection endpoint and any grouping or prefix metadata used by the system.
+- **Health and availability**: The system monitors instance availability. An instance may be marked inactive or scheduled for shutdown when it becomes unresponsive or is intentionally removed.
+- **Shutdown**: When an instance shuts down, no new sessions are allocated from it. Active sessions notified of instance shutdown and when terminated are explicitly released.
+- **Replacement**: New or replacement instances can be added to the pool; the system updates its routing and allocation state to include them.
+
+## Replica Sets
+- **Purpose**: Replica sets group read-only instances that can serve replicated data. They provide horizontal capacity for read workloads and can be used for shadowing or replication-aware routing.
+- **Load distribution**: The system selects replica instances for new sessions based on load characteristics (e.g., number of active sessions per instance) to spread work across replicas.
+- **Membership changes**: Replica instances can be added or removed dynamically. When a replica is removed, pooled and active sessions associated with that replica are released or reallocated after the active session has been migrated to another replica.
+
+## Primary Management
+- **Role of primary**: A primary instance serves write traffic and authoritative state. Primary management coordinates session allocation to the primary and may also manage a standby for failover or replication.
+- **Primary/standby relationship**: The primary set comprises one primary and zero or more standby instances. The standby may be held in reserve for failover or used for maintenance tasks depending on operational policy.
+- **Failover & replacement**: The system currently **DOES NOT** support primary failover.
+
+## Session Pools
+- **Purpose**: Session pools hold reusable server-side sessions to reduce connection overhead and speed client allocations.
+- **Pool keys**: Sessions in the pool are tracked by a composite key (database identity and user identity) so that pooled sessions match incoming allocation requirements.
+- **Configurable parameters**:
+  - Size limit: Maximum number of pooled sessions the pool will hold for resource control.
+  - Timeout/expiration: How long idle pooled sessions remain eligible before being considered expired.
+  - Soft limits: A threshold to decide when to evict older entries to enforce expiration policies.
+- **Eviction policy**: Pools use an age- or usage-based eviction strategy (LRU) to remove the least-recently-used sessions when limits are reached or when sessions expire.
+- **Session lifecycle within pool**:
+  - Return: When a session finishes client work and is eligible for reuse, it is returned to the pool and tracked for future allocations.
+  - Allocation: A future request that matches the pool key may reuse a pooled session if available; otherwise a new session is created.
+  - Release: Sessions are removed from the pool and deallocated when they are closed, when the instance is no longer active, or as part of eviction.
+- **Safety and cleanup**: Pool operations are coordinated to be safe in concurrent environments. When instances are removed or shutdown, pooled sessions are released and cleaned up to avoid resource leaks.
+
+## User and Database Invalidation
+
+- **Invalidation triggers**: When a user account or a database is removed, disabled, or otherwise marked invalid, the system treats this as an allocation constraint change and initiates cleanup for any affected pooled sessions.
+
+- **Pool eviction**: Pooled sessions associated with the invalid user or database are identified and removed from session pools so they cannot be reused for future allocations. Eviction is performed promptly to prevent mismatched credentials or routing.
+
+- **Active sessions**: Active sessions that reference the invalid user or database kept open and will be terminated when the associated client session terminates.
+
+## Allocation Strategy
+- **Prefer reuse**: When a pooled session matching request criteria exists, it is preferred over creating a new session in order to reduce overhead.
+- **Least-loaded selection**: When selecting a replica for new allocations, the system favors the least-loaded instance to balance active session counts.
+- **Fallbacks**: If no pooled session is available or no replica is available, the client session will fallback to the primary.
+
+## Summary
+Database instance management comprises provisioning, dynamic membership, and allocation policies that together enable scalable read and write routing. Session pools reduce connection overhead, while replica and primary sets allow controlled distribution of workloads and operational flexibility.

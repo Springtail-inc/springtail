@@ -1,0 +1,81 @@
+---
+title: "Foreign Data Wrapper"
+---
+
+## Overview
+Springtail's PostgreSQL Foreign Data Wrapper (FDW) lets a PostgreSQL backend query Springtail tables as if they were native relations. The implementation splits responsibility between the PostgreSQL-facing callbacks (planner/executor integration) and the Springtail manager layer that understands Springtail metadata, schemas, and storage semantics. This document intentionally excludes the DDL manager; it focuses on the runtime FDW path.
+
+## Architecture Layers
+
+### FDW-Facing Layer (`src/pg_fdw/pg_fdw.c`, `src/pg_fdw/multicorn_util.c`)
+- Implements PostgreSQL FDW planning and execution callbacks and translates planner/executor data structures into Springtail-friendly descriptors.
+- Parses foreign table/server options (`db_id`, `tid`, `schema_xid`, etc.) and builds the FDW-private state carried across callbacks.
+- Classifies predicates, determines projection lists, constructs `ForeignPath`/`ForeignScan` nodes, and provides EXPLAIN output that reflects pushdown decisions and visibility parameters.
+
+### Springtail Manager Layer (`src/pg_fdw/pg_fdw_mgr.cc`)
+- Resolves table metadata, schemas, indexes, and user-defined types via `TableMgrClient` and shared-memory caches.
+- Maintains the mapping from PostgreSQL transaction IDs to Springtail XIDs, enforces snapshot visibility, and invalidates caches when `schema_xid` advances.
+- Chooses covering indexes, computes iterator bounds, and drives scan execution over Springtail `Table` iterators (including index-only scans when possible).
+- Supplies statistics and path-key metadata back to the FDW layer so PostgreSQL's optimizer can cost the foreign relation accurately.
+
+## Springtail Manager Layer Internals
+
+### Metadata and Index Discovery
+`PgFdwMgr::_create_scan_state` materializes a `PgFdwState` that caches column metadata, available indexes (primary plus ready secondaries), and attribute maps. `_compute_planning_metadata` discovers which indexes match equality predicates ("qual indexes") or join quals, so later callbacks can re-use that work without rebuilding state. This keeps planning deterministic even when multiple callbacks access the same relation.
+
+### Transaction/XID Workflow
+A background thread (`PgFdwMgr::_internal_run`) polls Redis for the most recent `schema_xid`, asks `XidMgrClient` for committed XIDs, and forwards progress to `PgXidCollectorClient`. When PostgreSQL enters the FDW via `fdw_create_state`, the manager:
+1. Ensures `_schema_xid` is monotonic and invalidates cached metadata if a higher schema version was requested.
+2. Maps the calling PostgreSQL transaction (`pg_xid`) to the latest committed Springtail XID (`_trans_xid`), re-using the mapping if the same backend invokes multiple scans.
+3. Blocks until the Springtail XID is at least as recent as `_last_xid` so snapshot reads never regress.
+4. Stores the mapping until `fdw_commit_rollback` clears it at transaction end.
+This handshake guarantees that every scan inside a PostgreSQL transaction uses the same Springtail snapshot, which is critical for multi-table consistency.
+
+### Schema and User-Type Cache Maintenance
+`_try_create_cache` connects the FDW process to shared-memory caches for table roots, schemas, and user types. Whenever `schema_xid` jumps forward inside `fdw_create_state`, the manager invalidates both the schema cache and the table cache to avoid serving stale column or index definitions. User-defined type lookups use an LRU cache; cache misses flow through `sys_tbl_mgr::Client::get_usertype` pinned to the caller's XID.
+
+
+## PostgreSQL FDW Callback Responsibilities
+
+### Planning Phase
+- **GetForeignRelSize**: builds/updates the plan state, retrieves row-count statistics from the manager, and caches qualifying/join indexes for later callbacks. Width estimation inspects the column metadata directly, so subsequent callbacks do not repeat catalog lookups.
+- **GetForeignPaths**: classifies predicates (pushable vs. local), evaluates selectivity, and constructs one or more `ForeignPath` entries. Costs incorporate Springtail-specific multipliers (primary vs. secondary index lookups, full scans, etc.) returned by the manager.
+- **GetForeignPlan**: converts the chosen path into a `ForeignScan`, capturing the target columns, pushed quals, remnant local quals, and the cached routing/snapshot info. The resulting plan node contains all data needed for execution without further catalog I/O.
+
+### Execution Phase
+- **BeginForeignScan**: calls `PgFdwMgr::fdw_begin_scan`, which allocates a `PgFdwState`, records PostgreSQL attribute metadata, decides on index-only vs. table scans, and initializes iterator bounds plus filter structures derived from quals.
+- **IterateForeignScan**: repeatedly asks `fdw_iterate_scan` for the next tuple. The manager walks Springtail iterators (ascending or descending), applies residual filters inline, converts fields into PostgreSQL datums (including enum/extension mapping), and reports EOS when iterators meet.
+- **ReScanForeignScan**: invokes `fdw_reset_scan`, re-derives iterator bounds (qualifications may have changed in nested-loop rechecks), reapplies filters, and rewinds the iterators.
+- **EndForeignScan**: delegates to `fdw_end_scan`, which logs row statistics, clears tracing state, and deletes the `PgFdwState`.
+- **Utility callbacks** (`ExplainForeignScan`, `AnalyzeForeignTable`, `ImportForeignSchema`): each relies on manager helpers to enumerate indexes, produce human-readable filter descriptions, gather statistics, or synthesize DDL.
+
+## Query Planning and Optimization
+
+### Predicate Pushdown
+`multicorn_util.c` walks `baserestrictinfo` clauses, checking operator support, function volatility, and type compatibility through the manager's `_is_type_sortable` and `check_type_compatibility`. Pushable quals become part of the remote qualifier list passed to `PgFdwMgr`, which then converts them into constant fields for iterator bounds. Non-pushable quals remain as local filters inside `fdw_iterate_scan`.
+
+### Column Projection
+The FDW builds an `attrs_used` bitmap from the target list, remote/local quals, join keys, and required visibility metadata. The manager translates that bitmap into a concrete field list, optionally sourced from the covering index schema. Minimizing projected columns reduces deserialization work even though Springtail scans operate inside the same process boundary (fewer field extractions and datum conversions).
+
+### Index-Aware Planning and Execution
+- **Planning**: `_compute_planning_metadata` and `_get_index_quals` mark indexes that satisfy WHERE or JOIN equality clauses. `fdw_get_path_keys` then surfaces those matches (and their cardinality adjustments, such as `rows = 1` for unique hits) so PostgreSQL can cost access paths correctly.
+- **Execution**: `_init_quals` chooses the best available index (primary first, then secondaries or a planner-provided sort index), while `_set_scan_iterators` converts qual prefixes into `lower_bound`/`upper_bound` ranges—including special handling for `NOT_EQUALS`. If the projection list is fully covered by the chosen index, `fdw_begin_scan` enables index-only mode by pulling fields directly from the index schema, reducing I/O. `fdw_iterate_scan` applies any remaining filters inline so PostgreSQL only sees qualifying tuples.
+- **Sort Pushdown**: `fdw_can_sort` verifies whether a requested sort order aligns with the chosen index (respecting direction and NULLS FIRST rules). When it does, the manager records the sort index so execution can scan in that order, eliminating extra Sort nodes in PostgreSQL.
+
+## Consistency and Snapshot Isolation
+- **schema_xid** freezes the schema version used for metadata resolution. If a higher value is requested, caches are invalidated before scan state is built, ensuring column/index definitions match the caller's expectation.
+- **pg_xid** (from PostgreSQL) is mapped to a Springtail XID via `_update_last_xid`, guaranteeing that every scan within a backend observes the same snapshot. The background thread keeps `_last_xid` monotonic and notifies the XID collector whenever a newer committed XID is observed.
+- **Replica safety** is achieved indirectly: scans block until the committed Springtail XID is at least as recent as `_last_xid`, preventing reads from replicas that are behind the requested snapshot.
+
+## Execution Flow Summary
+1. `fdw_init` wires up logging, properties, and clients; `init()` connects to caches and starts the background XID thread.
+2. Planning callbacks gather statistics, candidate indexes, and width estimates without materializing full scan state.
+3. `fdw_create_state` (triggered from `GetForeignPlan`) maps the PostgreSQL transaction to a Springtail XID and returns FDW-private data stored in the plan node.
+4. `fdw_begin_scan` builds a `PgFdwState`, selects/initializes iterators, and determines index-only vs. table scans.
+5. `fdw_iterate_scan` streams tuples by advancing iterators, applying residual quals, converting datums, and updating per-scan stats.
+6. `fdw_reset_scan` and `fdw_end_scan` rewind or tear down the state; `fdw_commit_rollback` clears transaction mappings when PostgreSQL ends the transaction.
+
+## Operational Considerations
+- **Qual selectivity**: Because iterator bounds depend on deterministic quals, ensuring predicates use supported operators (simple comparisons, immutable expressions) maximizes index usage.
+- **Projection discipline**: Wide projections prevent index-only scans; trimming SELECT lists (and avoiding unused columns in quals) keeps scans in index-only mode more often.
+- **Monitoring**: EXPLAIN output from `fdw_explain_scan` lists chosen indexes, filters, and scan types, making it easier to diagnose why a query fell back to full scans or local filtering.

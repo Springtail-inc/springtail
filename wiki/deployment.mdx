@@ -1,0 +1,23 @@
+---
+title: "Overview"
+---
+
+This section covers deploying Springtail in a production environment. A production deployment groups the Springtail services into three node types:
+
+- **Ingestion Node** — ingest changes from the primary database.
+- **Proxy Node** — handle client connections and route queries.
+- **FDW Node(s)** — serve queries; there can be one or more depending on the scale of the deployment.
+
+All nodes share a Redis cache and a common storage layer underneath.
+
+## High-level steps
+
+Deploying Springtail to production involves the following steps:
+
+1. **[Configure PostgreSQL](/configuring-postgres)** — prepare the primary database for replication.
+2. **[Configure Redis](/redis-configuration)** — set up the shared Redis cache used by all nodes.
+3. **[Deploy with the Coordinator](/production-deployment)** — use the Springtail Coordinator to start Springtail, add and remove replica nodes, and stop it.
+
+<Note>
+For a local, single-machine setup intended for development and testing, see [Local Cluster Deployment](/local-cluster-deployment) instead.
+</Note>

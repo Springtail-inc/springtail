@@ -1,0 +1,588 @@
+---
+title: "Admin Http"
+---
+
+# AdminServer Class
+
+## Overview
+
+`AdminServer` provides an embedded HTTP administration interface for Springtail services.
+It runs as a singleton service, starts its own thread, and exposes a small HTTP API for
+health checks, configuration inspection, logging control, and dynamically registered
+administrative endpoints. The server automatically binds to an available port and publishes its address to Redis for service discovery.
+
+The server is built on top of `httplib::Server` and uses JSON for all request and response
+payloads.
+
+## Features
+
+- **Embedded HTTP server** using the `cpp-httplib` library
+- **Dynamic route registration** for GET and POST handlers
+- **Built-in health and configuration endpoints**
+- **Centralized error handling and response formatting** with structured JSON responses
+- **Thread-safe dynamic route management** using shared mutexes
+- **Automatic service discovery** via Redis integration
+- **Logging control** through HTTP endpoints
+- **Single-threaded request processing** for simplicity
+- **Runs in a dedicated thread**
+- **Singleton-based lifecycle management**
+
+## Lifecycle
+
+The AdminServer instance is created automatically when first accessed.
+Startup and shutdown are managed through the common Singleton infrastructure.
+
+On startup:
+
+- The HTTP server thread is started
+- Default routes are registered
+- The server binds to an IP and port
+- The bound address is published to Redis
+
+On shutdown:
+
+- The HTTP server is stopped
+- The server thread is joined
+- Resources are released cleanly
+
+## Class Declaration
+
+```cpp
+class AdminServer : public Singleton<AdminServer>
+```
+
+The `AdminServer` inherits from `Singleton<AdminServer>` to ensure only one instance exists throughout the application lifetime.
+
+## Public Interface
+
+### Type Definitions
+
+#### `GetHandler`
+
+```cpp
+using GetHandler = std::function<void(
+    const std::string &path,
+    const httplib::Params &params,
+    nlohmann::json &json_response
+)>;
+```
+
+Handler function type for GET requests.
+
+**Parameters:**
+- `path`: The request path
+- `params`: URL query parameters
+- `json_response`: JSON object to populate with response data
+
+#### `PostHandler`
+
+```cpp
+using PostHandler = std::function<void(
+    const std::string &path,
+    const httplib::Params &params,
+    const std::string &body,
+    nlohmann::json &json_response
+)>;
+```
+
+Handler function type for POST requests.
+
+**Parameters:**
+- `path`: The request path
+- `params`: URL query parameters
+- `body`: Request body as string
+- `json_response`: JSON object to populate with response data
+
+### Route Management Methods
+
+#### `register_get_route()`
+
+```cpp
+void register_get_route(const std::string& path, GetHandler &&handler)
+```
+
+Registers a handler for a specific GET request path.
+
+**Parameters:**
+- `path`: The URL path to handle (e.g., "/status")
+- `handler`: Handler function to execute for this path
+
+**Thread Safety:** Yes (uses unique lock)
+
+**Example:**
+```cpp
+AdminServer::get_instance()->register_get_route("/status",
+    [](const std::string &path, const httplib::Params &params, nlohmann::json &json_response) {
+        json_response = {{"status", "running"}, {"uptime", get_uptime()}};
+    }
+);
+```
+
+#### `deregister_get_route()`
+
+```cpp
+void deregister_get_route(const std::string& path)
+```
+
+Removes a previously registered GET handler.
+
+**Parameters:**
+- `path`: The URL path to deregister
+
+**Thread Safety:** Yes (uses unique lock)
+
+#### `register_post_route()`
+
+```cpp
+void register_post_route(const std::string& path, PostHandler &&handler)
+```
+
+Registers a handler for a specific POST request path.
+
+**Parameters:**
+- `path`: The URL path to handle
+- `handler`: Handler function to execute for this path
+
+**Thread Safety:** Yes (uses unique lock)
+
+**Example:**
+```cpp
+AdminServer::get_instance()->register_post_route("/restart",
+    [](const std::string &path, const httplib::Params &params, 
+       const std::string &body, nlohmann::json &json_response) {
+        nlohmann::json request = nlohmann::json::parse(body);
+        perform_restart(request["component"]);
+        json_response = {{"status", "restarted"}};
+    }
+);
+```
+
+#### `deregister_post_route()`
+
+```cpp
+void deregister_post_route(const std::string& path)
+```
+
+Removes a previously registered POST handler.
+
+**Parameters:**
+- `path`: The URL path to deregister
+
+**Thread Safety:** Yes (uses unique lock)
+
+#### `exists()`
+
+```cpp
+static bool exists()
+```
+
+Checks if the AdminServer singleton instance has been created.
+
+**Returns:** `true` if instance exists, `false` otherwise
+
+## Built-in Endpoints
+
+The AdminServer provides several built-in endpoints for common administrative tasks:
+
+### GET /health
+
+Returns server health status.
+
+**Response:**
+```json
+{
+    "status": "up"
+}
+```
+
+### GET /config
+
+Returns all application configuration settings.
+
+**Response:**
+```json
+{
+    "status": "ok",
+    "settings": {
+        // All configuration properties
+    }
+}
+```
+
+### GET /logging
+
+Returns current logging configuration and statistics.
+
+**Response:**
+```json
+{
+    "log_level": "info",
+    "debug_level": 0,
+    "module_masks": { /* ... */ }
+}
+```
+
+### POST /logging
+
+Updates logging configuration dynamically.
+
+**Request Body:**
+```json
+{
+    "log_level": "debug",           // Optional: Set log level (trace, debug, info, warn, error, critical)
+    "debug_level": 2,                // Optional: Set debug level (0-n)
+    "module_mask": {                 // Optional: Enable/disable specific module logging
+        "module": "database",
+        "value": true
+    }
+}
+```
+
+**Response:**
+```json
+{
+    "status": "ok",
+    "result": {
+        // Updated logging configuration
+    }
+}
+```
+
+## Custom Route Registration
+
+The users of this class may dynamically register and deregister administrative routes.
+
+```cpp
+GET Routes
+using GetHandler =
+    std::function<void(
+        const std::string& path,
+        const httplib::Params& params,
+        nlohmann::json& json_response
+    )>;
+```
+
+Routes are matched by exact path.
+
+```cpp
+POST Routes
+using PostHandler =
+    std::function<void(
+        const std::string& path,
+        const httplib::Params& params,
+        const std::string& body,
+        nlohmann::json& json_response
+    )>;
+```
+
+## Error Handling
+
+All request handlers are executed inside a common error wrapper that:
+- Converts exceptions into JSON responses
+- Sets appropriate HTTP status codes
+- Logs errors consistently
+
+Supported Error Types
+- `HttpError` for application-level HTTP failures
+- JSON parsing errors
+- Standard C++ exceptions
+- Unknown exceptions
+
+### `HttpError` Exception
+
+HttpError represents an HTTP-aware exception type.
+
+**Features**:
+- Custom error message
+- Explicit HTTP status code
+- Automatically translated into JSON error responses
+
+```cpp
+class HttpError : public Error
+```
+
+Custom exception class for HTTP-specific errors with status codes.
+
+#### Constructor
+
+```cpp
+explicit HttpError(const std::string &msg, uint32_t error_code = 400)
+```
+
+**Parameters:**
+- `msg`: Error message
+- `error_code`: HTTP status code (default: 400)
+
+#### Method
+
+```cpp
+uint32_t get_error_code()
+```
+
+Returns the HTTP error code associated with the exception.
+
+## InternalHTTPServer Class
+
+`InternalHTTPServer` is a private nested class that extends `httplib::Server` to provide additional functionality.
+
+**Capabilities**:
+- Retrieve bound IP and port at runtime
+- Convert HTTP requests into a human-readable string format for debugging
+
+### Methods
+
+#### `get_bind_ip_port()`
+
+```cpp
+std::string get_bind_ip_port()
+```
+
+Returns the IP address and port the server is bound to in the format "ip:port". Supports both IPv4 and IPv6.
+
+**Returns:** String in format "x.x.x.x:port" or empty string if socket is invalid
+
+#### `request_to_string()` (static)
+
+```cpp
+static std::string request_to_string(const httplib::Request& request)
+```
+
+Helper function for debugging that converts an HTTP request to a detailed string representation.
+
+**Parameters:**
+- `request`: The HTTP request to convert
+
+**Returns:** Multi-line string with all request details including method, path, headers, parameters, body, form data, and file uploads
+
+## Private Implementation Details
+
+### Constructor
+
+```cpp
+AdminServer()
+```
+
+The constructor performs the following initialization:
+1. Configures the HTTP server with a single-threaded task queue
+2. Registers all built-in endpoints (/health, /config, /logging)
+3. Sets up wildcard dispatchers for GET and POST requests
+4. Starts the server thread
+5. Waits until the server is ready
+6. Publishes the server address to Redis for service discovery
+
+### Thread Management
+
+#### `_internal_run()`
+
+```cpp
+void _internal_run() override
+```
+
+Runs the HTTP server on the configured IP and port. The server binds to 0.0.0.0:0 by default, allowing the OS to select an available port.
+
+#### `_internal_thread_shutdown()`
+
+```cpp
+void _internal_thread_shutdown() override
+```
+
+Signals the server to stop accepting new requests and begin shutdown.
+
+### Request Dispatching
+
+#### `_dispatch_get()`
+
+```cpp
+void _dispatch_get(const httplib::Request& req, httplib::Response& res)
+```
+
+Dispatches GET requests to registered handlers. Uses shared lock for thread-safe route lookup.
+
+**Behavior:**
+- Looks up handler in `_get_routes` map
+- Invokes handler if found
+- Throws `HttpError` with 404 status if no handler exists
+
+#### `_dispatch_post()`
+
+```cpp
+void _dispatch_post(const httplib::Request& req, httplib::Response& res)
+```
+
+Dispatches POST requests to registered handlers. Uses shared lock for thread-safe route lookup.
+
+**Behavior:**
+- Looks up handler in `_post_routes` map
+- Invokes handler if found
+- Throws `HttpError` with 404 status if no handler exists
+
+### Error Handling
+
+#### `_wrap_error_handler()`
+
+```cpp
+template<typename Func, typename... Args>
+requires std::same_as<std::invoke_result_t<Func, Args...>, nlohmann::json>
+void _wrap_error_handler(httplib::Response& res, Func func, Args && ...args)
+```
+
+Generic wrapper that catches exceptions from handler functions and converts them to structured JSON error responses.
+
+**Caught Exceptions:**
+- `HttpError`: Returns custom error code with error message
+- `nlohmann::detail::exception`: Returns 500 with JSON parsing error details
+- `std::exception`: Returns 500 with standard exception message
+- `...` (catch-all): Returns 500 with unknown error status
+
+**Error Response Format:**
+```json
+{
+    "status": "error_type",
+    "error_message": "detailed error message"
+}
+```
+
+### Member Variables
+
+```cpp
+InternalHTTPServer _svr;                                    // HTTP server instance
+std::string _ip{"0.0.0.0"};                                // Bind IP address
+uint16_t _port{0};                                         // Bind port (0 = auto-select)
+std::unordered_map<std::string, GetHandler> _get_routes;   // GET handler registry
+std::unordered_map<std::string, PostHandler> _post_routes; // POST handler registry
+std::shared_mutex _mutex;                                  // Protects route maps
+```
+
+## Redis Integration
+
+On startup, the server publishes its network location to Redis using:
+- Instance ID
+- Instance key
+- Program name
+
+This allows external tools and services to discover the active admin endpoint dynamically.
+
+## Usage
+
+Functionality:
+- The server listens on 0.0.0.0 by default
+- The port is assigned dynamically unless configured otherwise
+- All responses are JSON
+- Unregistered paths return HTTP 404
+
+### Basic Usage Example
+
+```cpp
+// Server automatically starts when first accessed
+AdminServer::get_instance();
+
+// Register a custom GET endpoint
+AdminServer::get_instance()->register_get_route("/metrics",
+    [](const std::string &path, const httplib::Params &params, nlohmann::json &json_response) {
+        json_response = {
+            {"requests_processed", get_request_count()},
+            {"avg_response_time_ms", get_avg_response_time()}
+        };
+    }
+);
+
+// Register a custom POST endpoint
+AdminServer::get_instance()->register_post_route("/cache/clear",
+    [](const std::string &path, const httplib::Params &params, 
+       const std::string &body, nlohmann::json &json_response) {
+        clear_cache();
+        json_response = {{"status", "cleared"}};
+    }
+);
+```
+
+### Handler with Error Handling
+
+```cpp
+AdminServer::get_instance()->register_post_route("/user/create",
+    [](const std::string &path, const httplib::Params &params,
+       const std::string &body, nlohmann::json &json_response) {
+        nlohmann::json request = nlohmann::json::parse(body);
+        
+        // Validate input
+        if (!request.contains("username")) {
+            throw HttpError("Missing username field", 400);
+        }
+        
+        // Process request
+        std::string username = request["username"];
+        if (!create_user(username)) {
+            throw HttpError("User already exists", 409);
+        }
+        
+        json_response = {
+            {"status", "created"},
+            {"username", username}
+        };
+    }
+);
+```
+
+### Using Query Parameters
+
+```cpp
+AdminServer::get_instance()->register_get_route("/search",
+    [](const std::string &path, const httplib::Params &params, nlohmann::json &json_response) {
+        // Access query parameters from URL like /search?query=test&limit=10
+        std::string query = params.count("query") ? params.at("query") : "";
+        int limit = params.count("limit") ? std::stoi(params.at("limit")) : 10;
+        
+        auto results = perform_search(query, limit);
+        json_response = {
+            {"query", query},
+            {"results", results}
+        };
+    }
+);
+```
+
+### Deregistering Routes
+
+```cpp
+// Remove a route when no longer needed
+AdminServer::get_instance()->deregister_get_route("/metrics");
+AdminServer::get_instance()->deregister_post_route("/cache/clear");
+```
+
+## Service Discovery
+
+On startup, the AdminServer automatically publishes its listening address to Redis:
+
+**Redis Key Format:**
+```
+Hash: admin_console:{instance_id}
+Field: {instance_key}:{program_name}
+Value: {ip}:{port}
+```
+
+This allows other services to discover and connect to the admin interface dynamically.
+
+## Thread Safety
+
+- Route registration/deregistration uses `std::unique_lock` for exclusive access
+- Route dispatching uses `std::shared_lock` for concurrent read access
+- Multiple GET/POST requests can be processed concurrently (read access)
+- Route modifications block all request processing (write access)
+- The server uses a single-threaded task queue, so handlers execute sequentially
+
+## Design Considerations
+
+1. **Single-threaded Processing**: The server uses a single-threaded task queue to simplify synchronization and avoid complex concurrency issues in handlers
+2. **Dynamic Port Selection**: Binding to port 0 allows the OS to select an available port, avoiding conflicts
+3. **Wildcard Matching**: The server registers wildcard patterns (`.*`) and uses custom dispatchers for flexible routing
+4. **JSON-based Communication**: All responses are JSON for consistency and ease of parsing
+5. **Centralized Error Handling**: The `_wrap_error_handler` template ensures consistent error responses across all endpoints
+
+## Notes
+
+- The server automatically binds to `0.0.0.0` on an available port
+- All handlers must populate the `json_response` parameter
+- Throwing `HttpError` allows custom HTTP status codes
+- The server waits until ready before publishing to Redis
+- Built-in endpoints cannot be deregistered
+- Route paths are exact matches (no regex or wildcards in custom routes)

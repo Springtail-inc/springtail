@@ -1,0 +1,385 @@
+---
+title: "Common Init"
+---
+
+# Springtail Initialization and Service Lifecycle
+
+This module provides the bootstrapping, dependency ordering, lifecycle management, and shutdown coordination for Springtail services.
+
+It defines:
+
+* A generic service abstraction
+* Multiple initialization entry points (normal, daemon, test, custom)
+* Dependency-aware shutdown ordering
+* Centralized signal handling for daemon execution
+* Cross-service argument storage
+* Deterministic startup and shutdown sequencing
+
+This is infrastructure code. Touch it carefully.
+
+## Core Concepts
+
+### ServiceRunner
+
+ServiceRunner is the base class for all services participating in Springtail initialization.
+
+```
+class ServiceRunner {
+public:
+    explicit ServiceRunner(const std::string &name);
+    virtual ~ServiceRunner();
+
+    virtual bool start();
+    virtual void stop();
+
+    const std::string &get_name() const;
+};
+```
+
+Responsibilities:
+
+* Encapsulates startup and shutdown logic for a service
+* Provides a human-readable service name
+* Enables ordered startup and reverse-order shutdown
+
+Lifecycle Rules:
+
+* `start()` is called in registration order
+* If any `start()` fails, already-started services are stopped in reverse order
+* `stop()` is always called during shutdown, even on failure paths
+
+## Initialization Entry Points:
+
+### Standard
+
+Standard initialization for non-daemon processes is done using `springtail_init()` function.
+
+```
+void springtail_init(
+    bool load_redis = false,
+    const std::optional<std::string> &log_filename = std::nullopt,
+    const std::optional<uint32_t> &logging_mask = std::nullopt
+);
+```
+
+What It Does:
+
+* Initializes logging
+* Sets up exception handling
+* Loads properties (environment + optional Redis)
+* Initializes telemetry
+* Starts Redis manager
+* Initializes property Redis cache
+
+Typical Usage:
+```
+springtail_init(false);
+```
+
+This initialization is used for short-lived utility tools that still need Springtail infrastructure. Here is an example usage:
+
+```
+springtail_init(false, std::nullopt, 0);
+// utility logic
+springtail_shutdown();
+```
+
+Notes:
+* No Redis loading
+* No daemonization
+* Logging mask explicitly provided
+* Clean startup and teardown in a single process
+
+This is the good choice for admin tools, migrations, and diagnostics.
+
+### Daemon process
+
+Initialization for long-running daemon processes is done using `springtail_init_daemon()` function.
+```
+void springtail_init_daemon(
+    const std::string &program_name,
+    bool daemonize,
+    const std::optional<uint32_t> &logging_mask = std::nullopt
+);
+```
+
+What It Adds:
+
+* Optional daemonization via fork()
+* PID file creation
+* Signal-based shutdown coordination
+* Admin HTTP server startup
+* Coordinator thread startup
+
+Daemonization Behavior
+
+* If `daemonize == true`, `fork()` function is called and parent proce exits immediately, while child becomes session leader.
+* Standard file descriptors are STDIN/STDOUT/STDERR redirected to `/dev/null`
+* PID written to `<pid_path>/<program_name>.pid`
+
+Here is an example usage by long-running services such as the Proxy server.
+
+```
+springtail_store_arguments(
+    ServiceId::ProxyServerId,
+    {
+        {"force_shadow", std::any(force_shadow)},
+        {"force_primary", std::any(force_primary)}
+    }
+);
+
+springtail_init_daemon(argv[0], daemonize, LOG_PROXY);
+ProxyServer::start();
+springtail_daemon_run();
+
+springtail_shutdown();
+```
+
+Flow Breakdown
+
+1. Store cross-service arguments
+* Arguments are available to services during initialization
+* Stored before initialization so runners can retrieve them
+
+2. Initialize daemon runtime
+* Optional daemonization
+* PID file creation
+* Logging and signal handling
+* Admin server and coordinator startup
+
+3. Start the main service
+* `ProxyServer::start()` runs after infrastructure is ready
+
+4. Block until shutdown
+* `springtail_daemon_run()` waits for signals
+
+5. Graceful shutdown
+* Services stop in dependency order
+* Resources released deterministically
+
+### Unit tests initialization
+Initialization of unit tests is done using `springtail_init_test()` function.
+
+```
+void springtail_init_test(
+    const std::optional<uint32_t> &logging_mask = std::nullopt
+);
+```
+
+Characteristics:
+
+* Forces Redis loading
+* No daemon logic
+* Simplified logging setup
+
+Here is a usage example inside a unit test program:
+
+Minimal, predictable setup intended for tests.
+
+```
+springtail_init_test();
+// test logic
+springtail_shutdown();
+```
+
+Characteristics:
+
+* Redis is enabled
+* No daemon logic
+* No blocking signal loop
+* Can only be called once during the test program life time
+
+Use this for unit tests.
+
+### Custom initialization
+
+Fully custom initialization is done using `springtail_init_custom()` function.
+```
+void springtail_init_custom(
+    std::vector<std::unique_ptr<ServiceRunner>> &runners
+);
+```
+
+When to Use:
+
+* Embedding Springtail inside another process
+* Only a subset of initialization services are needed
+* Non-standard startup ordering
+
+You are responsible for providing all required runners. Use this when you need full control over which services start and in what order. Here is an example:
+
+```
+std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+
+service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
+service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
+service_runners.emplace_back(std::make_unique<LoggingRunner>(
+    "test", std::nullopt, LOG_ALL
+));
+service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>("test"));
+
+springtail_init_custom(service_runners);
+// custom logic
+springtail_shutdown();
+```
+
+When to use this:
+* Embedding Springtail inside another application
+* Running a partial service stack
+* Testing startup order interactions
+* Avoiding Redis, admin servers, or coordinators
+
+With `springtail_init_custom()` responsibilities shift to you. You must provide all required runners and you control startup order.
+
+## Argument Passing Between Services
+
+Arguments stored via `springtail_store_arguments()` are accessible during initialization and runtime.
+
+Example:
+
+```
+auto force_shadow = springtail_retreive_argument<bool>(
+    ServiceId::ProxyServerId,
+    "force_shadow",
+    false
+);
+```
+
+Guarantees:
+* Type-safe via std::any
+* Service-scoped
+* Optional or required retrieval
+* Fails on type mismatch
+
+## Built-in Service Runners
+
+### Logging 
+
+`DefaultLoggingRunner`:
+Handles final logging and open telemetry shutdown.
+
+`LoggingRunner`:
+Initializes logging with optional overrides:
+ * Log filename
+ * Logging mask
+ * Daemon mode awareness
+
+### Properties
+
+`PropertiesRunner`:
+Loads configuration from:
+* Environment
+* Optional Redis
+* Optional override file
+
+`PropertiesCacheRunner`:
+Initializes the Redis-backed configuration cache.
+
+### Daemon
+
+`DaemonRunner`:
+Handles process daemonization and PID management.
+
+### Exception Handling
+
+`ExceptionRunner`:
+Initializes signal handlers and backtrace support.
+
+### Redis
+
+`RedisMgrRunner`:
+Initializes and shuts down the Redis connection manager.
+
+### Coordinator Interface
+
+`CoordinatorRunner`:
+Starts the coordinator background thread.
+
+### Admin Interface
+
+`AdminServerRunner`:
+Starts and stops the admin HTTP server.
+
+## Service Registration and Shutdown
+
+### ServiceRegister
+
+ServiceRegister is a singleton responsible for:
+* Owning all active services
+* Enforcing startup order
+* Enforcing reverse shutdown order
+
+If startup fails midway:
+
+* Already-started services are stopped immediately
+* Initialization aborts
+
+### Dependency Graph
+
+Springtail defines an explicit service dependency graph which enforces correct shutdown ordering of the internal singleton services.
+This prevents resource teardown races. It uses topological sort on the predefined dependency graph. The sort is executed during runtime and
+will cause a fatal error is any cycle is detected. When a singleton service is initialized with a specific service id, it will be marked is
+active. During shutdown, topologically sorted list of services will be shutdown in the order defined by their dependencies.
+
+## Graceful Shutdown
+
+The shutdown is performed using `springtail_daemon_run()` function:
+
+```
+void springtail_daemon_run();
+```
+
+It blocks until one of the shutdown signals is received:
+
+* SIGINT
+* SIGTERM
+* SIGQUIT
+* SIGUSR1
+* SIGUSR2
+
+Once triggered:
+* The signal handlers for these signals are restored
+* Shutdown proceeds in dependency order
+
+The shutdown process is done by `springtail_shutdown()` function:
+
+```
+void springtail_shutdown();
+```
+
+It shuts down all registered services in topological order.
+
+Notes:
+
+* Uses precomputed dependency ordering
+* Calls each service’s registered shutdown function
+* Performs final Protobuf cleanup
+
+## Cross-Service Argument Storage
+
+This functionality is needed when we have command line arguments that need to be passed to specific `Singleton` services.
+It allows arbitrary typed arguments to be stored for the service that needs them and then retrieved by that service during initialization.
+
+To store an argument, use the following function:
+```
+springtail_store_argument<ServiceType>(
+    ServiceId service_id,
+    const std::string &arg_name,
+    const T &value
+);
+```
+
+To retrieve an argument, use the following function:
+```
+auto value = springtail_retreive_argument<ServiceType>(
+    service_id,
+    "arg_name",
+    true
+);
+```
+
+Guarantees:
+* Type-safe retrieval via std::any
+* Optional enforcement of required arguments
+* Fails on type mismatch

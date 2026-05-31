@@ -1,0 +1,76 @@
+---
+title: "Message Flow Overview"
+---
+
+## Overview
+The `ClientSession` and `ServerSession` classes in the Springtail project facilitate communication between the client and the database server. This communication is essential for managing queries, state transitions, and failover scenarios.
+
+### ClientSession
+- **Manages Client Connections**: Handles incoming client requests and routes them to the appropriate `ServerSession`.
+- **State Management**: Tracks the state of the client connection (e.g., STARTUP, READY, QUERY).
+- **Failover Handling**: Manages failover notifications and transitions to replica servers when necessary.
+- **Query Parsing and Execution**: Processes client queries and forwards them to the `ServerSession`.
+
+### ServerSession
+- **Manages Server Connections**: Handles communication with the database server.
+- **Batch Processing**: Queues and processes batches of messages from the `ClientSession`.
+- **Error Recovery**: Implements mechanisms to recover from errors and maintain session integrity.
+- **State Management**: Tracks the state of the server connection (e.g., STARTUP, DEPENDENCIES, QUERY).
+
+## Communication Flow
+1. **Client Request Handling**:
+   - The `ClientSession` receives a request from the client.
+   - It parses the request and determines the appropriate action (e.g., query execution, transaction management).
+
+2. **Server Session Selection**:
+   - The `ClientSession` selects or creates a `ServerSession` based on the request type and session state.
+   - It may reuse an existing `ServerSession` or create a new one for failover scenarios.
+
+3. **Message Forwarding**:
+   - The `ClientSession` forwards the parsed query or command to the `ServerSession`.
+   - The `ServerSession` processes the message and communicates with the database server.
+
+4. **Response Handling**:
+   - The `ServerSession` receives the response from the database server.
+   - It forwards the response back to the `ClientSession`, which sends it to the client.
+
+5. **Error and Failover Management**:
+   - If an error occurs, the `ServerSession` attempts to recover and notifies the `ClientSession`.
+   - In failover scenarios, the `ClientSession` transitions to a replica server and replays pending state.
+
+## Message Path: Server -> Client Session
+
+This section describes how server-side connections are accepted, scheduled, processed, and how replies are returned to the client.
+
+1. **Connection Acceptance**:
+   - Server accepts new TCP connections and wraps them in connection objects
+   - Creates an in-memory session to track the socket and connection state
+   - Registers the session with the event infrastructure for monitoring
+
+2. **Event Detection**:
+   - Main event loop monitors registered sockets for readability
+   - When a socket becomes readable, the client session associated with socket is obtained
+   - All sockets associated with the client session (the client session and all server session sockets) are removed from the poll set
+   - The client session is added to a runnable set; if the server session is in a RESET state, then there is no associated client session and it is added to the runnable set
+
+3. **Worker Processing**
+   - Runnable sessions are submitted to a worker pool
+   - A worker thread picks up the session and begins processing
+   - Worker reads incoming bytes, assembles protocol messages, and processes them
+
+4. **Message Handling**
+   - Client session first checks for data on the client session socket, then for data on the server session sockets
+   - Client-facing sessions interpret the client protocol
+   - Parse message payloads and forward commands to the server-side session
+   - Manage transactional state and buffering as required
+
+5. **Reply Delivery**
+   - Server-side session receives responses from the database; the server session socket will have data available
+   - Prepares outgoing buffers and writes to the client's socket
+   - All traffic is logged by the request/response logging subsystem
+
+6. **Session Re-queueing**
+   - Worker clears temporary state after processing
+   - Re-registers the session with the event loop if connection remains open
+   - Performs cleanup if the session is closing or errors occur
+

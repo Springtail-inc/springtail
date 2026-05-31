@@ -1,0 +1,71 @@
+---
+title: "Session Management"
+---
+
+# Session Management
+
+## Lifecycle
+
+The Proxy is session based.  A session is a client connection.  It exists from the time a client connects until the client disconnects (or is disconnected by a fatal error).  A session is represented by a:
+* **Client Session:** that is connected from the client host to the Proxy
+* 2 **Server Sessions:** connected from the Proxy to a database instance.  They are:
+    * A **Primary Session** is connected to the primary database instance
+    * A **Replica Session** is connected with a Springtail replica node; however if no replica nodes are available there may just be a single Primary Session present.  
+
+When a session is closed by the client, the associated Server Sessions are returned to a session pool indexed by the user and the database.  These are re-used when possible if the same user connects to the same database.  A pool may expire a session after a period of time.
+
+In summary:
+1.  A client connects to the proxy, a new client session is created.
+2. The client session authenticates the user with the Primary database.
+3. A query is received from the client
+4. The query is parsed, if the query is a **read-only** query, a replica server is selected as follows:
+    * Either a pooled server session is selected or,
+    * A server session is created, and the user is authenticated
+5. This continues until the client disconnects or a fatal error occurs that disconnects the session
+
+A replica session may fail-over to another replica if the set of replica nodes are down-sized.  If this happens, a new replica is chosen and the existing session state is replayed onto the new replica prior to it serving any queries.
+
+## Session State
+
+Session state is preserved in a **History Cache**.  The History Cache maintains the set of operations that transform client session state, e.g., Prepared Statements, SET operations, DISCARD or RESET operations.  The cache is necessary to replay stateful operations when switching between the Primary and Replica Sessions.  E.g., if a `SET search_path ...` operation comes in then it must be replayed on both Primary and Replica Sessions for future operations to be valid.
+
+Session state is maintained both at the Session level as well as at the Transaction level.  Some state is transactional, meaning it only survives the current transaction and has no effect after the transaction has committed.  This state is necessary when switching nodes within a transaction.  Session state survives a transaction and must be replayed after a transaction has ended, or if a session is failed over to a new replica.
+
+### Identifying Replay State
+Every operation is identified by an ID that is assigned once the operation has been successfully applied at a database instance (either primary or replica).  Each server session maintains the ID of the last operation it has executed.  Thus, the applicable session history can be fetched that has not yet been applied on that database instance.  The session state is periodically compacted to remove duplicates or to remove operations that would have no effect due to a future operation (e.g., a RESET or a DISCARD or a CLOSE). 
+
+### Session History
+
+Long-lived state that persists across transactions:
+- **SET statements**: Session variables (e.g., work_mem, search_path)
+- **PREPARE statements**: Named prepared statements
+- **DECLARE WITH HOLD**: Cursors that survive transaction end
+- **LISTEN statements**: Notification channels
+
+### Transaction History
+
+Transaction-scoped state that exists only within a transaction:
+- All statements executed in the current transaction
+- Rolled back on ROLLBACK or error
+- Merged to session history on successful COMMIT
+- Organized by savepoint levels
+
+### Cache Operations
+
+**Adding Statements:**
+- Parse each query to determine type and properties
+- Track read-safety, dependencies, and side effects
+- Associate with current transaction or savepoint level
+- Store metadata for replay purposes
+
+**Replay for Server Sessions:**
+- Query cache for statements needed by a server session
+- Filter by session vs transaction scope
+- Filter by read-only vs read-write
+- Generate dependency messages in correct order
+
+**Transaction Operations:**
+- **Commit**: Merge transaction history to session history
+- **Rollback**: Discard entire transaction history
+- **Savepoint**: Create nested scope level
+- **Rollback to Savepoint**: Discard statements after savepoint

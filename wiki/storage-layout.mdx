@@ -1,0 +1,311 @@
+---
+title: "Storage Layout"
+---
+
+# Springtail Storage Layer
+
+This document describes the storage layout and organization of data in Springtail's storage engine, from the low-level extent structure up through tables and indexes.
+
+## Overview
+
+Springtail uses a multi-version concurrency control (MVCC) storage system with copy-on-write semantics. Data is organized hierarchically:
+
+- **Extents**: Fixed-size blocks containing rows of data with a fixed-width schema
+- **Fields**: Type-specific accessors for reading/writing column values within rows
+- **BTrees**: B+ tree indexes composed of extents, used for both primary and secondary indexes
+- **Tables**: Logical collections of data organized by a primary BTree and zero or more secondary indexes
+- **Cache**: Unified page cache managing access to extents across all tables
+
+## Extent Structure
+
+An extent is the fundamental storage unit in Springtail. Each extent consists of three components stored sequentially on disk:
+
+### 1. Extent Header
+
+The header (serialized via `ExtentHeader::pack()`) contains metadata about the extent:
+
+```
+Offset  Size  Field
+------  ----  -----
+0       8     xid           - Transaction ID when extent was written
+8       8     prev_offset   - Location of previous extent version (for MVCC)
+16      4     row_size      - Fixed size of each row in bytes
+20      4     field_count   - Number of fields in schema
+24      N     field_types   - Array of field type bytes (1 byte per field)
+24+N    1     type          - Extent type (leaf/branch, root flag)
+```
+
+**Field Type Encoding**: Each field type byte encodes both the Springtail type (lower 7 bits) and nullable flag (top bit).
+
+**Extent Types**:
+- `LEAF` (0x00): Contains actual data rows
+- `BRANCH` (0x01): Contains index keys and child extent pointers
+- Root flag (0x02): Indicates this extent is a tree root
+
+### 2. Fixed Data
+
+The fixed data section contains a contiguous array of fixed-width rows. Each row has exactly `row_size` bytes and stores:
+
+- **Fixed-width values**: Integers, floats stored inline at specific byte offsets (at the beginning of the row)
+- **Variable-data offsets**: 4-byte offsets into the variable data section for TEXT, BINARY, NUMERIC, and EXTENSION types
+- **Boolean fields**: Packed as bits after all fixed-width fields
+- **Null bitmaps**: Packed bits indicating which nullable fields are NULL (after boolean fields)
+- **Undefined bitmaps**: Packed bits for replication tracking (indicates unchanged fields). Note: undefined bitmaps are only present in write cache extents, not in on-disk table extents.
+
+Row layout is determined by the `ExtentSchema` (see `src/storage/schema.cc:79-162`), which places fixed-width fields first, then boolean bits, null bits, and finally undefined bits (if applicable) at the end of the row.
+
+**Example row structure for on-disk extents** (simplified):
+```
+[int64_field: 8 bytes] [text_offset: 4 bytes] [int32_field: 4 bytes] [bool_field: 1 bit] [null_bits: N bits]
+```
+
+**Example row structure for write cache extents** (simplified):
+```
+[int64_field: 8 bytes] [text_offset: 4 bytes] [int32_field: 4 bytes] [bool_field: 1 bit] [null_bits: N bits] [undefined_bits: M bits]
+```
+
+### 3. Variable Data
+
+Variable-length values (TEXT, BINARY, NUMERIC, EXTENSION types) are stored in a separate variable data section managed by the `VariableData` class. This provides:
+
+- **Length-prefixed storage**: Each value stored as `[4-byte length][data]`
+- **Automatic deduplication**: Hash table detects duplicate values within an extent
+- **Chunked allocation**: Data organized in 4KB chunks to avoid vector reallocation
+- **Global offset addressing**: Fixed data stores 4-byte offsets into this global space
+
+The deduplication hash (in `Extent::_variable_hash`) maps `string_view` → offset, ensuring identical strings share storage.
+
+## Field Abstraction
+
+The `Field` class hierarchy provides type-safe access to column values within logical rows (often extent rows, but also replication log messages, constant values, etc.):
+
+### Field Types
+
+**ExtentField** (`include/storage/field.hh:508`): Accesses data in an `Extent::Row` by:
+- Storing byte offset within the fixed row data
+- For booleans: storing bit position and bitmask
+- For nullable fields: tracking null bitmap offset and bit
+- For variable data: reading offset from fixed data, then dereferencing into variable section
+
+**ConstField**: Represents constant values (for query predicates, default values)
+
+**PgLogField**: Reads data from PostgreSQL replication log messages
+
+**MutableField** (`include/storage/field.hh:325`): Extends `Field` with `set_*` methods for writing values
+
+### Field Operations
+
+Fields support:
+- Type-specific `get_*` and `set_*` methods (e.g., `get_int64()`, `set_text()`)
+- Comparison operations (`less_than()`, `equal()`) used for index searches
+- Null and undefined checks via bitmask operations
+- Copying values between different row sources
+
+## BTree Organization
+
+Tables and indexes are organized as B+ trees composed of extents:
+
+### BTree Structure (`include/storage/btree.hh`)
+
+**Read-Only BTree**:
+- Immutable snapshot at a specific XID
+- Root extent identified by offset
+- Branch extents contain: `[sort_key_fields...][child_extent_offset: uint64]`
+- Leaf extents contain: actual table data or index entries
+- Binary search within extents for O(log n) lookups
+
+**Mutable BTree** (`include/storage/mutable_btree.hh`):
+- Copy-on-write modifications at target XID
+- In-memory page cache with configurable size
+- Dirty pages flushed hierarchically (children before parents)
+- Supports insert, remove, upsert operations
+- Auto-splits extents when they exceed size threshold
+
+### BTree Extent Types
+
+**Branch Extents**:
+- Schema: sort key columns + `child_offset` field
+- Each row represents separator key + pointer to child extent
+- Used for navigation during tree traversal
+
+**Leaf Extents**:
+- For primary index: full table rows with all columns
+- For secondary index: index columns + extent_id + row_id for lookup
+
+### BTree Iterator
+
+The `BTree::Iterator` performs in-order traversal:
+- Maintains path from root to current leaf (via `Node` objects)
+- `++` operator: advances within extent or navigates to next leaf via parent
+- `--` operator: similar backward traversal
+- Supports binary search via `lower_bound()`, `upper_bound()`, `find()`
+
+## Table Organization
+
+### Table Structure (`include/sys_tbl_mgr/table.hh`)
+
+A `Table` represents a logical collection of rows with:
+
+**Primary Index** (`_primary_index`):
+- BTree storing full row data, sorted by primary key
+- Schema includes all table columns
+- Branch extents use primary key fields for navigation
+- Leaf extents contain complete rows
+
+**Secondary Indexes** (`_secondary_indexes`):
+- Map from index_id → (BTree, column_positions)
+- Schema: index columns + internal_row_id
+- Used for queries with non-primary-key predicates
+- Maintained alongside primary index
+
+**Look-Aside Index** (`_look_aside_index`):
+- Maps internal_row_id → (extent_id, row_position)
+- Enables secondary index lookups to find actual rows
+- Schema: `[internal_row_id][extent_id][row_offset]`
+
+### Table Iterator
+
+`Table::Iterator` supports multiple iteration modes:
+
+**Primary iteration**: Traverses BTree, loads data extents from extent_id pointers
+**Secondary iteration**: Uses secondary index + look-aside for data access
+**Index-only iteration**: Returns index entries without fetching full rows
+
+### Table Metadata
+
+Tables maintain metadata in a "roots" file:
+```
+Schema: [index_id: uint64][extent_id: uint64][last_internal_row_id: uint64]
+```
+
+One row per index tracks the root extent for each snapshot.
+
+## Mutable Tables
+
+### MutableTable (`include/sys_tbl_mgr/mutable_table.hh`)
+
+Provides write operations on tables:
+
+**Operations**:
+- `insert()`: Add new row (append or positioned by primary key)
+- `update()`: Modify existing row (copy-on-write)
+- `remove()`: Delete row from extent and indexes
+- `upsert()`: Insert or update based on primary key existence
+
+**Write Strategies**:
+- Empty table: Use `_empty_page` for first extent
+- Append: Add to last extent if sorted correctly
+- Lookup: Use primary index to find target extent
+- Direct: Write to specified extent_id (from write cache)
+
+**Index Maintenance**:
+- Dirty pages trigger `_flush_handler()` callback
+- Invalidates old index entries via `_invalidate_indexes()`
+- Populates new entries via `_flush_and_populate_indexes()`
+- Maintains consistency between primary and secondary indexes
+
+### Finalization
+
+`MutableTable::finalize()`:
+1. Flushes all dirty pages (primary data + all index BTrees)
+2. Returns `TableMetadata` with new root extent offsets
+3. Optionally calls `sync_data_and_indexes()` for durability
+
+## Storage Cache
+
+### Cache Architecture (`include/storage/cache.hh`)
+
+The `StorageCache` provides unified page management:
+
+**Page States**:
+- `CLEAN`: Read from disk, unmodified, can be evicted
+- `DIRTY`: Modified by MutableTable, needs flush
+- `MUTABLE`: Actively being modified
+- `FLUSHING`: Asynchronous write in progress
+- `INVALID`: Evicted or replaced
+
+**Page Structure**:
+- Wraps one or more `Extent` objects
+- Tracks extent_id, cache_id, file path
+- Reference counting for multi-user access
+- LRU eviction for clean pages
+
+**Cache Operations**:
+- `get()`: Retrieve page by (database_id, file, extent_id, xid)
+- `get_or_create()`: Get existing or create new mutable page
+- Copy-on-write: CLEAN pages copied to MUTABLE on first write
+- Hierarchical flushing: Dirty pages written with updated child pointers
+
+### SafePagePtr
+
+RAII wrapper managing page lifecycle:
+- Acquires page from cache on construction
+- Releases back to cache on destruction
+- Supports read (shared) and write (exclusive) locks
+- Transparent access to underlying `Page` object
+
+## MVCC and Versioning
+
+### Copy-on-Write Semantics
+
+All modifications create new extent versions:
+1. Read extent at access_xid
+2. Copy to new MUTABLE extent
+3. Apply modifications
+4. Flush with target_xid in header
+5. Update parent extent with new child pointer
+
+### Extent Chains
+
+Extents form version chains via `prev_offset`:
+```
+extent@xid=100 → extent@xid=50 → extent@xid=20 → ...
+```
+
+Old versions remain for queries at earlier XIDs (cleaned by Vacuumer).
+
+### Snapshot Isolation
+
+- `Table` objects snapshot at specific XID
+- BTree navigation uses extent headers to find correct version
+- Time-travel queries access historical extent versions
+- Write transactions create new snapshot at target_xid
+
+## Schema Evolution
+
+Schemas are versioned alongside data:
+
+**ExtentSchema** (`include/storage/schema.hh`):
+- Defines column order, types, nullability
+- Calculates fixed row layout and field offsets
+- Generates Field accessors for reading/writing
+
+**Schema Changes**:
+- New columns: Added with default values or NULL
+- Dropped columns: Marked as non-existent in schema
+- Type changes: Handled via schema conversion during page reads
+- Schema metadata tracked per XID range
+
+## File Organization
+
+Tables stored in directories:
+```
+{table_base}/{db_id}/{table_id}/{snapshot_xid}/
+  ├── raw              - Primary table data extents
+  ├── {index_id}.idx   - Secondary index extents (one file per index)
+  ├── look_aside       - Look-aside index for row lookup
+  └── roots            - Index root metadata (system tables only)
+```
+
+Each file is an append-only sequence of extents written at increasing offsets.
+
+## Summary
+
+Springtail's storage layer provides:
+- **Extent-level**: Compact fixed+variable row storage with deduplication
+- **Field-level**: Type-safe column access with null/undefined tracking
+- **Index-level**: B+ tree organization with copy-on-write modifications
+- **Table-level**: Primary + secondary indexes with look-aside support
+- **Cache-level**: Unified page management with MVCC snapshots
+
+This architecture enables efficient read-only OLTP-style queries while supporting MVCC for time-travel and concurrent access.

@@ -1,0 +1,48 @@
+---
+title: "Quickstart"
+---
+
+This quickstart is the fastest way to get a locally running version of Springtail up for testing. It uses the **local cluster**, a full multi-node Springtail deployment running under Docker Compose. For an explanation of what each step does, the cluster's internals, and the full set of management commands, see [Local Cluster Deployment](/local-cluster-deployment).
+
+## Prerequisites
+
+- Docker and Docker Compose
+- Python 3
+- AWS CLI
+
+## Launch the cluster
+
+Run all commands from the `local-cluster/` directory:
+
+```shell
+cd local-cluster
+```
+
+Build a package and start the cluster. The first `./cluster up` builds any missing images, so it may take a few minutes:
+
+```shell
+./cluster build-package /tmp/springtail-packages
+./cluster up /tmp/springtail-packages/springtail-<date>-<gitsha>.tar.gz
+```
+
+Check that the cluster is up:
+
+```shell
+./cluster status
+```
+
+Connect to the proxy with any PostgreSQL client:
+
+```shell
+psql -h localhost -p 55432 -U postgres
+```
+
+## Tear down
+
+```shell
+# Stop the Springtail services, keeping the primary DB and dependencies
+./cluster down
+
+# Stop everything and remove all data volumes
+./cluster down all
+```

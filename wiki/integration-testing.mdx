@@ -1,0 +1,355 @@
+---
+title: "Integration Testing"
+---
+
+The integration tests run a full Springtail instance and perform end-to-end testing of the ingest and query components by executing SQL and then verify correctness.  The integration tests should be run from the `python/testing` directory via:
+
+```bash
+python3 test_runner.py
+```
+
+This will run all of the integration tests.
+
+# Integration test framework
+
+## Overview
+
+Our SQL test runner operates using individual test files which each represent a single test case.  These test cases can then be bundled together into test sets, which share a single global setup and cleanup phase.
+
+## Running the tests
+
+Tests are run using `test_runner.py` which is located in `python/testing`.  It requires a YAML configuration file with the following parameters:
+
+- `test_folder`
+    - The path to the folder containing the test set directories.
+- `system_json_path`
+    - The path to the Springtail system configuration JSON file.
+- `build_dir`
+    - The path to the Springtail build directory.
+- `tmp_config_dir`
+    - This a temporary directory for where to put an overlay generated system json file
+- `overlay_config`
+    - A dictionary of overlays.  The key represents the overlay name and a matching overlay file should be present in `overlays/<key>.json` . For each overlay key we specify other parameters used by an overlay and interpreted by the testing framework
+- `configs`
+    - In this section we specify what we want to run for each configuration. Each configuration contains a list of overlay and of the corresponding test sets that we want to run for this overlay.  The `default` configuration is used if no command line parameters are passed in.
+
+The test runner configuration is stored in test_runner_config.yaml file and below is an example of what we expect to find there:
+
+```yaml
+# Folder holding the test cases
+test_folder: 'test_cases'
+
+# the location of the Springtail configuration file to use
+system_json_path: '../../system.json.test'
+
+# the location of the Springtail build
+build_dir: '../../debug'
+
+# the location for generated overlay Springtail configuration files
+tmp_config_dir: '/tmp/tmp_springtail_config'
+
+# overlay configuration, each overlay has a corresponding .json override file in
+# overlays directory
+# only overlays specified here can be used as paramerter with the script
+# -o option
+overlay_config:
+
+  # uses a small repl log size to force more frequent log rotations
+  small_log_rotate:
+    # no parameters
+    params: ~
+
+  # uses a small repl log size to force more frequent log rotations together with streaming postgres config
+  small_log_rotate_with_streaming:
+    params:
+      postgres_config:
+        logical_decoding_work_mem: 64
+
+  # uses a small data cache size to force more frequent eviction
+  small_cache_size:
+    # no parameters
+    params: ~
+
+  # uses a small worker mem size to ensure streaming mode
+  streaming_postgres_config:
+    params:
+      postgres_config:
+        logical_decoding_work_mem: 64
+
+  # set the test config to run the test and verify steps against the proxy
+  integration_test_config:
+    params:
+      use_proxy_for_test: true
+      use_proxy_for_verify: true
+
+  # special configuration for testing include schema
+  include_schema_config:
+    # no parameters
+    params: ~
+
+# config sections, contains full configuration of the run as we want to run it
+# each configuration specifies what we want to run without an overlay and
+# for each overlay mentioned, we specify which test sets we want to run it with
+configs:
+  # configuration for nightly builds
+  nightly:
+    - overlay: ~
+      test_sets: 'all'
+    - overlay: 'small_log_rotate'
+      test_sets: ['recovery']
+    - overlay: 'small_log_rotate_with_streaming'
+      test_sets: ['recovery']
+    - overlay: 'small_cache_size'
+      test_sets: ['basic']
+    - overlay: 'streaming_postgres_config'
+      test_sets: ['recovery', 'large_data']
+    - overlay: 'include_schema_config'
+      test_sets: ['include_schema']
+
+  # configuration for github CI
+  github_ci:
+    - overlay: ~
+      test_sets: ['basic', 'framework', 'preload', 'enum_bits', 'complex', 'numeric', 'query_benchmark']
+    - overlay: 'small_log_rotate'
+      test_sets: ['recovery']
+    - overlay: 'small_log_rotate_with_streaming'
+      test_sets: ['recovery']
+    - overlay: 'small_cache_size'
+      test_sets: ['basic']
+    - overlay: 'streaming_postgres_config'
+      test_sets: ['recovery']
+    - overlay: 'include_schema_config'
+      test_sets: ['include_schema']
+
+  # this configuration runs when there is nothing specified on the command line
+  default:
+    - overlay: ~
+      test_sets: ['basic', 'framework', 'preload', 'enum_bits', 'complex', 'numeric', 'query_benchmark']
+    - overlay: 'small_log_rotate'
+      test_sets: ['recovery']
+    - overlay: 'small_log_rotate_with_streaming'
+      test_sets: ['recovery']
+    - overlay: 'small_cache_size'
+      test_sets: ['basic']
+    - overlay: 'streaming_postgres_config'
+      test_sets: ['recovery', 'large_data']
+    - overlay: 'include_schema_config'
+      test_sets: ['include_schema']
+
+```
+
+There are several different ways to execute the test runner.
+
+```bash
+# run all tests with all overlays
+# -- this should be the default way to run the integration tests
+# it will executes the tests as specied in default config
+python3 test_runner.py
+
+# run all tests in a given test set without using any overlay
+python3 test_runner.py <test_set>
+
+# run specific tests cases within a given test set without using any overlay
+python3 test_runner.py <test_set> <test_case_1> <test_case_2> ...
+
+# run a specific overlay for given test set and test cases when specified
+python3 test_runner.py -o <overlay> [<test_set> <test_case_1> <test_case_2> ...]
+
+# run a specific configuration, right now it can be one of 'nightly',
+# 'github_ci', or 'default'
+python3 test_runner.py -c <config>
+```
+
+## Test Case
+
+A test case is defined by a single file which has the following structure:
+
+```bnf
+<section> ::= "##" <section_name>
+<section_name> ::= "metadata" | "test" | "verify" | "cleanup"
+
+<directive> ::= "###" <directive_type>
+<directive_type> ::= <metadata_directive> |
+                     <test_directive> |
+                     <verify_directive> |
+                     <cleanup_directive>
+
+# only valid in the "metadata" section
+<metadata_directive> ::= "autocommit" ("true" | "false") |
+                         "default_txn" <string> |
+                         "sync_timeout" <seconds> |
+                         "query_timeout" <seconds> |
+                         "poll_interval" <seconds> |
+                         "require_overlays" <list of overlay names>
+
+# only valid in the "test" section
+<test_directive> ::= "parallel" |
+                     "sequential" [ <txn_id> ] |
+                     "txn" <txn_id> |
+                     "load_csv" <filename> <table> |
+                     "sleep" <seconds> |
+                     "sync" |
+                     "recovery_point" |
+                     "force_recovery" |
+                     "restart" |
+                     "switch_db" <database name> |
+                     "streaming" 
+                     
+# only valid in the "verify" sectiona
+<verify_directive> ::= "schema_check" <schema name> <table name> |
+											 "table_exists" <schema name> <table name> ("true" | "false") |
+											 "index_existt" <schema name> <table name> <index name> ("true" | "false") |
+											 "switch_db" <database name> |
+											 "benchmark" 
+
+# only valid in the "cleanup" section
+<cleanup_directive> ::= "switch_db" <database name>
+                     
+# not fully specified here, but a SQL statement may span multiple lines
+<sql> ::= <SQL statement> ';'
+<comment> ::= '--' <comment text>
+
+<line> ::= <sql> | <comment> | <section> | <directive>
+```
+
+### Sections
+
+There are 2 required sections and 2 optional sections of every test case.
+
+#### Metadata (optional)
+
+The `metadata` section defines variables for the overall test case.
+
+- `autocommit`
+    - Specifies if the sql commands are each individual transactions or not.  If not, you can use `BEGIN` and `COMMIT` sql commands to perform a transaction within the test.  Either way, a `COMMIT` is automatically issued at the end of the “test” section by the test runner.
+    - The default value is `true` to maintain the behavior of the current tests.
+- `default_txn`
+    - Specifies the name of the default transaction to use in sequential sections.  This is only useful in very specific situations where you are using a mix of sequential and parallel sub-sections and want to ensure that the sequential sections use a specific transaction from the parallel sub-section without having to specify it with each sequential sub-section header.
+    - The default value is `default` .
+- `sync_timeout`
+    - Specifies the maximum time in seconds spent waiting for a sync to Springtail to complete.  This impacts both the `sync` directive and the implicit sync that occurs after the `test` section is run.  It may make sense to increase this if the test is performing actions that could take a long time to sync (e.g., loading a large amount of data or forcing a re-sync on a large table).
+    - The default value is `3` seconds.
+- `query_timeout`
+    - Specifies the maximum time to wait for a query to complete.  If this timeout is exceeded by any query to the Springtail replica database then the test is considered failed.
+    - The default value is `5` seconds.
+- `poll_interval`
+    - Specifies the time between checks for the `sync` operation in seconds.  Can be specified as a float for sub-second timing.
+    - The default value is `0.001` seconds.
+- `require_overlays`
+    - Specifies the list of overlays that are required to be able to run this test case
+
+#### Test (required)
+
+The `test` section defines the actual sql commands to run for this test case.  There are also a number of directives available to better control the behaviors of the test.
+
+- `load_csv`
+    - Specifies a CSV file and a table into which the CSV file will be loaded.  Please ensure that the table exists before this directive is called since it will not create it.  The CSV file is assumed to be in the same directory with the test case and it must contain headers which match the column names in the table it is being loaded into.
+    - If your CSV file is large, please place a gzip compressed version of it in the public S3 bucket at `s3://public-share.springtail.io/test_files` — e.g., `s3://public-share.springtail.io/test_files/mushroom_overload.csv.gz` .  The CSV files of that directory are synchronized locally before tests are run, allowing you to create a symlink to the appropriate CSV file from your test set’s directory.
+- `sleep`
+    - Specifies that a given transaction should pause sending SQL statements for a given number of seconds.  This is most useful when trying to enforce timings between different transactions in a parallel sub-section.
+- `sync`
+    - Blocks execution until the previous SQL statements have been applied to the Springtail replica.  This is almost never required since their is an implicit `sync` run at the end of every test section to ensure data is fully synced before running the verify section.
+- `txn`
+    - Specifies that the following SQL statements should be executed within a single transaction with the provided logical name.  These logical transactions are executed on separate database connections, meaning you can interleave SQL statements between transactions to ensure correctness in more complex situations.
+    - By default SQL statements are part of the default transaction if none has been specified.
+- `parallel`
+    - Specifies that the following statements are part of a parallel execution.  In this sub-section, separate transactions (as defined by `txn` directives) are executed in parallel.  If you do not specify a transaction, then the statements are executed in the default transaction.
+- `sequential`
+    - Specifies that the following statements should be executed sequentially.  This means that each statement will be run only when the previous has completed, even when switching between logical transactions.
+- `recovery_point`
+    - Uses this instruction to get current XID and stores it as XID to recover to once `force_recovery` is triggered.
+- `force_recovery`
+    - Brings down the system, reverts the committed XID to an earlier XID retrieved at `recovery_point`, and then brings the system back up to force it to recover data from the WAL.
+- `restart`
+    - Forces the system to do full restart without resetting the database.
+- `swtich_db`
+    - Changes the current transaction to use specified database. If there is no `txn` instruction preceding this statement, then database switch is applied to the default transaction, otherwise it is applied to the transaction specified by `txn` instruction that is preceding `switch_db` instruction. This forces all the further instructions or SQL statements to apply only to this database.
+- `streaming`
+    - Enables streaming
+
+#### Verify (required)
+
+The `verify` section defines sql commands that are run against both the primary and the Springtail replica and then have their results compared to ensure that the test has run successfully.  These can consist of `SELECT` statements or the following directives:
+
+- `schema_check`
+    - Compares the table schemas between the primary and Springtail to ensure that they match.  Also checks all active indexes (primary and secondary)
+- `table_exists`
+    - Verifies that the specified table exists or does not exist on both primary and replica.
+- `index_exists`
+    - Verifies that the specified index exists or does not exist on both primary and replica.
+- `swtich_db`
+    - Changes the current transaction to use specified database.This forces all the further instructions or SQL statements to apply only to this database.
+
+#### Cleanup (optional)
+
+The `cleanup` section defines sql commands that are run against the primary after the verification step to revert any changes you don’t want visible to the next test in the test set. This section allows the following directives:
+
+- `swtich_db`
+    - Changes the current transaction to use specified database.This forces all the further instructions or SQL statements to apply only to this database.
+
+## Test Set
+
+A test set is composed of a set of test cases along with a global configuration.  The test case is specified using a directory, the test cases are files within that directory that end with the `.sql` extension.  The global configuration is a special file named `__config.sql` which uses a similar, but slightly different and simplified format from the test cases.
+
+```bnf
+<section> ::= "##" <section_name>
+<section_name> ::= "metadata" | "setup" | "cleanup"
+
+<directive> ::= "###" <directive_type>
+<directive_type> ::= <metadata_directive> |
+                     <setup_directive> |
+                     <cleanup_directive>
+                     
+# only valid in the "metadata" section
+<metadata_directive> ::= "autocommit" ("true" | "false") |
+												 "live_startup" <interval> |
+												 "require_overlays" <list of overlays>
+
+# only valid in the "setup" section
+<setup_directive> ::= "load_csv" <filename> <table> |
+											"add_db" <database name> |
+											"switch_db" <database name>
+								
+# only valid in the "cleanup" section
+<cleanup_directive> ::= "switch_db" <database name>
+                     
+# not fully specified here, but a SQL statement may span multiple lines
+<sql> ::= <SQL statement> ';'
+<comment> ::= '--' <comment text>
+
+	<line> ::= <sql> | <comment> | <section> | <directive>
+```
+
+### Global configuration
+
+The global configuration also has an optional `metadata` section which can contain the following instructions:
+
+- `autocommit`
+    - Specifies if the sql commands are each individual transactions or not.  If not, you can use `BEGIN` and `COMMIT` sql commands to perform a transaction within the test.  Either way, a `COMMIT` is automatically issued at the end of the “test” section by the test runner.
+    - The default value is `true` to maintain the behavior of the current tests.
+- `live_startup`
+    - Specifies that the test set should run a background thread with the given sleep interval. This background thread will periodically issue an update to `background_control`  table.
+- `require_overlays`
+    - Specifies the list of overlays that are required to be able to run this test set
+
+The `setup` section of the global configuration specifies any SQL commands that should be run prior to Springtail starting.  This allows us to test the initial sync of the primary database, as well as centralize the creation of any shared tables required by the individual test cases. It can have one initial instruction:
+
+- `add_db`
+    - Add given database at the setup time. From that point on, this database will be available for `switch_db` instruction and data preload before the system starts.
+
+The `cleanup` section of the global configuration specifies any SQL commands that should be run after Springtail is shutdown.  Ideally this would revert the database to it’s state prior to the test set running so that another test set can be run.
+
+### Running a test set
+
+A test set execution is composed of the following steps:
+
+- Setup
+    - Runs the `setup` from the global configuration to prepare the primary database for the test cases.
+- Start Springtail
+    - Brings up the Springtail replica from scratch, also causing the initial sync of the primary database.
+- Execute test cases
+    - Runs each test case in the test set.  The test cases are run based on the lexicographical order of their file names.
+- Shutdown Springtail
+    - Brings down the Springtail replica.
+- Cleanup
+    - Runs the `cleanup` from the global configuration to prepare for the next test set.

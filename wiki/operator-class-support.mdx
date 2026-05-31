@@ -1,0 +1,241 @@
+---
+title: "Operator class support"
+---
+
+## Overview
+
+This document describes the implementation of operator class (opclass) support in Springtail, enabling the system to handle GIN and GiST secondary indexes in addition to the existing B-tree indexes.
+
+> **Status:** This feature is currently in development on branch `SPR-1090-gin-gist-base-3` and has not been merged to `main`.
+
+### Background
+
+PostgreSQL uses operator classes to define the behavior of indexes for different data types. Each index type (B-tree, GIN, GiST) requires specific support functions identified by support numbers. For example:
+- **GIN indexes** use functions like `extractValue`, `extractQuery`, and `consistent`
+- **GiST indexes** use functions like `consistent`, `union`, `compress`, `decompress`, and `penalty`
+
+Previously, Springtail only supported B-tree secondary indexes. This implementation extends the system to:
+1. Capture and store operator class metadata from PostgreSQL
+2. Route index operations to the appropriate opclass-specific functions
+3. Provide the foundation for building and maintaining GIN/GiST indexes
+
+### Goals
+
+- Store `opclass` (operator class name) for each index column and `index_type` (btree, gin, gist) for each index
+- Enable dynamic invocation of opclass support functions via `OpClassHandler`
+- Prepare the indexer infrastructure to handle non-B-tree index types
+
+---
+
+## Implementation Details
+
+### 1. New Data Structures
+
+#### OpClassHandler (`include/common/constants.hh`)
+
+```cpp
+struct OpClassHandler {
+    using OpClassFunc = uintptr_t (*)(const std::string& opclass_name,
+                                      int support_number,
+                                      uintptr_t /*Datum*/ datum);
+    OpClassFunc opclass_func = nullptr;
+    ExtensionContext context = {};
+};
+```
+
+This handler encapsulates a callback for invoking opclass-specific functions. The `support_number` parameter identifies which support function to call (e.g., `GIST_CONSISTENT = 1`, `GIN_COMPARE = 1`).
+
+#### Index Type Constants
+
+```cpp
+static constexpr std::string_view INDEX_TYPE_GIN = "gin";
+static constexpr std::string_view INDEX_TYPE_GIST = "gist";
+static constexpr std::string_view INDEX_TYPE_BTREE = "btree";
+```
+
+### 2. Schema Extensions
+
+#### Replication Messages (`include/pg_repl/pg_repl_msg.hh`)
+
+Extended `PgMsgSchemaIndexColumn` with:
+```cpp
+std::string opclass;  // operator class name (e.g., "tsvector_ops", "int4_ops")
+```
+
+Extended `PgMsgIndex` with:
+```cpp
+std::string index_type;  // "gin", "gist", or "btree"
+```
+
+#### Internal Schema (`include/storage/schema.hh`)
+
+Extended `Index::Column` with:
+```cpp
+std::string opclass;
+```
+
+Extended `Index` with:
+```cpp
+std::string index_type;
+```
+
+#### System Tables (`include/sys_tbl_mgr/system_tables.hh`)
+
+**Indexes table** - Added column:
+| Column | Position | Type |
+|--------|----------|------|
+| OPCLASS | 6 | TEXT |
+
+**IndexNames table** - Added column:
+| Column | Position | Type |
+|--------|----------|------|
+| INDEX_TYPE | 8 | TEXT |
+
+### 3. PostgreSQL Trigger Updates (`scripts/triggers.sql`)
+
+Modified the index creation trigger to extract opclass and index type from PostgreSQL system catalogs:
+
+```sql
+SELECT
+    i.indexrelid AS index_oid,
+    i.indclass AS indclass,
+    am.amname AS index_type
+FROM pg_index i
+JOIN pg_class ic ON ic.oid = i.indexrelid
+JOIN pg_am am ON am.oid = ic.relam
+...
+
+-- Extract opclass for each column
+SELECT
+    opc.opcname AS opclass
+FROM unnest(ind_obj.indkey, ind_obj.indclass)
+     WITH ORDINALITY AS u(attnum, opclass_oid, ord)
+JOIN pg_opclass opc ON opc.oid = u.opclass_oid
+```
+
+This captures:
+- `am.amname`: The access method name (btree, gin, gist, brin)
+- `opc.opcname`: The operator class name for each index column
+
+### 4. MutableBTree Extensions (`include/storage/mutable_btree.hh`)
+
+Extended constructor to accept opclass handler and index type:
+
+```cpp
+MutableBTree(uint64_t database_id,
+             const std::filesystem::path &file,
+             const std::vector<uint32_t> &keys,
+             ExtentSchemaPtr schema,
+             uint64_t xid,
+             uint64_t max_extent_size,
+             const ExtensionCallback &extension_callback = {},
+             const OpClassHandler &opclass_handler = {},
+             const std::string_view index_type = constant::INDEX_TYPE_BTREE);
+```
+
+New member variables:
+```cpp
+OpClassHandler _opclass_handler;
+std::string_view _index_type;
+```
+
+### 5. Table Manager Updates
+
+#### MutableTable (`include/sys_tbl_mgr/mutable_table.hh`)
+
+Extended `create_index_root` signature:
+```cpp
+MutableBTreePtr create_index_root(
+    uint64_t index_id,
+    const std::vector<uint32_t>& index_columns,
+    const ExtensionCallback& extension_callback = {},
+    const OpClassHandler& opclass_handler = {},
+    const std::string_view index_type = constant::INDEX_TYPE_BTREE);
+```
+
+#### TableMgr (`include/sys_tbl_mgr/table_mgr.hh`)
+
+Extended `get_snapshot_table` to accept `OpClassHandler`:
+```cpp
+MutableTablePtr get_snapshot_table(
+    uint64_t db_id,
+    uint64_t table_id,
+    uint64_t snapshot_xid,
+    ExtentSchemaPtr schema,
+    const std::vector<Index>& secondary_keys,
+    const ExtensionCallback &extension_callback = {},
+    const OpClassHandler &opclass_handler = {});
+```
+
+### 6. Indexer Changes (`src/pg_log_mgr/indexer.cc`)
+
+The indexer now branches based on index type:
+
+```cpp
+if (idx._index_request.index().index_type() == constant::INDEX_TYPE_GIN) {
+    //XXX: Build GIN INDEX
+} else {
+    // Default - btree index builder
+    root = mutable_table->create_index_root(index_id, idx_cols,
+        {PgExtnRegistry::get_instance()->comparator_func});
+    // ... existing B-tree build logic
+}
+```
+
+Similar branching exists for:
+- Index invalidation during updates
+- Index population during reconciliation
+
+### 7. Protobuf Schema Updates (`src/proto/sys_tbl_mgr.proto`)
+
+```protobuf
+message IndexColumn {
+    string name = 1;
+    int32 position = 2;
+    int32 idx_position = 3;
+    string opclass = 4;  // NEW
+}
+
+message IndexInfo {
+    ...
+    string index_type = 10;  // NEW
+}
+```
+
+---
+
+## Data Flow
+
+### Index Creation
+
+```
+PostgreSQL CREATE INDEX
+        ↓
+DDL Trigger (triggers.sql)
+        ↓
+Extract: opclass, index_type from pg_opclass, pg_am
+        ↓
+Replication Message (PgMsgIndex)
+        ↓
+sys_tbl_mgr::Server::_create_index()
+        ↓
+Store in IndexNames (index_type) and Indexes (opclass) system tables
+        ↓
+Indexer loads Index metadata (includes index_type, opclass per column)
+        ↓
+Indexer builds index based on index_type
+        ↓
+Create MutableBTree with OpClassHandler
+        ↓
+For GIN/GiST: invoke opclass methods via OpClassHandler
+
+```
+---
+
+## Path to completion
+
+The core implementation is complete. The remaining blocker is a build failure in the unit test `src/pg_fdw/test/where_test.cc`.
+
+**Issue:** The test file imports both `table` and `mutable_table` headers simultaneously. These headers have conflicting dependencies—one pulls in custom Springtail extension-related imports while the other includes default PostgreSQL imports, causing symbol conflicts during compilation.
+
+**Resolution:** Avoid using `mutable_table` in the test. Instead, load the table data directly and use only the `Table` class for scan operations during testing.

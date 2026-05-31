@@ -1,0 +1,27 @@
+---
+title: "FAQ"
+---
+
+### What problem does Springtail solve?
+
+Springtail addresses the challenges of scaling database performance without the need for complex and risky migrations. Traditional migrations often involve compatibility issues, extensive testing, and a significant time investment. Springtail eliminates these hurdles by providing scalable, distributed read replicas that dynamically adjust to demand, delivering high throughput when needed and reducing costs during periods of low usage.
+
+### What databases does Springtail support?
+
+Springtail is known to work with vanilla PostgreSQL, Amazon RDS for PostgreSQL, Aurora PostgreSQL, and Supabase.
+
+### Which versions of Postgres does Springtail support?
+
+Springtail is compatible with PostgreSQL versions 14.0 and higher.
+
+### How will Springtail import my existing data?
+
+To import your data, simply grant Springtail replication access to your PostgreSQL database. Springtail will take a snapshot of your existing tables and enable logical replication to capture ongoing changes, ensuring a consistent and up-to-date view of your data.
+
+### Do I need to install a Postgres extension for Springtail?
+
+No, Springtail does not require a PostgreSQL extension.
+
+### What kind of performance can I expect?
+
+Springtail improves concurrent query performance. It offloads and scales read execution, which also frees up your existing primary database to process more write transactions in less time.  Individual query latencies may be slightly slower or faster depending on the query workload.

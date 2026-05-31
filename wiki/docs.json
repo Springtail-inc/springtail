@@ -1,0 +1,161 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Springtail",
+  "colors": {
+    "primary": "#2e65ff",
+    "light": "#2a97ff",
+    "dark": "#2e65ff"
+  },
+  "favicon": "/springtail-favicon.png",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting Started",
+        "icon": "rocket",
+        "pages": [
+            "introduction",
+            "quickstart"
+        ]
+      },
+      {
+        "group": "Deployment",
+        "icon": "server",
+        "pages": [
+          "local-cluster-deployment",
+          {
+            "group": "Production Deployment",
+            "pages": [
+              "deployment",
+              "configuring-postgres",
+              "redis-configuration",
+              "production-deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "group": "Development and Testing",
+        "icon": "code",
+        "pages": [
+          {
+            "group": "Development",
+            "pages": [
+              "local-dev-environment",
+              "building",
+              "git-workflow",
+              "code-structure"
+            ]
+          },
+          {
+            "group": "Testing",
+            "pages": [
+              "unit-testing",
+              "integration-testing",
+              "performance-testing"
+            ]
+          }
+        ]
+      },
+      {
+        "group": "Architecture",
+        "icon": "sitemap",
+        "pages": [
+          "architecture",
+          {
+            "group": "Ingest Nodes",
+            "pages": [
+              "ingest-nodes",
+              "message-processing",
+              "write-cache",
+              "xid-management",
+              "system-metadata",
+              "syncing-tables",
+              "vacuumer",
+              "recovery"
+            ]
+          },
+          {
+            "group": "Proxy Nodes",
+            "pages": [
+              "proxy-nodes",
+              "message-flow-overview",
+              "session-management",
+              "client-session",
+              "server-session",
+              "database-instances-and-pooling",
+              "user-management"
+            ]
+          },
+          {
+            "group": "Query Nodes",
+            "pages": [
+              "query-nodes",
+              "query-node-lifecycle",
+              "foreign-data-wrapper",
+              "ddl-manager",
+              "xid-subscriber"
+            ]
+          },
+          {
+            "group": "Shared Components",
+            "pages": [
+              "system-properties",
+              "admin-http",
+              "storage-layout",
+              "shared-memory-caches",
+              "redis",
+              "common-init",
+              "singleton-services",
+              {
+                "group": "Extension Support",
+                "pages": [
+                  "extension-support",
+                  "postgres-stub-layer",
+                  "pgextnregistry-api-reference"
+                ]
+              },
+              {
+                "group": "Index Support",
+                "pages": [
+                  "index-support",
+                  "operator-class-support",
+                  "gin-index-support",
+                  "gist-index-support"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "group": "Reference",
+        "icon": "book-open",
+        "pages": [
+          "scaling-postgres",
+          "postgres-replication",
+          "postgres-compatibility",
+          "glossary",
+          "faq"
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Support",
+        "href": "mailto:support@springtail.io"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "website": "https://www.springtail.io"
+    }
+  }
+}

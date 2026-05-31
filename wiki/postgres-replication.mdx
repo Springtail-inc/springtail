@@ -1,0 +1,202 @@
+---
+title: "Postgres Replication"
+---
+
+## What is Postgres database replication?
+
+PostgreSQL database replication is a process of creating and maintaining multiple copies of a database across different servers. This technique is crucial for ensuring data availability, improving performance, and enhancing disaster recovery capabilities.
+
+## High-level use cases
+
+Database replication serves several important purposes:
+
+<Card title="High availability" icon="circle-check" horizontal="true">
+  Ensures continuous access to data even if one server fails.
+</Card>
+
+<Card title="Load balancing" icon="scale-balanced" horizontal="true">
+  Distributes read queries across multiple servers to improve performance.
+</Card>
+
+<Card title="Disaster recovery" icon="rotate-left" horizontal="true">
+  Provides a backup solution in case of data loss or system failure.
+</Card>
+
+<Card title="Data analysis" icon="magnifying-glass-chart" horizontal="true">
+  Allows for running complex queries on a replica without affecting the primary database's performance.
+</Card>
+
+## How databases work with write-ahead logging
+
+Write-Ahead Logging (WAL) is a crucial component that is used by many databases to ensure data is not lost during a crash. The log also makes it much simpler to perform replication between database instances. Here’s how it works:
+
+- The WAL records all changes made to the database before they are written to
+  the actual data files.
+- Each WAL record contains the details of the changes made within each
+  transaction and is assigned a new, unique, Log Sequence Number (LSN) to
+  identify that change.
+- The WAL can be replayed upon restarting after a crash to ensure data
+  integrity. It also enabled point-in-time recovery and replication.
+- For replication, WAL records are sent from the primary server to replicas,
+  allowing them to replay the changes and stay in sync.
+
+<Accordion title="Learn more" defaultOpen="false" icon="lightbulb">
+  For WAL configuration options, refer to the official PostgreSQL documentation: [Write Ahead Log](https://www.postgresql.org/docs/16/runtime-config-wal.html)
+</Accordion>
+
+## Physical vs. logical replication
+
+PostgreSQL supports two main types of replication: **physical** and **logical**, each with distinct advantages and use cases.
+
+### **Physical replication**
+
+Physical replication involves replicating physical data blocks after changes are applied. It is beneficial for large-scale replication because it copies data at the block level, making it faster. Additionally, physical replication supports streaming replication for near real-time updates. 
+
+However, it replicates the entire database cluster, which includes all databases and system tables, making it less flexible for partial replication or replication across different PostgreSQL versions. Changes to the physical layout of data blocks across versions can break compatibility.
+
+### Logical replication
+
+Logical replication exposes a logical representation of changes made within transactions, e.g., an update X was applied to row Y, rather than replicating the result stored within physical data blocks. This allows for the replication of specific tables or databases, and supports cross-version replication, which makes it more flexible for complex replication scenarios. 
+
+However, logical replication can be slower for large-scale replication, requires more configuration and management, and does not support certain database modifications, such as schema changes involving `ALTER TABLE`.
+
+## Logical replication in Postgres
+
+Today, logical replication is the preferred replication mechanism due to the cross-version compatibility and the ease of setup. However, it does have some limitations which are described below. Configuring logical replication in Postgres involves several steps and must be performed at a per-database level, not at the instance level.
+
+### Configuration file (wal_level for logical repl)
+
+To enable logical replication, you need to set the `wal_level` parameter to **logical** in the **postgresql.conf** file on the publisher server. This ensures that the WAL contains enough information for logical decoding.
+
+### Publications and subscriptions
+
+**Publications** are created on the publisher (source) database and define the set of tables/schemas for which changes should be replicated. It is possible to create a publication that covers all new tables created within a database or schema.
+
+**Subscriptions** are set up on the subscriber (target) database and specify which publications to receive.
+
+### Replication slot
+
+In logical replication, the WAL is used to capture logical changes to the database, and these changes are sent to the replication slot used by the logical replication process. Each change captured by logical decoding will receive a new LSN. These LSNs allow the logical replication client (like a subscriber) to track its position in the stream and ensure that no data is missed during replication.
+
+The replication slot is the mechanism that keeps track of changes that need to be sent to subscribers. It ensures that WAL records are not removed until all changes have been replicated. Specifically, the replication slot tracks the LSN of the WAL records that have been sent to the replica, as well as those that are acknowledged by the replica.
+
+### Output plugin
+
+The output plugin in Postgres plays a vital role in logical replication by converting the changes captured from the WAL into a format that can be consumed by replication subscribers or external systems. It handles decoding the logical changes, formatting them, and streaming them in a structured format. It also manages replication flow by handling feedback from the subscriber, such as acknowledgment messages or LSNs.
+
+The output plugin is specified when creating the replication slot and is tied to that replication slot. While Postgres provides a default plugin (**pgoutput**), custom plugins can be created to stream changes in other formats (e.g., JSON — [wal2json](https://github.com/eulerto/wal2json)), making Postgres integration with other systems flexible and efficient.
+
+### Important considerations
+
+Only once a specific LSN has been acknowledged can the record be freed from the WAL (thus freeing up disk space). If a replica takes too long to acknowledge a record, the WAL on the primary may continue growing in size. It is important for the primary to maintain the WAL records until acknowledged by the replica, otherwise the replica could lose data if it crashed before applying the changes. Similarly, it is important for the replica to quickly acknowledge records once they’ve been applied, minimizing the amount of data the primary must retain.
+
+The distance between the last LSN sent to the replica, and the last LSN acknowledged by replica contributes to replica lag. The time between these events is the time by which the replica is behind the primary. Minimizing this time is important for consistency. For example, if a write is issued to a primary and a read is issued to the replica, it is often desirable for that read to observe that write. If there is a large replica lag, there is a greater amount of time in which the reader may observe an older value.
+
+## Limitations of logical replication
+
+While logical replication is powerful, it has some limitations in terms of what operations are replicated and which are not.
+
+### Terminology
+
+To understand these limitations, it’s important to distinguish between Data Manipulation Language (DML) and Data Definition Language (DDL) operations:
+
+- **DML:** Operations that manipulate data (`INSERT` | `UPDATE` | `DELETE`)
+- **DDL:** Operations that define or modify the database structure (`CREATE TABLE` | `ALTER TABLE` | etc.)
+
+Logical replication primarily replicates DML operations:
+
+- `INSERT` | `UPDATE` | `DELETE` operations on tables
+- `TRUNCATE` operations (configurable)
+
+Most DDL operations are not automatically replicated, including:
+
+- Schema changes (`CREATE TABLE` | `ALTER TABLE`)
+- Index changes (both primary and secondary indexes)
+- Sequence operations
+
+All replicated tables must contain a primary index or must be designated as
+`REPLICA IDENTITY FULL` (within an `ALTER TABLE`) which will treat the entire row as
+the primary key.
+
+<Accordion title="Learn more" defaultOpen="false" icon="lightbulb">
+  See the official PostgreSQL documentation on [Logical Replication Restrictions](https://www.postgresql.org/docs/16/logical-replication-restrictions.html) for more information about limitations.
+</Accordion>
+
+### Handling non-replicated operations
+
+As noted above, operations that modify the schema (the structure of the tables) are typically not replicated using logical replication. There are a couple of ways to manage operations that aren’t automatically replicated: custom triggers or manual synchronization.
+
+Custom triggers can be set up to replicate certain operations not covered by logical replication. When an operation that modifies the schema (e.g., `ALTER TABLE`), a trigger (SQL function) can be called. Within this function one can extract the name of the table being modified. Unfortunately, the exact schema change is not available, but it is possible to query the current schema for that table. If setting up a custom replica, it may then be possible to compare the new schema to the old schema to determine the changes that occurred.
+
+While it is also possible to detect new index creation, or altered indexes via triggers, it becomes more complicated to automatically make the changes on the replica. Typically the index must be dropped and recreated. Recreating an index may require resorting the entire table (e.g., for a primary index).
+
+Manual synchronization is another method for synchronizing schema changes. It requires the changes to be manually applied to both the publisher and subscriber. When doing so, careful planning is required to coordinate schema changes to ensure consistency across all instances. E.g., when manually handling schema changes:
+
+- `ALTER TABLE`: Apply changes manually to both publisher and subscriber.
+- `CREATE TABLE`: Create the table on the subscriber before setting up replication for it.
+- Primary indexes: Changes must be manually applied to maintain consistency.
+- Secondary indexes: Can be created or dropped independently on the subscriber for query optimization.
+
+## The replication protocol for consumers
+
+Understanding the replication protocol is crucial for consumers of PostgreSQL’s logical replication. The type and format of the messages that are generated by the primary and sent to the replica depend on the Output Plugin specified with the replication slot.
+
+The following sections assume the use of the default **pgoutput** plugin.
+
+### Message types
+
+The replication protocol primarily uses two types of messages:
+
+- **XLogData**: Contains the actual data change messages from the WAL. The XLogData message contains the starting LSN, the ending LSN and the server’s timestamp. It also encodes the actual data change message. There is a message for each type of logical modification (e.g., an `UPDATE` | `INSERT` | `BEGIN` | `COMMIT` message).
+
+<Accordion title="Learn more" defaultOpen="false" icon="lightbulb">
+  See the official PostgreSQL documentation on [Logical Replication Message Formats](https://www.postgresql.org/docs/16/protocol-logicalrep-message-formats.html) for more details on each message type.
+</Accordion>
+
+- **KeepAlive**: Sent periodically to maintain the connection and provide status updates. Typically the replica should respond immediately to keep the connection to the primary alive.
+
+<Accordion title="Learn more" defaultOpen="false" icon="lightbulb">
+  See the official PostgreSQL documentation on [Streaming Replication Protocol](https://www.postgresql.org/docs/16/protocol-replication.html) for additional information.
+</Accordion>
+
+### Streaming vs. full transaction messages
+
+PostgreSQL supports two modes of sending replication messages: 
+
+1. Full transaction mode
+2. Streaming mode
+
+#### Full transaction mode
+
+In full transaction mode, messages are sent when a transaction is committed. No messages for aborted transactions are ever sent. This makes replication simpler, as all data can be replayed. Its biggest downside is that the primary DB must buffer all changes for a transaction until the commit occurs before it can send any data to the replica. If the transaction is large, this can result in buffering a large number of log records to disk, increasing resource utilization and latency.  A full transaction starts with a `BEGIN` message and ends with a `COMMIT` message.  The Postgres configuration parameter: `logical_decoding_work_mem`, controls how much data is buffered before switching to streaming mode (if streaming mode is enabled).
+
+#### Streaming mode
+
+In streaming mode, the primary sends messages to the replica as they occur, allowing for real-time replication. This means that changes within a transaction are not buffered until a commit occurs, so ABORTs must be sent in the replication stream. This makes it slightly more complicated for the replica, as it must now handle ABORTed transactions.  Streaming messages were introduced in protocol version 2 (in Postgres version 14); as such, if replication is initiated with protocol version 1, stream messages are disabled.
+
+At the message level, streaming mode introduces `STREAM START`, `STREAM STOP`, `STREAM COMMIT`, and `STREAM ABORT` messages.  Since operations are streamed prior to the commit or abort, streaming mode must also support sub-transactions (generated by `SAVEPOINTs`), as well as interleaved transactions.  Messages between a `STREAM START` and `STREAM STOP` belong to the same parent transaction.  The `STREAM START` will indicate the Postgres Transaction ID or XID of the parent transaction.  After a `STREAM STOP` message, either a `STREAM START`, `STREAM COMMIT`, `STREAM ABORT` or full transaction will follow.
+
+To support sub-transactions in streaming mode, the normal replication messages are modified to contain an XID to indicate the (sub) transaction to which they belong.  In streaming mode, a sub-transaction is indicated through a different XID than that of the parent.  The parent (or top-level) transaction ID is indicated by the `STREAM START` operation.  If a sub-transaction is aborted, then an explicit `STREAM ABORT` message will be issued containing both the parent and sub-transaction XID.
+
+It is possible to have nested sub-transactions by nesting `SAVEPOINT` commands.  Replication messages will always contain the XID of the latest active sub-transaction.  It is possible to abort multiple sub-transactions at once (e.g., rolling back to an early `SAVEPOINT`), in this case, multiple `STREAM ABORT` messages will be generated, one for each sub-transaction that is aborted.  As well, when a `SAVEPOINT` is released, messages will contain the XID of the latest previous `SAVEPOINT` or the parent transaction (if nesting is fully unrolled).
+
+The `STREAM COMMIT`, unlike the abort, only specifies the parent XID; it implicitly commits all non-aborted sub-transactions.  Both `STREAM COMMIT` and `STREAM ABORT` messages are sent after a `STREAM STOP`.
+
+### Acknowledging last synced LSN
+
+Consumers must periodically acknowledge the latest LSN they’ve successfully processed. This acknowledgment is crucial for several reasons:
+
+- It allows the primary server to free up WAL space. Postgres can be configured to only hold onto so much WAL space before it starts reclaiming records. So it is important for the replica to make sure the log doesn’t grow to this point.
+
+<Accordion title="Learn more" defaultOpen="false" icon="lightbulb">
+  See the official PostgreSQL documentation on the [max_slot_wal_keep_size](https://www.postgresql.org/docs/16/runtime-config-replication.html#GUC-MAX-SLOT-WAL-KEEP-SIZE) configuration option.
+</Accordion>
+
+- It helps with the tracking of replication lag.
+- It ensures that the consumer doesn't miss any data in case of disconnection.
+
+The latest LSN that the primary database is aware of can be queried by looking at the `pg_replication_slots` table in Postgres. The column `confirmed_flush_lsn` holds the last flushed LSN that Postgres has received from the replica.
+
+### Fast-forwarding on idle databases
+
+For databases with infrequent changes, the replication protocol includes a mechanism to “fast-forward” the stream. Even if the database is idle, the current LSN on the primary may be advancing due to internal cleanup or other activities that occur within the database which don’t result in logical records being replicated. As such, if the LSN is not acknowledged then the primary database will not release the space held by WAL records. So it is important for the replica to periodically request the latest LSN, and acknowledge that LSN so that the primary can reclaim resources.

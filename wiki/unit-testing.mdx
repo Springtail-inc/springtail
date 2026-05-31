@@ -1,0 +1,13 @@
+---
+title: "Unit Testing"
+---
+
+Unit tests are intended to test individual class interfaces and functionality.  They should be narrow in scope and not involve complex integrations between components.
+
+The unit tests are written using the [Google Test framework](https://github.com/google/googletest).  They should be run from the build directory via:
+
+```bash
+make check
+```
+
+This will build and run all of the unit tests.  To run individual tests, you can run `ctest` with the appropriate filters.  If the tests are already built, you can also run `make test` both at the top level to run the entire test suite or within individual subdirectories in order to run a portion of the tests.

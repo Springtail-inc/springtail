@@ -1,0 +1,185 @@
+---
+title: "Server Session"
+---
+
+# Server Session Documentation
+
+## Overview
+
+The Server Session represents a connection between the Springtail proxy and a PostgreSQL backend server. It is responsible for managing the lifecycle of the server connection, processing client queries, and ensuring proper state synchronization between the client and the server. The Server Session acts as the intermediary between the Client Session and the PostgreSQL server, handling query execution, batching, dependency resolution, and error recovery.
+
+## Responsibilities
+
+1. **Connection Management**: Establish and maintain a connection to the PostgreSQL server, including authentication and session setup.
+2. **Query Execution**: Process queries received from the Client Session, ensuring proper routing and execution.
+3. **Batch Processing**: Handle batches of messages from the Client Session, including dependency resolution and pipelining.
+4. **State Synchronization**: Replay session state (e.g., session variables, prepared statements) to ensure consistency when switching servers or recovering from failover.
+5. **Error Handling**: Manage errors during query execution, including extended protocol error recovery and transaction rollback.
+6. **Response Coordination**: Collect responses from the PostgreSQL server and forward them to the Client Session.
+
+---
+
+## State Transitions
+
+The Server Session operates as a state machine, transitioning between states based on the current operation and the responses from the PostgreSQL server.
+
+### States
+
+1. **STARTUP**: The initial state where the server session is being established and authenticated.
+2. **READY**: The idle state where the server session is waiting for the next batch of messages from the Client Session.
+3. **DEPENDENCIES**: The state where the server session is processing dependency messages (e.g., session replay) before executing the actual query batch.
+4. **QUERY**: The state where the server session is processing the main query batch.
+5. **EXTENDED_ERROR**: The state entered when an error occurs during extended protocol processing. The server session discards all messages until a synchronization point (Sync) is reached.
+6. **RESET_SESSION**: The state where the server session is resetting its state to prepare for reuse.
+7. **ERROR**: The state entered when a fatal error occurs, leading to session termination.
+
+### State Transitions
+
+#### STARTUP → READY
+- **Trigger**: Server authentication completes successfully.
+- **Actions**:
+  - Initialize session parameters.
+  - Transition to READY state to wait for client messages.
+
+#### READY → DEPENDENCIES
+- **Trigger**: A batch with dependency messages is received.
+- **Actions**:
+  - Process dependency messages (e.g., session replay).
+  - Transition to QUERY state once dependencies are resolved.
+
+#### READY → QUERY
+- **Trigger**: A batch with no dependencies is received.
+- **Actions**:
+  - Begin processing the query batch.
+
+#### DEPENDENCIES → QUERY
+- **Trigger**: All dependency messages in the batch are processed.
+- **Actions**:
+  - Transition to QUERY state to process the main query batch.
+
+#### QUERY → READY
+- **Trigger**: The query batch is fully processed, and the server sends a ReadyForQuery message.
+- **Actions**:
+  - Transition back to READY state to wait for the next batch.
+
+#### QUERY → EXTENDED_ERROR
+- **Trigger**: An error occurs during extended protocol processing (e.g., Parse, Bind, Execute).
+- **Actions**:
+  - Discard all messages in the batch until a Sync message is received.
+  - Transition to EXTENDED_ERROR state to wait for recovery.
+
+#### EXTENDED_ERROR → QUERY
+- **Trigger**: A Sync message is processed, and the server sends a ReadyForQuery message.
+- **Actions**:
+  - Transition back to QUERY state to resume normal processing.
+
+#### ANY → RESET_SESSION
+- **Trigger**: The session is being reset for reuse.
+- **Actions**:
+  - Clear session state and prepare for reuse.
+  - Send message to Postgres server to reset session state (e.g., DISCARD ALL, etc)
+  - Once response is received session can be added back to a session pool indexed by user/database.
+
+#### ANY → ERROR
+- **Trigger**: An error occurs, or the session is terminated.
+- **Actions**:
+  - Close the server connection and clean up resources.
+  - Client session is notified.  
+  - If the error is fatal, the client session is terminated and error sent to client, otherwise a failover to another session is attempted.
+
+---
+
+## Client Session API
+
+The Server Session interacts with the Client Session through a set of well-defined callbacks. These callbacks allow the Server Session to notify the Client Session about query results, errors, and state changes.
+
+### Key Callbacks
+
+1. **Message Response**: Notifies the Client Session when a query message has been processed.
+   - Includes success or failure status.
+   - Allows the Client Session to forward results or handle errors.
+
+2. **Ready For Query**: Notifies the Client Session when the server is ready for the next query.
+   - Includes the transaction status (idle, in-transaction, or error).
+   - Allows the Client Session to update its state and send the next batch.
+
+3. **Error Notification**: Notifies the Client Session about errors during query processing.
+   - Includes error details and the affected query.
+
+4. **Session Replay Completion**: Notifies the Client Session when dependency messages (e.g., session replay) have been processed.
+   - Allows the Client Session to send the main query batch.
+
+---
+
+## Message Flow
+
+1. Messages are received from the Client Session and added to the batch queue.
+2. The Server Session processes messages in order, resolving dependencies first.
+3. Responses are collected from the PostgreSQL server and forwarded to the Client Session.
+
+---
+
+## Batch Processing
+
+The Server Session processes messages from the Client Session in batches. A batch is a group of messages that can be sent to the PostgreSQL server in a single pipeline.
+
+### Batch Structure
+
+A batch consists of:
+1. **Dependency Messages**: Messages required to synchronize session state (e.g., SET statements, PREPARE statements).
+2. **Query Messages**: The main query or queries to be executed.
+3. **Control Messages**: Messages like Sync and Flush that control the flow of the batch.
+
+### Batch Lifecycle
+
+1. **Queueing**: The Client Session queues a batch of messages for the Server Session.
+2. **Dependency Processing**: If the batch contains dependencies, they are processed first.
+3. **Query Execution**: The main query messages are processed after dependencies are resolved.
+4. **Completion**: The batch is marked complete when all messages are processed, and the server sends a ReadyForQuery message.
+
+---
+
+## Dependency Handling
+
+Dependencies are messages that must be processed before the main query batch. These include:
+
+1. **Session Variables**: SET statements that configure session-level parameters.
+2. **Prepared Statements**: PREPARE statements that define reusable queries.
+3. **Cursors**: DECLARE statements for cursors that survive transaction boundaries.
+
+### Dependency Resolution
+
+1. Dependencies are sent to the server before the main query batch.
+2. The Server Session transitions to DEPENDENCIES state while processing dependencies.
+3. Once all dependencies are processed, the Server Session transitions to QUERY state.
+
+---
+
+## Error Handling
+
+The Server Session implements robust error handling to ensure proper recovery and client notification.
+
+### Simple Protocol Errors
+
+1. The server sends an ErrorResponse message.
+2. The Server Session forwards the error to the Client Session.
+3. The Server Session transitions back to READY state after processing the error.
+
+### Extended Protocol Errors
+
+1. An error occurs during Parse, Bind, or Execute.
+2. The Server Session enters EXTENDED_ERROR state.
+3. All messages in the batch are discarded until a Sync message is received.
+4. The Server Session processes the Sync message and transitions back to QUERY state.
+
+### Fatal Errors
+
+1. A fatal error occurs (e.g., connection failure, protocol violation).
+2. The Server Session transitions to ERROR state.
+3. The session is terminated, and resources are cleaned up.
+
+---
+
+## Summary
+
+The Server Session is a critical component of the Springtail proxy, responsible for managing the connection to the PostgreSQL server, processing client queries, and ensuring proper state synchronization. Its design ensures efficient query execution, robust error handling, and seamless integration with the Client Session.

@@ -1,0 +1,26 @@
+---
+title: "Postgres Compatibility"
+---
+
+Springtail achieves Postgres compatibility through three core mechanisms:
+
+1. The use of the Postgres Foreign Data Wrapper as a frontend within the compute node.
+1. The ability of the Springtail Proxy to route queries to the primary database that it does not support. These typically include queries that modify data. For example, DDL operations like `CREATE TABLE` | `ALTER TABLE` | `UPDATE` | `DELETE` | `DROP` | etc.
+1. The use of database triggers on the primary database to replicate schema changes (DDL changes) that are not otherwise replicated through the Postgres Logical Replication Protocol.
+
+With these mechanisms, Springtail achieves full PostgreSQL compatibility. However, a few limitations exist for replicating specific data types and tables imposed by the constraints of the Postgres Logical Replication Protocol.
+
+### Data limitations
+
+Certain types of tables cannot be replicated to Springtail due to limitations within the Postgres Logical Replication Protocol. These include:
+
+* Tables with generated columns; columns defined as functions over other columns
+* Tables or databases not using UTF-8 encodings
+* Tables or databases not using C or C.UTF-8 collations
+
+Certain operations require a full resync of table data, again, usually due to the lack of information present in the replication stream. While the table is being synced, queries for that table will be redirected to the primary. These operations include:
+
+* The modification of the primary key (this requires re-indexing the table)
+* A column changing from nullable to not-nullable
+* A change to the column’s type
+* Adding a new column with a default value
