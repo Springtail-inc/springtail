@@ -47,9 +47,14 @@
               "code-structure"
             ]
           },
-          "testing",
-          "load-generator",
-          "performance"
+          {
+            "group": "Testing",
+            "pages": [
+              "unit-testing",
+              "integration-testing",
+              "performance-testing"
+            ]
+          }
         ]
       },
       {

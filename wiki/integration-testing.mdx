@@ -1,28 +1,6 @@
 ---
-title: "Testing"
+title: "Integration Testing"
 ---
-
-# Overview
-
-There are currently three major categories of tests:
-
-- Unit tests
-- Integration tests
-- Performance tests
-
-## Unit tests
-
-Unit tests are intended to test individual class interfaces and functionality.  They should be narrow in scope and not involve complex integrations between components.
-
-The unit tests are written using the [Google Test framework](https://github.com/google/googletest).  They should be run from the build directory via:
-
-```bash
-make check
-```
-
-This will build and run all of the unit tests.  To run individual tests, you can run `ctest` with the appropriate filters.  If the tests are already built, you can also run `make test` both at the top level to run the entire test suite or within individual subdirectories in order to run a portion of the tests.
-
-## Integration tests
 
 The integration tests run a full Springtail instance and perform end-to-end testing of the ingest and query components by executing SQL and then verify correctness.  The integration tests should be run from the `python/testing` directory via:
 
@@ -30,7 +8,7 @@ The integration tests run a full Springtail instance and perform end-to-end test
 python3 test_runner.py
 ```
 
-This will run all of the integration tests.  
+This will run all of the integration tests.
 
 # Integration test framework
 
@@ -375,13 +353,3 @@ A test set execution is composed of the following steps:
     - Brings down the Springtail replica.
 - Cleanup
     - Runs the `cleanup` from the global configuration to prepare for the next test set.
-
-
-# TODO
-### Performance tests
-* Ingestion performance suite
-* Ingestion benchmarks
-* Query performance testing
-
-
-
