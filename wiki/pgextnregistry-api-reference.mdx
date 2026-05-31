@@ -281,7 +281,7 @@ void add_operator(const std::string& extension,
 **Parameters:**
 - `extension`: Extension name
 - `oid`: Operator OID from `pg_operator`
-- `oper_name`: Operator symbol (e.g., "=", "<@", "&&")
+- `oper_name`: Operator symbol (e.g., `=`, `<@`, `&&`)
 - `proc_name`: Implementation function name
 
 **Behavior:**
@@ -315,7 +315,7 @@ void* get_operator_func_by_oper_name(const char* oper_name) const;
 ```
 
 **Parameters:**
-- `oper_name`: Operator symbol (e.g., "=", "%", "<@")
+- `oper_name`: Operator symbol (e.g., `=`, `%`, `<@`)
 
 **Returns:** Function pointer or `nullptr` if not found
 

@@ -1,0 +1,310 @@
+---
+title: "Local Dev Environment"
+---
+
+The local dev environment runs a PostgreSQL 16 instance and a development container with the full C++ toolchain (compiler, linker), plus PostgreSQL and Redis servers. Your local source tree is mounted into the container, so edits on your machine are built inside the container.
+
+There are two ways to bring it up: **Docker Compose** (recommended) or a **manual `docker run`**.
+
+## Prerequisites
+
+- Docker and Docker Compose
+- Python 3
+
+### Installing a container runtime (macOS)
+
+Install Homebrew, then a container runtime:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# install if not already installed
+brew install colima docker docker-compose docker-Buildx
+```
+
+#### Colima (preferred)
+
+Install colima and docker (this is preferred); make sure you are using `macOS Virtualization.Framework` and `virtiofs` with colima.
+
+**NOTE**: Rosetta is a x86 translation layer, if not using Apple Silicon Mx then it may not be necessary.
+
+```bash
+# NOTE: 12 = GB memory, use less if needed
+#       Also if Apple M4, pass --nested-virtualization to make gdb work
+colima start --memory 12 --cpu 5 --vm-type=vz --vz-rosetta
+
+# run colima status and check the output
+springtail % colima status
+INFO[0000] colima is running using macOS Virtualization.Framework
+INFO[0000] arch: aarch64
+INFO[0000] runtime: docker
+INFO[0000] mountType: virtiofs
+```
+
+#### Docker Desktop
+
+If using Docker Desktop you may need to set some options to enable Rosetta and VirtioFS.  See: https://www.docker.com/blog/docker-desktop-4-25/ Go to Settings→General and select VirtioFS and Rosetta.
+
+## Quick Start (Docker Compose)
+
+### 1. Build the base Docker image
+
+From the repository root:
+
+```shell
+cd docker
+./docker_base.sh
+```
+
+This builds the `springtail:base` image from `Dockerfile.base`, which includes a patched PostgreSQL 16 (built from source with RLS support for foreign tables), Redis, the C++ toolchain, and all Ansible-provisioned dependencies.
+
+### 2. Start the dev environment
+
+```shell
+export SPRINGTAIL_SRC=/path/to/springtail   # absolute path to your repo checkout
+docker compose up -d
+```
+
+This starts two services:
+
+| Service    | Container         | Description                      | Host Port |
+|------------|-------------------|----------------------------------|-----------|
+| `postgres` | `pg16`            | PostgreSQL 16 with logical replication enabled | 5432 |
+| `dev`      | `dev-springtail`  | Development container with build tools         | 2222 (SSH) |
+
+The dev container mounts your source tree at `/home/dev/springtail` and starts PostgreSQL, Redis, and SSH automatically via its entrypoint.
+
+### 3. Build Springtail inside the container
+
+Shell into the dev container and run the debug build:
+
+```shell
+docker exec -it dev-springtail bash
+
+# Inside the container:
+cd ~/springtail
+./vcpkg.sh          # one-time: install C++ dependencies
+./debug.sh          # build debug binaries into ./debug/
+```
+
+### 4. Run the unit tests (C++ / CTest)
+
+```shell
+cd ~/springtail/debug
+make build_tests
+ctest
+```
+
+Or build and run in one step:
+
+```shell
+cmake --build debug --target check
+```
+
+The `check` target kills any running Springtail processes, installs SQL triggers, builds the tests, and runs them via CTest.
+
+### 5. Run the integration tests
+
+The integration test runner is a Python script that exercises Springtail end-to-end against a real PostgreSQL instance. It must be run from its own directory:
+
+```shell
+cd ~/springtail/python/testing
+python3 test_runner.py
+```
+
+This runs the **default** test configuration, which includes the test sets `basic`, `framework`, `preload`, `enum_bits`, `complex`, `numeric`, `query_benchmark`, and `recovery` (with various overlay configurations).
+
+#### Common test_runner.py options
+
+```shell
+# Run the default configuration (same as no arguments)
+python3 test_runner.py
+
+# Run a specific named configuration (e.g., nightly, github_ci_p1)
+python3 test_runner.py -c nightly
+
+# Run a single test set
+python3 test_runner.py basic
+
+# Run specific test cases within a test set
+python3 test_runner.py basic test_create.sql test_insert.sql
+
+# Run with a specific overlay
+python3 test_runner.py -o small_log_rotate recovery
+
+# Skip downloading test data from S3 (useful offline or in CI)
+python3 test_runner.py --skip-downloads
+
+# Output JUnit XML report
+python3 test_runner.py -j results.xml
+```
+
+Available test sets: `basic`, `complex`, `enum_bits`, `framework`, `include_schema`, `large_data`, `live_startup`, `numeric`, `policy_roles`, `preload`, `query_benchmark`, `recovery`, `text_tables`.
+
+Available overlays: `small_log_rotate`, `small_log_rotate_with_streaming`, `small_cache_size`, `streaming_postgres_config`, `integration_test_config`, `include_schema_config`.
+
+### 6. Tear down
+
+```shell
+cd /path/to/springtail/docker
+docker compose down -v
+```
+
+## Alternative: manual container (`docker run`)
+
+Instead of Docker Compose, you can build and run the dev container by hand.
+
+### Build the image
+
+```bash
+git clone git@github.com:Springtail-inc/springtail.git
+cd springtail
+```
+
+From within the springtail dir, create the docker image and run it.
+
+- The `-p` options will map the ports from container to host.  Use Postgres (5432), Redis (6379) and SSH (22) (only SSH is required).
+- The `-v` option will map your local springtail github source into the container (`source:target`).  The source should be your local springtail dir, the target must be `/home/dev/springtail`.  The source is the location at which you checked out and cloned the github source code; replace `<springtail_dir>`.
+- The `--privileged` and `--cap-add=SYS_PTRACE` options may be useful for debugging to attach to a running process
+
+```bash
+# from springtail root
+cd docker
+docker-buildx build --progress plain -t springtail:dev -f ./Dockerfile.base .
+
+# note: replace <springtail_dir> with the location of the cloned springtail dir
+# ~ is short for /Users/<username>, so use one or the other
+docker run -p 2222:22 -p 6666:6379 -v ~/<springtail_dir>:/home/dev/springtail -d --name dev --shm-size=1g -it springtail:dev --privileged --cap-add=SYS_PTRACE
+```
+
+The Dockerfile.base edits the Postgres configuration and creates the script `entrypoint.sh` as the container entry point.  This script ensures the Postgres and Redis services are running, and it creates the Postgres springtail user.  The Dockerfile also edits the Postgres configuration as necessary.
+
+### Logging in
+
+You should see 3 directories after logging in:
+
+```bash
+ssh -p 2222 dev@localhost # use password 'dev'
+```
+
+```bash
+dev@941221cd102e:~$ ls
+debug  external  springtail
+```
+
+The `springtail` directory should be the mounted directory from your local machine containing the code.  The `debug` directory is where the code will be built within the container, and the `external` directory will host the `vcpkg` packages and source.
+
+### Building
+
+From within the dev container; this will create symlinks to `../debug` and `../external` and will start the build.  First it will download `vcpkg` and build it, then it will download the dependency packages and build them, lastly it will build the Springtail code.
+
+```bash
+# first time; go grab a coffee it may be a while...
+cd springtail
+./debug.sh
+
+# subsequent times
+cd debug
+make
+```
+
+#### Troubleshooting the build
+
+- Check for the existence of the following two files, and make sure they are symlinks:
+- `debug -> /home/dev/debug/`
+- `external -> /home/dev/external/`
+
+```bash
+# make sure you are in the springtail dir
+cd /home/dev/springtail
+
+# look for debug and external
+ls -l
+...
+lrwxr-xr-x  1 dev dev     16 Oct  4 23:29 debug -> /home/dev/debug/
+...
+lrwxr-xr-x  1 dev dev     19 Oct  4 23:29 external -> /home/dev/external/
+
+# if they don't exist:
+ln -s /home/dev/debug
+ln -s /home/dev/external
+```
+
+- Sometimes running `./debug.sh` results in errors while building the external dependencies in vcpkg.  If this happens, just try rerunning `./debug.sh` and see if you can make progress (i.e., check if it is failing on a different dependency, if so keep going).
+
+## Operating the environment
+
+### After Mac reboot
+
+After reboot if your container is no longer accessible, check if colima is running and if not start it:
+
+```bash
+> colima start --memory 16 --cpu 5 --vm-type=vz --vz-rosetta
+INFO[0000] starting colima
+INFO[0000] runtime: docker
+WARN[0000] Unable to enable Rosetta: Rosetta2 is not installed
+WARN[0000] Run 'softwareupdate --install-rosetta' to install Rosetta2
+INFO[0000] starting ...                                  context=vm
+INFO[0011] provisioning ...                              context=docker
+INFO[0012] starting ...                                  context=docker
+INFO[0012] done
+```
+
+Now verify if the docker container is running:
+
+```bash
+docker container ls
+```
+
+If it did not find anything, the docker container needs to be restarted. Run the following command:
+
+```bash
+> docker container ls --all
+CONTAINER ID   IMAGE            COMMAND                  CREATED       STATUS                        PORTS                                                                                            NAMES
+6bc0f4fe0fb3   springtail:dev   "/usr/local/bin/entr…"   2 weeks ago   Exited (255) 24 minutes ago   5432/tcp, 0.0.0.0:2222->22/tcp, [::]:2222->22/tcp, 0.0.0.0:6666->6379/tcp, [::]:6666->6379/tcp   dev
+```
+
+The first number is the container id and this is what is needed to get container restarted.
+
+```bash
+docker container start <container id>
+```
+
+Now you can login into your container. If you try to do `docker run` command instead of `docker container start`, it will fail as follows:
+
+```bash
+> docker run -p 2222:22 -p 6666:6379 -v ~/springtail:/home/dev/springtail -d --name dev -it springtail:dev --priviliged --cap-add=SYS_PTRACE
+docker: Error response from daemon: Conflict. The container name "/dev" is already in use by container "6bc0f4fe0fb32c62945a411c67b4ddbaf522c6f4fcedbdc4a232d8ac0c9cee63". You have to remove (or rename) that container to be able to reuse that name.
+```
+
+### Running out of space
+
+If you have trouble with disk space or RAM or CPU, you can restart `colima`:
+
+```bash
+# e.g. 300G disk, 20G RAM, and 6 CPUs
+colima start --disk 300 --memory 20 --vz-rosetta --cpu 6 --vm-type=vz
+```
+
+You would need to restart the docker container as specified above.
+
+## VS Code
+
+Since you have mounted the `springtail` source dir into the container, the code it is building is the same code on your local machine.  Any edits to the code on your local machine will be reflected in the container.  So after you make a code change, just rebuild from the container (`cd debug; make`).
+
+### Dev containers
+
+If you are using VSCode or Cursor (based on VSCode), and want more functionality to just work, it is best to have VSCode connect to the docker image and edit there. You can do this by installing the “Dev Containers” extension.  And then access the Command Palette (cmd+shift+P) and run “Dev Containers: Attach to Running Container…”. You can then select your container. It will first connect as “root”, which is not what you want, so then run “Dev Containers: Open Container Configuration File” and set the contents to the following:
+
+```json
+{
+	"remoteUser": "dev",
+	"workspaceFolder": "/home/dev/springtail",
+}
+```
+
+You can then reconnect with “Dev Containers: Attach to Running Container…”. Note that in this environment, you can also install the “CMake” extension and run things like “CMake: Build” and get good language server integration.
+
+### Clangd
+
+Additionally, in VSCode, I’d recommend installing the `clangd` extension, and also run `sudo apt install clangd` inside of your container. After installing the VSCode extension, you should get an option to disable “Microsoft Intellisense” (as both extensions provide the same functionality). The clangd extension should give much more accurate/faster support for “Find all references”.

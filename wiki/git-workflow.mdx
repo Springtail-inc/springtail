@@ -1,0 +1,69 @@
+---
+title: "Git Workflow"
+---
+
+This page describes the development process for working on Springtail, from issue creation through merge.
+
+## Dev Process
+
+- **Issue Creation:**
+    - Create a new issue in GitHub.
+    - Clearly describe the feature's functionality and purpose.
+    - Include relevant details, user stories, or acceptance criteria.
+    - **Assign the issue to yourself if you will be working on it.**
+- **Branching:**
+    - Once the issue is created, create a new development branch based on the `main` branch (`git checkout -b branch_name`).
+        - Use a descriptive branch name that references the issue number (e.g., `123-feature` or `123-issue`).
+    - **Push the newly created branch to your remote repository on GitHub (`git push -u`).**
+    - If the above push command does not work, do `git push --set-upstream origin <branch name>`
+    - If something is wrong and you need to delete remote branch, do `git push -d origin <branch name>`
+    - To delete local branch, do `git branch -d <branch name>`
+    - To see the list of remote branches and to verify that you have created a remote branch, do `git branch -r`
+- **Development:**
+    - Implement the feature code within your development branch.
+    - Make frequent commits with clear and concise commit messages that describe the specific changes made.
+    - The commit message should reference the GitHub issue, e.g.,
+        - `git commit -m "Fix bug reported ref #123"`
+    - Use unit tests to ensure the functionality of your code.
+    - Run all tests locally prior to submitting a Pull Request.
+        - From root of the build tree (e.g., in `springtail/debug/`) run `make test`
+- **Pull Request Creation:**
+    - Once development is complete, create a Pull Request (PR) from your development branch to the `main` branch.
+    - Reference the issue number in the PR title or description to link the feature to the initial request.
+    - Provide a clear summary of the changes made and the purpose of the feature.
+    - Request code reviews from other developers.
+- **Review and Merge:**
+    - Address any feedback or suggestions received during the code review process.
+    - Make necessary code changes and push them to your development branch.
+    - Rerun all unit and integration tests.
+    - Once the code is approved for merging, contact @Garth or @Craig to merge into main.
+        - A **squash merge** option should be used to merge your changes into the `main` branch. This creates a single commit representing the entire feature development.
+- **Bring your branch up to date with main**:
+    - Perform the following commands (best to have done a `git commit` locally before merging):
+
+        ```bash
+        git pull
+        git merge origin/main
+        git push
+        ```
+
+- Pull in updates from a branch other than main
+    - Perform the following commands:
+
+        ```bash
+        git stash # optional - saves uncommited changes
+        git pull
+        git merge origin/<branch name>    # will apply the changes from the branch
+        git push # optional - only if you want to apply the same change to the remote branch
+        git stash pop # optional - get the uncommited changes back and merge if needed
+        ```
+
+    - If after merge command you want to revert to the pre-merge state, run `git reset --hard ORIG_HEAD`
+    - To see the diff of the last commit, do `git diff HEAD^`
+    - If you want a remote branch with the name different than your local branch:
+        - Create branch: `git push --set-upstream origin <local branch>:<remote branch>`
+        - Push to remote branch: `git push origin HEAD:<remote branch>`
+- Cleanup remote branch view from git: `git remote prune origin`
+- Delete local branch: `git branch -D <branch name>`
+- Restore uncommitted, but not staged file: `git restore <filename>`
+- Restore uncommitted, but staged file: `git restore --staged <filename>`

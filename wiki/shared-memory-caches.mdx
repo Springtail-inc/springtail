@@ -225,7 +225,7 @@ Value: vector<proto::Extent>
 - Registers with appropriate singleton clients
 
 **Performance Considerations:**
-- Only processes XIDs <= snapshot_xid (transaction isolation)
+- Only processes `XIDs <= snapshot_xid` (transaction isolation)
 - Limits to `MAX_WRITE_CACHE_EXTENTS` (10) per query
 - Resets pending XIDs if too many extents found
 - Avoids redundant extent fetches

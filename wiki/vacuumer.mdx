@@ -112,7 +112,7 @@ title: "Vacuumer"
     - `min_fdw_xid`: Minimum XID in use by foreign data wrappers (active queries from remote)
     - `last_committed_xid`: Latest committed transaction (protects uncommitted data)
     - `min_index_xid`: Minimum XID for ongoing index builds/drops
-  - Only extents with XID < cutoff are vacuumed, ensuring no active transaction can reference the data
+  - Only extents with `XID < cutoff` are vacuumed, ensuring no active transaction can reference the data
   - Cutoff XIDs are persisted to Redis per-database for monitoring (`_save_last_seen_cutoff_xid`)
 
   **Persistence & Schema** (`vacuumer.cc:62-76`)
@@ -128,7 +128,7 @@ title: "Vacuumer"
 
   **Roots File Cleanup** (`vacuumer.cc:783-851`)
   - System tables maintain the roots in the files of the format (`roots.{xid}`)
-  - Vacuum removes roots files with XID < cutoff, preserving the current symlinked version
+  - Vacuum removes roots files with `XID < cutoff`, preserving the current symlinked version
   - Iterates all system tables defined in `sys_tbl::TABLE_IDS`
 
   **Recovery Protocol** (`vacuumer.cc:710-781`)

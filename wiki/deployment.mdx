@@ -1,21 +1,23 @@
 ---
-title: "Deployment"
+title: "Overview"
 ---
 
-Deployment
-====
+This section covers deploying Springtail in a production environment. A production deployment groups the Springtail services into three node types:
 
-This section provides guidelines and best practices for deploying the system in various environments. It covers topics such as infrastructure requirements, configuration settings, scaling strategies, and monitoring solutions to ensure optimal performance and reliability.
-We will cover the following topics:
+- **Ingestion Node** — ingest changes from the primary database.
+- **Proxy Node** — handle client connections and route queries.
+- **FDW Node(s)** — serve queries; there can be one or more depending on the scale of the deployment.
 
- - Local Cluster Deployment (docker based)
- - AWS EC2 Based Deployment
+All nodes share a Redis cache and a common storage layer underneath.
 
-In both deployment models, we are grouping the services into three separate groups:
+## High-level steps
 
- - Ingestion Node / Container
- - Proxy Node / Container
- - FDW Node(s) / Container(s)
+Deploying Springtail to production involves the following steps:
 
-where there can be multiple FDW nodes depending on the scale of the deployment. 
-All the nodes containers share a Redis Cache and a Storage Layer underneath.
+1. **[Configure PostgreSQL](/configuring-postgres)** — prepare the primary database for replication.
+2. **[Configure Redis](/redis-configuration)** — set up the shared Redis cache used by all nodes.
+3. **[Deploy with the Coordinator](/production-deployment)** — use the Springtail Coordinator to start Springtail, add and remove replica nodes, and stop it.
+
+<Note>
+For a local, single-machine setup intended for development and testing, see [Local Cluster Deployment](/local-cluster-deployment) instead.
+</Note>

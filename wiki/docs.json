@@ -11,20 +11,50 @@
   "navigation": {
     "groups": [
       {
-        "group": "Overview",
+        "group": "Getting Started",
+        "icon": "rocket",
         "pages": [
-          "home"
+            "introduction",
+            "quickstart"
         ]
       },
       {
-        "group": "Concepts",
+        "group": "Deployment",
+        "icon": "server",
         "pages": [
-          "scaling-postgres",
-          "postgres-replication"
+          "local-cluster-deployment",
+          {
+            "group": "Production Deployment",
+            "pages": [
+              "deployment",
+              "configuring-postgres",
+              "redis-configuration",
+              "production-deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "group": "Development and Testing",
+        "icon": "code",
+        "pages": [
+          {
+            "group": "Development",
+            "pages": [
+              "local-dev-environment",
+              "building",
+              "git-workflow",
+              "code-structure"
+            ]
+          },
+          "testing",
+          "load-generator",
+          "performance"
         ]
       },
       {
         "group": "Architecture",
+        "icon": "sitemap",
         "pages": [
           "architecture",
           {
@@ -65,7 +95,6 @@
           {
             "group": "Shared Components",
             "pages": [
-              "shared-components",
               "system-properties",
               "admin-http",
               "storage-layout",
@@ -91,34 +120,15 @@
                 ]
               }
             ]
-          },
-          "web-ui"
-        ]
-      },
-      {
-        "group": "Deployment",
-        "pages": [
-          "deployment",
-          "configuring-postgres",
-          "quickstart",
-          "redis-configuration",
-          "local-cluster-deployment",
-          "production-deployment"
-        ]
-      },
-      {
-        "group": "Development and Testing",
-        "pages": [
-          "development-and-testing",
-          "development",
-          "testing",
-          "load-generator",
-          "performance"
+          }
         ]
       },
       {
         "group": "Reference",
+        "icon": "book-open",
         "pages": [
+          "scaling-postgres",
+          "postgres-replication",
           "postgres-compatibility",
           "glossary",
           "faq"

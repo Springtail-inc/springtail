@@ -51,10 +51,12 @@ In the `local-cluster/env` directory, there is a `env.setup` file that defines t
 IMAGE=local-cluster-img:latest
 ```
 
-So you may want to build an image with the tag `local-cluster-img:latest` before starting the local cluster.
+The base image (along with the controller and custom PostgreSQL images) is built automatically by `./cluster up` if it
+is not already present, so you normally do not need to build it by hand. To build or rebuild it manually, run the
+following from the repository root:
 
 ```shell
-$ docker build -t local-cluster-img:latest -f local-cluster/Dockerfile.base .
+$ docker build -t local-cluster-img:latest -f docker/Dockerfile.local-cluster .
 ```
 
 ## Working with Local Cluster
@@ -68,10 +70,16 @@ $ ./cluster build-package <out-dir>
 ```
 
 2. Start the local cluster. You can specify the full package path on your local machine (the tarball file generated from
-   the previous step).
+   the previous step). This step also builds any missing images (base, controller, and custom PostgreSQL).
 
 ```shell
 $ ./cluster up <full-package-path>
+```
+
+   To disable SSL for inter-service connections, append the `--disable-ssl` flag:
+
+```shell
+$ ./cluster up <full-package-path> --disable-ssl
 ```
 
 3. It takes a few minutes (usually less than 2) to start the cluster. You can check the status by:
@@ -85,15 +93,24 @@ $ ./cluster status
 Once all containers are up and running, you can `shell` into any container. For example:
 
 ```shell
-$ ./cluster sh <name>
+$ ./cluster sh <service>
 ```
 
-The container names are:
+The service names are:
 
 - `proxy`
 - `ingestion`
-- `fdw`
+- `fdw1`
+- `fdw2`
 - `controller`
+
+Other useful commands:
+
+```shell
+$ ./cluster logs <service>      # show logs for a service
+$ ./cluster restart <service>   # restart a service container
+$ ./cluster ls                  # list all services
+```
 
 By default, the `springtail-coordinator` service is not started. You can start it by (inside a container):
 
@@ -101,12 +118,38 @@ By default, the `springtail-coordinator` service is not started. You can start i
    $ systemctl start springtail-coordinator
    ```
 
+### Host Ports
+
+The following services are exposed on the host:
+
+| Service         | Host Port |
+|-----------------|-----------|
+| Primary DB      | 15432     |
+| Redis           | 16379     |
+| Proxy           | 55432     |
+| FDW 1           | 45432     |
+| FDW 2           | 45433     |
+| AWS Mock (Moto) | 29999     |
+| Controller API  | 19824     |
+
+Connect to the proxy from the host with any PostgreSQL client:
+
+```shell
+$ psql -h localhost -p 55432 -U postgres
+```
+
 ### Tearing Down the Cluster
 
 To tear down the Springtail containers,
 
 ```shell
 $ ./cluster down
+```
+
+To stop a single service and its dependencies, pass its name:
+
+```shell
+$ ./cluster down proxy
 ```
 
 To tear down everything including the supporting services (Redis, local AWS mock, local DB),

@@ -1,0 +1,48 @@
+---
+title: "Code Structure"
+---
+
+## Root directories
+
+| Directory | Description |
+| --- | --- |
+| src/ | Source tree by module |
+| include/ | Header tree by module |
+| external/ | Where `vcpkg` installs its packages |
+| scripts/ | Helper scripts |
+| python/ | Python libraries for testing; coordinator for deployment; localcluster controller and utilities |
+| docker/ | Docker files, scripts |
+| cmake/ | CMake helper functions |
+| local_cluster/ | Local cluster setup scripts for running cluster using containers on local machine |
+| debug/ * | Conditionally created by CMake for debug builds |
+| release/ * | Conditionally created by CMake for production builds |
+
+## Important files
+
+| Filename | Description |
+| --- | --- |
+| CMakeLists.txt | Top level CMake file for building code.  Add new modules/sub-dirs here.  Other configuration should be local to each module |
+| vcpkg.json | List of C++ vcpkg dependencies; See [list of packages](https://vcpkg.io/en/packages) |
+| clean.sh / debug.sh / release.sh | Helper scripts, wrapper around CMake to clean, build debug or build release  |
+| system.json | Properties JSON file for specifying hostnames, and other configuration info for modules |
+| python/testing/springtail.py | Initialize redis with properties specified in system.json.* file; bring up system, bring down system, run checks on system |
+| python/testing/test_runner.py | Run full system tests, uses [springtail.py](http://springtail.py) to bring up and down system, runs tests located in test_cases |
+
+## Modules
+
+| Name | Description |
+| --- | --- |
+| common | Common utilities, springtail_init() should be called in every main; logging, exceptions, concurrent queues, thread pool, etc. |
+| storage | Threaded storage layer; B-tree, extent and schema handling and definition |
+| pg_repl | Low-level Postgres replication; connecting to primary and decoding replication messages |
+| pg_log_mgr | Consumes Postgres replication stream to log, process log, extracts transaction start/commit, inserts commit records into a queue to be consumed by the committer.  The committer is responsible for applying log changes to the tables and committing them. |
+| write_cache | Cache for holding dirty extents by XID; indexed by Table ID, Extent ID, XID and primary key value |
+| xid_mgr | Persistently stores last committed XID |
+| benchmarks | Code for benchmarking file system performance (for distributed file systems) |
+| proto | gRPC protocol definitions |
+| sys_tbl_mgr | System table service & cache; accessed via Thrift; centralizes management of system table metadata |
+| proxy | Postgres Proxy that handles read/write splitting sending writes to primary, and reads to FDWs |
+| pg_fdw | Postgres frontend query nodes implemented using Postgres Foreign Data Wrapper (FDW) extension; also includes the ddl_daemon for managing DDL changes for the FDW (to create/alter foreign tables) |
+| redis | Redis helper classes |
+| admin_http | Embedded internal http server |
+| pg_ext | Postgres extension related |
