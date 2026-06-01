@@ -54,65 +54,39 @@ Currently, only `gin_trgm_ops` opclass is supported, enabling `LIKE` and `ILIKE`
 
 ### Index Building
 
-```
-INDEX CREATION
-      │
-      ▼
-Server::_create_index()
-  → _check_gin_index_columns() validates opclass
-  → _upsert_index_name() persists metadata
-      │
-      ▼
-Indexer::_build_index()
-  → Detects INDEX_TYPE_GIN
-  → Calls _build_gin_index()
-      │
-      ▼
-Indexer::_build_gin_index()
-  (builds index at the XID x1 in a separate thread in Indexer)
-  → create_gin_index_root() initializes BTree
-  → For each row, for each indexed column:
-      → extract_trgm_from_value() extracts trigrams
-      → Insert (position, token, row_id) into BTree
+```mermaid
+flowchart TD
+    subgraph Creation [INDEX CREATION]
+        direction TB
+        Create["Server::_create_index()<br/>→ _check_gin_index_columns() validates opclass<br/>→ _upsert_index_name() persists metadata"]
+        BuildIdx["Indexer::_build_index()<br/>→ Detects INDEX_TYPE_GIN<br/>→ Calls _build_gin_index()"]
+        BuildGin["Indexer::_build_gin_index()<br/>(builds index at XID x1 in a separate Indexer thread)<br/>→ create_gin_index_root() initializes BTree<br/>→ For each row, for each indexed column:<br/>→ extract_trgm_from_value() extracts trigrams<br/>→ Insert (position, token, row_id) into BTree"]
+        Create --> BuildIdx --> BuildGin
+    end
 
-RECONCILIATION
-      │
-      ▼
-  → committer triggers process_index_reconciliation()
-      → Calls _reconcile_index()
-      → Reconciles index using new mutations happed post XID x1
-      → Insert (position, token, row_id) into BTree for inserts/updates
-      → Remove (position, token, row_id) from BTree for deletes
+    subgraph Recon [RECONCILIATION]
+        direction TB
+        ReconStep["committer triggers process_index_reconciliation()<br/>→ Calls _reconcile_index()<br/>→ Reconciles index using new mutations after XID x1<br/>→ Insert (position, token, row_id) for inserts/updates<br/>→ Remove (position, token, row_id) for deletes"]
+    end
 
-INCREMENTAL MAINTENANCE
-      │
-      ▼
-MutableTable::apply_mutation<INSERT/DELETE>()
-  → index_mutation_handler() checks index type via _index_lookup
-  → For GIN: extracts trigrams, inserts/removes tuples
-  → For BTree: standard key-value operation
+    subgraph Maint [INCREMENTAL MAINTENANCE]
+        direction TB
+        Apply["MutableTable::apply_mutation&lt;INSERT/DELETE&gt;()<br/>→ index_mutation_handler() checks index type via _index_lookup<br/>→ For GIN: extracts trigrams, inserts/removes tuples<br/>→ For BTree: standard key-value operation"]
+    end
+
+    Creation --> Recon --> Maint
 ```
 
 ### Index Scanning (in-progress)
 
-```
-QUERY: SELECT * FROM t WHERE col LIKE '%pattern%'
-      │
-      ▼
-FDW::_init_quals()
-  → Selects GIN index with matching column
-      │
-      ▼
-FDW::_set_scan_iterators()
-  → extract_gin_keys_from_string() extracts query trigrams
-  → Table::begin(index_id, tokens)
-      │
-      ▼
-Table::Iterator (GINSecondary)
-  → Iterates BTree entries matching tokens
-  → Deduplicates rows via _visited_internal_row_ids
-  → Resolves row location via look_aside_index
-  → Returns matching table rows
+```mermaid
+flowchart TD
+    Query["QUERY: SELECT * FROM t WHERE col LIKE '%pattern%'"]
+    InitQuals["FDW::_init_quals()<br/>→ Selects GIN index with matching column"]
+    SetIter["FDW::_set_scan_iterators()<br/>→ extract_gin_keys_from_string() extracts query trigrams<br/>→ Table::begin(index_id, tokens)"]
+    Iter["Table::Iterator (GINSecondary)<br/>→ Iterates BTree entries matching tokens<br/>→ Deduplicates rows via _visited_internal_row_ids<br/>→ Resolves row location via look_aside_index<br/>→ Returns matching table rows"]
+
+    Query --> InitQuals --> SetIter --> Iter
 ```
 
 ---

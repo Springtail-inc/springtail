@@ -41,48 +41,38 @@ enum class IndexStatus {
 ```
 
 **State Transitions:**
-```
-    create_index                              drop_index
-         │                                   (index NOT in _work_set)
-         ▼                                         │
-    ┌──────────┐                                   ▼
-    │ BUILDING │                             ┌──────────┐
-    └────┬─────┘                             │ DELETING │
-         │                                   └────┬─────┘
-         │                                        │
-         ├──────────────────┐                     │
-         │                  │                     │
-         │ drop_index       │ build complete      │
-         │ (index IN        │                     │
-         │  _work_set)      │                     │
-         │                  │                     │
-         ▼                  ▼                     │
-    ┌──────────┐    ┌───────────────┐             │
-    │ ABORTING │───►│  pending      │◄────────────┘
-    └──────────┘    │ reconciliation│             
-                    └───────┬───────┘             
-                            │                     
-                            ▼                     
-                    ┌───────────────┐             
-                    │_reconcile_    │
-                    │  index()      │
-                    └───────┬───────┘
-                            │
-              ┌─────────────┼─────────────┐
-              │             │             │
-              ▼             ▼             ▼
-        ┌───────────┐ ┌───────────┐ ┌───────────┐
-        │ DELETING  │ │ ABORTING  │ │ BUILDING  │
-        │     ↓     │ │     ↓     │ │     ↓     │
-        │  _drop()  │ │_commit_   │ │_commit_   │
-        │           │ │build()    │ │build()    │
-        │           │ │(truncate) │ │(finalize) │
-        └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
-              │             │             │
-              ▼             ▼             ▼
-         ┌─────────┐   ┌─────────┐   ┌───────┐
-         │ DELETED │   │ DELETED │   │ READY │
-         └─────────┘   └─────────┘   └───────┘
+```mermaid
+flowchart TD
+    BUILDING(["BUILDING"])
+    DELETING1(["DELETING"])
+    ABORTING(["ABORTING"])
+    Pending["pending reconciliation"]
+    Recon["_reconcile_index()"]
+
+    DELETING2(["DELETING<br/>_drop()"])
+    ABORTING2(["ABORTING<br/>_commit_build() (truncate)"])
+    BUILDING2(["BUILDING<br/>_commit_build() (finalize)"])
+
+    DELETED1(["DELETED"])
+    DELETED2(["DELETED"])
+    READY(["READY"])
+
+    Start1["create_index"] --> BUILDING
+    Start2["drop_index<br/>(index NOT in _work_set)"] --> DELETING1
+
+    BUILDING -->|"drop_index (index IN _work_set)"| ABORTING
+    BUILDING -->|build complete| Pending
+    ABORTING --> Pending
+    DELETING1 --> Pending
+
+    Pending --> Recon
+    Recon --> DELETING2
+    Recon --> ABORTING2
+    Recon --> BUILDING2
+
+    DELETING2 --> DELETED1
+    ABORTING2 --> DELETED2
+    BUILDING2 --> READY
 ```
 
 **Notes:**
@@ -154,276 +144,85 @@ using Key = std::pair<uint64_t, uint64_t>;  // (db_id, index_id)
 
 ### Index Creation Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           INDEX CREATION FLOW                               │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    CB["Committer._commit_batch()<br/>Collects index requests across batch XIDs, calls at final_xid"]
+    PR["process_requests(db_id, final_xid, combined_index_requests)<br/>Sets DDL counter = request count, routes each request by action type"]
+    Build["build()<br/>1. Skip if index already READY<br/>2. Add key to _table_idx_map (abort tracking)<br/>3. Add IndexParams to _work_set<br/>4. Push key to _queue<br/>5. Register with RedisDDL<br/>6. Notify workers via _cv"]
+    Worker["Worker: task()<br/>Picks up key from queue, fetches IndexParams from _work_set,<br/>calls _build() if status is BUILDING"]
+    BuildFn["_build()<br/>1. Invalidate table cache<br/>2. Create B-tree root<br/>3. Build look-aside (if first index)<br/>4. Scan all rows<br/>5. Insert into B-tree"]
+    AddPending["_add_to_pending_reconciliation()<br/>1. Add to pending map<br/>2. Decrement DDL counter<br/>3. If counter == 0: push IndexReconcileRequest to queue"]
+    LogMgr["pg_log_mgr enqueues RECONCILE_INDEX message for pg_log_reader<br/>(via IndexReconciliationQueueManager)"]
+    CommitterRecv["Committer receives RECONCILE_INDEX message<br/>Calls process_index_reconciliation()"]
+    Recon["_reconcile_index()<br/>Catches up with changes made during build:<br/>- Invalidate old extents<br/>- Populate new extents"]
+    Commit["_commit_build()<br/>1. Finalize B-tree<br/>2. Update table roots<br/>3. Set index state READY<br/>4. Cleanup tracking maps"]
 
-  Committer._commit_batch()
-           │
-           │ Collects index requests across batch XIDs
-           │ Calls at final_xid
-           ▼
-    process_requests(db_id, final_xid, combined_index_requests)
-           │
-           │ Sets DDL counter = request count
-           │ Routes each request by action type
-           ▼
-    ┌──────────────┐
-    │   build()    │
-    └──────┬───────┘
-           │
-           │ 1. Check if index already READY → skip if so
-           │ 2. Add key to _table_idx_map (for abort tracking)
-           │ 3. Add IndexParams to _work_set
-           │ 4. Push key to _queue
-           │ 5. Register with RedisDDL
-           │ 6. Notify workers via _cv
-           ▼
-    ┌──────────────────────┐
-    │   Worker: task()     │ ◄─── Worker thread picks up key from queue
-    └──────────┬───────────┘
-               │
-               │ Fetches IndexParams from _work_set
-               │ Calls _build() if status is BUILDING
-               ▼
-    ┌──────────────────────┐
-    │      _build()        │
-    │                      │
-    │  1. Invalidate table │
-    │     cache            │
-    │  2. Create B-tree    │
-    │     root             │
-    │  3. Build look-aside │
-    │     (if first index) │
-    │  4. Scan all rows    │
-    │  5. Insert into      │
-    │     B-tree           │
-    └──────────┬───────────┘
-               │
-               │ Returns IndexState with B-tree root
-               ▼
-    ┌────────────────────────────┐
-    │ _add_to_pending_           │
-    │   reconciliation()         │
-    │                            │
-    │  1. Add to pending map     │
-    │  2. Decrement DDL counter  │
-    │  3. If counter == 0:       │
-    │     Push IndexReconcile-   │
-    │     Request to queue       │
-    └────────────────────────────┘
-               │
-               │ Queue read by pg_log_mgr
-               │ (via IndexReconciliationQueueManager)
-               ▼
-    ┌────────────────────────────┐
-    │ pg_log_mgr enqueues        │
-    │ RECONCILE_INDEX message    │
-    │ for pg_log_reader          │
-    └──────────┬─────────────────┘
-               │ 
-               │ pg_log_reader pushes
-               │ msg to committer queue
-               │
-               ▼
-    ┌────────────────────────────┐
-    │ Committer receives         │
-    │ RECONCILE_INDEX message    │
-    │                            │
-    │ Calls process_index_       │
-    │   reconciliation()         │
-    └──────────┬─────────────────┘
-               │
-               ▼
-    ┌────────────────────────────┐
-    │   _reconcile_index()       │
-    │                            │
-    │  Catches up with changes   │
-    │  made during build:        │
-    │  - Invalidate old extents  │
-    │  - Populate new extents    │
-    └──────────┬─────────────────┘
-               │
-               ▼
-    ┌────────────────────────────┐
-    │    _commit_build()         │
-    │                            │
-    │  1. Finalize B-tree        │
-    │  2. Update table roots     │
-    │  3. Set index state READY  │
-    │  4. Cleanup tracking maps  │
-    └────────────────────────────┘
+    CB --> PR --> Build --> Worker
+    Worker --> BuildFn
+    BuildFn -->|Returns IndexState with B-tree root| AddPending
+    AddPending -->|Queue read by pg_log_mgr| LogMgr
+    LogMgr -->|pg_log_reader pushes msg to committer queue| CommitterRecv
+    CommitterRecv --> Recon --> Commit
 ```
 
 ### Index Drop Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                             INDEX DROP FLOW                                 │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    PR["process_requests()<br/>action == 'drop_index'"]
+    Drop["drop()"]
 
-    process_requests()
-           │
-           │ action == "drop_index"
-           ▼
-    ┌──────────────┐
-    │    drop()    │
-    └──────┬───────┘
-           │
-           ├───────────────────────────────────────┐
-           │                                       │
-           ▼                                       ▼
-    ┌────────────────────┐              ┌────────────────────────┐
-    │ Index NOT in       │              │ Index IS in            │
-    │ _work_set          │              │ _work_set (building)   │
-    │                    │              │                        │
-    │ Fresh drop:        │              │ Concurrent drop:       │
-    │ Index exists and   │              │ Build in progress      │
-    │ not being built    │              │                        │
-    └─────────┬──────────┘              └───────────┬────────────┘
-              │                                     │
-              ▼                                     ▼
-    ┌────────────────────┐              ┌────────────────────────┐
-    │ Create work item   │              │ Mark existing item     │
-    │ with DELETING      │              │ as ABORTING            │
-    │ status             │              │                        │
-    │                    │              │ Decrement DDL counter  │
-    │ Push to queue      │              │ (no new work item)     │
-    │ Register RedisDDL  │              │                        │
-    └─────────┬──────────┘              └───────────┬────────────┘
-              │                                     │
-              ▼                                     ▼
-    ┌────────────────────┐              ┌────────────────────────┐
-    │ Worker picks up    │              │ _build() detects       │
-    │                    │              │ ABORTING via           │
-    │ Since !BUILDING:   │              │ _was_dropped() check   │
-    │ → Add to pending   │              │ every 1000 rows        │
-    │   reconciliation   │              │                        │
-    │   directly         │              │ Returns early with     │
-    └─────────┬──────────┘              │ partial B-tree         │
-              │                         └───────────┬────────────┘
-              │    ..... Reconciliation pipe        │
-              |          similar to                 |
-              |          create_index flow .....    |
-              ▼                                     ▼
-    ┌────────────────────┐              ┌────────────────────────┐
-    │ _reconcile_index() │              │ _reconcile_index()     │
-    │                    │              │                        │
-    │ Detects DELETING   │              │ Detects ABORTING       │
-    │ → calls _drop()    │              │ → calls _commit_build()│
-    └─────────┬──────────┘              └───────────┬────────────┘
-              │                                     │
-              ▼                                     ▼
-    ┌────────────────────┐              ┌────────────────────────┐
-    │ _drop()            │              │ _commit_build()        │
-    │                    │              │                        │
-    │ 1. Truncate B-tree │              │ 1. Truncate B-tree     │
-    │ 2. Truncate look-  │              │ 2. Truncate look-aside │
-    │    aside if last   │              │    if present          │
-    │    secondary index │              │ 3. Set state DELETED   │
-    │ 3. Set DELETED     │              │                        │
-    │ 4. Update roots    │              │                        │
-    └────────────────────┘              └────────────────────────┘
+    NotIn["Index NOT in _work_set<br/>Fresh drop: index exists and not being built"]
+    IsIn["Index IS in _work_set (building)<br/>Concurrent drop: build in progress"]
+
+    CreateItem["Create work item with DELETING status<br/>Push to queue, register RedisDDL"]
+    MarkAbort["Mark existing item as ABORTING<br/>Decrement DDL counter (no new work item)"]
+
+    WorkerPicks["Worker picks up<br/>Since !BUILDING: add to pending reconciliation directly"]
+    BuildDetect["_build() detects ABORTING via _was_dropped() check every 1000 rows<br/>Returns early with partial B-tree"]
+
+    ReconDel["_reconcile_index()<br/>Detects DELETING → calls _drop()"]
+    ReconAbort["_reconcile_index()<br/>Detects ABORTING → calls _commit_build()"]
+
+    DropFn["_drop()<br/>1. Truncate B-tree<br/>2. Truncate look-aside if last secondary index<br/>3. Set DELETED<br/>4. Update roots"]
+    CommitFn["_commit_build()<br/>1. Truncate B-tree<br/>2. Truncate look-aside if present<br/>3. Set state DELETED"]
+
+    PR --> Drop
+    Drop --> NotIn
+    Drop --> IsIn
+    NotIn --> CreateItem --> WorkerPicks
+    IsIn --> MarkAbort --> BuildDetect
+    WorkerPicks -.->|Reconciliation pipe similar to create_index flow| ReconDel
+    BuildDetect -.->|Reconciliation pipe similar to create_index flow| ReconAbort
+    ReconDel --> DropFn
+    ReconAbort --> CommitFn
 ```
 
 ### Index Recovery Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           INDEX RECOVERY FLOW                               │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Trigger["Committer receives INDEX_RECOVERY_TRIGGER<br/>(pg_log_mgr pushes this message when the db gets added)"]
+    Recover["recover_indexes(db_id)"]
+    Cleanup["_cleanup_for_db()<br/>Clears stale data:<br/>- _work_set entries<br/>- Pending recon map<br/>- Table-index map"]
+    GetUnfinished["sys_tbl_mgr::Server::get_unfinished_indexes_info()<br/>Returns indexes in states:<br/>- NOT_READY (incomplete builds)<br/>- BEING_DELETED (incomplete drops)"]
+    ForEach["For each XID with unfinished indexes:<br/>Build IndexProcessRequest list:<br/>- NOT_READY → action='create_index'<br/>- BEING_DELETED → action='drop_index'"]
+    PR["process_requests()<br/>Schedules recovery work through normal build/drop paths"]
 
-  Committer receives INDEX_RECOVERY_TRIGGER
-    (pg_log_mgr pushes this message when the db gets added)
-           │
-           ▼
-    recover_indexes(db_id)
-           │
-           ▼
-    ┌──────────────────────┐
-    │  _cleanup_for_db()   │
-    │                      │
-    │  Clears stale data:  │
-    │  - _work_set entries │
-    │  - Pending recon map │
-    │  - Table-index map   │
-    └──────────┬───────────┘
-               │
-               ▼
-    ┌────────────────────────────────────┐
-    │ sys_tbl_mgr::Server::              │
-    │   get_unfinished_indexes_info()    │
-    │                                    │
-    │ Returns indexes in states:         │
-    │ - NOT_READY (incomplete builds)    │
-    │ - BEING_DELETED (incomplete drops) │
-    └──────────┬─────────────────────────┘
-               │
-               ▼
-    ┌────────────────────────────────────┐
-    │ For each XID with unfinished       │
-    │ indexes:                           │
-    │                                    │
-    │  Build IndexProcessRequest list:   │
-    │  - NOT_READY → action="create_index│
-    │  - BEING_DELETED → action="drop_   │
-    │                         index"     │
-    └──────────┬─────────────────────────┘
-               │
-               ▼
-    ┌────────────────────────────────────┐
-    │    process_requests()              │
-    │                                    │
-    │ Schedules recovery work through    │
-    │ normal build/drop paths            │
-    └────────────────────────────────────┘
+    Trigger --> Recover --> Cleanup --> GetUnfinished --> ForEach --> PR
 ```
 
 ### Abort Indexes Flow (Table Resync)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         ABORT INDEXES FLOW                                  │
-│                      (During Table Resync)                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Push["pg_log_reader pushes abort_index message into<br/>committer queue for the table as part of table_resync processing"]
+    PR["committer calls process_requests()<br/>action == 'abort_index'"]
+    Abort["abort_indexes()(db_id, table_id, xid)"]
+    Steps["1. Decrement DDL counter<br/>2. Find all index keys for (db_id, table_id) in _table_idx_map<br/>3. For each key: set work_item._status = ABORTING"]
+    Workers["Workers detect ABORTING status during build<br/>via _was_dropped() checks<br/>→ Clean up and mark DELETED"]
 
-    pg_log_reader pushes abort_index message into
-    committer queue for the table
-    as part of table_resync processing
-           │
-           │
-           ▼
-    committer calls process_requests()
-           │
-           │ action == "abort_index"
-           ▼
-    ┌──────────────────────────────┐
-    │   abort_indexes()            │
-    │   (db_id, table_id, xid)     │
-    └──────────┬───────────────────┘
-               │
-               ▼
-    ┌──────────────────────────────┐
-    │ 1. Decrement DDL counter     │
-    │                              │
-    │ 2. Find all index keys for   │
-    │    (db_id, table_id) in      │
-    │    _table_idx_map            │
-    │                              │
-    │ 3. For each key:             │
-    │    Set work_item._status     │
-    │    = ABORTING                │
-    └──────────────────────────────┘
-               │
-               ▼
-    ┌──────────────────────────────┐
-    │ Workers detect ABORTING      │
-    │ status during build via      │
-    │ _was_dropped() checks        │
-    │                              │
-    │ → Clean up and mark DELETED  │
-    └──────────────────────────────┘
+    Push --> PR --> Abort --> Steps --> Workers
 ```
 
 ---

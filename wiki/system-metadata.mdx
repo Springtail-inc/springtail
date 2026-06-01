@@ -4,17 +4,6 @@ title: "System Metadata"
 
 # Schema Management Architecture
 
-## Table of Contents
-1. [Overview](#overview)
-2. [System Tables](#system-tables)
-3. [Schema Information Management](#schema-information-management)
-4. [Caching Architecture](#caching-architecture)
-5. [System Table Manager](#system-table-manager)
-6. [Data Flow](#data-flow)
-7. [Key Design Patterns](#key-design-patterns)
-
----
-
 ## Overview
 
 The Springtail schema management system provides versioned metadata tracking for all database objects including tables, schemas, indexes, and user-defined types. The architecture is designed to support:
@@ -651,232 +640,98 @@ Allows client to opt-in to specific SHM caches.
 
 ### Schema Read Flow (FDW → Server)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ FDW (PostgreSQL Foreign Data Wrapper)                       │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Access table schema
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ TableMgrClient (client-side)                                │
-│  get_schema(db_id, table_id, xid)                           │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Check SchemaCache (in-process)
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ SchemaCache::get()                                          │
-│  - Cache hit? Return constructed SchemaMetadata             │
-│  - Cache miss? Call populate function                       │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Cache miss
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Client::get_schema() - Check SHM Cache                      │
-│  - ShmCache hit? Deserialize protobuf, return               │
-│  - ShmCache miss? Issue gRPC call                           │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ gRPC: GetSchemaRequest
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ sys_tbl_mgr::Service (server-side gRPC handler)             │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Route to Server
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Server::get_schema(db_id, table_id, xid)                    │
-│  - Acquire read lock (_read_mutex)                          │
-│  - Check uncommitted caches first                           │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Not in uncommitted caches
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Read from System Tables (via SystemTableMgr)                │
-│  - Read Schemas table: columns at XID                       │
-│  - Read Indexes table: indexes at XID                       │
-│  - Read IndexNames table: index metadata                    │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Construct SchemaMetadata
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ SchemaMetadata object constructed                           │
-│  - columns: vector<SchemaColumn>                            │
-│  - indexes: vector<Index>                                   │
-│  - access_range: XID validity range                         │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Serialize to protobuf
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ proto::GetSchemaResponse                                    │
-│  - Serialized schema columns                                │
-│  - Serialized indexes                                       │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ gRPC response
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Client receives response                                    │
-│  - Store in SHM cache (for other processes)                 │
-│  - Store in SchemaCache (for local reuse)                   │
-│  - Return SchemaMetadataPtr to caller                       │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    FDW["FDW (PostgreSQL Foreign Data Wrapper)"]
+    Client1["TableMgrClient.get_schema(db_id, table_id, xid)"]
+    SC{"SchemaCache.get()<br/>(in-process)"}
+    SHM{"Client.get_schema()<br/>check SHM cache"}
+    GRPC["gRPC: GetSchemaRequest"]
+    Svc["sys_tbl_mgr::Service<br/>(server-side gRPC handler)"]
+    Srv["Server.get_schema()<br/>read lock, check uncommitted caches"]
+    Disk["Read system tables<br/>Schemas / Indexes / IndexNames"]
+    Build["Construct SchemaMetadata<br/>(columns, indexes, access_range)"]
+    Ser["Serialize to proto::GetSchemaResponse"]
+    Ret["Client stores in SHM + SchemaCache,<br/>returns SchemaMetadataPtr"]
+
+    FDW --> Client1 --> SC
+    SC -->|hit| Ret
+    SC -->|miss| SHM
+    SHM -->|"hit (deserialize)"| Ret
+    SHM -->|miss| GRPC --> Svc --> Srv
+    Srv -->|hit in uncommitted| Ser
+    Srv -->|miss| Disk --> Build --> Ser --> Ret
 ```
 
 ### Table Roots Read Flow
 
-```
-FDW
-  ↓
-TableMgrClient::get_roots(db_id, table_id, xid)
-  ↓
-Check SHM cache (springtail.roots)
-  ↓ (miss)
-gRPC: GetRootsRequest
-  ↓
-Server::get_roots()
-  ↓
-Check _roots_cache (uncommitted)
-  ↓ (miss)
-Read TableRoots system table
-  ↓
-Read TableStats system table
-  ↓
-Construct TableMetadata
-  ↓
-Serialize to proto::GetRootsResponse
-  ↓
-Return via gRPC
-  ↓
-Client stores in SHM cache
-  ↓
-Return TableMetadataPtr
+```mermaid
+flowchart TD
+    FDW["FDW"]
+    C["TableMgrClient.get_roots(db_id, table_id, xid)"]
+    SHM{"Check SHM cache<br/>(springtail.roots)"}
+    GRPC["gRPC: GetRootsRequest"]
+    Srv["Server.get_roots()"]
+    UC{"Check _roots_cache<br/>(uncommitted)"}
+    RR["Read TableRoots system table"]
+    RS["Read TableStats system table"]
+    Build["Construct TableMetadata"]
+    Ser["Serialize to proto::GetRootsResponse"]
+    Ret["Client stores in SHM cache,<br/>returns TableMetadataPtr"]
+
+    FDW --> C --> SHM
+    SHM -->|hit| Ret
+    SHM -->|miss| GRPC --> Srv --> UC
+    UC -->|hit| Ser
+    UC -->|miss| RR --> RS --> Build --> Ser --> Ret
 ```
 
 ### DDL Write Flow (CREATE TABLE)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ PostgreSQL Event Trigger                                    │
-│  - Captures CREATE TABLE event                              │
-│  - Sends PgMsgTable via replication stream                  │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Replication message
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Server::create_table(db_id, xid, msg)                       │
-│  - Acquire write lock (_write_mutex)                        │
-│  - Assign new table_id                                      │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Populate uncommitted caches
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ _table_cache[db][table_id][xid] = TableCacheRecord          │
-│  - name, namespace_id, exists=true, etc.                    │
-└─────────────────────────────────────────────────────────────┘
-                     │
-┌─────────────────────────────────────────────────────────────┐
-│ _schema_cache[db][table_id][col_id] = vector<ColumnHistory> │
-│  - For each column in the table                             │
-└─────────────────────────────────────────────────────────────┘
-                     │
-┌─────────────────────────────────────────────────────────────┐
-│ _index_cache[db][table_id][PRIMARY_INDEX] = IndexCacheItem  │
-│  - Primary index definition                                 │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Generate DDL JSON for DDL manager
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Return DDL JSON string                                      │
-│  - DDL manager will track and apply on commit               │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Transaction commits...
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Server::finalize(db_id, xid, call_sync=true)                │
-│  - Acquire unique lock on _write_mutex                      │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Persist to disk
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Write to System Tables                                      │
-│  - TableNames: Insert (table_id, name, xid, exists=true)    │
-│  - Schemas: Insert (table_id, col, xid) for each column     │
-│  - Indexes: Insert (table_id, PRIMARY_INDEX, xid)           │
-│  - IndexNames: Insert (PRIMARY_INDEX, state=READY)          │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Sync to disk
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ SystemTable::sync() for each modified system table          │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Update SHM caches
-                     ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ ShmCache::update_committed_xid(db, xid, has_schema_changes=true) │
-│  - Records schema change at this XID                             │
-│  - Updates committed XID timestamp                               │
-└────────────────────┬─────────────────────────────────────────────┘
-                     │
-                     │ Clear uncommitted caches
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ _table_cache.clear(db)                                      │
-│ _schema_cache.clear(db)                                     │
-│ _index_cache.clear(db)                                      │
-│ ... (but NOT _table_existence_cache)                        │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    ET["PostgreSQL Event Trigger<br/>captures CREATE TABLE, sends PgMsgTable"]
+    CT["Server.create_table(db_id, xid, msg)<br/>write lock, assign table_id"]
+
+    subgraph UnCache [Populate uncommitted caches]
+        direction TB
+        TC["_table_cache[db][table_id][xid]"]
+        SCH["_schema_cache[db][table_id][col_id]"]
+        IDX["_index_cache[db][table_id][PRIMARY_INDEX]"]
+    end
+
+    DDL["Return DDL JSON for DDL manager"]
+    FIN["Server.finalize(db_id, xid, call_sync=true)<br/>unique write lock"]
+
+    subgraph Persist [Write to system tables]
+        direction TB
+        TN["TableNames"]
+        SchT["Schemas"]
+        IdxT["Indexes"]
+        InT["IndexNames"]
+    end
+
+    Sync["SystemTable.sync() per modified table"]
+    Upd["ShmCache.update_committed_xid(has_schema_changes=true)"]
+    Clr["Clear uncommitted caches<br/>(except _table_existence_cache)"]
+
+    ET --> CT --> UnCache --> DDL --> FIN --> Persist --> Sync --> Upd --> Clr
 ```
 
 ### Cache Invalidation Flow
 
 When DDL changes occur, caches must be invalidated:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ DDL Operation Committed (e.g., ALTER TABLE ADD COLUMN)      │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ DDL manager notifies FDW
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ FDW detects schema change at new XID                        │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Invalidate local cache
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Client::invalidate_table(db_id, table_id, xid)              │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Propagate to SchemaCache
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ SchemaCache::invalidate_table(db, tid, xid)                 │
-│  - Marks schema entry as ending at xid                      │
-│  - Future access beyond xid triggers refetch                │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ SHM cache already updated by Server during finalize
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│ ShmCache has new schema version cached                      │
-│  - Next get_schema(xid > old_xid) will hit SHM cache        │
-│  - Or fetch from server if not in SHM                       │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    DDL["DDL operation committed<br/>(e.g. ALTER TABLE ADD COLUMN)"]
+    Notify["DDL manager notifies FDW"]
+    Detect["FDW detects schema change at new XID"]
+    Inv["Client.invalidate_table(db_id, table_id, xid)"]
+    SCInv["SchemaCache.invalidate_table(db, tid, xid)<br/>marks entry ending at xid; next access refetches"]
+    SHM["SHM cache already updated by Server during finalize<br/>next get_schema(xid > old) hits SHM or server"]
+
+    DDL --> Notify --> Detect --> Inv --> SCInv --> SHM
 ```
 
 **Key Points:**

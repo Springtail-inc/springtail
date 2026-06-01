@@ -70,57 +70,27 @@ struct GistEntry {
 
 ### Index Building
 
-```
-INDEX CREATION
-      │
-      ▼
-Server::_create_index()
-  → Validates opclass compatibility
-  → _upsert_index_name() persists metadata
-      │
-      ▼
-MutableTable::create_gist_index_root()
-  → Creates schema via create_gist_index_schema()
-  → Initializes MutableBTree with INDEX_TYPE_GIST
-  → Stores opclass names for each indexed column
-      │
-      ▼
-Indexer::_build_index()
-  → Detects INDEX_TYPE_GIST
-  → Calls build logic (to be implemented)
+```mermaid
+flowchart TD
+    Create["INDEX CREATION"]
+    CreateIdx["Server::_create_index()<br/>→ Validates opclass compatibility<br/>→ _upsert_index_name() persists metadata"]
+    Root["MutableTable::create_gist_index_root()<br/>→ Creates schema via create_gist_index_schema()<br/>→ Initializes MutableBTree with INDEX_TYPE_GIST<br/>→ Stores opclass names for each indexed column"]
+    BuildIdx["Indexer::_build_index()<br/>→ Detects INDEX_TYPE_GIST<br/>→ Calls build logic (to be implemented)"]
+
+    Create --> CreateIdx --> Root --> BuildIdx
 ```
 
 ### Index Insertion
 
-```
-INSERT/UPDATE Operation
-      │
-      ▼
-MutableBTree::insert()
-  → Detects INDEX_TYPE_GIST
-  → extract_gist_entry_from_tuple()
-      ├─ For each indexed column:
-      │  ├─ make_datum_from_field() converts Springtail field to Datum
-      │  └─ Invokes GIST_COMPRESS via opclass method
-      └─ Returns GistEntry with compressed keys
-      │
-      ▼
-Page::insert_gist()
-  → Marks page as dirty
-  → Delegates to StorageCache::Page::insert_gist()
-      │
-      ▼
-StorageCache::Page::gist_choose_subtree()
-  → For each child page (internal nodes):
-      ├─ read_branch_entry_from_row() extracts child predicate
-      ├─ compute_gist_penalty() calculates insertion cost
-      └─ Selects child with minimum penalty
-  → Returns iterator to chosen subtree
-      │
-      ▼
-StorageCache::Page::insert_gist()
-  → Inserts tuple into chosen extent/subtree
-  → (Split logic and tree rebalancing: TBD)
+```mermaid
+flowchart TD
+    Op["INSERT/UPDATE Operation"]
+    Insert["MutableBTree::insert()<br/>→ Detects INDEX_TYPE_GIST<br/>→ extract_gist_entry_from_tuple()<br/>— For each indexed column:<br/>— make_datum_from_field() converts Springtail field to Datum<br/>— Invokes GIST_COMPRESS via opclass method<br/>→ Returns GistEntry with compressed keys"]
+    PageInsert["Page::insert_gist()<br/>→ Marks page as dirty<br/>→ Delegates to StorageCache::Page::insert_gist()"]
+    Choose["StorageCache::Page::gist_choose_subtree()<br/>→ For each child page (internal nodes):<br/>— read_branch_entry_from_row() extracts child predicate<br/>— compute_gist_penalty() calculates insertion cost<br/>— Selects child with minimum penalty<br/>→ Returns iterator to chosen subtree"]
+    CacheInsert["StorageCache::Page::insert_gist()<br/>→ Inserts tuple into chosen extent/subtree<br/>→ (Split logic and tree rebalancing: TBD)"]
+
+    Op --> Insert --> PageInsert --> Choose --> CacheInsert
 ```
 
 ### Incremental Maintenance

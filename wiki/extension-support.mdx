@@ -66,38 +66,21 @@ Initialization flow during database setup that loads extensions configured in `s
 
 ## Extension Loading Flow
 
-```
-Application Startup
-      │
-      ▼
-PgCopyTable::init_pg_extn_registry(db_id, xid)
-  → Reads extension config from system.json
-  → For each extension:
-      │
-      ├─→ PgExtnRegistry::init_libraries()
-      │     ├─ dlopen() loads extension .so file
-      │     └─ Stores library handle in _library_map
-      │
-      ├─→ _load_extn_types()
-      │     ├─ Queries pg_type for extension types
-      │     ├─ For each type:
-      │     │   ├─ dlsym() loads type I/O functions (typinput, typoutput, typreceive, typsend)
-      │     │   └─ PgExtnRegistry::add_type()
-      │     └─ Creates extension types in Server::create_usertype()
-      │
-      ├─→ _load_extn_operators()
-      │     ├─ Queries pg_operator for extension operators
-      │     ├─ For each operator:
-      │     │   ├─ dlsym() loads operator implementation function
-      │     │   └─ PgExtnRegistry::add_operator()
-      │     └─ Stores operator_name → function_ptr mappings
-      │
-      └─→ _load_extn_opclasses()
-            ├─ Queries pg_opclass for GIN/GIST opclasses
-            ├─ For each opclass method (compress, penalty, union, etc.):
-            │   ├─ dlsym() loads support function
-            │   └─ PgExtnRegistry::add_opclass()
-            └─ Stores (opclass_name, support_number) → method mappings
+```mermaid
+flowchart TD
+    Start["Application Startup"]
+    Init["PgCopyTable::init_pg_extn_registry(db_id, xid)<br/>Reads extension config from system.json<br/>For each extension:"]
+
+    Libs["PgExtnRegistry::init_libraries()<br/>- dlopen() loads extension .so file<br/>- Stores library handle in _library_map"]
+    Types["_load_extn_types()<br/>- Queries pg_type for extension types<br/>- dlsym() loads type I/O functions (typinput, typoutput, typreceive, typsend)<br/>- PgExtnRegistry::add_type()<br/>- Creates extension types in Server::create_usertype()"]
+    Ops["_load_extn_operators()<br/>- Queries pg_operator for extension operators<br/>- dlsym() loads operator implementation function<br/>- PgExtnRegistry::add_operator()<br/>- Stores operator_name → function_ptr mappings"]
+    OpClasses["_load_extn_opclasses()<br/>- Queries pg_opclass for GIN/GIST opclasses<br/>- dlsym() loads support function (compress, penalty, union, etc.)<br/>- PgExtnRegistry::add_opclass()<br/>- Stores (opclass_name, support_number) → method mappings"]
+
+    Start --> Init
+    Init --> Libs
+    Init --> Types
+    Init --> Ops
+    Init --> OpClasses
 ```
 
 ---

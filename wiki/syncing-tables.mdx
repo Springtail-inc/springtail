@@ -353,39 +353,28 @@ The stall mechanism uses **inter-thread coordination** via state synchronizer an
 
 **Detailed Stall Sequence:**
 
-```
-PgLogMgr Copy Thread              PgLogMgr Reader Thread              Committer
-─────────────────────              ──────────────────────              ─────────
-1. Detect sync request
-   (from Redis queue)
+```mermaid
+sequenceDiagram
+    participant Copy as PgLogMgr Copy Thread
+    participant Reader as PgLogMgr Reader Thread
+    participant Committer
 
-2. State transition:
-   RUNNING → SYNC_STALL
-
-3. SyncTracker::block_commits()
-   ├─ Push TABLE_SYNC_START  ──────────────────────────────────────→ Blocks commits
-   │  to committer queue
-   └─ Returns immediately
-
-4. Push STALL to logger queue ──→ 5. Pop STALL message
-                                  6. Set state: SYNCING
-                                  7. Block in wait loop:
-                                     _internal_state.wait_for_state(
-                                         {STATE_REPLAYING, STATE_RUNNING})
-
-8. Detect state == SYNCING
-   (stall acknowledged)
-
-9. Execute table copies:
-   - PgCopyTable::copy_tables()
-   - Workers capture snapshots
-   - Workers mark_inflight()
-   - Workers emit sync messages
-
-10. Set state: REPLAYING      ──→ 11. Detect state change
-                                  12. Exit wait loop
-                                  13. Set state: RUNNING
-                                  14. Resume processing logs
+    Note over Copy: 1. Detect sync request (from Redis queue)
+    Note over Copy: 2. State: RUNNING → SYNC_STALL
+    Copy->>Committer: 3. block_commits(): push TABLE_SYNC_START to committer queue
+    Note over Committer: Blocks commits
+    Note over Copy: block_commits() returns immediately
+    Copy->>Reader: 4. Push STALL to logger queue
+    Note over Reader: 5. Pop STALL message
+    Note over Reader: 6. Set state: SYNCING
+    Note over Reader: 7. Block in wait loop:<br/>wait_for_state({REPLAYING, RUNNING})
+    Note over Copy: 8. Detect state == SYNCING (stall acknowledged)
+    Note over Copy: 9. Execute table copies:<br/>copy_tables(), capture snapshots,<br/>mark_inflight(), emit sync messages
+    Copy->>Reader: 10. Set state: REPLAYING
+    Note over Reader: 11. Detect state change
+    Note over Reader: 12. Exit wait loop
+    Note over Reader: 13. Set state: RUNNING
+    Note over Reader: 14. Resume processing logs
 ```
 
 **Why This Works:**
@@ -495,31 +484,26 @@ PgCopyResult {
 
 **XID Flow Through System:**
 
-```
-PostgreSQL              PgCopyTable             SyncTracker          PgLogReader
-──────────              ───────────             ───────────          ───────────
-pg_xid = <X>       →    Capture snapshot    →   mark_inflight()
-                        target_xid = <T>        - Store xmin/xmax
-                        pg_xid = <X>            - Store xips
-                                                - Store schema
+```mermaid
+sequenceDiagram
+    participant PG as PostgreSQL
+    participant Copy as PgCopyTable
+    participant ST as SyncTracker
+    participant Reader as PgLogReader
 
-                   →    Emit sync message   →                    →  Process mutations:
-                        {target_xid: T,                              if (pg_xid < xmax &&
-                         pg_xid: X}                                     !in xips):
-                                                                        skip mutation
-
-                   →                        →   add_sync()        →  Check if X committed
-                                                - Move to
-                                                  _sync_map[X]
-
-                                            →   check_commit(X)   →  If commit seen at X:
-                                                - Return                 return SwapRequest
-                                                  SwapRequest
-
-                                            →                     →  Assign new XID <S>
-                                                                     swap_sync_table(S)
-
-                                            →   clear_tables()
+    PG->>Copy: pg_xid = X
+    Note over Copy: Capture snapshot<br/>(target_xid = T, pg_xid = X)
+    Copy->>ST: mark_inflight()
+    Note over ST: Store xmin/xmax, xips, schema
+    Copy->>Reader: Emit sync message {target_xid: T, pg_xid: X}
+    Note over Reader: Process mutations:<br/>if (pg_xid < xmax && !in xips): skip mutation
+    Reader->>ST: add_sync()
+    Note over ST: Move to _sync_map[X]
+    Note over Reader: Check if X committed
+    Reader->>ST: check_commit(X)
+    ST-->>Reader: SwapRequest (if commit seen at X)
+    Note over Reader: Assign new XID S<br/>swap_sync_table(S)
+    Reader->>ST: clear_tables()
 ```
 
 #### Snapshot Visibility Rules
@@ -815,130 +799,65 @@ This prevents double-application of transactions during recovery.
 
 ### Full Sync Lifecycle
 
-```
-Time  Copy Thread         Logger Queue        Reader Thread       SyncTracker        PostgreSQL
-────  ───────────         ────────────        ─────────────       ───────────        ──────────
-T0    Wait on Redis
-      sync request
+```mermaid
+sequenceDiagram
+    participant Copy as Copy Thread
+    participant LQ as Logger Queue
+    participant Reader as Reader Thread
+    participant ST as SyncTracker
+    participant PG as PostgreSQL
 
-T1    Receive request
-      table_oids=[100]
+    Note over Copy: T0 Wait on Redis sync request
+    Note over Copy: T1 Receive request, table_oids=[100]
+    Note over Copy: T2 State: RUNNING → SYNC_STALL
+    Copy->>ST: T3 block_commits()
+    Note over ST: _table_map[100] = resync (lock table)
+    Copy->>LQ: T4 Push STALL
+    LQ->>Reader: T5 Pop STALL
+    Note over Reader: State: SYNCING, enter wait loop
+    Note over Copy: T6 Detect SYNCING
 
-T2    State:
-      RUNNING→SYNC_STALL
+    Copy->>PG: T7 copy_tables(xid=5000)
+    PG-->>Copy: pg_current_xact_id()=2000<br/>snapshot "1990:2000:1995"
+    Copy->>ST: T8 mark_inflight(table=100, xid=5000,<br/>xmin=1990, xmax=2000, xips=[1995])
+    Note over ST: _inflight_map[100] = Inflight{2000, 2000, [1995]}
+    Copy->>PG: T9 COPY table TO STDOUT
+    PG-->>Copy: returns 1M rows
+    Note over Copy: T10 Worker inserts to snapshot_table
+    Copy->>PG: T11 pg_logical_emit_message('table_sync',<br/>{target_xid:5000, pg_xid:2000})
+    Note over Copy: T12 All workers complete
+    Note over Copy: T13 State: SYNCING → REPLAYING
 
-T3    block_commits() ────────────────────────────────────────→  _table_map[100] ←─ Lock table
-                                                                  = resync
-T4    Push STALL ────→    [STALL]
-                              │
-T5                            └──────────→    Pop STALL
-                                              State: SYNCING
-                                              Enter wait loop
+    Note over Reader: T14 Detect REPLAYING, exit wait loop,<br/>State: RUNNING, resume processing
+    Note over Reader: T15 Process queued replication logs
 
-T6    Detect SYNCING
+    LQ->>Reader: T16 [BEGIN 1996]
+    Note over Reader: _process_begin(1996), create batch
+    LQ->>Reader: T17 [INSERT t100] pg_xid=1996
+    Note over Reader: should_skip? 1996 < 2000 ✓,<br/>1996 in [1995]? ✗ → SKIP
+    LQ->>Reader: T18 [COMMIT 1996]
+    Note over Reader: check_commit(1996)? → No sync at 1996
+    LQ->>Reader: T19 [BEGIN 1995]
+    LQ->>Reader: T20 [INSERT t100] pg_xid=1995
+    Note over Reader: should_skip? 1995 < 2000 ✓,<br/>1995 in [1995]? ✓ → APPLY
+    LQ->>Reader: T21 [COMMIT 1995]
+    Note over Reader: check_commit(1995)? → No sync at 1995
+    LQ->>Reader: T22 [BEGIN 2001]
+    LQ->>Reader: T23 [INSERT t100] pg_xid=2001
+    Note over Reader: should_skip? 2001 >= 2000 ✓ → APPLY
 
-T7    xid=5000
-      copy_tables(xid) ───────────────────────────────────────────────────────────→ pg_current_xact_id()
-                                                                                     = 2000
-                                                                                     pg_current_snapshot()
-                                                                                     = "1990:2000:1995"
+    LQ->>Reader: T24 [TABLE_SYNC] (msg from T11)
+    Reader->>ST: add_sync(table=100, pg_xid=2000,<br/>xmin=1990, xmax=2000, xips=[1995])
+    Note over ST: _inflight_map.erase(100)<br/>_sync_map[2000] = XidRecord<br/>_table_map[100] = XidRecord
 
-T8    Worker captures ─────────────────────────────────────────→ mark_inflight(
-      snapshot                                                     table=100,
-      pg_xid=2000                                                 xid=5000,
-      xmin=1990                                                   xmin=1990,
-      xmax=2000                                                   xmax=2000,
-      xips=[1995]                                                 xips=[1995])
-
-                                                                  _inflight_map[100]
-                                                                  = Inflight{2000,
-                                                                             2000,
-                                                                             [1995]}
-
-T9    Worker executes ────────────────────────────────────────────────────────────→ COPY table TO STDOUT
-      COPY                                                                           Returns 1M rows
-
-T10   Worker inserts
-      to snapshot_table
-
-T11   Worker emits ────────────────────────────────────────────────────────────────→ pg_logical_emit_message(
-      sync message                                                                     'table_sync',
-                                                                                       '{"target_xid":5000,
-                                                                                         "pg_xid":2000}')
-
-      Message enters ←──────────────────────────────────────────────────────────────  Replication stream
-      replication log
-
-T12   All workers
-      complete
-
-T13   State:
-      SYNCING→REPLAYING
-
-T14                                          Detect REPLAYING
-                                              Exit wait loop
-                                              State: RUNNING
-                                              Resume processing
-
-T15                                          Process queued
-                                              replication logs
-
-T16                        [BEGIN 1996] ──→  _process_begin(1996)
-                                              Create batch
-
-T17                        [INSERT t100] ─→  add_mutation(t100)
-                           pg_xid=1996        should_skip(100,1996)?
-                                                ├─ 1996 < 2000 ✓
-                                                └─ 1996 in [1995]? ✗
-                                              → SKIP ✓
-
-T18                        [COMMIT 1996] ─→  _process_commit(1996)
-                                              check_commit(1996)?
-                                                → No sync at 1996
-
-T19                        [BEGIN 1995] ──→  _process_begin(1995)
-
-T20                        [INSERT t100] ─→  add_mutation(t100)
-                           pg_xid=1995        should_skip(100,1995)?
-                                                ├─ 1995 < 2000 ✓
-                                                └─ 1995 in [1995]? ✓
-                                              → APPLY ✓
-
-T21                        [COMMIT 1995] ─→  _process_commit(1995)
-                                              check_commit(1995)?
-                                                → No sync at 1995
-
-T22                        [BEGIN 2001] ──→  _process_begin(2001)
-
-T23                        [INSERT t100] ─→  add_mutation(t100)
-                           pg_xid=2001        should_skip(100,2001)?
-                                                ├─ 2001 >= 2000 ✓
-                                              → APPLY ✓
-
-T24                        [TABLE_SYNC] ──→  Process COPY_SYNC ──→ add_sync(
-                           msg from T11                              table=100,
-                                                                     pg_xid=2000,
-                                                                     xmin=1990,
-                                                                     xmax=2000,
-                                                                     xips=[1995])
-
-                                                                  _inflight_map.erase(100)
-                                                                  _sync_map[2000] = XidRecord
-                                                                  _table_map[100] = XidRecord
-
-T25                        [COMMIT 2000] ─→  _process_commit(2000)
-                                              check_commit(2000)? ─→ YES! Found sync
-                                                                     at pg_xid=2000
-
-                                              clear_tables() ─────→ _sync_map.erase(2000)
-
-                                              xid=5001
-                                              swap_sync_table(5001)
-
-                                              Notify committer ───→ SWAP table 100@5001
-
-T26                                                              ─→ Table 100 now
-                                                                    visible to queries
+    LQ->>Reader: T25 [COMMIT 2000]
+    Reader->>ST: check_commit(2000)?
+    ST-->>Reader: YES! Found sync at pg_xid=2000
+    Reader->>ST: clear_tables()
+    Note over ST: _sync_map.erase(2000)
+    Note over Reader: xid=5001, swap_sync_table(5001)
+    Reader->>PG: Notify committer → SWAP table 100@5001
+    Note over PG: T26 Table 100 now visible to queries
 ```
 
 ## Performance Considerations
