@@ -29,30 +29,24 @@ The Client Session builds upon a base Session class which provides:
 
 ### Primary States
 
-```
-┌─────────────┐
-│   STARTUP   │  Initial state, handling authentication
-└──────┬──────┘
-       │
-       ↓
-┌─────────────┐
-│ AUTH_SERVER │  Waiting for server authentication
-└──────┬──────┘
-       │
-       ↓
-┌─────────────┐
-│    READY    │  Idle, waiting for next query
-└──────┬──────┘
-       │
-       ↓
-┌─────────────┐
-│    QUERY    │  Processing query (delegated to server session)
-└──────┬──────┘
-       │
-       ↓
-┌─────────────┐
-│    ERROR    │  Fatal error, connection closing
-└─────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> STARTUP
+    STARTUP --> AUTH_SERVER: client auth completes
+    AUTH_SERVER --> READY: server auth completes
+    READY --> QUERY: client sends query message
+    QUERY --> READY: server sends ReadyForQuery
+    STARTUP --> ERROR: fatal error / disconnect
+    AUTH_SERVER --> ERROR: fatal error / disconnect
+    READY --> ERROR: fatal error / disconnect
+    QUERY --> ERROR: fatal error / disconnect
+    ERROR --> [*]
+
+    note right of STARTUP: Initial state, handling authentication
+    note right of AUTH_SERVER: Waiting for server authentication
+    note right of READY: Idle, waiting for next query
+    note right of QUERY: Processing query (delegated to server session)
+    note right of ERROR: Fatal error, connection closing
 ```
 
 ### State Transitions

@@ -20,35 +20,25 @@ The Shared Memory Cache Subsystem enables efficient inter-process communication 
 
 ### High-Level Data Flow
 
-```
-┌─────────────────────────────────────┐
-│   XID Manager (xid_mgr_daemon)      │
-│   - Manages transaction commitments │
-└────────────────┬────────────────────┘
-                 │ gRPC: XidPushResponse
-                 ↓
-┌─────────────────────────────────────────────────────────────┐
-│ PgXidSubscriberMgr (daemon, separate thread)               │
-│ - Receives XID notifications                               │
-│ - Creates 5 shared memory caches                           │
-│ - Populates caches on transaction commit                   │
-│ - Worker threads fetch metadata proactively                │
-└───┬─────────────────────────────────────────────────────────┘
-    │ Shared Memory IPC
-    ├─ SHM_CACHE_ROOTS         (table metadata)
-    ├─ SHM_CACHE_SCHEMAS       (table schemas)
-    ├─ SHM_CACHE_USERTYPES     (user-defined types)
-    ├─ SHM_CACHE_TABLE_IDS     (pending mutations)
-    └─ SHM_CACHE_EXTENTS       (mutation records)
-    │
-    ↓ (Opens and reads)
-┌──────────────────────────────┐
-│   PgFdwMgr (FDW process)     │
-│   - Runs in PostgreSQL       │
-│   - Opens existing caches    │
-│   - Queries pending XIDs     │
-│   - Applies mutations        │
-└──────────────────────────────┘
+```mermaid
+flowchart TD
+    XID["XID Manager (xid_mgr_daemon)<br/>Manages transaction commitments"]
+    Sub["PgXidSubscriberMgr (daemon, separate thread)<br/>- Receives XID notifications<br/>- Creates 5 shared memory caches<br/>- Populates caches on transaction commit<br/>- Worker threads fetch metadata proactively"]
+
+    subgraph SHM [Shared Memory IPC]
+        direction TB
+        Roots["SHM_CACHE_ROOTS (table metadata)"]
+        Schemas["SHM_CACHE_SCHEMAS (table schemas)"]
+        UserTypes["SHM_CACHE_USERTYPES (user-defined types)"]
+        TableIds["SHM_CACHE_TABLE_IDS (pending mutations)"]
+        Extents["SHM_CACHE_EXTENTS (mutation records)"]
+    end
+
+    FDW["PgFdwMgr (FDW process)<br/>- Runs in PostgreSQL<br/>- Opens existing caches<br/>- Queries pending XIDs<br/>- Applies mutations"]
+
+    XID -->|"gRPC: XidPushResponse"| Sub
+    Sub --> SHM
+    SHM -->|opens and reads| FDW
 ```
 
 ### Components

@@ -45,49 +45,16 @@ title: "Vacuumer"
   4. VACUUM RUN (background thread, every 1 second)
 ```
 
-```
-                      _do_vacuum_run()
-                            │
-                            ▼
-      ┌─────────────────────────────────────────────┐
-      │  Flush in-memory expired entries to global  │
-      │  vacuum file if count exceeds threshold     │
-      └─────────────────────────────────────────────┘
-                            │
-                            ▼
-      ┌─────────────────────────────────────────────┐
-      │  Read expired extents from global vacuum    │
-      │  file                                       │
-      └─────────────────────────────────────────────┘
-                            │
-                            ▼
-      ┌─────────────────────────────────────────────┐
-      │  For each file with expired extents:        │
-      │                                             │
-      │    1. Merge current expired extents with    │
-      │       leftover partials from previous runs  │
-      │                                             │
-      │    2. Align extent boundaries to multiples  │
-      │       of filesystem block size (4KB)        │
-      │                                             │
-      │    3. _hole_punch_file() -> fallocate()     │
-      │       to reclaim aligned blocks             │
-      │                                             │
-      │    4. Save unaligned remainders as partials │
-      │       for future coalescing                 │
-      └─────────────────────────────────────────────┘
-                            │
-                            ▼
-      ┌─────────────────────────────────────────────┐
-      │  Delete expired snapshot directories        │
-      │  (dropped tables/indexes)                   │
-      └─────────────────────────────────────────────┘
-                            │
-                            ▼
-      ┌─────────────────────────────────────────────┐
-      │  Rotate/truncate global vacuum file         │
-      │  (clear processed, keep unprocessed)        │
-      └─────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Start["_do_vacuum_run()"]
+    Flush["Flush in-memory expired entries to global<br/>vacuum file if count exceeds threshold"]
+    ReadE["Read expired extents from<br/>global vacuum file"]
+    PerFile["For each file with expired extents:<br/>1. Merge current expired extents with leftover partials<br/>2. Align extent boundaries to filesystem block size (4KB)<br/>3. _hole_punch_file() → fallocate() to reclaim aligned blocks<br/>4. Save unaligned remainders as partials for future coalescing"]
+    DelSnap["Delete expired snapshot directories<br/>(dropped tables/indexes)"]
+    Rotate["Rotate/truncate global vacuum file<br/>(clear processed, keep unprocessed)"]
+
+    Start --> Flush --> ReadE --> PerFile --> DelSnap --> Rotate
 ```
   ---
 
