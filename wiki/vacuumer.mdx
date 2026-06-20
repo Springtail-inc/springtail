@@ -26,9 +26,9 @@ title: "Vacuumer"
   | **`Vacuumer`** | Main singleton class managing vacuum operations (`vacuumer.hh:97`) |
   | **`VacuumerUtils`** | Utility class for querying vacuum state without instantiating the full Vacuumer (`vacuumer.hh:42`) |
   | **`VacuumConfig`** | Namespace with configuration defaults: block size for hole punching (4KB), global vacuum file size threshold to trigger vacuum run (20KB), max expired extent entries held in memory before flushing to disk (10K) |
-  | **`HoleInfo`** | Struct holding an expired extent's location: `{ offset, size }` (`vacuumer.hh:199-202`) |
-  | **`ExtentMap`** | Tracks expired extents: `file → xid → vector<HoleInfo>` (`vacuumer.hh:240`) |
-  | **`SnapshotMap`** | Tracks expired snapshots: `db_id → xid → list<paths>` (`vacuumer.hh:247`) |
+  | **`HoleInfo`** | Struct holding an expired extent's location: `{ offset, size }` (`vacuumer.hh:207-210`) |
+  | **`ExtentMap`** | Tracks expired extents: `file → xid → vector<HoleInfo>` (`vacuumer.hh:248`) |
+  | **`SnapshotMap`** | Tracks expired snapshots: `db_id → xid → list<paths>` (`vacuumer.hh:255`) |
   | **Global vacuum file** | Persistent log of pending vacuum work (`.global.vcm`) |
   | **Partial files** | Track unaligned leftover regions that couldn't be hole-punched (`_partials.vcm`) |
 
