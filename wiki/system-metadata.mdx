@@ -356,7 +356,7 @@ struct SchemaEntry {
 
 **Key:** `(db_id, table_id)`
 
-**Capacity:** Default 128 entries (configurable)
+**Capacity:** Configured via the `cache_size` setting (4096 in the production configuration)
 
 #### Features
 
@@ -424,7 +424,7 @@ The `sys_tbl_mgr` is a gRPC service that manages reading and writing system tabl
 
 ### Architecture - Two Modes
 
-#### Server-Side (`SystemTableMgrServer`)
+#### Server-Side (`sys_tbl_mgr::Server`)
 
 **Location:** `include/sys_tbl_mgr/server.hh`, `src/sys_tbl_mgr/server.cc`
 
@@ -437,7 +437,7 @@ The `sys_tbl_mgr` is a gRPC service that manages reading and writing system tabl
 4. Manage XID progression and synchronization
 5. Serve gRPC requests from clients
 
-#### Client-Side (`SystemTableMgrClient`)
+#### Client-Side (`sys_tbl_mgr::Client`)
 
 **Location:** `include/sys_tbl_mgr/client.hh`, `src/sys_tbl_mgr/client.cc`
 
@@ -451,7 +451,7 @@ The `sys_tbl_mgr` is a gRPC service that manages reading and writing system tabl
 
 ### gRPC Service Definition
 
-**Location:** `proto/sys_tbl_mgr.proto`
+**Location:** `src/proto/sys_tbl_mgr.proto`
 
 ```protobuf
 service SysTblMgr {
@@ -895,7 +895,7 @@ void _set_table_info(uint64_t db_id, TableCacheRecordPtr table_info) {
 - `include/sys_tbl_mgr/schema_cache.hh` - In-process schema cache
 - `include/sys_tbl_mgr/server.hh` - Server-side management
 - `include/sys_tbl_mgr/client.hh` - Client-side RPC interface
-- `include/sys_tbl_mgr/table.hh` - Table interface and SchemaMetadata definition
+- `include/sys_tbl_mgr/table.hh` - Table interface
 - `include/sys_tbl_mgr/msg_cache.hh` - Generic message cache template
 - `include/storage/schema.hh` - SchemaColumn, Index, SchemaMetadata definitions
 
@@ -909,7 +909,7 @@ void _set_table_info(uint64_t db_id, TableCacheRecordPtr table_info) {
 
 ### Protocol Definitions
 
-- `proto/sys_tbl_mgr.proto` - gRPC service and message definitions
+- `src/proto/sys_tbl_mgr.proto` - gRPC service and message definitions
 
 ---
 

@@ -13,7 +13,7 @@ title: "Code Structure"
 | python/ | Python libraries for testing; coordinator for deployment; localcluster controller and utilities |
 | docker/ | Docker files, scripts |
 | cmake/ | CMake helper functions |
-| local_cluster/ | Local cluster setup scripts for running cluster using containers on local machine |
+| local-cluster/ | Local cluster setup scripts for running cluster using containers on local machine |
 | debug/ * | Conditionally created by CMake for debug builds |
 | release/ * | Conditionally created by CMake for production builds |
 
@@ -40,7 +40,7 @@ title: "Code Structure"
 | xid_mgr | Persistently stores last committed XID |
 | benchmarks | Code for benchmarking file system performance (for distributed file systems) |
 | proto | gRPC protocol definitions |
-| sys_tbl_mgr | System table service & cache; accessed via Thrift; centralizes management of system table metadata |
+| sys_tbl_mgr | System table service & cache; accessed via gRPC; centralizes management of system table metadata |
 | proxy | Postgres Proxy that handles read/write splitting sending writes to primary, and reads to FDWs |
 | pg_fdw | Postgres frontend query nodes implemented using Postgres Foreign Data Wrapper (FDW) extension; also includes the ddl_daemon for managing DDL changes for the FDW (to create/alter foreign tables) |
 | redis | Redis helper classes |

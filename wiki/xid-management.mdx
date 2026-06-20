@@ -2,4 +2,135 @@
 title: "XID Management"
 ---
 
-Transaction processing.
+# XID Management
+
+XID management is how Springtail maintains a single, consistent notion of "what
+has committed" as transactions flow through the ingest pipeline. It assigns
+every replicated change a monotonic Springtail transaction id (XID), records the
+durable commit order, and publishes a single **committed-XID watermark** that
+every reader in the system uses to decide what data is visible.
+
+This page covers the XID model and the central XID manager service. The
+mechanics that build on top of it are documented elsewhere: how XIDs are tracked
+while a table is being copied lives in [Syncing Tables](/syncing-tables), how
+schema versions are tied to XIDs lives in [System Metadata](/system-metadata),
+how the committed XID anchors restart lives in [Recovery](/recovery), and how
+query nodes consume commit notifications lives in
+[XID Subscriber](/xid-subscriber).
+
+## Two transaction-id spaces
+
+Springtail does not reuse the primary's transaction ids as its consistency
+clock. Two distinct id spaces are involved:
+
+- **Postgres XID (`pg_xid`)** — the 32-bit transaction id assigned by the
+  primary database. It is not gap-free across the changes Springtail sees, and
+  it wraps around, so it cannot serve as a global ordering key.
+- **Springtail XID (`xid`)** — a 64-bit, monotonically increasing id that
+  Springtail assigns itself. It defines a total order over every replicated
+  change and never wraps.
+
+The `PgLogReader` assigns the Springtail XID as it reads changes off the
+replication log, by atomically incrementing a counter
+(`include/pg_log_mgr/pg_log_reader.hh`). Each XID carries the originating
+`pg_xid` alongside it, so the mapping back to the primary's transaction is
+preserved. Where an LSN is also needed, the two are paired in an `XidLsn`
+(`include/storage/xid.hh`).
+
+A single primary transaction may produce several replicated changes, so multiple
+Springtail XIDs can map to the same `pg_xid`. The XID that represents the actual
+transaction commit is flagged as a **real commit**; the others are intermediate
+records.
+
+## The XID manager service
+
+The XID manager (`XidMgrServer`, `src/xid_mgr/xid_mgr_server.cc`) is a singleton
+gRPC service that owns the committed-XID state for every database on the node.
+Per database it maintains:
+
+- a durable **transaction log** of XID records, written through `PgXactLogWriter`
+  (`include/xid_mgr/pg_xact_log_writer.hh`),
+- the **last committed XID** — the highest real-commit XID, which is the
+  watermark returned to readers, and
+- a **schema-change history**, used to answer schema-consistent reads (see
+  below).
+
+Ingest components call the server directly; everything else reaches it over gRPC
+through `XidMgrClient` (`include/xid_mgr/xid_mgr_client.hh`). The service
+definition is in `src/proto/xid_manager.proto`.
+
+### The committed-XID watermark
+
+`get_committed_xid(db_id, schema_xid)` is the consistency boundary for the whole
+system: a change is visible only once its XID is at or below the committed
+watermark. Readers throughout Springtail gate on it — the FDW and DDL manager on
+query nodes, the [vacuumer](/vacuumer), and the replication log readers all ask
+the XID manager (or a cached copy of its value) for the committed XID before
+deciding what they may act on.
+
+When `schema_xid` is `0`, or the database has no recorded schema changes, the
+call returns the most recent committed XID. When a non-zero `schema_xid` is
+supplied, the manager consults its schema-change history and returns the latest
+commit that is still consistent with that schema version, so a query node sees a
+stable schema for the duration of a read even as later DDL commits arrive. The
+history itself — how schema versions map to XIDs — is described in
+[System Metadata](/system-metadata).
+
+## How commits are recorded
+
+The [committer](/message-processing) in the ingest pipeline drives the XID
+manager through a small set of entry points, chosen according to where the
+transaction's data already is. The distinction exists to keep the durable
+watermark from ever moving ahead of durable data.
+
+| Call | Used when | Effect |
+|------|-----------|--------|
+| `commit_xid` | A real commit whose data is already durable (or has no table mutations) | Advances the watermark and writes the record to the transaction log immediately. |
+| `commit_xid_no_xlog` | A real commit whose table data has not yet been fsynced | Advances the in-memory watermark and notifies subscribers, but **defers** the log write until the data is persisted. |
+| `commit_xlog` | The deferred data has since been persisted | Flushes the pending log entries to the transaction log, making the commit durable. |
+| `record_mapping` | An intermediate XID, or a commit recorded while commits are blocked for a table sync | Records the XID-to-`pg_xid` mapping and any schema change, without advancing the committed watermark. |
+
+The deferred path is what guarantees crash safety: the durable committed XID is
+only written once the corresponding table data is on disk, so after a restart the
+watermark can never point past data that was actually persisted. The reason
+commits are blocked during a table copy, and how they are released afterward, is
+covered in [Syncing Tables](/syncing-tables).
+
+## Commit notifications
+
+When a real commit is recorded — and for intermediate records that touched
+tables — the XID manager pushes a notification to its subscribers over a gRPC
+server-side stream. Each notification carries the database id, the committed XID,
+whether the transaction included schema changes, whether it is a real commit, and
+the list of modified table ids. Query nodes subscribe to this stream to keep
+their caches current and to learn when newly committed data is available; that
+consumer is documented in [XID Subscriber](/xid-subscriber).
+
+## Durability, recovery, and cleanup
+
+The transaction log is memory-mapped and persisted per database. Each record
+packs the Springtail XID, the originating `pg_xid`, and the real-commit flag.
+
+On startup, the log is sanitized before the watermark is established: any trailing
+records that are not real commits are dropped, so the log always ends on a
+durable commit, and the recovered XID becomes the starting watermark. The ingest
+pipeline then seeds the `PgLogReader`'s next-XID counter from that value
+(`src/pg_log_mgr/pg_log_mgr.cc`), so XID assignment resumes exactly where it left
+off. How this committed XID anchors the broader recovery scan is described in
+[Recovery](/recovery).
+
+A background thread runs on a fixed interval (`XIG_MGR_MIN_SYNC_MS`, 500 ms) to
+flush the log and trim the schema-change history. History entries below the
+minimum schema XID still in use — obtained from Redis — are discarded, and older
+log files are cleaned up by timestamp once they are no longer needed.
+
+## Key files
+
+| File | Role |
+|------|------|
+| `src/xid_mgr/xid_mgr_server.cc`, `include/xid_mgr/xid_mgr_server.hh` | The XID manager service and per-database commit state. |
+| `include/xid_mgr/xid_mgr_client.hh` | Client used by off-node components to query the committed XID. |
+| `include/xid_mgr/pg_xact_log_writer.hh` | Durable, memory-mapped transaction log. |
+| `src/proto/xid_manager.proto` | gRPC service and message definitions. |
+| `include/storage/xid.hh` | `XidLsn` / `XidRange` value types. |
+| `include/pg_log_mgr/pg_log_reader.hh` | Assigns monotonic Springtail XIDs during ingest. |

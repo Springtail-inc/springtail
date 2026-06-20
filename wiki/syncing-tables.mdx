@@ -83,7 +83,7 @@ struct PgCopyResult {
 
 Tracks table synchronization state and determines when mutations should be skipped during log replay. Acts as the bridge between PgCopyTable and the replication pipeline.
 
-**Four Primary Data Structures:**
+**Five Primary Data Structures:**
 
 1. **`_resync_map`** - Tables where resync was issued but not yet picked up by copy thread
 2. **`_resync_picked_map`** - Tables picked for resync at specific XID
@@ -684,7 +684,7 @@ uint64_t PgLogRecovery::repair_logs() {
 
 **Phase 2: Replay Logs**
 
-Three-stage replay process:
+Four-step replay process:
 
 ```cpp
 void PgLogRecovery::replay_logs() {
@@ -895,17 +895,21 @@ Bulk data copying happens **after** pipeline resumes, so replication lag is mini
 
 ### Key Constants
 
-**From pg_log_mgr.cc:**
+**From pg_log_mgr.hh:**
 ```cpp
 LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024  // 128MB log files
 QUEUE_SIZE = 256 * 1024                      // Logger queue size
 FSYNC_LOOP_INTERVAL_MS = 500                 // Log fsync frequency
 ```
 
-**From pg_copy_table.cc:**
+**From pg_copy_table.hh:**
 ```cpp
-NUM_COPY_WORKERS = 4                         // Worker thread count
-MAX_BATCH_SIZE = 4 * 1024 * 1024            // 4MB extent batches
+WORKER_THREADS = 4                           // Worker thread count
+```
+
+**From pg_log_reader.hh:**
+```cpp
+MAX_BATCH_SIZE = 4 * 1024 * 1024             // 4MB write-cache batch flush threshold
 ```
 
 ### Tuning Recommendations

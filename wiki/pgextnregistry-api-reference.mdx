@@ -58,7 +58,7 @@ struct PgOpsClassMethod {
     std::string key_type;        // Key type name
     int support_number;          // Support proc number (1-11)
     std::string function_name;   // Function name (e.g., "gin_extract_value_trgm")
-    void* function_ptr;          // dlsym() loaded function pointer
+    PGFunction function_ptr = nullptr;  // dlsym() loaded function pointer
 };
 ```
 
@@ -172,7 +172,7 @@ std::cout << "Type input function: " << type.typinput << std::endl;
 Get a type I/O function by name.
 
 ```cpp
-void* get_type_func_by_type_name(const std::string& type_name) const;
+PGFunction get_type_func_by_type_name(const std::string& type_name) const;
 ```
 
 **Parameters:**
@@ -275,14 +275,14 @@ Register an extension operator.
 void add_operator(const std::string& extension,
                   uint32_t oid,
                   const std::string& oper_name,
-                  const std::string& proc_name);
+                  const std::string& oper_proc);
 ```
 
 **Parameters:**
 - `extension`: Extension name
 - `oid`: Operator OID from `pg_operator`
 - `oper_name`: Operator symbol (e.g., `=`, `<@`, `&&`)
-- `proc_name`: Implementation function name
+- `oper_proc`: Implementation function name
 
 **Behavior:**
 - Uses `dlsym()` to load operator function from extension library
@@ -300,7 +300,7 @@ registry->add_operator("pg_trgm", 3636, "%", "similarity");
 Get operator function by OID.
 
 ```cpp
-void* get_operator_func_by_oid(uint32_t oid) const;
+PGFunction get_operator_func_by_oid(uint32_t oid) const;
 ```
 
 **Returns:** Function pointer or `nullptr` if not found
@@ -311,7 +311,7 @@ void* get_operator_func_by_oid(uint32_t oid) const;
 Get operator function by operator symbol.
 
 ```cpp
-void* get_operator_func_by_oper_name(const char* oper_name) const;
+PGFunction get_operator_func_by_oper_name(const char* oper_name) const;
 ```
 
 **Parameters:**
@@ -330,7 +330,7 @@ void* similarity_func = registry->get_operator_func_by_oper_name("%");
 Get operator function by procedure name.
 
 ```cpp
-void* get_operator_func_by_proc_name(const std::string& proc_name) const;
+PGFunction get_operator_func_by_proc_name(const std::string& proc_name) const;
 ```
 
 **Example:**
@@ -452,11 +452,11 @@ if (method.function_ptr) {
 ---
 
 ### get_opclass_method_func_ptr_by_method_name()
-Get opclass method function pointer (static convenience method).
+Get opclass method function pointer.
 
 ```cpp
-static void* get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name,
-                                                        int support_number);
+PGFunction get_opclass_method_func_ptr_by_method_name(const std::string& opclass_name,
+                                                      int support_number) const;
 ```
 
 **Returns:** Function pointer or `nullptr` if not found
@@ -465,54 +465,6 @@ static void* get_opclass_method_func_ptr_by_method_name(const std::string& opcla
 ```cpp
 void* func = PgExtnRegistry::get_opclass_method_func_ptr_by_method_name("gist_point_ops",
                                                                         GIST_COMPRESS);
-```
-
----
-
-### invoke_opclass_method()
-Invoke an opclass method with a single Datum argument.
-
-```cpp
-static Datum invoke_opclass_method(const std::string& opclass_name,
-                                   int support_number,
-                                   Datum value);
-```
-
-**Parameters:**
-- `opclass_name`: OpClass name
-- `support_number`: Support procedure number
-- `value`: Input Datum
-
-**Returns:** Result Datum
-
-**Implementation:**
-```cpp
-Datum PgExtnRegistry::invoke_opclass_method(const std::string& opclass_name,
-                                           int support_number,
-                                           Datum value) {
-    auto method = get_instance()->get_opclass_method_by_method_name(opclass_name,
-                                                                     support_number);
-    if (!method.function_ptr) {
-        LOG_ERROR("Failed to find opclass method");
-        return Datum();
-    }
-
-    PGFunction operator_func_ptr = (PGFunction)method.function_ptr;
-    Datum result = DirectFunctionCall1(operator_func_ptr, value);
-    return result;
-}
-```
-
-**Example:**
-```cpp
-// Compress a point for GIST index
-GISTENTRY entry;
-entry.key = point_datum;
-entry.leafkey = true;
-
-Datum compressed = PgExtnRegistry::invoke_opclass_method("gist_point_ops",
-                                                         GIST_COMPRESS,
-                                                         PointerGetDatum(&entry));
 ```
 
 ---
