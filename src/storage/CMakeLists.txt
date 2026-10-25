@@ -1,6 +1,7 @@
 # source files
 set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc cache.cc cache_tracing.cc
-                    numeric_utils.cc vacuumer.cc)
+                    numeric_utils.cc vacuumer.cc
+                    index_engine/index_extent_cache.cc index_engine/btree_write_strategy.cc index_engine/index_writer.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -120,6 +121,15 @@ springtail_unit_test(test_extent
   SOURCES test/test_extent.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_storage GTest::gtest_main
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+
+# index_writer (btree) test
+springtail_unit_test(test_index_writer
+  SOURCES test/test_index_writer.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LINK_OPTIONS "--coverage"
+  LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 
