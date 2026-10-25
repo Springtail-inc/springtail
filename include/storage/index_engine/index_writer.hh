@@ -49,8 +49,10 @@ namespace springtail {
             /** Stable identity used as this node's entry in its parent's branch row, and as the
                 key its parent's `children` list is searched by during descent: the on-disk
                 extent_id this node was read from, or (if created fresh, e.g. a split result) a
-                synthetic id assigned by IndexWriter::_next_temp_id. Replaced with the real,
-                on-disk extent_id once this node is flushed. */
+                synthetic id assigned from IndexWriter::_next_temp_id's reserved range (see
+                TEMP_ID_BASE -- this must never be allowed to collide with a real, on-disk
+                extent_id, round-1 review). Replaced with the real, on-disk extent_id once this
+                node is flushed. */
             uint64_t id = constant::UNKNOWN_EXTENT;
 
             /** The on-disk extent_id this node's content supersedes once flushed (becomes
@@ -277,7 +279,11 @@ namespace springtail {
         ValueTuplePtr _make_value_key(Extent &extent, MutableFieldArrayPtr key_fields);
 
         /** Split `node` in two via the strategy's split_point(), returning the replacement pair;
-            `node` itself is discarded (never flushed, never referenced again). */
+            `node` itself is discarded (never flushed, never referenced again). If `node` is a
+            branch, also partitions its `children` between the two results by which half's rows
+            each child's row ended up in -- otherwise a child that was itself already split
+            earlier this generation (and so is only reachable via `node->children`, not yet
+            patched into a real extent_id) would be silently dropped from the flush walk. */
         std::pair<NodePtr, NodePtr> _split_node(NodePtr node);
 
         /** After mutating path.back(), split it (and propagate the split upward through
@@ -306,10 +312,25 @@ namespace springtail {
         std::shared_ptr<IndexExtentCache> _cache;
         Strategy _strategy;
 
+        /**
+         * Not-yet-flushed nodes (split results, a brand-new root, a brand-new empty tree) need a
+         * stable identity before they have a real on-disk extent_id, used both as the value
+         * written into a parent's branch row and as the key _get_child() searches a parent's
+         * `children` by. Real extent_ids are plain append-only file byte offsets (IOFile::
+         * reserve_offset()) and so start at 0 and grow with file size -- small values for a long
+         * time. A temp-id counter that also started at 0 would collide with real ids the moment a
+         * second (or later) generation's IndexWriter reopens an existing tree and splits again:
+         * _get_child()'s and _flush_node()'s lookups match an id by *value*, with no other way to
+         * tell "this is a temp id" from "this is a real, untouched sibling's id" apart (round-1
+         * review finding 1). Reserving the top half of the uint64_t space for temp ids makes that
+         * collision structurally impossible -- no real file will ever reach a 2^63-byte offset.
+         */
+        static constexpr uint64_t TEMP_ID_BASE = uint64_t(1) << 63;
+
         NodePtr _root;
         uint64_t _xid;
         bool _finalized = true;
-        uint64_t _next_temp_id = 0;
+        uint64_t _next_temp_id = TEMP_ID_BASE;
         bool _in_call = false;
 
         ExtensionCallback _extension_callback;

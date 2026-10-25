@@ -67,21 +67,23 @@ namespace {
         std::shared_ptr<IndexExtentCache> _cache;
 
         std::shared_ptr<BtreeIndexWriter>
-        _create_writer(const std::filesystem::path &name, uint64_t xid)
+        _create_writer(const std::filesystem::path &name, uint64_t xid,
+                       uint64_t max_extent_size = constant::MAX_EXTENT_SIZE)
         {
             auto writer = std::make_shared<BtreeIndexWriter>(
                 0, name, _keys, _schema, xid, _cache,
-                BtreeWriteStrategy(constant::MAX_EXTENT_SIZE));
+                BtreeWriteStrategy(max_extent_size));
             writer->init_empty();
             return writer;
         }
 
         std::shared_ptr<BtreeIndexWriter>
-        _open_writer(const std::filesystem::path &name, uint64_t xid, uint64_t root_offset)
+        _open_writer(const std::filesystem::path &name, uint64_t xid, uint64_t root_offset,
+                     uint64_t max_extent_size = constant::MAX_EXTENT_SIZE)
         {
             auto writer = std::make_shared<BtreeIndexWriter>(
                 0, name, _keys, _schema, xid, _cache,
-                BtreeWriteStrategy(constant::MAX_EXTENT_SIZE));
+                BtreeWriteStrategy(max_extent_size));
             writer->init(root_offset);
             return writer;
         }
@@ -178,6 +180,53 @@ namespace {
 
         auto final_reader = _open_writer(_base_dir / "InsertAndRemove", 3, offset_2);
         ASSERT_EQ(_count_and_verify_order(final_reader), 2500);
+    }
+
+    // Regression test for round-1 review finding 1: temp ids (assigned to not-yet-flushed split
+    // results) and real on-disk extent ids (plain file byte offsets) used to share the same
+    // numeric space, both starting at/near 0. Reopening an already-flushed, multi-leaf tree and
+    // inserting enough to force a *new* split in the reopened generation could collide a fresh
+    // temp id with an untouched sibling's real id, corrupting either _get_child()'s descent (it
+    // would resolve to the wrong, already-materialized node) or _flush_node()'s branch-row patch
+    // (it would patch the wrong row, leaving the real split result's row pointing at a temp id
+    // that resolves to nothing once the tree is reopened again). None of the other tests caught
+    // this: they either never reopen before mutating (no cross-generation id collision possible)
+    // or only remove on reopen (removal never allocates a temp id). This test reopens, then
+    // inserts enough new rows to force a second-generation split, then reopens *again* and reads
+    // the result back -- exactly the steady-state ingest pattern (one Committer batch finalizing,
+    // the next one opening at the new root) this bug would have corrupted.
+    TEST_F(IndexWriterTest, ReopenThenSplitAgain) {
+        // a 1-byte threshold forces a split on essentially every insert past the first, so a
+        // small number of inserts is enough to exercise several generations of splitting
+        auto writer = _create_writer(_base_dir / "ReopenThenSplitAgain", 1, 1);
+
+        auto row_value = [](const std::string &name, uint64_t table_id, uint16_t idx) {
+            auto key_fields = std::make_shared<FieldArray>(4);
+            key_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+            key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(name);
+            key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(uint64_t(0));
+            key_fields->at(3) = std::make_shared<ConstTypeField<uint16_t>>(idx);
+            return std::make_shared<FieldTuple>(key_fields, nullptr);
+        };
+
+        uint64_t offset = 0;
+        std::vector<std::string> names = { "a", "f", "m", "r", "z" };
+        int gen_count = 8;
+        for (int gen = 0; gen < gen_count; gen++) {
+            auto gen_writer = (gen == 0)
+                ? writer
+                : _open_writer(_base_dir / "ReopenThenSplitAgain", gen + 1, offset, 1);
+
+            for (auto &name : names) {
+                gen_writer->insert(row_value(name + std::to_string(gen), 1, 0));
+            }
+
+            offset = gen_writer->finalize();
+            ASSERT_EQ(_count_and_verify_order(gen_writer), names.size() * (gen + 1));
+        }
+
+        auto final_reader = _open_writer(_base_dir / "ReopenThenSplitAgain", 1000, offset, 1);
+        ASSERT_EQ(_count_and_verify_order(final_reader), names.size() * gen_count);
     }
 
     TEST_F(IndexWriterTest, InsertAndRemoveAll) {

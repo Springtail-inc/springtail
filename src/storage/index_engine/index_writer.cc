@@ -85,6 +85,8 @@ namespace springtail {
     {
         ReentrancyGuard guard(_in_call);
         CHECK(_root == nullptr);
+        DCHECK_LT(root_offset, TEMP_ID_BASE) << "root_offset is a real on-disk extent id, which "
+                                                "must never land in the reserved temp-id range";
 
         auto extent = _cache->get(_database_id, _file, root_offset);
         ExtentSchemaPtr schema = extent->header().type.is_branch() ? _branch_schema : _leaf_schema;
@@ -110,6 +112,12 @@ namespace springtail {
                 return child;
             }
         }
+
+        // Every id reaching this point was read straight out of an on-disk branch row (an
+        // untouched child never registered in `parent->children`), so it must be a real
+        // extent_id -- never a temp id, which would mean some split result's row was never
+        // patched to its real id before being flushed (see TEMP_ID_BASE's comment).
+        DCHECK_LT(id, TEMP_ID_BASE);
 
         auto extent = _cache->get(_database_id, _file, id);
         ExtentSchemaPtr schema = extent->header().type.is_branch() ? _branch_schema : _leaf_schema;
@@ -283,6 +291,26 @@ namespace springtail {
         second->schema = node->schema;
         second->dirty = true;
         second->prev_key = _make_value_key(*second_extent, key_fields);
+
+        // A branch's `children` tracks its materialized (touched-or-split-but-not-yet-flushed)
+        // descendants, keyed by whatever id each one's row in `node->extent` currently holds
+        // (possibly a temp id, if that descendant was itself already split earlier this
+        // generation). copy_range() above duplicated those rows verbatim into `first`/`second`,
+        // but *not* the children bookkeeping -- every descendant must be handed to whichever of
+        // `first`/`second` now holds its row, or _flush_node()'s traversal can never reach it
+        // again: its temp id would be copied as-is into whichever of `first`/`second` eventually
+        // gets flushed, instead of being patched to a real extent_id, and reading the tree back
+        // later would try to resolve that stale temp id as if it were a real on-disk offset.
+        for (auto &child : node->children) {
+            auto row_i = std::ranges::find_if(*node->extent, [this, &child](const Extent::Row &row) {
+                return _branch_child_f->get_uint64(&row) == child->id;
+            });
+            CHECK(row_i != node->extent->end());
+
+            uint32_t index = static_cast<uint32_t>(row_i - node->extent->begin());
+            NodePtr &new_parent = (index < split_at) ? first : second;
+            new_parent->children.push_back(child);
+        }
 
         return { first, second };
     }
