@@ -40,7 +40,7 @@ namespace springtail {
             auto &top = frames.back();
             uint64_t child_id = _branch_child_f->get_uint64(&*top.pos);
             auto child = _get_extent(child_id);
-            frames.push_back({ child, _schema_for(child), child->begin() });
+            frames.push_back({ child, child->begin() });
         }
     }
 
@@ -53,7 +53,7 @@ namespace springtail {
             auto &top = frames.back();
             uint64_t child_id = _branch_child_f->get_uint64(&*top.pos);
             auto child = _get_extent(child_id);
-            frames.push_back({ child, _schema_for(child), child->last() });
+            frames.push_back({ child, child->last() });
         }
     }
 
@@ -71,7 +71,7 @@ namespace springtail {
             return end();
         }
 
-        std::vector<typename Iterator::Frame> frames{ { root, _schema_for(root), root->begin() } };
+        std::vector<typename Iterator::Frame> frames{ { root, root->begin() } };
         _descend_leftmost(frames);
 
         return Iterator(this, std::move(frames));
@@ -94,8 +94,7 @@ namespace springtail {
         std::vector<typename Iterator::Frame> frames;
 
         while (current->header().type.is_branch()) {
-            ExtentSchemaPtr schema = _branch_schema;
-            auto child_i = _strategy.lower_bound(current, schema, search_key);
+            auto child_i = _strategy.lower_bound(current, _branch_schema, search_key);
             if (child_i == current->end()) {
                 if (for_update) {
                     child_i = current->last();
@@ -107,12 +106,11 @@ namespace springtail {
             uint64_t child_id = _branch_child_f->get_uint64(&*child_i);
             auto child = _get_extent(child_id);
 
-            frames.push_back({ current, schema, child_i });
+            frames.push_back({ current, child_i });
             current = std::move(child);
         }
 
-        ExtentSchemaPtr leaf_schema = _leaf_schema;
-        auto leaf_i = _strategy.lower_bound(current, leaf_schema, search_key);
+        auto leaf_i = _strategy.lower_bound(current, _leaf_schema, search_key);
         if (leaf_i == current->end()) {
             if (for_update) {
                 leaf_i = current->last();
@@ -121,7 +119,7 @@ namespace springtail {
             }
         }
 
-        frames.push_back({ current, leaf_schema, leaf_i });
+        frames.push_back({ current, leaf_i });
         return Iterator(this, std::move(frames));
     }
 
@@ -142,8 +140,7 @@ namespace springtail {
         std::vector<typename Iterator::Frame> frames;
 
         while (current->header().type.is_branch()) {
-            ExtentSchemaPtr schema = _branch_schema;
-            auto child_i = _strategy.upper_bound(current, schema, search_key);
+            auto child_i = _strategy.upper_bound(current, _branch_schema, search_key);
             if (child_i == current->end()) {
                 if (for_update) {
                     child_i = current->last();
@@ -155,12 +152,11 @@ namespace springtail {
             uint64_t child_id = _branch_child_f->get_uint64(&*child_i);
             auto child = _get_extent(child_id);
 
-            frames.push_back({ current, schema, child_i });
+            frames.push_back({ current, child_i });
             current = std::move(child);
         }
 
-        ExtentSchemaPtr leaf_schema = _leaf_schema;
-        auto leaf_i = _strategy.upper_bound(current, leaf_schema, search_key);
+        auto leaf_i = _strategy.upper_bound(current, _leaf_schema, search_key);
         if (leaf_i == current->end()) {
             if (for_update) {
                 leaf_i = current->last();
@@ -169,7 +165,7 @@ namespace springtail {
             }
         }
 
-        frames.push_back({ current, leaf_schema, leaf_i });
+        frames.push_back({ current, leaf_i });
         return Iterator(this, std::move(frames));
     }
 

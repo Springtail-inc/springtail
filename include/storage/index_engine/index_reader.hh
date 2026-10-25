@@ -71,7 +71,6 @@ namespace springtail {
              */
             struct Frame {
                 std::shared_ptr<Extent> extent;
-                ExtentSchemaPtr schema;
                 Extent::Iterator pos;
 
                 bool operator==(const Frame &rhs) const {
@@ -132,9 +131,7 @@ namespace springtail {
                     assert(_reader != nullptr && _reader->_root_offset != constant::UNKNOWN_EXTENT);
 
                     auto root = _reader->_get_extent(_reader->_root_offset);
-                    ExtentSchemaPtr schema = root->header().type.is_branch() ? _reader->_branch_schema
-                                                                             : _reader->_leaf_schema;
-                    _frames.push_back({ root, schema, root->last() });
+                    _frames.push_back({ root, root->last() });
                     _reader->_descend_rightmost(_frames);
 
                     return *this;
@@ -228,10 +225,6 @@ namespace springtail {
     private:
         std::shared_ptr<Extent> _get_extent(uint64_t extent_id) const {
             return _source->get(_database_id, _file, extent_id, _xid);
-        }
-
-        ExtentSchemaPtr _schema_for(const std::shared_ptr<Extent> &extent) const {
-            return extent->header().type.is_branch() ? _branch_schema : _leaf_schema;
         }
 
         /** Descend from `frames.back()` leftmost down to a leaf, appending frames along the way
