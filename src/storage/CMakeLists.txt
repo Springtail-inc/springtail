@@ -1,7 +1,8 @@
 # source files
 set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc cache.cc cache_tracing.cc
                     numeric_utils.cc vacuumer.cc
-                    index_engine/index_extent_cache.cc index_engine/btree_write_strategy.cc index_engine/index_writer.cc)
+                    index_engine/index_extent_cache.cc index_engine/btree_write_strategy.cc index_engine/index_writer.cc
+                    index_engine/btree_read_strategy.cc index_engine/storage_cache_extent_source.cc index_engine/index_reader.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -127,6 +128,15 @@ springtail_unit_test(test_extent
 # index_writer (btree) test
 springtail_unit_test(test_index_writer
   SOURCES test/test_index_writer.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LINK_OPTIONS "--coverage"
+  LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+
+# index_reader (btree) test
+springtail_unit_test(test_index_reader
+  SOURCES test/test_index_reader.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LINK_OPTIONS "--coverage"
   LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
