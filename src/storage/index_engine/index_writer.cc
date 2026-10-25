@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <unordered_set>
 
 #include <absl/log/check.h>
 
@@ -6,6 +7,7 @@
 #include <storage/index_engine/index_writer.hh>
 #include <storage/io.hh>
 #include <storage/io_mgr.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail {
     template <typename Strategy>
@@ -354,9 +356,22 @@ namespace springtail {
             NodePtr parent = path[i - 1];
             // already dirty: insert()/remove() touched the whole path up front (see _touch())
 
-            // remove node's old row (located by the key it was recorded under) and splice in the
-            // two new children in its place
-            auto row_i = _lower_bound_rows(*parent->extent, parent->schema, node->prev_key);
+            // Remove node's old row, located by its *child pointer* (node->id), not by the key it
+            // was recorded under. node->prev_key is a cached snapshot of node's max key from
+            // whenever node was last (re)created (materialized from disk, or produced by an
+            // earlier split this generation) -- it is only ever used to *write* a branch row
+            // (_insert_branch_row), never refreshed when further inserts/removes into node change
+            // its actual current max without node itself splitting again. Searching for that
+            // stale key via lower_bound can land past node's real row (or miss it outright) once
+            // enough intervening churn has moved other siblings' keys around it -- confirmed via a
+            // direct repro mirroring Table_Test.MultiThreadMutations' workload (every row's
+            // secondary-index key reassigned, many of them, in an order decorrelated from the
+            // original insert order, within one generation). node->id is node's one stable,
+            // never-stale identity (see TEMP_ID_BASE's comment), so locate the row by it instead,
+            // mirroring _get_child()'s and _split_node()'s children-partition loop's own pattern.
+            auto row_i = std::ranges::find_if(*parent->extent, [this, &node](const Extent::Row &row) {
+                return _branch_child_f->get_uint64(&row) == node->id;
+            });
             CHECK(row_i != parent->extent->end());
             parent->extent->remove(row_i);
 
@@ -384,7 +399,11 @@ namespace springtail {
             bool parent_is_root = (i == 1);
             // already dirty: insert()/remove() touched the whole path up front (see _touch())
 
-            auto row_i = _lower_bound_rows(*parent->extent, parent->schema, node->prev_key);
+            // Locate node's row by its child pointer, not its (possibly stale) recorded key --
+            // see _propagate_splits()'s identical fix and comment for why.
+            auto row_i = std::ranges::find_if(*parent->extent, [this, &node](const Extent::Row &row) {
+                return _branch_child_f->get_uint64(&row) == node->id;
+            });
             CHECK(row_i != parent->extent->end());
             parent->extent->remove(row_i);
             std::erase(parent->children, node);
@@ -408,6 +427,43 @@ namespace springtail {
     template <typename Strategy>
     requires WriteStrategy<Strategy>
     void
+    IndexWriter<Strategy>::_propagate_key_increase(std::vector<NodePtr> &path, TuplePtr new_key)
+    {
+        // A branch row's recorded key is a routing upper bound for its child's subtree, written
+        // once (by _insert_branch_row(), from the child's prev_key at that moment) and otherwise
+        // never touched. If a later insert raises a child's own actual max past what's recorded
+        // -- unremarkable on its own, see node->prev_key's class comment -- *routing* breaks the
+        // moment that child is not its parent's last entry: choose_child()'s lower_bound(new key)
+        // would then stop at whichever sibling's still-larger recorded key comes first, landing
+        // the new row in the *wrong* leaf (one with no actual reason to reject it, so nothing
+        // crashes -- it silently becomes unreachable from that key's own correct descent path).
+        // Keep every ancestor's recorded key in lock-step with the actual max as it grows, so
+        // choose_child()'s ordinary (non-fallback) path always lands in the right subtree.
+        for (size_t i = path.size(); i-- > 1; ) {
+            NodePtr node = path[i];
+            NodePtr parent = path[i - 1];
+
+            auto row_i = std::ranges::find_if(*parent->extent, [this, &node](const Extent::Row &row) {
+                return _branch_child_f->get_uint64(&row) == node->id;
+            });
+            CHECK(row_i != parent->extent->end());
+
+            Extent::Row row = *row_i;
+            FieldTuple recorded(parent->schema->get_sort_fields(), &row);
+            if (!recorded.less_than(*new_key)) {
+                // already >= new_key at this level (and so, transitively, at every level above
+                // it was set correctly before) -- nothing further to propagate.
+                break;
+            }
+
+            MutableTuple(_branch_keys, &row).assign(*new_key);
+            node->prev_key = std::make_shared<ValueTuple>(new_key);
+        }
+    }
+
+    template <typename Strategy>
+    requires WriteStrategy<Strategy>
+    void
     IndexWriter<Strategy>::insert(TuplePtr value)
     {
         ReentrancyGuard guard(_in_call);
@@ -419,6 +475,7 @@ namespace springtail {
 
         _touch(path, path.size() - 1);
         _insert_row(path.back()->extent, path.back()->schema, value);
+        _propagate_key_increase(path, key);
 
         _propagate_splits(path);
     }
@@ -458,12 +515,12 @@ namespace springtail {
     template <typename Strategy>
     requires WriteStrategy<Strategy>
     void
-    IndexWriter<Strategy>::_flush_node(NodePtr node)
+    IndexWriter<Strategy>::_flush_node(NodePtr node, std::unordered_set<uint64_t> &reported_expired)
     {
         for (auto &child : node->children) {
             uint64_t old_id = child->id;
 
-            _flush_node(child);
+            _flush_node(child, reported_expired);
 
             // patch this node's branch row with the child's real, now-known extent_id
             auto row_i = std::ranges::find_if(*node->extent, [this, old_id](const Extent::Row &row) {
@@ -480,6 +537,26 @@ namespace springtail {
 
         uint64_t real_id = _cache->flush(_database_id, _file, node->extent);
 
+        // Notify the vacuumer that node->prev_offset is now superseded (architecture.md "btree"
+        // redesign Sec 4's reachability invariant: once nothing points at it, it's reclaimable).
+        // Phase 1 deliberately left this unwired (nothing referenced IndexWriter in production
+        // yet) and flagged exactly this phase as the one to wire it up, and to decide how to
+        // de-duplicate: a split's "first"/"second" results both inherit the same prev_offset
+        // (_split_node), and if both independently flush (e.g. across different calls this
+        // generation, or one now and one after a later re-split), reporting prev_offset more than
+        // once would double-count it in the vacuumer's bookkeeping. reported_expired is scoped to
+        // one finalize() call and dedupes within it; chained splits *across* generations can't
+        // double-report the same prev_offset, since by the next generation it's already a real,
+        // different on-disk id. The reported size is an estimate (node's own just-flushed size,
+        // not prev_offset's exact original size) -- mirroring StorageCache::DataCache::
+        // _flush_and_update_extent()'s identical approximation for the same reason: the exact
+        // original byte size of a superseded extent isn't retained once CoW has moved past it.
+        if (node->prev_offset != constant::UNKNOWN_EXTENT &&
+                reported_expired.insert(node->prev_offset).second) {
+            Vacuumer::get_instance()->expire_extent(_file, node->prev_offset,
+                                                    node->extent->byte_count(), _xid);
+        }
+
         node->id = real_id;
         node->dirty = false;
         node->children.clear();
@@ -494,7 +571,8 @@ namespace springtail {
         CHECK(_root != nullptr);
 
         if (_root->dirty) {
-            _flush_node(_root);
+            std::unordered_set<uint64_t> reported_expired;
+            _flush_node(_root, reported_expired);
         }
 
         if (fs_sync) {
@@ -502,6 +580,18 @@ namespace springtail {
         }
 
         _finalized = true;
+
+        // A root that was init_empty()'d and never subsequently touched (never marked dirty) was
+        // never flushed above, so _root->id is still its synthetic, never-on-disk temp id
+        // (TEMP_ID_BASE range) rather than a real extent_id -- returning it verbatim would leak a
+        // temp id to a caller expecting a durable root offset (phase-2.md's deviation 3, found
+        // reachable in phase 3 via MutableTable::finalize() unconditionally finalizing
+        // _primary_index for a brand-new, still-empty table). Mirrors MutableBTree::_flush_root()'s
+        // existing behavior for the same case: a page that `!is_dirty()` is returned as-is, which
+        // for a freshly init_empty()'d page still carries extent_id == UNKNOWN_EXTENT.
+        if (_root->id >= TEMP_ID_BASE) {
+            return constant::UNKNOWN_EXTENT;
+        }
 
         return _root->id;
     }

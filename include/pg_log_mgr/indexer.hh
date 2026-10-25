@@ -3,7 +3,7 @@
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/index_requests_manager.hh>
 #include <redis/redis_ddl.hh>
-#include <storage/mutable_btree.hh>
+#include <sys_tbl_mgr/table.hh>
 
 namespace springtail::committer {
 
@@ -114,8 +114,8 @@ namespace springtail::committer {
         void _drop(const Key& key, const IndexParams& idx, uint64_t end_xid);
 
         bool _was_dropped(const Key& key);
-        void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx,
-                uint64_t end_xid, MutableBTreePtr look_aside_root);
+        void _commit_build(IndexWriterPtr root, const Key& key, const IndexParams& idx,
+                uint64_t end_xid, IndexWriterPtr look_aside_root);
 
         // work state
         std::condition_variable_any _cv;
@@ -138,19 +138,28 @@ namespace springtail::committer {
          * - `idx` contains `dbid`, `indexid`, and `ddl`.
          */
         struct IndexState {
-            MutableBTreePtr _root;
+            IndexWriterPtr _root;
             Key _key;
             IndexParams _idx;
             uint64_t _tid;
-            MutableBTreePtr _look_aside_root;
+            IndexWriterPtr _look_aside_root;
         };
 
         /**
-         * Map indicating if a thread is building look-aside index for the table,
-         * useful when multiple index creation are in progress and want to allow first index only
-         * to create look aside index along with it
+         * Per table_id: the look-aside IndexWriter owned by whichever concurrent "first index on
+         * this table" build (architecture.md Sec 5.4 case 2) got there first this generation.
+         * This map's presence/absence of a table_id entry *is* the external serialization point
+         * case 2 calls for ("exactly one... creates and owns it; others... discover it already
+         * exists") -- the single-writer IndexWriter contract (Sec 5.4) means only the owning
+         * builder (the one that inserted this entry, tracked locally via _build()'s own
+         * build_look_aside flag) may ever call a mutating method on the stored writer; a builder
+         * that finds the entry already present must treat it as read-only discovery, never as a
+         * second mutator, since IndexWriter has no internal locking to protect against that and
+         * finalize() is one-shot. See phases/phase-3.md's look-aside bootstrap audit for the full
+         * reasoning (including why passive discovery, not shared mutation, is the correct fix for
+         * the race phase-2.md's own instance-independence note left open).
          */
-        std::unordered_map<uint64_t, bool> _look_aside_build_tracker;
+        std::unordered_map<uint64_t, IndexWriterPtr> _look_aside_build_tracker;
 
         /**
          * Mutex to have safe access for _look_aside_build_tracker

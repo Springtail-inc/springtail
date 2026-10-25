@@ -370,4 +370,80 @@ namespace {
 
     }
 
+    // Regression test for architecture.md Sec 5.4 case 2 / phase-3.md's look-aside bootstrap
+    // audit: two concurrent "first index on this table" builds (indexes on a table that has no
+    // secondary index yet) must create exactly one look-aside index, and both builds' own
+    // secondary indexes must end up correct -- which, for Table::Iterator::Secondary::update_page,
+    // depends on the look-aside index being completely and correctly populated regardless of
+    // which of the two builders actually owned building it. Uses a dedicated 2-worker Indexer
+    // (the shared fixture's _indexer only has 1 worker, so its two builds would never actually
+    // run concurrently) so the two builds genuinely race for look-aside ownership.
+    TEST_F(Indexer_Test, Test_ConcurrentFirstIndexBuildsShareLookAside)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t index_id_a = _secondary_index_id + 8;
+        uint64_t index_id_b = _secondary_index_id + 9;
+        uint64_t table_xid = access_xid++;
+        uint64_t index_xid_a = access_xid++;
+        uint64_t index_xid_b = access_xid++;
+
+        // Create table and populate with enough rows that each builder's bootstrap/catch-up
+        // takes long enough to give the other builder a real chance to observe the tracker entry
+        // mid-flight, rather than the race trivially resolving before either starts.
+        create_table(_db_id, table_id, table_xid, "test_indexer_table_concurrent_la", _columns);
+        _populate_table_with_data(table_id, table_xid, table_xid, 5000, 5);
+
+        auto queue_mgr = std::make_shared<springtail::pg_log_mgr::IndexReconciliationQueueManager>();
+        queue_mgr->add_queue(_db_id);
+        auto indexer = std::make_unique<Indexer>(2, queue_mgr);
+
+        // Two independent "first index on this table" DDLs -- separate DDL transactions (own
+        // XIDs, own reconciliation batches, matching how CREATE INDEX normally arrives one at a
+        // time), but submitted back-to-back with no synchronization between them, so Indexer's
+        // (two) worker threads genuinely race to build each one concurrently.
+        auto index_request_a = create_index(_db_id, table_id, index_xid_a, index_id_a, "idx_concurrent_la_a",
+                std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end() - 1), sys_tbl::IndexNames::State::NOT_READY);
+        auto index_request_b = create_index(_db_id, table_id, index_xid_b, index_id_b, "idx_concurrent_la_b",
+                std::vector<PgMsgSchemaColumn>(_columns.end() - 1, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
+
+        indexer->process_requests(_db_id, index_xid_a, {index_request_a});
+        sys_tbl_mgr::Server::get_instance()->finalize(_db_id, index_xid_a, true);
+        indexer->process_requests(_db_id, index_xid_b, {index_request_b});
+        sys_tbl_mgr::Server::get_instance()->finalize(_db_id, index_xid_b, true);
+
+        auto request_a = queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+        ASSERT_NE(request_a, nullptr);
+        auto request_b = queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+        ASSERT_NE(request_b, nullptr);
+
+        uint64_t reconcile_xid_a = access_xid++;
+        indexer->process_index_reconciliation(_db_id, index_xid_a, reconcile_xid_a);
+        uint64_t reconcile_xid_b = access_xid++;
+        indexer->process_index_reconciliation(_db_id, index_xid_b, reconcile_xid_b);
+
+        auto info_a = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id_a, {reconcile_xid_b, constant::MAX_LSN});
+        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info_a.state()), sys_tbl::IndexNames::State::READY);
+        auto info_b = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id_b, {reconcile_xid_b, constant::MAX_LSN});
+        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info_b.state()), sys_tbl::IndexNames::State::READY);
+
+        // Exactly one look-aside index exists for the table (a single file/root, shared by both
+        // now-READY secondary indexes), and it correctly resolves every row for both of them.
+        auto table = TableMgr::get_instance()->get_table(_db_id, table_id, reconcile_xid_b);
+        ASSERT_NE(table->look_aside_index(), nullptr);
+
+        uint64_t count_a = 0;
+        for (auto it = table->begin(index_id_a); it != table->end(index_id_a); ++it) {
+            ++count_a;
+        }
+        ASSERT_EQ(count_a, 5000u);
+
+        uint64_t count_b = 0;
+        for (auto it = table->begin(index_id_b); it != table->end(index_id_b); ++it) {
+            ++count_b;
+        }
+        ASSERT_EQ(count_b, 5000u);
+
+        queue_mgr->remove_queue(_db_id);
+    }
+
 } // namespace

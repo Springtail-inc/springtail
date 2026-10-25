@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 #include <common/constants.hh>
@@ -286,6 +287,13 @@ namespace springtail {
             patched into a real extent_id) would be silently dropped from the flush walk. */
         std::pair<NodePtr, NodePtr> _split_node(NodePtr node);
 
+        /** After inserting `new_key` into `path.back()`, walk ancestors upward refreshing each
+            one's recorded routing key for its child along `path` wherever `new_key` exceeds what
+            is currently recorded there -- see the .cc for why this is needed for routing
+            correctness (not just split/remove bookkeeping). Stops as soon as one level is
+            already >= new_key. */
+        void _propagate_key_increase(std::vector<NodePtr> &path, TuplePtr new_key);
+
         /** After mutating path.back(), split it (and propagate the split upward through
             `path`, rebuilding the root if necessary) for as long as the strategy says the
             resulting node still needs splitting. */
@@ -298,8 +306,11 @@ namespace springtail {
 
         /** Recursive, post-order (child-before-parent) flush of every dirty node reachable from
             `node`, patching each parent's branch row with its child's real, now-known extent_id
-            as each child finishes flushing. */
-        void _flush_node(NodePtr node);
+            as each child finishes flushing. Also notifies the Vacuumer that each flushed node's
+            prev_offset is now superseded, de-duplicated against `reported_expired` (scoped to one
+            finalize() call) since sibling split results can share the same prev_offset -- see the
+            .cc for the full reasoning. */
+        void _flush_node(NodePtr node, std::unordered_set<uint64_t> &reported_expired);
 
         /** Descend from `frames.back()` leftmost down to a leaf, appending frames along the way
             (used by Iterator::operator++() after moving to a new branch entry, and by begin()). */

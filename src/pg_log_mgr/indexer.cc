@@ -324,7 +324,7 @@ namespace springtail::committer {
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
         auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid, {PgExtnRegistry::get_instance()->comparator_func});
-        MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols, {PgExtnRegistry::get_instance()->comparator_func});
+        IndexWriterPtr root = mutable_table->create_index_root(index_id, idx_cols, {PgExtnRegistry::get_instance()->comparator_func});
         root->init_empty();
 
         auto look_aside_index = mutable_table->look_aside_index();
@@ -335,10 +335,37 @@ namespace springtail::committer {
 
             auto la_tracker_it = _look_aside_build_tracker.find(tid);
             if (la_tracker_it == _look_aside_build_tracker.end()) {
+                // We are the first concurrent "first index on this table" build to arrive --
+                // create and own the look-aside index's bootstrap, catch-up, and finalize for
+                // the whole duration of this table's "no look-aside index yet" window
+                // (architecture.md Sec 5.4 case 2).
                 look_aside_index = mutable_table->create_look_aside_root({PgExtnRegistry::get_instance()->comparator_func});
                 look_aside_index->init_empty();
-                _look_aside_build_tracker[tid] = true;
+                _look_aside_build_tracker[tid] = look_aside_index;
                 build_look_aside = true;
+            } else {
+                // Another builder already owns this table's look-aside bootstrap this
+                // generation. Discover its instance (architecture.md Sec 5.4 case 2: "others...
+                // discover it already exists") rather than silently staying null regardless of
+                // which MutableTable instance we got (TableMgr::get_mutable_table() constructs a
+                // fresh MutableTable per call, so this builder's own mutable_table->
+                // look_aside_index() can never reflect a sibling builder's create_look_aside_root()
+                // call -- confirmed by reading table_mgr.cc). We are NOT the owner, though, so we
+                // must never call a mutating method (insert/remove/truncate/finalize) on it:
+                // IndexWriter has no internal locking (Sec 5.4), and the owner is already relying
+                // on exclusive access for the rest of its build -- sharing a second live mutator
+                // would violate that contract and risk a double finalize(). The owner's own
+                // bootstrap scan (a complete snapshot as of its own start xid) plus its own
+                // reconciliation catch-up (through its own commit) plus steady-state ordinary
+                // ingest after that commit together cover the table's whole timeline with no gap
+                // that this builder needs to help fill -- this builder's own secondary index is
+                // built directly off the primary table, never off look-aside. See phases/
+                // phase-3.md for the full audit, including a known, separate, pre-existing gap
+                // this fix does not close: if the *owner's* build is itself aborted/dropped
+                // mid-flight while this builder is still in flight, responsibility is not handed
+                // off and the look-aside index is left permanently incomplete for historical
+                // rows -- flagged there as a deferred risk, not introduced by this phase.
+                look_aside_index = la_tracker_it->second;
             }
         }
 
@@ -398,11 +425,13 @@ namespace springtail::committer {
                 if (build_look_aside) {
                     look_aside_index->truncate();
                 }
-                return {nullptr, key, idx, tid, look_aside_index};
+                // Only the owning (build_look_aside) builder may ever hand back a non-null
+                // look-aside root -- see the discovery comment above.
+                return {nullptr, key, idx, tid, build_look_aside ? look_aside_index : nullptr};
             }
             // check if the index was dropped
             if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
-                return {root, key, idx, tid, look_aside_index};
+                return {root, key, idx, tid, build_look_aside ? look_aside_index : nullptr};
             }
 
             // insert key
@@ -414,7 +443,7 @@ namespace springtail::committer {
             ++row_cnt;
         }
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
-        return {root, key, idx, tid, look_aside_index};
+        return {root, key, idx, tid, build_look_aside ? look_aside_index : nullptr};
     }
 
     std::vector<uint32_t>
@@ -449,8 +478,8 @@ namespace springtail::committer {
     }
 
     void
-    Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx,
-            uint64_t end_xid, MutableBTreePtr look_aside_root)
+    Indexer::_commit_build(IndexWriterPtr root, const Key& key, const IndexParams& idx,
+            uint64_t end_xid, IndexWriterPtr look_aside_root)
     {
         auto [db_id, index_id] = key;
         auto tid = idx._index_request.index().table_id();

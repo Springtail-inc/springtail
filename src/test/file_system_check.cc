@@ -456,7 +456,7 @@ FSCheck::_validate_primary_extent(std::shared_ptr<Table> table, ExtentSchemaPtr 
 {
     FieldArrayPtr table_key_fields = table_schema->get_sort_fields();
 
-    BTreePtr table_btree = table->index(constant::INDEX_PRIMARY);
+    IndexReaderPtr table_btree = table->index(constant::INDEX_PRIMARY);
     CHECK(table_btree.get() != nullptr);
     LOG_INFO("\tPrimary index created with path = {}, xid = {}, primary_schema size = {}, extent id = {}",
             table_btree->get_file_path().c_str(), table_btree->get_xid(), table_btree->get_schema()->get_sort_keys().size(), table_btree->get_root_offset());
@@ -505,7 +505,7 @@ FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaP
     FieldArrayPtr table_fields = table_schema->get_fields();
     std::vector<uint64_t> index_ids = table->get_secondary_idx_ids();
     for (auto id: index_ids) {
-        BTreePtr table_btree = table->index(id);
+        IndexReaderPtr table_btree = table->index(id);
         CHECK(table_btree.get() != nullptr);
         LOG_INFO("\tSecondary index {} created with path = {}, xid = {}, primary_schema size = {}, extent id = {}",
                 id, table_btree->get_file_path().c_str(), table_btree->get_xid(),

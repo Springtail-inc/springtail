@@ -34,7 +34,7 @@ namespace indexer_helpers {
     static void _update_secondary_index(
             uint64_t                        extent_id,
             const RowPtrT                  &rows,        // pointer-like, supports *rows
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -89,7 +89,7 @@ namespace indexer_helpers {
     /* ------------------------------  PAGE  ----------------------------------- */
     void populate_index_for_page(uint64_t extent_id,
             const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -99,7 +99,7 @@ namespace indexer_helpers {
 
     void invalidate_index_for_page(uint64_t extent_id,
             const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -110,7 +110,7 @@ namespace indexer_helpers {
     /* -----------------------------  EXTENT  ---------------------------------- */
     void populate_index_for_extent(uint64_t extent_id,
             const std::shared_ptr<Extent>  &extent,
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -120,7 +120,7 @@ namespace indexer_helpers {
 
     void invalidate_index_for_extent(uint64_t extent_id,
             const std::shared_ptr<Extent>  &extent,
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -234,19 +234,25 @@ namespace indexer_helpers {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
             primary_schema = _schema->create_index_schema({}, { extent_c }, non_primary_key, extension_callback);
 
-            _primary_index = std::make_shared<MutableBTree>(_db_id,
+            _primary_index = std::make_shared<IndexWriterT>(_db_id,
                                                             _table_dir / constant::INDEX_PRIMARY_FILE,
                                                             non_primary_key,
                                                             primary_schema,
-                                                            _target_xid, get_max_extent_size(), extension_callback);
+                                                            _target_xid,
+                                                            IndexExtentCache::get_instance(),
+                                                            BtreeWriteStrategy{get_max_extent_size()},
+                                                            extension_callback);
         } else {
             primary_schema = _schema->create_index_schema(primary_key, { extent_c }, primary_key, extension_callback);
 
-            _primary_index = std::make_shared<MutableBTree>(_db_id,
+            _primary_index = std::make_shared<IndexWriterT>(_db_id,
                                                             _table_dir / constant::INDEX_PRIMARY_FILE,
                                                             primary_key,
                                                             primary_schema,
-                                                            _target_xid, get_max_extent_size(), extension_callback);
+                                                            _target_xid,
+                                                            IndexExtentCache::get_instance(),
+                                                            BtreeWriteStrategy{get_max_extent_size()},
+                                                            extension_callback);
         }
 
 
@@ -650,7 +656,7 @@ namespace indexer_helpers {
         return metadata;
     }
 
-    MutableBTreePtr
+    IndexWriterPtr
     MutableTable::create_look_aside_root(const ExtensionCallback& extension_callback)
     {
         // Get the singleton look-aside schema
@@ -659,15 +665,18 @@ namespace indexer_helpers {
         std::vector<std::string> look_aside_keys;
         look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
 
-        _look_aside_index = std::make_shared<MutableBTree>(_db_id, _table_dir / constant::INDEX_LOOK_ASIDE_FILE,
+        _look_aside_index = std::make_shared<IndexWriterT>(_db_id, _table_dir / constant::INDEX_LOOK_ASIDE_FILE,
                 look_aside_keys,
                 _look_aside_schema,
-                _target_xid, get_max_extent_size_secondary(), extension_callback);
+                _target_xid,
+                IndexExtentCache::get_instance(),
+                BtreeWriteStrategy{get_max_extent_size_secondary()},
+                extension_callback);
 
         return _look_aside_index;
     }
 
-    MutableBTreePtr
+    IndexWriterPtr
     MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback)
     {
         // Get the index schema - bypass cache if this is a snapshot table without system table metadata
@@ -680,11 +689,12 @@ namespace indexer_helpers {
         auto key = col_names;
         key.push_back(constant::INTERNAL_ROW_ID);
 
-        auto btree = std::make_shared<MutableBTree>(_db_id,
+        auto btree = std::make_shared<IndexWriterT>(_db_id,
                 _table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 key, index_schema,
                 _target_xid,
-                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary(),
+                IndexExtentCache::get_instance(),
+                BtreeWriteStrategy{index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary()},
                 extension_callback
                 );
         return btree;

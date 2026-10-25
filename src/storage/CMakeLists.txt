@@ -130,7 +130,7 @@ springtail_unit_test(test_index_writer
   SOURCES test/test_index_writer.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LINK_OPTIONS "--coverage"
-  LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
+  LIBS springtail_storage springtail_xid_mgr GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 
@@ -139,7 +139,7 @@ springtail_unit_test(test_index_reader
   SOURCES test/test_index_reader.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LINK_OPTIONS "--coverage"
-  LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
+  LIBS springtail_storage springtail_xid_mgr GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 

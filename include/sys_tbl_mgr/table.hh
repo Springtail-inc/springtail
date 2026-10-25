@@ -4,9 +4,12 @@
 #include <common/circular_buffer.hh>
 #include <algorithm>
 #include <memory>
-#include <storage/btree.hh>
 #include <storage/cache.hh>
-#include <storage/mutable_btree.hh>
+#include <storage/index_engine/btree_read_strategy.hh>
+#include <storage/index_engine/btree_write_strategy.hh>
+#include <storage/index_engine/index_reader.hh>
+#include <storage/index_engine/index_writer.hh>
+#include <storage/index_engine/storage_cache_extent_source.hh>
 
 #include <optional>
 #include <thread>
@@ -15,9 +18,22 @@
 namespace springtail {
 
     /**
+     * The concrete engine types ordinary user tables (Table/MutableTable) are built on, per
+     * phases/phase-3.md's integration of the "btree" redesign (architecture.md Sec 5.1, 5.3):
+     * IndexReader<BtreeReadStrategy> replaces BTree, IndexWriter<BtreeWriteStrategy> replaces
+     * MutableBTree. Named here (rather than BTreePtr/MutableBTreePtr) since every production call
+     * site needs a concrete, nameable type -- IndexReader/IndexWriter are templated on Strategy,
+     * not type-erased (phase-1.md/phase-2.md OQ4).
+     */
+    using IndexReaderT = IndexReader<BtreeReadStrategy>;
+    using IndexWriterT = IndexWriter<BtreeWriteStrategy>;
+    using IndexReaderPtr = std::shared_ptr<IndexReaderT>;
+    using IndexWriterPtr = std::shared_ptr<IndexWriterT>;
+
+    /**
      * Alias to a map holding secondary indexes :: index_id => (root, index_cols)
      */
-    using SecondaryIndexesCache = std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>>;
+    using SecondaryIndexesCache = std::map<uint64_t, std::pair<IndexWriterPtr, std::vector<uint32_t>>>;
 
 namespace table_helpers {
 
@@ -33,48 +49,48 @@ namespace indexer_helpers {
      *
      * @param extent_id  Extent ID
      * @param page       SafePagePtr whose rows should be removed from index.
-     * @param root       Mutable B-tree root of the secondary index.
+     * @param root       IndexWriter root of the secondary index.
      * @param idx_cols   index columns
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
+            const IndexWriterPtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Remove secondary-index entries for every row in an extent.
      *
      * @param extent_id  Extent ID
      * @param extent     Extent whose rows should be removed.
-     * @param root       Mutable B-tree root of the secondary index.
+     * @param root       IndexWriter root of the secondary index.
      * @param idx_cols   index columns
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void invalidate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
-            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
+            const IndexWriterPtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Insert secondary-index entries for every row in a page.
      *
      * @param extent_id  Extent ID
      * @param page       SafePagePtr whose rows should be indexed.
-     * @param root       Mutable B-tree root of the secondary index.
+     * @param root       IndexWriter root of the secondary index.
      * @param idx_cols   index columns
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
+            const IndexWriterPtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 
     /**
      * @brief Insert secondary-index entries for every row in an extent.
      *
      * @param extent_id  Extent ID
      * @param extent     Extent whose rows should be indexed.
-     * @param root       Mutable B-tree root of the secondary index.
+     * @param root       IndexWriter root of the secondary index.
      * @param idx_cols   index columns
      * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void populate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
-            const MutableBTreePtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
+            const IndexWriterPtr &root, const std::vector<std::string> &idx_cols, const ExtentSchemaPtr &schema);
 } // namespace indexer_helpers
 
     /**
@@ -108,7 +124,9 @@ namespace indexer_helpers {
 
     /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
-     * information, performing scans, extent_id lookups, etc.
+     * information, performing scans, extent_id lookups, etc.  The primary, look-aside, and
+     * secondary indexes are IndexReader<BtreeReadStrategy> instances (architecture.md "btree"
+     * redesign Sec 5.1, 5.3), immutable and pinned to this Table's xid/root.
      */
     class Table {
     public:
@@ -130,7 +148,7 @@ namespace indexer_helpers {
                 {}
 
                 Tracker(const Table *table,
-                         BTreePtr btree, const BTree::Iterator &btree_i)
+                         IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i)
                 : _table(table),
                   _btree(btree),
                   _btree_i(btree_i)
@@ -147,8 +165,8 @@ namespace indexer_helpers {
                 }
 
                 const Table *_table{}; ///< A pointer to the Table object this iterator is for.
-                BTreePtr _btree; ///< A pointer to the BTree of the primary index.
-                BTree::Iterator _btree_i; ///< An iterator into the BTree.
+                IndexReaderPtr _btree; ///< A pointer to the index reader of the primary index.
+                IndexReaderT::Iterator _btree_i; ///< An iterator into the index reader.
             };
 
             /**
@@ -157,7 +175,7 @@ namespace indexer_helpers {
             struct Primary : Tracker
             {
                 Primary(const Table *table,
-                        BTreePtr btree, const BTree::Iterator &btree_i,
+                        IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i,
                         StorageCache::SafePagePtr page,
                         const StorageCache::Page::Iterator &page_i )
                     : Tracker{table, btree, btree_i},
@@ -204,7 +222,7 @@ namespace indexer_helpers {
         struct Secondary : Tracker
         {
             Secondary(const Table *table,
-                    BTreePtr btree, const BTree::Iterator &btree_i,
+                    IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i,
                     ExtentSchemaPtr schema );
 
             Secondary(Secondary&&) = default;
@@ -240,7 +258,7 @@ namespace indexer_helpers {
         struct SecondaryIndexOnly : Tracker
         {
             SecondaryIndexOnly(const Table *table,
-                    BTreePtr btree, const BTree::Iterator &btree_i);
+                    IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i);
 
             SecondaryIndexOnly(SecondaryIndexOnly&&) = default;
             virtual ~SecondaryIndexOnly() = default;
@@ -391,8 +409,8 @@ namespace indexer_helpers {
             Iterator(const Table *table)
             {
                 _tracker.emplace<Primary>(table,
-                        BTreePtr{},
-                        BTree::Iterator{},
+                        IndexReaderPtr{},
+                        IndexReaderT::Iterator{},
                         StorageCache::SafePagePtr{},
                         StorageCache::Page::Iterator{});
             }
@@ -402,7 +420,7 @@ namespace indexer_helpers {
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
-                     BTreePtr btree, const BTree::Iterator &btree_i,
+                     IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
             {
@@ -410,14 +428,14 @@ namespace indexer_helpers {
             }
 
             Iterator(const Table *table,
-                     BTreePtr btree, const BTree::Iterator &btree_i,
+                     IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i,
                      ExtentSchemaPtr index_schema )
             {
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
             }
 
             Iterator(const Table *table,
-                     BTreePtr btree, const BTree::Iterator &btree_i)
+                     IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i)
             {
                 _tracker.emplace<SecondaryIndexOnly>(table, btree, btree_i);
             }
@@ -508,11 +526,11 @@ namespace indexer_helpers {
         }
 
         /**
-         * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
+         * Returns the requested index reader of the table based on the index ID in the "indexes" table.
          * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
-         * @return A BTree object of the requested index.
+         * @return An IndexReader object of the requested index.
          */
-        BTreePtr index(uint32_t idx) const {
+        IndexReaderPtr index(uint32_t idx) const {
             if (idx == 0) {
                 return _primary_index;
             }
@@ -575,7 +593,7 @@ namespace indexer_helpers {
         /**
          * Returns the look aside index of the table.
          */
-        BTreePtr look_aside_index() const {
+        IndexReaderPtr look_aside_index() const {
             return _look_aside_index;
         }
 
@@ -606,7 +624,7 @@ namespace indexer_helpers {
         }
 
         /**
-         * Advance this Table object to a new XID by updating the BTree roots.
+         * Advance this Table object to a new XID by updating the index roots.
          * This avoids expensive Table reconstruction when the table structure hasn't changed.
          *
          * Pre-condition: Caller must ensure the table structure (schemas, indexes) hasn't changed.
@@ -627,10 +645,10 @@ namespace indexer_helpers {
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
-         * @param pos The primary index btree iterator.
+         * @param pos The primary index reader iterator.
          * @return A pointer to the requested page.
          */
-        StorageCache::SafePagePtr _read_page_via_primary(BTree::Iterator &pos) const;
+        StorageCache::SafePagePtr _read_page_via_primary(IndexReaderT::Iterator &pos) const;
 
         /**
          * Reads an extent from the tree and returns it.
@@ -642,7 +660,7 @@ namespace indexer_helpers {
         /**
          * Creates read-only index of the table.
          */
-        BTreePtr
+        IndexReaderPtr
         _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ExtensionCallback &extension_callback = {});
 
     protected:
@@ -660,18 +678,18 @@ namespace indexer_helpers {
         FieldPtr _primary_extent_id_f; ///< The field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
-        BTreePtr _primary_index;
+        IndexReaderPtr _primary_index;
 
         /** Look aside index **/
-        BTreePtr _look_aside_index;
+        IndexReaderPtr _look_aside_index;
 
 
         /** A map of secondary indexes
          * first is the index id
-         * second.first is btree
+         * second.first is the index reader
          * second.second are the index columns
          */
-        std::map<uint64_t, std::pair<BTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The secondary indexes of the table..
+        std::map<uint64_t, std::pair<IndexReaderPtr, std::vector<uint32_t>>> _secondary_indexes; ///< The secondary indexes of the table..
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.

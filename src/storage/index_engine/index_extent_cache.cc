@@ -13,6 +13,13 @@ namespace springtail {
         : _max_size(max_size)
     { }
 
+    std::shared_ptr<IndexExtentCache>
+    IndexExtentCache::get_instance()
+    {
+        static std::shared_ptr<IndexExtentCache> instance = std::make_shared<IndexExtentCache>();
+        return instance;
+    }
+
     std::shared_ptr<Extent>
     IndexExtentCache::get(uint64_t database_id,
                          const std::filesystem::path &file,

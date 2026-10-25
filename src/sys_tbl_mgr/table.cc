@@ -125,12 +125,14 @@ get_table_dir(const std::filesystem::path &base,
         auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
         assert(it != roots.end());
 
-        _primary_index = std::make_shared<BTree>(_db_id,
+        _primary_index = std::make_shared<IndexReaderT>(_db_id,
                                                  _table_dir / constant::INDEX_PRIMARY_FILE,
-                                                 xid,
+                                                 primary_schema->get_sort_keys(),
                                                  primary_schema,
+                                                 xid,
                                                  it->extent_id,
-                                                 get_max_extent_size(),
+                                                 std::make_shared<StorageCacheExtentSource>(get_max_extent_size()),
+                                                 BtreeReadStrategy{},
                                                  extension_callback);
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
@@ -168,12 +170,15 @@ get_table_dir(const std::filesystem::path &base,
         // Initialize look aside index
         it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
         if (it != roots.end()) {
-            _look_aside_index = std::make_shared<BTree>(_db_id,
+            _look_aside_index = std::make_shared<IndexReaderT>(_db_id,
                     _table_dir / constant::INDEX_LOOK_ASIDE_FILE,
-                    xid,
+                    _look_aside_schema->get_sort_keys(),
                     _look_aside_schema,
+                    xid,
                     it->extent_id,
-                    get_max_extent_size_secondary(), extension_callback);
+                    std::make_shared<StorageCacheExtentSource>(get_max_extent_size_secondary()),
+                    BtreeReadStrategy{},
+                    extension_callback);
         }
     }
 
@@ -231,7 +236,7 @@ get_table_dir(const std::filesystem::path &base,
 
         CHECK(!index_only);
 
-        BTreePtr btree = index(index_id);
+        IndexReaderPtr btree = index(index_id);
 
         // find the extent that could contain the lower_bound() key
         auto &&i = btree->lower_bound(search_key);
@@ -450,7 +455,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     StorageCache::SafePagePtr
-    Table::_read_page_via_primary(BTree::Iterator &pos) const
+    Table::_read_page_via_primary(IndexReaderT::Iterator &pos) const
     {
         auto &&row = *pos;
         uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
@@ -463,15 +468,18 @@ get_table_dir(const std::filesystem::path &base,
         return StorageCache::get_instance()->get(_db_id, _table_dir / constant::DATA_FILE, extent_id, _xid, constant::LATEST_XID, get_max_extent_size());
     }
 
-    BTreePtr
+    IndexReaderPtr
     Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ExtensionCallback &extension_callback)
     {
         auto index_schema = schema_helpers::create_index_schema(_schema, index_columns, index_id, extension_callback);
-        auto btree = std::make_shared<BTree>(_db_id,
+        auto btree = std::make_shared<IndexReaderT>(_db_id,
                 _table_dir / fmt::format(constant::INDEX_FILE, index_id),
-                _xid, index_schema,
+                index_schema->get_sort_keys(), index_schema,
+                _xid,
                 offset,
-                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary(),
+                std::make_shared<StorageCacheExtentSource>(
+                        index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary()),
+                BtreeReadStrategy{},
                 extension_callback);
         return btree;
     }
@@ -529,7 +537,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     Table::Iterator::Secondary::Secondary(const Table *table,
-            BTreePtr btree, const BTree::Iterator &btree_i,
+            IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i,
             ExtentSchemaPtr schema )
         :
             Tracker{table, btree, btree_i}
@@ -590,7 +598,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     Table::Iterator::SecondaryIndexOnly::SecondaryIndexOnly(const Table *table,
-            BTreePtr btree, const BTree::Iterator &btree_i)
+            IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i)
         :
             Tracker{table, btree, btree_i}
     {}

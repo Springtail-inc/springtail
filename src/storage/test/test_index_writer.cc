@@ -1,3 +1,5 @@
+#include <random>
+#include <set>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -227,6 +229,79 @@ namespace {
 
         auto final_reader = _open_writer(_base_dir / "ReopenThenSplitAgain", 1000, offset, 1);
         ASSERT_EQ(_count_and_verify_order(final_reader), names.size() * gen_count);
+    }
+
+    // Coverage (not a standalone minimal repro -- see note below) for a data-corruption bug found
+    // while integrating this engine behind MutableTable (phases/phase-3.md): reassigning every
+    // row's secondary-index sort key, in an order decorrelated from the original insert order,
+    // within one generation, made _propagate_splits()/_remove_empty_leaf() fail to locate a
+    // child's own branch row. node->prev_key is a cached snapshot of a node's max key from
+    // whenever the node was last (re)created; it is never refreshed as further inserts/removes
+    // change the node's actual content without the node itself splitting again, and nothing else
+    // ever edits an existing branch row's key in place -- so prev_key and the parent's recorded
+    // key are supposed to stay in lockstep. The real failure (CHECK failed: row_i !=
+    // parent->extent->end(), confirmed via a diagnostic dump showing the child's row existed,
+    // found by id, under a key no longer matching prev_key) was only actually reproduced by
+    // Table_Test.MultiThreadMutations (test_table.cc) driving the real MutableTable/StorageCache
+    // stack at full scale (5000 rows, real CoW-eviction timing); this test exercises the same
+    // *shape* of churn directly against the engine, at a scale this suite can run quickly, as
+    // defense-in-depth, but by itself does not prove the fix (it passes here with or without the
+    // fix below -- confirmed by reverting it in isolation). Fixed by locating a child's row via
+    // its (never-stale) child pointer id instead of its (can-go-stale) recorded key.
+    TEST_F(IndexWriterTest, ReassignAllKeysWithinGeneration) {
+        auto writer = _create_writer(_base_dir / "ReassignAllKeysWithinGeneration", 1, 64);
+
+        auto row_value = [](const std::string &name, uint64_t table_id, uint16_t idx) {
+            auto key_fields = std::make_shared<FieldArray>(4);
+            key_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+            key_fields->at(1) = std::make_shared<ConstTypeField<std::string>>(name);
+            key_fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(uint64_t(0));
+            key_fields->at(3) = std::make_shared<ConstTypeField<uint16_t>>(idx);
+            return std::make_shared<FieldTuple>(key_fields, nullptr);
+        };
+
+        // Build N identity "slots" (each a fixed table_id, a tie-breaker that never changes),
+        // each given an initial sequential sort-key ("name", the *first*/most significant sort
+        // column) 0..N-1, inserted in a scrambled order -- mirroring test_table.cc's
+        // MultiThreadMutations, which assigns each of 5000 CSV rows a fresh sequential
+        // secondary-index sort key via a *different* (extent-grouped) traversal order than the
+        // original insert order.
+        constexpr int N = 800;
+        std::mt19937 rng(12345);
+
+        auto key_name = [](uint64_t key) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "k%08llu", (unsigned long long)key);
+            return std::string(buf);
+        };
+
+        std::vector<int> insert_order(N);
+        for (int i = 0; i < N; i++) insert_order[i] = i;
+        std::shuffle(insert_order.begin(), insert_order.end(), rng);
+
+        std::vector<uint64_t> current_key(N);
+        for (int slot : insert_order) {
+            current_key[slot] = static_cast<uint64_t>(slot);
+            writer->insert(row_value(key_name(current_key[slot]), static_cast<uint64_t>(slot), 0));
+        }
+        ASSERT_EQ(_count_and_verify_order(writer), N);
+
+        // Now reassign every slot a brand-new sequential sort key (0..N-1, a derangement),
+        // processed in yet another scrambled order, remove-then-insert, all within this one
+        // generation (no reopen).
+        std::vector<int> reassign_order(N);
+        for (int i = 0; i < N; i++) reassign_order[i] = i;
+        std::shuffle(reassign_order.begin(), reassign_order.end(), rng);
+
+        uint64_t next_key = 0;
+        for (int slot : reassign_order) {
+            writer->remove(row_value(key_name(current_key[slot]), static_cast<uint64_t>(slot), 0));
+            current_key[slot] = next_key++;
+            writer->insert(row_value(key_name(current_key[slot]), static_cast<uint64_t>(slot), 0));
+        }
+
+        int count = _count_and_verify_order(writer);
+        ASSERT_EQ(count, N);
     }
 
     TEST_F(IndexWriterTest, InsertAndRemoveAll) {

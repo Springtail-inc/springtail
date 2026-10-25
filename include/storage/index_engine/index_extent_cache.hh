@@ -46,6 +46,17 @@ namespace springtail {
         explicit IndexExtentCache(uint64_t max_size = DEFAULT_MAX_SIZE);
 
         /**
+         * Process-wide shared instance (architecture.md "btree" redesign Sec 8: this cache is
+         * "shared across multiple ingest worker threads... for different trees", not re-created
+         * per tree). Phase 3's integration decision (see phases/phase-3.md): a lazily-constructed
+         * function-local static, mirroring StorageCache::get_instance()'s role on the read side,
+         * without pulling this plain utility cache into the heavier Singleton<T>/ServiceId
+         * machinery that class reserves for actual daemon services with their own thread/shutdown
+         * lifecycle, which this class has none of.
+         */
+        static std::shared_ptr<IndexExtentCache> get_instance();
+
+        /**
          * Read (or return the cached, already-decompressed copy of) the extent at `extent_id` in
          * `file`. Purely mechanical: performs the on-disk IO via IOHandle and returns the result,
          * with no awareness of what the extent's rows mean.

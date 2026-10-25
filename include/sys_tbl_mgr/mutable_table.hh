@@ -5,7 +5,11 @@
 namespace springtail {
 
     /**
-     * Interface for mutating a table at the most recent XID.
+     * Interface for mutating a table at the most recent XID.  The primary, look-aside, and
+     * secondary indexes are IndexWriter<BtreeWriteStrategy> instances (architecture.md "btree"
+     * redesign Sec 5.1, 5.4): single-writer, no internal locking -- callers of this class must be
+     * the sole mutator of a given MutableTable instance at a time (see Table/MutableTable's
+     * Reader/Writer pairing invariant, architecture.md Sec 5.3).
      */
     class MutableTable {
     public:
@@ -132,26 +136,26 @@ namespace springtail {
          * @param index_id PG index ID.
          * @param index_columns Positions of the index columns.
          */
-        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {});
+        IndexWriterPtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {});
 
         /**
          * Create a btree that can be used for look aside index.
          */
-        MutableBTreePtr create_look_aside_root(const ExtensionCallback& extension_callback = {});
+        IndexWriterPtr create_look_aside_root(const ExtensionCallback& extension_callback = {});
 
         /**
          * Returns the look aside index of the table.
          */
-        MutableBTreePtr look_aside_index() const {
+        IndexWriterPtr look_aside_index() const {
             return _look_aside_index;
         }
 
         /**
-         * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
+         * Returns the requested index writer of the table based on the index ID in the "indexes" table.
          * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
-         * @return A BTree object of the requested index.
+         * @return An IndexWriter object of the requested index.
          */
-        MutableBTreePtr index(uint32_t idx) {
+        IndexWriterPtr index(uint32_t idx) {
             if (idx == 0) {
                 return _primary_index;
             }
@@ -352,12 +356,12 @@ namespace springtail {
         FieldPtr _primary_extent_id_f; ///< A field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
-        MutableBTreePtr _primary_index; ///< The mutable primary index btree.
+        IndexWriterPtr _primary_index; ///< The mutable primary index writer.
 
         /**
          * Look aside index for the secondary indexes
          */
-        MutableBTreePtr _look_aside_index; ///< The mutable look-aside index btree.
+        IndexWriterPtr _look_aside_index; ///< The mutable look-aside index writer.
 
         /** A map of secondary indexes
          * first is the index id
