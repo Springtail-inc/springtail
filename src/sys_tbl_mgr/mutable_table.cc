@@ -576,13 +576,13 @@ namespace indexer_helpers {
         return writers;
     }
 
-    void
-    MutableTable::run_compaction_cycle()
+    MutableTable::PreparedCompaction
+    MutableTable::prepare_compaction_cycle()
     {
         auto *vacuumer = Vacuumer::get_instance();
         auto candidates = vacuumer->get_compaction_candidates();
         if (candidates.empty()) {
-            return;
+            return {};
         }
 
         for (auto &writer : all_index_writers()) {
@@ -594,25 +594,46 @@ namespace indexer_helpers {
                 auto scratch_file = segment;
                 scratch_file += ".compact_scratch";
 
-                auto is_dead = [&segment, vacuumer](uint64_t real_id) {
-                    return vacuumer->compaction_dead_offsets(segment).count(
-                            SegmentSet::offset_of(real_id)) > 0;
+                // Fetched once per candidate segment, not once per extent scanned (round-1
+                // review finding 2) -- compaction_dead_offsets()'s own doc comment says a
+                // snapshot taken once per cycle is exactly the intended, safe usage; querying
+                // Vacuumer (a process-wide singleton, and the same mutex its background thread
+                // holds for an entire vacuum pass) on every extent the scan touches contended
+                // with that background thread and copied this set far more often than needed.
+                auto dead_offsets = vacuumer->compaction_dead_offsets(segment);
+                auto is_dead = [&dead_offsets](uint64_t real_id) {
+                    return dead_offsets.count(SegmentSet::offset_of(real_id)) > 0;
                 };
 
                 auto items = writer->bulk_copy_for_compaction(segment, scratch_file, is_dead,
                                                                vacuumer->compaction_item_budget());
-                if (!items.empty()) {
-                    writer->apply_compaction_batch(scratch_file, items);
+                if (items.empty()) {
+                    // One candidate segment per cycle across the whole table keeps this bounded
+                    // (phase-7.md's Throttling task) -- don't fall through to try another
+                    // segment this same call.
+                    return {};
                 }
 
-                // One candidate segment per cycle across the whole table keeps this bounded
-                // (phase-7.md's Throttling task) -- a segment not fully reclaimed this call
-                // (because it wasn't fully compacted, or wasn't fully dead yet after compacting)
-                // will simply be offered again on a later claim/finalize once the Vacuumer's
-                // own background thread re-derives candidacy.
-                return;
+                return PreparedCompaction{ writer, scratch_file, std::move(items) };
             }
         }
+        return {};
+    }
+
+    void
+    MutableTable::apply_compaction_cycle(PreparedCompaction &batch)
+    {
+        if (!batch.writer) {
+            return;
+        }
+        batch.writer->apply_compaction_batch(batch.scratch_file, batch.items);
+    }
+
+    void
+    MutableTable::run_compaction_cycle()
+    {
+        auto batch = prepare_compaction_cycle();
+        apply_compaction_cycle(batch);
     }
 
     void

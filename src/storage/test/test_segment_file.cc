@@ -574,9 +574,11 @@ namespace {
             auto scratch_file = segment;
             scratch_file += ".compact_scratch";
 
-            auto is_dead = [&segment](uint64_t real_id) {
-                return Vacuumer::get_instance()->compaction_dead_offsets(segment).count(
-                        SegmentSet::offset_of(real_id)) > 0;
+            // Fetched once per candidate segment, not once per extent scanned (round-1 review
+            // finding 2 -- mirrors MutableTable::prepare_compaction_cycle()'s identical fix).
+            auto dead_offsets = Vacuumer::get_instance()->compaction_dead_offsets(segment);
+            auto is_dead = [&dead_offsets](uint64_t real_id) {
+                return dead_offsets.count(SegmentSet::offset_of(real_id)) > 0;
             };
 
             auto items = writer->bulk_copy_for_compaction(

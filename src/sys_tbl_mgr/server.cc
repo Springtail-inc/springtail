@@ -869,6 +869,29 @@ Server::finalize(uint64_t db_id, uint64_t xid, bool call_sync)
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got finalize() -- db {}, xid {}", db_id, xid);
 
+    // Background space-reclaim compaction, phase 1 (architecture.md "btree" redesign Sec 7.1,
+    // round-1 review finding 1): run *before* acquiring the catalog queue slot below, not
+    // inside it. Phase 1 (MutableTable::prepare_compaction_cycle(), which calls
+    // IndexWriter::bulk_copy_for_compaction() under the hood) needs no exclusivity at all --
+    // running it inside the slot would block every *other* system table's catalog traffic in
+    // this database for the duration of the scan, exactly the "one large pass that monopolizes
+    // a writer" architecture.md Sec 7.1 says background compaction must never be. A short-lived
+    // shared lock on `_mutex` (the same lock _get_mutable_system_table() takes to mutate
+    // `_write[db_id]`) snapshots the currently-cached tables first -- every mutator of that map
+    // also holds the catalog queue slot, so reading it *with* that slot held (as the loop below
+    // still does for phase 2/finalize()) needs no extra lock, but phase 1 deliberately runs
+    // without the slot, so it needs `_mutex` instead to stay race-free against a concurrent
+    // insert into `_write[db_id]`.
+    std::map<uint64_t, MutableTablePtr> write_snapshot;
+    {
+        boost::shared_lock lock(_mutex);
+        write_snapshot = _write[db_id];
+    }
+    std::map<uint64_t, MutableTable::PreparedCompaction> prepared_compactions;
+    for (const auto& entry : write_snapshot) {
+        prepared_compactions.emplace(entry.first, entry.second->prepare_compaction_cycle());
+    }
+
     // Acquire this db's catalog-mutation queue slot as a barrier (architecture.md Decisions log
     // entry 9): `MultiQueueThreadManager` guarantees strict per-queue_id FIFO with exactly one
     // request in flight at a time, so finalize() being granted this slot already implies every
@@ -889,18 +912,35 @@ Server::finalize(uint64_t db_id, uint64_t xid, bool call_sync)
     // XXX we currently don't store the metadata, but re-read it from the roots file each time
     std::map<uint64_t, TableMetadata> md_map;
     for (const auto& entry : _write[db_id]) {
-        // Background space-reclaim compaction for system/catalog tables (architecture.md "btree"
-        // redesign Sec 7.1, Decisions log entry 2): routed through this same per-db_id catalog
-        // queue slot already held above, rather than a Committer worker -- a Committer worker is
-        // not this table's sole mutator the way it is for an ordinary table (architecture.md
-        // Sec 5.4 case 1), so compaction work for it must go through the same serialization
-        // point every other catalog mutation does. Runs before finalize() so any relocation it
-        // performs rides along with this same finalize() call, not a separate one.
-        entry.second->run_compaction_cycle();
+        // Background space-reclaim compaction, phase 2: apply whatever phase 1 (above, run
+        // *before* this slot was acquired) found for this table, if anything -- the only part
+        // of compaction that actually needs this table's single-writer exclusivity (Decisions
+        // log entry 2), which this catalog-queue slot provides for system tables. Runs before
+        // finalize() so any relocation it performs rides along with this same finalize() call,
+        // not a separate one.
+        auto prepared_it = prepared_compactions.find(entry.first);
+        if (prepared_it != prepared_compactions.end()) {
+            entry.second->apply_compaction_cycle(prepared_it->second);
+            prepared_compactions.erase(prepared_it);
+        }
 
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize table {}@{}", entry.first, request.xid());
         md_map[entry.first] = entry.second->finalize(call_sync);
     }
+
+    // Defensive cleanup: a table present in the pre-slot snapshot but gone by the time the loop
+    // above ran (there's no code path that does this today -- every `_write[db_id]` mutator also
+    // holds the catalog queue slot, and nothing clears individual entries outside of this same
+    // function's own end-of-finalize `_write[db_id].clear()` below -- but prepare_compaction_cycle()
+    // ran without that slot held, so this can't be ruled out purely by inspection) would otherwise
+    // leak its scratch file forever.
+    for (auto& [table_id, batch] : prepared_compactions) {
+        if (batch.writer) {
+            std::error_code ec;
+            std::filesystem::remove(batch.scratch_file, ec);
+        }
+    }
+
     if (md_map.empty()) {
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Nothing to finalize: {}@{} >= {}", db_id, request.xid(),
                     write_xid);

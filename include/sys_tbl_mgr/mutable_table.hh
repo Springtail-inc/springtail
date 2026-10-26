@@ -185,20 +185,58 @@ namespace springtail {
         std::vector<IndexWriterPtr> all_index_writers() const;
 
         /**
-         * Run one bounded cycle of background space-reclaim compaction (architecture.md "btree"
-         * redesign Sec 7.1) across this table's indexes: checks the Vacuumer's current
-         * compaction-candidate segments against each index's own segment files
-         * (IndexWriter::get_segment_paths()) and, for at most one matching segment, bulk-copies
-         * its still-reachable extents (phase 1) and relocates them into that index's live
-         * structure (phase 2) -- both performed inline here. This is safe to call from either of
-         * this phase's two owning-component call sites (a Committer worker's claimed table_id
-         * turn, or Server's per-db_id catalog-queue callback during finalize()) because both
-         * already hold this MutableTable's exclusive single-writer turn per this class's own
-         * contract (architecture.md Sec 5.4; Decisions log entry 2) -- this method does not
-         * itself acquire or check any exclusivity. A no-op if none of this table's segments are
-         * currently a candidate. Never calls finalize() -- any relocation performed here rides
-         * along with the caller's own already-scheduled finalize() for this generation, exactly
-         * like any other mutation.
+         * Phase 1's output for one table, held between prepare_compaction_cycle() and
+         * apply_compaction_cycle() (architecture.md "btree" redesign Sec 7.1) -- deliberately a
+         * plain data holder with no behavior, since the whole point of splitting these two
+         * calls is letting a caller do something else (e.g. acquire a lock) in between them.
+         * `writer` is null and `items` empty when prepare_compaction_cycle() found nothing to
+         * do; apply_compaction_cycle() treats that as a no-op.
+         */
+        struct PreparedCompaction {
+            IndexWriterPtr writer;
+            std::filesystem::path scratch_file;
+            std::vector<IndexWriterT::CompactionItem> items;
+        };
+
+        /**
+         * Background space-reclaim compaction, phase 1 only (architecture.md "btree" redesign
+         * Sec 7.1): checks the Vacuumer's current compaction-candidate segments against each of
+         * this table's indexes' own segment files (IndexWriter::get_segment_paths()) and, for at
+         * most one matching segment, bulk-copies its still-reachable extents into a scratch
+         * file. Needs no exclusivity at all -- IndexWriter::bulk_copy_for_compaction() touches
+         * only this tree's (already thread-safe) extent cache and construction-time-fixed
+         * schema state, never `_root`/`_segments`/`_in_call` -- so, unlike every other mutating
+         * entry point this class exposes, this is safe to call *without* this table's owning
+         * component holding any lock at all, including whatever serialization point it would
+         * otherwise need before apply_compaction_cycle() (round-1 review finding 1: running
+         * phase 1 inside `Server::finalize()`'s per-db_id catalog-queue slot blocked every
+         * other system table's catalog traffic in that database for the scan's duration, which
+         * is exactly the "zero coordination" property phase 1 is specifically designed to not
+         * need). A no-op (returns a `PreparedCompaction` with a null `writer`) if none of this
+         * table's segments are currently a candidate.
+         */
+        PreparedCompaction prepare_compaction_cycle();
+
+        /**
+         * Background space-reclaim compaction, phase 2 only (architecture.md Sec 7.1): relocates
+         * `batch` (prepare_compaction_cycle()'s output) into its writer's live structure, through
+         * the ordinary single-writer mutation path -- same exclusivity contract as insert()/
+         * remove(), the caller must already hold it (a Committer worker's claimed table_id turn,
+         * or a system-table catalog-queue callback; see Decisions log entry 2). A no-op if
+         * `batch.writer` is null (phase 1 found nothing to do). Never calls finalize() -- any
+         * relocation performed here rides along with the caller's own already-scheduled
+         * finalize() for this generation, exactly like any other mutation.
+         */
+        void apply_compaction_cycle(PreparedCompaction &batch);
+
+        /**
+         * Convenience wrapper running both phases back to back -- safe only for a caller that
+         * doesn't need phase 1 to run outside whatever lock it already holds (architecture.md
+         * Sec 5.4 case 3: an ordinary table's `Committer` worker is already this table's sole
+         * mutator regardless, so there's no lock for phase 1 to escape here). System-table
+         * callers must not use this -- see Server::finalize(), which calls
+         * prepare_compaction_cycle() before acquiring its catalog-queue slot and
+         * apply_compaction_cycle() after.
          */
         void run_compaction_cycle();
 
