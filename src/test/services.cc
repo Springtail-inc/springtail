@@ -2,6 +2,7 @@
 
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <storage/index_engine/shared_extent_pool.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <write_cache/write_cache_client.hh>
@@ -36,6 +37,19 @@ namespace springtail::test {
         Json::get_to<std::filesystem::path>(json, "table_dir", table_dir);
         table_dir = Properties::make_absolute_path(table_dir);
         std::filesystem::remove_all(table_dir);
+
+        // SharedExtentPool (architecture.md "btree" redesign Sec 6) is deliberately host-wide and
+        // outlives any one process -- that's the whole point in production, where many backend
+        // processes on one host share it without any of them wiping it on their own
+        // start/shutdown. But that same persistence means it does NOT get the fresh-start
+        // `table_dir` above just got: unrelated test binaries that each simulate "a fresh system
+        // from scratch" deterministically reuse the same low (file, extent_id) keys, and -- unlike
+        // production, where a table's directory encodes a monotonically-unique table_id/xid that's
+        // never reused for different content -- would otherwise silently hand a later test
+        // whatever a completely unrelated earlier test published under the same key. Clear it here,
+        // in the same place table_dir itself gets reset, rather than in production-reachable code.
+        SharedExtentPool::remove(SharedExtentPool::DEFAULT_NAME);
+
         sys_tbl_mgr::Server::get_instance();
     }
 

@@ -9,7 +9,7 @@
 #include <storage/index_engine/btree_write_strategy.hh>
 #include <storage/index_engine/index_reader.hh>
 #include <storage/index_engine/index_writer.hh>
-#include <storage/index_engine/storage_cache_extent_source.hh>
+#include <storage/index_engine/shared_pool_extent_source.hh>
 
 #include <optional>
 #include <thread>

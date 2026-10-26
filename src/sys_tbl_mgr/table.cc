@@ -131,7 +131,7 @@ get_table_dir(const std::filesystem::path &base,
                                                  primary_schema,
                                                  xid,
                                                  it->extent_id,
-                                                 std::make_shared<StorageCacheExtentSource>(get_max_extent_size()),
+                                                 std::make_shared<SharedPoolExtentSource>(get_max_extent_size()),
                                                  BtreeReadStrategy{},
                                                  extension_callback);
 
@@ -176,7 +176,7 @@ get_table_dir(const std::filesystem::path &base,
                     _look_aside_schema,
                     xid,
                     it->extent_id,
-                    std::make_shared<StorageCacheExtentSource>(get_max_extent_size_secondary()),
+                    std::make_shared<SharedPoolExtentSource>(get_max_extent_size_secondary()),
                     BtreeReadStrategy{},
                     extension_callback);
         }
@@ -477,7 +477,7 @@ get_table_dir(const std::filesystem::path &base,
                 index_schema->get_sort_keys(), index_schema,
                 _xid,
                 offset,
-                std::make_shared<StorageCacheExtentSource>(
+                std::make_shared<SharedPoolExtentSource>(
                         index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary()),
                 BtreeReadStrategy{},
                 extension_callback);
