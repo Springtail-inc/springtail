@@ -297,8 +297,11 @@ namespace springtail::committer {
             server->update_roots(db_id, info.table_id(), end_xid, *meta);
         }
 
-        // Cleanup table-index map
-        _remove_index_key(db_id, info.table_id(), key);
+        // Cleanup table-index map. _drop() operates on an index that was already READY (it must
+        // have gone through a prior _commit_build() to get BEING_DELETED in the first place), so
+        // it never owns the look-aside bootstrap tracker entry for this table -- never clear it
+        // here.
+        _remove_index_key(db_id, info.table_id(), key, false);
 
         LOG_INFO("Index dropped: {}:{} @ {}", db_id, index_id, end_xid);
     }
@@ -553,8 +556,11 @@ namespace springtail::committer {
             }
         }
 
-        // Cleanup table-index map
-        _remove_index_key(db_id, tid, key);
+        // Cleanup table-index map. look_aside_root is non-null here iff *this* build is the one
+        // that owns the table's look-aside bootstrap (indexer.cc's _build(): only the owner's
+        // IndexState ever carries a non-null look_aside_root) -- only the owner may retire the
+        // tracker entry, regardless of whether this call landed via success, abort, or deletion.
+        _remove_index_key(db_id, tid, key, look_aside_root != nullptr);
     }
 
     // Index reconciliation flows
@@ -746,7 +752,7 @@ namespace springtail::committer {
         }
     }
 
-    void Indexer::_remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key)
+    void Indexer::_remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key, bool owns_look_aside)
     {
         std::scoped_lock lock(_table_idx_map_mtx);
         auto db_it = _table_idx_map.find(db_id);
@@ -767,12 +773,19 @@ namespace springtail::committer {
             }
         }
 
-        // Clear look aside index tracker
-        {
+        // Clear the look-aside build tracker *only* when this completing build is the one that
+        // owns it (round-1 review finding 1). _look_aside_build_tracker[table_id]'s presence is
+        // the external serialization point for architecture.md Sec 5.4 case 2 -- "all pending
+        // index builds for this table_id finished" (the key_list.empty() signal above) is not an
+        // equivalent condition: a non-owning sibling build can legitimately finish (and call this
+        // function) before the owner's own look-aside bootstrap/catch-up/finalize does, and
+        // erasing the entry then would let a third concurrent "first index" build on the same
+        // table conclude it must start its own, independent look-aside bootstrap while the real
+        // owner is still mid-build.
+        if (owns_look_aside) {
             std::unique_lock g(_look_aside_mutex);
             _look_aside_build_tracker.erase(table_id);
         }
-
     }
 
 }  // namespace springtail::gc

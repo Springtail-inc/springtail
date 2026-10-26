@@ -446,4 +446,154 @@ namespace {
         queue_mgr->remove_queue(_db_id);
     }
 
+    // Regression test for round-1 review finding 1: Indexer::_remove_index_key() used to erase
+    // _look_aside_build_tracker[table_id] unconditionally, on *any* completing build for that
+    // table, not just the one that owns the look-aside bootstrap. A non-owning build finishing
+    // (and committing) before the owner finishes its own, longer bootstrap-scan-inclusive build
+    // would erase the owner's still-in-flight ownership record, and a third "first index" build
+    // arriving in that window would wrongly conclude it must start a second, independent
+    // look-aside bootstrap, rather than discovering the first one -- exactly the corruption class
+    // architecture.md Sec 5.4 case 2 and this phase's brief were about preventing.
+    //
+    // Reproduced deterministically here, rather than via timing-dependent concurrency (the
+    // existing Test_ConcurrentFirstIndexBuildsShareLookAside's two real worker threads race for
+    // ownership, but can't control *commit* ordering, so it doesn't reliably exercise this
+    // specific bug -- see the round-1 review). A single-worker Indexer processes DDLs strictly
+    // FIFO: the first DDL submitted on a table with no secondary index yet is *always* the
+    // look-aside owner, and reconciliation (commit) is an explicit, test-driven step independent
+    // of build order -- letting this test force exactly the order the bug needs (the non-owner,
+    // B, commits before the owner, A) without depending on thread-scheduling luck. C's catalog
+    // row and xid are reserved *before* B is reconciled (so a schema query pinned at C's xid
+    // never observes B's later READY transition, exactly as if the Indexer had simply gotten to
+    // building C sooner), while handing C's DDL to the Indexer is deliberately delayed until
+    // after B commits -- that's the wall-clock race the bug needs, decoupled from xid order.
+    // Final-state row-resolution alone would not catch this bug (A's and a spurious second
+    // owner's bootstraps are independently complete over an unchanging table, so whichever one's
+    // root wins the last update_roots() still resolves every row correctly) -- the assertion
+    // that actually catches it is the look-aside file's on-disk size, which doubles if a second,
+    // orphaned bootstrap ran.
+    TEST_F(Indexer_Test, Test_LookAsideTrackerSurvivesNonOwnerCommit)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t index_id_a = _secondary_index_id + 10;
+        uint64_t index_id_b = _secondary_index_id + 11;
+        uint64_t index_id_c = _secondary_index_id + 12;
+        uint64_t table_xid = access_xid++;
+
+        create_table(_db_id, table_id, table_xid, "test_indexer_table_tracker_survives", _columns);
+        _populate_table_with_data(table_id, table_xid, table_xid, 500, 5);
+
+        auto queue_mgr = std::make_shared<springtail::pg_log_mgr::IndexReconciliationQueueManager>();
+        queue_mgr->add_queue(_db_id);
+        // A single worker: DDLs are processed strictly in submission order, so A (submitted
+        // first, on a table with no secondary index yet) is deterministically the look-aside
+        // owner, and B (submitted next, before A is reconciled) is deterministically the
+        // non-owner that discovers A's tracker entry.
+        auto indexer = std::make_unique<Indexer>(1, queue_mgr);
+
+        // A: the look-aside owner. Build it, but don't reconcile (commit) it yet.
+        uint64_t index_xid_a = access_xid++;
+        auto index_request_a = create_index(_db_id, table_id, index_xid_a, index_id_a, "idx_tracker_a",
+                std::vector<PgMsgSchemaColumn>(_columns.end() - 3, _columns.end() - 2), sys_tbl::IndexNames::State::NOT_READY);
+        indexer->process_requests(_db_id, index_xid_a, {index_request_a});
+        sys_tbl_mgr::Server::get_instance()->finalize(_db_id, index_xid_a, true);
+        auto request_a = queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+        ASSERT_NE(request_a, nullptr);
+
+        // B: the non-owner, built (and discovers A's still-uncommitted tracker entry) while A is
+        // still outstanding.
+        uint64_t index_xid_b = access_xid++;
+        auto index_request_b = create_index(_db_id, table_id, index_xid_b, index_id_b, "idx_tracker_b",
+                std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end() - 1), sys_tbl::IndexNames::State::NOT_READY);
+        indexer->process_requests(_db_id, index_xid_b, {index_request_b});
+        sys_tbl_mgr::Server::get_instance()->finalize(_db_id, index_xid_b, true);
+        auto request_b = queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+        ASSERT_NE(request_b, nullptr);
+
+        // C: register the catalog row (NOT_READY) and reserve its xid *now*, in the same batch
+        // as A/B and before B is reconciled -- mirroring a real CREATE INDEX statement that was
+        // issued around the same time as A/B's, so a schema/roots query pinned at index_xid_c
+        // must not see B's *later* READY transition (reconcile_xid_b, assigned below, is a later
+        // xid than this). Only the *handoff to the Indexer* (process_requests(), further down)
+        // is deliberately delayed until after B commits -- that's the wall-clock race the bug
+        // needs, decoupled from xid order.
+        uint64_t index_xid_c = access_xid++;
+        auto index_request_c = create_index(_db_id, table_id, index_xid_c, index_id_c, "idx_tracker_c",
+                std::vector<PgMsgSchemaColumn>(_columns.end() - 1, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
+
+        // Commit the *non-owner* (B) first -- the exact ordering the bug needs. If
+        // _remove_index_key() still erased the tracker unconditionally, this would wrongly clear
+        // A's (the owner's) still-in-flight ownership record. Because B's READY transition lands
+        // at reconcile_xid_b (a *later* xid than index_xid_c reserved above), C's own build --
+        // querying the schema pinned at index_xid_c -- still sees the table as having no READY
+        // secondary index yet, exactly as it would have if the Indexer had simply gotten around
+        // to building C sooner.
+        uint64_t reconcile_xid_b = access_xid++;
+        indexer->process_index_reconciliation(_db_id, index_xid_b, reconcile_xid_b);
+
+        // Now hand C's (already-registered, earlier-xid) DDL to the Indexer -- a third "first
+        // index" build arriving in the window opened by B's commit. It must still discover A's
+        // look-aside index via the surviving tracker entry, not start a second, independent one.
+        indexer->process_requests(_db_id, index_xid_c, {index_request_c});
+        sys_tbl_mgr::Server::get_instance()->finalize(_db_id, index_xid_c, true);
+        auto request_c = queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+        ASSERT_NE(request_c, nullptr);
+
+        uint64_t reconcile_xid_c = access_xid++;
+        indexer->process_index_reconciliation(_db_id, index_xid_c, reconcile_xid_c);
+
+        // Finally commit the real owner, A.
+        uint64_t reconcile_xid_a = access_xid++;
+        indexer->process_index_reconciliation(_db_id, index_xid_a, reconcile_xid_a);
+
+        // The decisive check for the bug itself: if _remove_index_key() still erased the tracker
+        // unconditionally, C would have wrongly become a second owner and independently
+        // bootstrap-scanned the whole table into its own look-aside tree -- which, because
+        // nothing distinguishes its content from A's own (correct) bootstrap in this scenario,
+        // is otherwise invisible to the row-resolution assertions below (whichever of A's/C's
+        // tree wins the last update_roots() call is, on its own, equally complete). The
+        // orphaned second tree's disk footprint is not: a single correct bootstrap of 500 rows
+        // measures 8 blocks on this filesystem; a duplicated one measures 16. Assert comfortably
+        // below double to catch the duplication without being sensitive to exact block counts.
+        auto table_dir = TableMgr::get_instance()->get_table_data_dir(_db_id, table_id, reconcile_xid_a);
+        ASSERT_TRUE(table_dir.has_value());
+        auto look_aside_file = table_dir.value() / constant::INDEX_LOOK_ASIDE_FILE;
+        ASSERT_LT(fs::get_block_count(look_aside_file), 12u)
+            << "look-aside file is roughly double the size of a single bootstrap -- "
+               "_look_aside_build_tracker was likely erased by a non-owner, letting a third "
+               "build start a second, independent look-aside bootstrap";
+
+        auto info_a = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id_a, {reconcile_xid_a, constant::MAX_LSN});
+        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info_a.state()), sys_tbl::IndexNames::State::READY);
+        auto info_b = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id_b, {reconcile_xid_a, constant::MAX_LSN});
+        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info_b.state()), sys_tbl::IndexNames::State::READY);
+        auto info_c = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id_c, {reconcile_xid_a, constant::MAX_LSN});
+        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info_c.state()), sys_tbl::IndexNames::State::READY);
+
+        // Exactly one look-aside index exists for the table, and it correctly resolves every row
+        // for all three now-READY secondary indexes.
+        auto table = TableMgr::get_instance()->get_table(_db_id, table_id, reconcile_xid_a);
+        ASSERT_NE(table->look_aside_index(), nullptr);
+
+        uint64_t count_a = 0;
+        for (auto it = table->begin(index_id_a); it != table->end(index_id_a); ++it) {
+            ++count_a;
+        }
+        ASSERT_EQ(count_a, 500u);
+
+        uint64_t count_b = 0;
+        for (auto it = table->begin(index_id_b); it != table->end(index_id_b); ++it) {
+            ++count_b;
+        }
+        ASSERT_EQ(count_b, 500u);
+
+        uint64_t count_c = 0;
+        for (auto it = table->begin(index_id_c); it != table->end(index_id_c); ++it) {
+            ++count_c;
+        }
+        ASSERT_EQ(count_c, 500u);
+
+        queue_mgr->remove_queue(_db_id);
+    }
+
 } // namespace

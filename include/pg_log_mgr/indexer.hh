@@ -228,8 +228,17 @@ namespace springtail::committer {
          * @param db_id Database ID.
          * @param table_id Table ID.
          * @param key Index key to remove.
+         * @param owns_look_aside True iff *this* completing build is the one that owns
+         *        `_look_aside_build_tracker[table_id]` (i.e. it was the builder that created the
+         *        table's look-aside index this generation, architecture.md Sec 5.4 case 2).
+         *        `_look_aside_build_tracker`'s entry is retired only when its owner's build
+         *        completes -- a non-owning sibling build finishing first (or a `_drop()` call,
+         *        which never owns a look-aside bootstrap) must never clear another build's
+         *        in-flight ownership record, or a third concurrent "first index" build could
+         *        start a second, independent look-aside bootstrap against the same table while
+         *        the real owner is still mid-build.
          */
-        void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key);
+        void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key, bool owns_look_aside);
 
         /**
          * @brief Cleanup all records related to the db before initiating recovery

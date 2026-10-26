@@ -53,8 +53,10 @@ Server::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_table() -- db {} table {} xid {} lsn {}", db_id,
             request.table().id(), request.xid(), request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // perform the CREATE TABLE
     return _create_table(request);
@@ -68,8 +70,10 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got alter_table() -- db {} table {} xid {} lsn {}", db_id,
             request.table().id(), xid.xid, xid.lsn);
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // retrieve the id of the namespace
     // this function is called by drop table, so we don't check if
@@ -250,8 +254,10 @@ Server::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_table() -- {}@{}:{}", request.table_id(), request.xid(), request.lsn());
 
-    // hold a shared lock to prevent a concurrent finalize()
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // perform the DROP TABLE
     auto op = _drop_table(request);
@@ -274,8 +280,10 @@ Server::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace
                 db_id, request.namespace_id(), request.name(), request.xid(),
                 request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     auto ns_info = _get_namespace_info(db_id, request.namespace_id(), xid);
     if (ns_info) {
@@ -314,8 +322,10 @@ Server::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace 
                 db_id, request.namespace_id(), request.name(), request.xid(),
                 request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // retrieve the old namespace name
     auto ns_info = _get_namespace_info(db_id, request.namespace_id(), xid);
@@ -343,8 +353,10 @@ Server::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_namespace() -- db {} namespace_id {} xid {} lsn {}", db_id,
                 request.namespace_id(), request.xid(), request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // update the namespace_names table
     auto op =
@@ -372,8 +384,10 @@ Server::create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &
                 db_id, request.namespace_id(), request.type_id(), request.name(), request.xid(),
                 request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // update the user_types table
     auto op = _mutate_usertype(db_id, request.type_id(), request.name(),
@@ -406,8 +420,10 @@ Server::alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &m
                 db_id, request.namespace_id(), request.type_id(), request.name(), request.xid(),
                 request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // retrieve the old user type name
     auto user_type_info = _get_usertype_info(db_id, request.type_id(), xid);
@@ -450,8 +466,10 @@ Server::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &ms
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_usertype() -- db {} namespace_id {} type_id {} xid {} lsn {}", db_id,
                 request.namespace_id(), request.type_id(), request.xid(), request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     proto::DDLOperation op;
     auto user_type_info = _get_usertype_info(db_id, request.type_id(), xid);
@@ -498,8 +516,10 @@ Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPar
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got attach_partition() -- db {} table {} xid {} lsn {}", db_id,
               request.table_id(), request.xid(), request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     std::unordered_map<uint64_t, std::pair<std::string, std::string>> partition_map;
     auto attached_partitions = _get_modified_partition_details(db_id, xid, request.table_id(), request.partition_data(), &partition_map, true);
@@ -578,8 +598,10 @@ Server::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPar
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got detach_partition() -- db {} table {} xid {} lsn {}", db_id,
               request.table_id(), request.xid(), request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     auto detached_partitions = _get_modified_partition_details(db_id, xid, request.table_id(), request.partition_data(), nullptr, false);
 
@@ -642,8 +664,10 @@ Server::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, s
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_index() -- db {}, table {}, index {}, xid {}:{}", db_id,
                 request.index().table_id(), request.index().id(), request.xid(), request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // perform the CREATE INDEX
     bool created = false;
@@ -673,8 +697,10 @@ Server::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, ui
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got set_index_state() -- db {}, xid {}:{}, table_id {}, index_id {}, state {}",
                 db_id, xid.xid, xid.lsn, table_id, index_id, (uint32_t)(state));
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     _set_index_state(request);
 
@@ -733,8 +759,10 @@ Server::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_index() -- db {}, index {}, xid {}:{}", db_id,
                 request.index_id(), request.xid(), request.lsn());
 
-    // acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // Create response for the dropped index
     proto::IndexInfo dropped_index;
@@ -777,8 +805,10 @@ Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got update_roots() -- db {}, table {}, xid {}",
             db_id, table_id, xid);
 
-    // hold a shared lock to prevent a concurrent finalize()
-    boost::shared_lock lock(_write_mutex);
+    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    // comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // update the metadata and return
     _update_roots(request);
@@ -1106,8 +1136,10 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got swap_sync_table()");
     std::vector<proto::DDLOperation> ddl_ops;
 
-    // 1. acquire a shared lock to ensure no one is doing a finalize
-    boost::shared_lock lock(_write_mutex);
+    // 1. Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
+    //    every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
+    //    comment in server.hh for why a shared lock here is no longer sufficient.
+    boost::unique_lock lock(_write_mutex);
 
     // 2. check if the namespace exists at the end of the target XID, if it doesn't create it
     XidLsn ns_xid(namespace_req.xid(), namespace_req.lsn());

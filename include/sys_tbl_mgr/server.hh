@@ -842,8 +842,31 @@ private:
     boost::shared_mutex _read_mutex;
 
     /**
-     * Locked for read when accessing the mutable tables.  Unique lock when finalizing and
-     * swapping the XID.
+     * Serializes catalog mutations against finalize()/sync()'s swap, and -- as of the "btree"
+     * engine redesign's phase 3 -- against every *other* catalog-mutation entry point too.
+     *
+     * Every DDL entry point (create/alter/drop_table, create/alter/drop_namespace,
+     * create/alter/drop_usertype, attach/detach_partition, create/drop_index, set_index_state,
+     * update_roots, swap_sync_table) takes this lock exclusively around its own body.
+     * finalize()/sync()/remove_db() also take it exclusively (for their XID swap). Before the
+     * "btree" redesign, these DDL entry points only ever took this lock *shared*: that was
+     * sufficient to block a concurrent finalize() swap, but provided no mutual exclusion between
+     * the DDL entry points themselves, because that exclusion was actually coming from
+     * MutableBTree's own internal per-page shared_mutex lock-coupling, not from this mutex.
+     * IndexWriter (MutableBTree's replacement for system/catalog tables as of phase 3) has no
+     * internal locking by design (architecture.md "btree" redesign Sec 5.4) -- it assumes
+     * single-writer, exclusive access is already guaranteed by whoever owns the tree. For system
+     * tables, that owner is this class, and architecture.md Sec 5.4 case 1 requires an explicit,
+     * narrow serialization point to exist *before* the internal locking it removes; phase 4 is
+     * building the real one (a per-`(db_id, table_id)` work queue that `PgLogReader`/`Indexer`/
+     * `Committer` funnel catalog mutations through, replacing this mutex's role for that purpose
+     * entirely). Promoting every DDL entry point's lock to exclusive here (round-1 review finding
+     * 2) is the narrow stopgap for the gap between phase 3 (removing the internal locking) and
+     * phase 4 (adding the real queue): it over-serializes relative to the eventual per-table
+     * queue (DDL on two unrelated tables now blocks on each other too, not just DDL on the same
+     * table), but DDL volume is low (architecture.md Sec 5.4 case 1 makes the identical trade-off
+     * for the real queue's own design), and it closes a live crash/corruption window rather than
+     * carrying it as documented-but-unmitigated debt across a phase boundary.
      */
     boost::shared_mutex _write_mutex;
 
