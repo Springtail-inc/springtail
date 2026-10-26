@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -63,27 +64,50 @@ namespace springtail {
  * `IndexReader::Iterator::Frame` (index_reader.hh) compares extents by `shared_ptr` identity,
  * not content, and documents that this is only sound if the provider "hands back the same
  * object for the same key while it's resident". `StorageCacheExtentSource` gets this for free
- * from `StorageCache`'s own weak_ptr-based `ExtentRef`. This class re-establishes the same
- * property *within one process*: `get()` keeps a small process-local `(file, extent_id) ->
- * weak_ptr<Extent>` map (`_local_cache` below) and returns the same live `Extent` on a
- * same-process repeat lookup -- while it's still referenced anywhere -- instead of copying
- * fresh bytes out of shared memory (or re-publishing) every time. This lives on
- * `SharedExtentPool` itself, not on `SharedPoolExtentSource`, so every `ExtentSource` built on
- * top of one process's pool instance shares the same identity map, matching
- * `StorageCache::get_instance()`'s single-process-singleton scope.
+ * from `StorageCache`'s own weak_ptr-based `ExtentRef`, via a lock held across its *entire*
+ * lookup-miss-create sequence (`StorageCache::PageCache::get()`, cache.cc) -- same-process
+ * concurrent misses fully serialize there, so two callers can never independently construct two
+ * different objects for the same key. This class's cross-process lock *cannot* do the same (it
+ * must release during `fetch()`, a potentially slow disk read, or every other process -- not
+ * just this one's other threads -- would block on one key's I/O; see the OQ6 section below), so
+ * same-process identity needs its own, separate mechanism: a process-local `(file, extent_id) ->
+ * weak_ptr<Extent>` map (`_local_cache` below) for the already-resolved common case, plus a
+ * process-local single-flight gate (`_local_inflight`, `std::shared_future`-based) so that if a
+ * second same-process caller asks for a key while a first caller is still resolving it (shared-
+ * pool lookup, or `fetch()` itself), the second caller *waits for and reuses* the first caller's
+ * result instead of independently resolving its own, distinct `Extent` object. Round-1 review
+ * (phase-5.md) caught this as a real gap: the two call sites that populate `_local_cache` (the
+ * shared-pool hit branch and the publish branch) raced with no synchronization between them
+ * beyond protecting the map's own internal structure -- not the same thing as guaranteeing which
+ * caller's object wins is the *only* object in play. `get()`'s single-flight gate closes that:
+ * every same-process caller for a given key, concurrent or not, is guaranteed to observe exactly
+ * one call into the shared-pool-level resolution logic (`_get_and_publish()`) and exactly one
+ * resulting `Extent` object, regardless of thread count. This lives on `SharedExtentPool` itself,
+ * not on `SharedPoolExtentSource`, so every `ExtentSource` built on top of one process's pool
+ * instance shares the same identity map/gate, matching `StorageCache::get_instance()`'s
+ * single-process-singleton scope.
  *
  * --- OQ6: synchronizing "first backend publishes, others wait" ---
  * Decompression of *different* keys never blocks on each other: the pool's one mutex is held
- * only for map bookkeeping (lookup, insert, evict), never across a `fetch()` call. Decompression
- * of the *same* key by two racing processes is NOT a first-wins/discard-the-loser race: the
- * first process to miss marks the key "in flight" (under the mutex) before calling `fetch()`;
- * any other process that sees the key in flight polls (briefly sleeping, not holding the mutex)
- * until the publisher finishes, then reads the published entry instead of also calling
- * `fetch()`. This guarantees exactly one `fetch()` call per key per "miss episode", not just
- * "usually one" -- load-bearing for the multi-process test's "assert exactly one decompression
- * occurs" assertion. A stale in-flight marker (publisher process crashed after marking in-
- * flight, before publishing -- see the crash-safety note below) is reclaimed by any waiter once
- * it's older than `STALE_INFLIGHT_SECONDS`, which also bounds how long a crash can wedge a key.
+ * only for actual map bookkeeping (lookup, pin-count/LRU update, insert, evict) -- never across a
+ * `fetch()` call, a byte-level copy of a published entry's content, or `Extent::serialize()`'s
+ * CPU-bound packing work. (Round-1 review caught both of the latter two: an earlier revision held
+ * the lock across the hit path's byte copy and the publish path's `pack_extent()` call, which are
+ * not map operations and do not need mutual exclusion -- a published entry's content never
+ * changes after publish, so copying it out is safe to do unlocked once pinned, and serializing a
+ * process-local `Extent` into bytes needs no shared state at all. Both were moved out of the
+ * locked section; only the unavoidable copy of already-serialized bytes *into* the shared
+ * container at insert time remains locked, since that's the actual shared-memory mutation other
+ * processes' lookups must never observe half-written.) Decompression of the *same* key by two
+ * racing processes is NOT a first-wins/discard-the-loser race: the first process to miss marks
+ * the key "in flight" (under the mutex) before calling `fetch()`; any other process that sees the
+ * key in flight polls (briefly sleeping, not holding the mutex) until the publisher finishes,
+ * then reads the published entry instead of also calling `fetch()`. This guarantees exactly one
+ * `fetch()` call per key per "miss episode", not just "usually one" -- load-bearing for the
+ * multi-process test's "assert exactly one decompression occurs" assertion. A stale in-flight
+ * marker (publisher process crashed after marking in-flight, before publishing -- see the
+ * crash-safety note below) is reclaimed by any waiter once it's older than
+ * `STALE_INFLIGHT_SECONDS`, which also bounds how long a crash can wedge a key.
  *
  * --- Crash safety (restating the lifetime invariant for the cross-process model) ---
  * Extent identity and content are never mutated after publish (clean-only, architecture.md Sec
@@ -174,9 +198,9 @@ public:
      * once per key per miss episode across every process attached to this pool, see the class
      * comment's OQ6 section -- and publishes the result for everyone else.
      *
-     * Does NOT provide the same-object-identity guarantee `IndexReader` needs across repeat
-     * calls for the same key within one process -- that is `SharedPoolExtentSource`'s job
-     * (see its own header comment), layered on top of this class.
+     * Provides the same-object-identity guarantee `IndexReader` needs across repeat calls for
+     * the same key within one process, including concurrent same-process calls racing on a key
+     * that's not yet resolved locally -- see the class comment's "Identity invariant" section.
      */
     std::shared_ptr<Extent> get(const Key &key, const FetchFn &fetch);
 
@@ -226,6 +250,12 @@ public:
 private:
     void _unpin(const Key &key);
 
+    /** The shared-pool-level resolution `get()` delegates to once it has established (via the
+        process-local single-flight gate, see `_local_mutex`/`_local_inflight` below) that this
+        call is the *only* same-process caller resolving `key` right now: the actual shared-pool
+        hit/miss/publish logic, including the OQ6 in-flight handshake with other processes. */
+    std::shared_ptr<Extent> _get_and_publish(const Key &key, const FetchFn &fetch);
+
     class Impl;
     std::unique_ptr<Impl> _impl;
 
@@ -236,6 +266,16 @@ private:
     // instance benefits, matching StorageCache's single-process-singleton scope exactly.
     mutable std::mutex _local_mutex;
     std::unordered_map<Key, std::weak_ptr<Extent>, KeyHash> _local_cache;
+
+    // Process-local single-flight gate: while a key is present here, some thread in this
+    // process is already inside _get_and_publish() resolving it. Any other same-process thread
+    // that finds a key here waits on the shared_future instead of independently resolving its
+    // own, distinct Extent object -- see the class comment's "Identity invariant" section and
+    // round-1 review Finding 2. Protected by the same _local_mutex as _local_cache (not a
+    // separate mutex): every transition that touches one of these two maps always needs to look
+    // at the other to decide what to do (found in cache? found in-flight? neither?), so one
+    // mutex covering both avoids a second lock-ordering axis to reason about.
+    std::unordered_map<Key, std::shared_future<std::shared_ptr<Extent>>, KeyHash> _local_inflight;
 
     std::shared_ptr<Extent> _local_cache_find(const Key &key);
     void _local_cache_store(const Key &key, const std::shared_ptr<Extent> &extent);

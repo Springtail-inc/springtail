@@ -1,4 +1,5 @@
 #include <chrono>
+#include <future>
 #include <thread>
 
 #include <boost/functional/hash.hpp>
@@ -307,6 +308,63 @@ SharedExtentPool::get(const Key &key, const FetchFn &fetch)
         return local;
     }
 
+    // Process-local single-flight gate (round-1 review Finding 2): guarantees every
+    // same-process caller for `key`, concurrent or not, observes exactly one call into
+    // _get_and_publish() and exactly one resulting Extent object -- see shared_extent_pool.hh's
+    // "Identity invariant" section.
+    std::shared_ptr<std::promise<std::shared_ptr<Extent>>> promise;
+    std::shared_future<std::shared_ptr<Extent>> future;
+
+    {
+        std::lock_guard<std::mutex> lock(_local_mutex);
+
+        // re-check: another thread may have finished resolving `key` between our lock-free
+        // _local_cache_find() above and acquiring this lock.
+        auto cache_it = _local_cache.find(key);
+        if (cache_it != _local_cache.end()) {
+            if (auto extent = cache_it->second.lock()) {
+                return extent;
+            }
+            _local_cache.erase(cache_it);
+        }
+
+        auto inflight_it = _local_inflight.find(key);
+        if (inflight_it != _local_inflight.end()) {
+            future = inflight_it->second;
+        } else {
+            promise = std::make_shared<std::promise<std::shared_ptr<Extent>>>();
+            future = promise->get_future().share();
+            _local_inflight.emplace(key, future);
+        }
+    }
+
+    if (!promise) {
+        // another thread in this process is already resolving `key` -- wait for it and reuse
+        // its result (this also rethrows if the resolver's attempt threw).
+        return future.get();
+    }
+
+    try {
+        auto extent = _get_and_publish(key, fetch);
+        {
+            std::lock_guard<std::mutex> lock(_local_mutex);
+            _local_inflight.erase(key);
+        }
+        promise->set_value(extent);
+        return extent;
+    } catch (...) {
+        {
+            std::lock_guard<std::mutex> lock(_local_mutex);
+            _local_inflight.erase(key);
+        }
+        promise->set_exception(std::current_exception());
+        throw;
+    }
+}
+
+std::shared_ptr<Extent>
+SharedExtentPool::_get_and_publish(const Key &key, const FetchFn &fetch)
+{
     for (;;) {
         auto shm_key = _impl->make_shm_key(key);
 
@@ -317,14 +375,21 @@ SharedExtentPool::get(const Key &key, const FetchFn &fetch)
             if (it != _impl->_entries->end()) {
                 it->second.pin_count++;
                 _impl->touch_locked(shm_key);
+                lock.unlock();
 
+                // RAII: guarantees _unpin() runs even if unpack_extent() throws (round-1 review
+                // Finding 3) -- Pin's constructor is private/friend-only, so this is only
+                // reachable from within SharedExtentPool itself.
+                Pin pin(this, key);
+
+                // Copied unlocked (round-1 review Finding 1): a published entry's bytes never
+                // change after publish (clean-only), and the pin above (taken under the lock, a
+                // moment ago) already guarantees evict_for_space_locked() will skip this entry
+                // until we release it -- so there's nothing left for the lock to protect here.
                 std::vector<char> header_bytes(it->second.header.begin(), it->second.header.end());
                 std::string body_bytes(it->second.body.begin(), it->second.body.end());
 
-                lock.unlock();
-
                 auto extent = unpack_extent(header_bytes, body_bytes);
-                _unpin(key);
                 _local_cache_store(key, extent);
                 return extent;
             }
@@ -358,15 +423,20 @@ SharedExtentPool::get(const Key &key, const FetchFn &fetch)
             throw;
         }
 
+        // Serialize OUTSIDE the lock too (round-1 review Finding 1): Extent::serialize() is
+        // CPU-bound work on a process-local Extent, needs no shared state, and is not a map
+        // operation -- only the actual copy of the resulting bytes into the shared container
+        // (below) needs the lock, since that's the shared-memory mutation other processes'
+        // lookups must never observe half-written.
+        std::vector<char> header_bytes;
+        std::string body_bytes;
+        pack_extent(*extent, header_bytes, body_bytes);
+
         {
             Impl::Lock lock(_impl->_mutex);
             _impl->_inflight->erase(shm_key);
 
             if (_impl->_entries->find(shm_key) == _impl->_entries->end()) {
-                std::vector<char> header_bytes;
-                std::string body_bytes;
-                pack_extent(*extent, header_bytes, body_bytes);
-
                 try {
                     _impl->evict_for_space_locked();
 

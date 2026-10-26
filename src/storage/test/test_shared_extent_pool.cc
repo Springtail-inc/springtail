@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -228,5 +229,92 @@ TEST_F(SharedExtentPoolTest, ExactlyOneFetchAcrossRacingProcesses)
 
     ASSERT_EQ(counters->fetch_count.load(), 1)
         << "expected exactly one decompression across all racing processes";
+}
+
+/**
+ * Round-1 review Finding 2: two same-process threads racing on a never-before-seen key must
+ * observe the *same* `Extent` object -- the same-object-identity invariant
+ * `IndexReader::Iterator::Frame` depends on (see shared_extent_pool.hh's "Identity invariant"
+ * section). Verified to actually discriminate: with `SharedExtentPool::get()`'s process-local
+ * single-flight gate removed (routing straight into `_get_and_publish()`), this reliably
+ * produced `NUM_THREADS` distinct `Extent` identities and a `fetch_count` of `NUM_THREADS`
+ * instead of 1, reproduced across repeated runs; restoring the gate made it pass again.
+ */
+TEST_F(SharedExtentPoolTest, ConcurrentSameProcessCallsReturnSameIdentity)
+{
+    SharedExtentPool pool(POOL_NAME, POOL_SIZE);
+    SharedExtentPool::Key key{"file_concurrent", 0};
+
+    constexpr int NUM_THREADS = 8;
+    std::atomic<int> fetch_count{0};
+    std::atomic<int> ready{0};
+    std::atomic<bool> go{false};
+
+    auto fetch = [&fetch_count]() {
+        fetch_count.fetch_add(1);
+        // widen the race window so every thread is genuinely contending, not just the first
+        // one to reach the lock.
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        return make_extent(1, 777);
+    };
+
+    std::vector<std::shared_ptr<Extent>> results(NUM_THREADS);
+    std::vector<std::thread> threads;
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        threads.emplace_back([&, i]() {
+            ready.fetch_add(1);
+            while (!go.load()) {
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+            }
+            results[i] = pool.get(key, fetch);
+        });
+    }
+
+    while (ready.load() < NUM_THREADS) {
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+    go.store(true);
+
+    for (auto &t : threads) {
+        t.join();
+    }
+
+    ASSERT_EQ(fetch_count.load(), 1)
+        << "expected exactly one decompression across all racing threads";
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        ASSERT_EQ(extent_value(*results[i]), 777u);
+        ASSERT_EQ(results[i].get(), results[0].get())
+            << "thread " << i << " got a distinct Extent object instead of sharing thread 0's";
+    }
+}
+
+/**
+ * Round-1 review Finding 3: a pin must be released even if an exception is thrown while it's
+ * held (e.g. `SharedExtentPool::_get_and_publish()`'s hit path throwing from `unpack_extent()`
+ * after pinning but before storing the result) -- not just on the normal-return path, or a
+ * pinned entry would permanently resist eviction (a one-slot leak per occurrence).
+ */
+TEST_F(SharedExtentPoolTest, PinReleasedWhenExceptionThrownWhileHeld)
+{
+    SharedExtentPool pool(POOL_NAME, SMALL_POOL_SIZE);
+    SharedExtentPool::Key key{"file_pin_exception", 0};
+    pool.get(key, [] { return make_extent(1, 0); });
+
+    try {
+        auto pin = pool.try_pin(key);
+        ASSERT_TRUE(pin.has_value());
+        throw std::runtime_error("simulated failure while pin is held");
+    } catch (const std::runtime_error &) {
+        // expected -- `pin`'s destructor should have released it during unwinding.
+    }
+
+    // flood the pool so an eviction pass targets this (now least-recently-used) entry; if the
+    // pin above leaked, pin_count would still be > 0 and evict_for_space_locked() would skip
+    // it forever.
+    for (uint64_t i = 1; i < 500; ++i) {
+        SharedExtentPool::Key flood_key{"file_pin_exception", i};
+        pool.get(flood_key, [i] { return make_extent(1, i); });
+    }
+    ASSERT_FALSE(pool.contains(key)) << "pin leaked across an exception while held";
 }
 }  // namespace
