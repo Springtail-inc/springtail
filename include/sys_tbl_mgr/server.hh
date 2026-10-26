@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/init.hh>
+#include <common/multi_queue_thread_manager.hh>
 #include <common/singleton.hh>
 
 #include <ddl.pb.h>
@@ -193,6 +194,25 @@ public:
      */
     void remove_db(uint64_t db_id);
 
+    /**
+     * Opaque RAII handle representing exclusive ownership of a db's catalog-mutation queue slot
+     * (see `_catalog_queue`'s doc comment). Destroying it releases the slot, letting the next
+     * queued caller (if any) proceed.
+     */
+    using CatalogQueueSlot = std::shared_ptr<void>;
+
+    /**
+     * TEST-ONLY: acquires `db_id`'s catalog-mutation queue slot directly, bypassing any actual
+     * mutation. Used by tests to deterministically force a real mutation call (and/or
+     * finalize()/sync()/revert()) to enqueue-and-wait behind a held slot, constructing the
+     * finalize()-vs-queue race scenario without relying on a sleep-based timing race for the
+     * "submitted but not yet drained" window. Not used by any production code path.
+     */
+    CatalogQueueSlot test_only_acquire_catalog_queue_slot(uint64_t db_id)
+    {
+        return _acquire_catalog_queue_slot(db_id);
+    }
+
 private:
     Server();
     ~Server() override = default;
@@ -205,6 +225,16 @@ private:
      *
      */
     void _internal_shutdown() override;
+
+    /**
+     * Acquires `db_id`'s catalog-mutation queue slot (see `_catalog_queue`), blocking the calling
+     * thread until it is this call's turn. The returned handle holds the slot for as long as it
+     * stays alive; destroying it (normally via scope exit at the end of whichever catalog-mutation
+     * entry point or finalize()/sync()/revert() acquired it) releases the slot and lets the next
+     * queued caller proceed. This is the single serialization point every catalog-mutating entry
+     * point and finalize()/sync()/revert() route through in place of the old `_write_mutex`.
+     */
+    CatalogQueueSlot _acquire_catalog_queue_slot(uint64_t db_id);
 
     // CACHE FOR NAMES
 
@@ -836,39 +866,55 @@ private:
     std::map<uint64_t, uint64_t> _write_xid;
 
     /**
-     * Locked for read when accessing the read-only tables.  Unique lock when finalizing and
-     * swapping the XID.
+     * Locked for read when accessing the read-only tables. Unique lock when finalize()/revert()
+     * are performing their atomic swap of the committed roots/XID -- this is the mechanism that
+     * makes that swap invisible to concurrent readers (architecture.md "btree" redesign Sec 5.3's
+     * Reader/Writer MVCC split). Independent of, and unaffected by, `_catalog_queue` below: reads
+     * never go through the catalog queue, so this mutex is still the only thing guarding them
+     * against an in-flight swap.
      */
     boost::shared_mutex _read_mutex;
 
     /**
-     * Serializes catalog mutations against finalize()/sync()'s swap, and -- as of the "btree"
-     * engine redesign's phase 3 -- against every *other* catalog-mutation entry point too.
+     * Single-consumer catalog-mutation queue, one logical queue per `db_id` (via
+     * `common::MultiQueueThreadManager`'s `queue_id`, here just `db_id` itself). This is the
+     * "btree" engine redesign's phase 4 serialization point required by architecture.md Sec 5.4
+     * case 1: `IndexWriter` (the engine every system/catalog table runs on as of phase 3) has no
+     * internal locking and assumes single-writer, exclusive, non-reentrant access is already
+     * guaranteed by whoever owns the tree -- for system tables, that owner is this class.
      *
-     * Every DDL entry point (create/alter/drop_table, create/alter/drop_namespace,
+     * Every catalog-mutating entry point (create/alter/drop_table, create/alter/drop_namespace,
      * create/alter/drop_usertype, attach/detach_partition, create/drop_index, set_index_state,
-     * update_roots, swap_sync_table) takes this lock exclusively around its own body.
-     * finalize()/sync()/remove_db() also take it exclusively (for their XID swap). Before the
-     * "btree" redesign, these DDL entry points only ever took this lock *shared*: that was
-     * sufficient to block a concurrent finalize() swap, but provided no mutual exclusion between
-     * the DDL entry points themselves, because that exclusion was actually coming from
-     * MutableBTree's own internal per-page shared_mutex lock-coupling, not from this mutex.
-     * IndexWriter (MutableBTree's replacement for system/catalog tables as of phase 3) has no
-     * internal locking by design (architecture.md "btree" redesign Sec 5.4) -- it assumes
-     * single-writer, exclusive access is already guaranteed by whoever owns the tree. For system
-     * tables, that owner is this class, and architecture.md Sec 5.4 case 1 requires an explicit,
-     * narrow serialization point to exist *before* the internal locking it removes; phase 4 is
-     * building the real one (a per-`(db_id, table_id)` work queue that `PgLogReader`/`Indexer`/
-     * `Committer` funnel catalog mutations through, replacing this mutex's role for that purpose
-     * entirely). Promoting every DDL entry point's lock to exclusive here (round-1 review finding
-     * 2) is the narrow stopgap for the gap between phase 3 (removing the internal locking) and
-     * phase 4 (adding the real queue): it over-serializes relative to the eventual per-table
-     * queue (DDL on two unrelated tables now blocks on each other too, not just DDL on the same
-     * table), but DDL volume is low (architecture.md Sec 5.4 case 1 makes the identical trade-off
-     * for the real queue's own design), and it closes a live crash/corruption window rather than
-     * carrying it as documented-but-unmitigated debt across a phase boundary.
+     * update_roots, swap_sync_table) and finalize()/sync()/revert() acquire this db's slot via
+     * `_acquire_catalog_queue_slot()` before touching any system table, and hold it for their
+     * entire body (replacing the old `_write_mutex`, now removed, which this class used for the
+     * identical purpose through phase 3's stopgap). Because `MultiQueueThreadManager` guarantees
+     * exactly one in-flight request per `queue_id` in strict submission order, finalize()
+     * acquiring this same slot is sufficient, on its own, to act as a barrier: it cannot be
+     * granted its turn until every mutation submitted before it has both acquired *and released*
+     * its own turn, so a mutation submitted-but-not-yet-executed before a concurrent finalize()
+     * can never be silently dropped or misapplied to the next generation (architecture.md
+     * Decisions log entry 9). No separate queue-item-type or second handshake is needed -- an
+     * ordinary slot acquisition already provides the barrier.
+     *
+     * Scoped per `db_id`, not per user `table_id`: the actual single-writer resource this queue
+     * protects is each system catalog table's own `MutableTable`/`IndexWriter` instance
+     * (`_write[db_id]`, keyed by the small, fixed `sys_tbl::TABLE_IDS` set -- confirmed by reading
+     * every `_get_mutable_system_table()` call site), not a per-user-table resource -- two
+     * different user tables' DDL can, and regularly do, both touch the *same* system table (e.g.
+     * `IndexNames`) in one db, so partitioning this queue any finer than `db_id` while still
+     * preserving correctness would require proving, for every one of this class's ~20 call sites,
+     * which exact subset of `sys_tbl::TABLE_IDS` its single atomic critical section touches, and
+     * coordinating acquisition order across those subsets without introducing a cross-call-site
+     * lock-ordering deadlock -- a fragile, change-sensitive analysis the architecture's own stated
+     * trade-off for this case (accept DDL serialization; DDL volume is low) does not require.
+     * Scoping per `db_id` is a strict superset of the necessary serialization (always safe) and
+     * is still materially narrower than phase 3's stopgap, which serialized across *every* db in
+     * the process via one process-wide `_write_mutex`; this queue gives different dbs genuine
+     * concurrency while keeping all catalog mutations *within* one db strictly ordered. See
+     * phases/phase-4.md's "Open questions resolved" for the full reasoning.
      */
-    boost::shared_mutex _write_mutex;
+    std::shared_ptr<common::MultiQueueThreadManager> _catalog_queue;
 
     /** The read-only interface for the system tables to service get requests. */
     std::map<uint64_t, std::map<uint64_t, TablePtr>> _read;

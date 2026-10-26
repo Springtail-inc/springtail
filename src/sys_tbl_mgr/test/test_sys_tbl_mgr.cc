@@ -2,7 +2,11 @@
  * Tests the interfaces of the SysTblMgr service.
  */
 #include <algorithm>
+#include <atomic>
 #include <barrier>
+#include <chrono>
+#include <future>
+#include <thread>
 
 #include <postgresql/server/catalog/pg_type_d.h>
 
@@ -22,6 +26,7 @@
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/system_table_mgr_server.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -912,5 +917,249 @@ namespace {
         ASSERT_TRUE(std::filesystem::exists(table_roots_dir / fmt::format("roots.{}", xid4)));
 
         LOG_INFO("TableRoots system table also cleaned up correctly");
+    }
+
+    // Regression test for architecture.md Sec 5.4 case 1 / phase 4's per-db catalog-mutation
+    // queue. Drives PgLogReader-style DDL (alter_table), Indexer-style index-state updates
+    // (set_index_state), and Committer-style root updates (update_roots) concurrently against the
+    // *same* table_id from three threads -- the three actor types the queue must serialize.
+    //
+    // A naive "wrap each call with an enter/exit counter and assert the observed concurrency
+    // never exceeds 1" design does *not* work here and was tried first: a caller legitimately
+    // spends time *blocked*, waiting its turn for an already-held slot, which is indistinguishable
+    // from "inside the call" to an enter/exit counter wrapped around the whole call -- so a
+    // correctly-serialized queue still shows multiple callers "active" simultaneously (one
+    // actually running, the rest blocked), which is not a bug. Confirmed this concretely: an
+    // isolated probe tracking only `_acquire_catalog_queue_slot`'s own acquire-to-release window
+    // (not the surrounding business call) never showed more than 1 concurrent holder, proving the
+    // queue itself was correct the whole time the naive counter was reporting violations.
+    //
+    // Fixed by testing what actually matters deterministically, the same way
+    // `FinalizeVsQueueRace` below does: pre-acquire this db's queue slot directly via
+    // `test_only_acquire_catalog_queue_slot()`, then confirm all three real entry points block
+    // (never return) while that slot is held, and all three complete once it is released. This
+    // directly proves alter_table/set_index_state/update_roots route through the same per-db
+    // serialization point, which is the actual property that prevents the corruption/lost-update
+    // hazard architecture Sec 5.4 case 1 describes -- without needing to force a specific
+    // downstream crash (confirmed separately, by reading mutable_table.cc's
+    // _upsert_direct/_upsert_by_lookup, that ordinary small-table mutations mutate an
+    // already-cached page via StorageCache and only reach IndexWriter's own guarded methods on a
+    // flush/split, which a handful of rows never forces mid-generation -- so a crash-chasing test
+    // would be unreliable at this data scale regardless).
+    //
+    // Confirmed this fails (the entry points return immediately, without blocking, even while the
+    // slot is held) when the queue-slot acquisition is temporarily removed from
+    // alter_table/set_index_state/update_roots, and passes with it restored -- see
+    // phases/phase-4.md for the record of that verification.
+    TEST_F(SysTblMgr_Test, ConcurrentMutationsSameTable) {
+        uint64_t tid = 400000;
+        uint64_t index_id = 400001;
+
+        auto msg = _create_table(tid, "multi_actor");
+        _create_index(tid, "multi_actor_idx", index_id);
+        _finalize();
+
+        // Hold this db's catalog queue slot directly, forcing all three real entry points below
+        // to enqueue-and-wait rather than racing them against each other in real time.
+        auto holder = _server->test_only_acquire_catalog_queue_slot(_db);
+
+        std::atomic<bool> alter_table_returned{false};
+        std::atomic<bool> set_index_state_returned{false};
+        std::atomic<bool> update_roots_returned{false};
+
+        // Actor 1: PgLogReader-style DDL against this table.
+        msg.columns.push_back({"extra", static_cast<uint8_t>(SchemaType::INT32), 0,
+                               std::nullopt, 3, 0, true, false});
+        auto ddl_xid = _next_lsn();
+        std::thread ddl_thread([&]() {
+            _server->alter_table(_db, ddl_xid, msg);
+            alter_table_returned = true;
+        });
+
+        // Actor 2: Indexer-style index-state update against this table's index.
+        auto index_state_xid = _next_lsn();
+        std::thread indexer_thread([&]() {
+            _server->set_index_state(_db, index_state_xid, tid, index_id, sys_tbl::IndexNames::State::READY);
+            set_index_state_returned = true;
+        });
+
+        // Actor 3: Committer-style root update against this same table.
+        auto roots_xid = _next_lsn();
+        std::thread committer_thread([&]() {
+            TableMetadata metadata;
+            metadata.roots.push_back({index_id, 0xABCD0001});
+            _server->update_roots(_db, tid, roots_xid.xid, metadata);
+            update_roots_returned = true;
+        });
+
+        // Give all three time to reach their own queue-slot acquisition and enqueue (they must
+        // then block behind `holder`, which is still held).
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+        EXPECT_FALSE(alter_table_returned.load())
+            << "alter_table() returned while another caller held this db's catalog queue slot -- "
+               "it did not route through the queue";
+        EXPECT_FALSE(set_index_state_returned.load())
+            << "set_index_state() returned while another caller held this db's catalog queue slot "
+               "-- it did not route through the queue";
+        EXPECT_FALSE(update_roots_returned.load())
+            << "update_roots() returned while another caller held this db's catalog queue slot -- "
+               "it did not route through the queue";
+
+        // Release the held slot: the queue's FIFO ordering now lets the three real calls proceed,
+        // one at a time (never concurrently, since they all share one db-scoped slot).
+        holder.reset();
+
+        ddl_thread.join();
+        indexer_thread.join();
+        committer_thread.join();
+
+        ASSERT_TRUE(alter_table_returned.load());
+        ASSERT_TRUE(set_index_state_returned.load());
+        ASSERT_TRUE(update_roots_returned.load());
+
+        _finalize();
+
+        // Also confirm the table is still in a coherent, queryable state afterward.
+        auto schema_meta = _client->get_schema(_db, tid, _xid);
+        ASSERT_NE(schema_meta, nullptr);
+        auto it = std::ranges::find_if(schema_meta->indexes,
+                               [&](const auto& index) { return index.id == index_id; });
+        ASSERT_NE(it, schema_meta->indexes.end());
+    }
+
+    // Regression test for architecture.md Decisions log entry 9 (finalize()-vs-queue barrier):
+    // submits a mutation (M, an update_roots call) and then calls finalize() for the same xid from
+    // another thread, before M is known to have drained -- using
+    // `test_only_acquire_catalog_queue_slot()` to deterministically hold this db's queue slot so
+    // both M's and finalize()'s own acquisitions are forced to enqueue-and-wait behind it (rather
+    // than relying on a sleep-based race to create the overlap window). Asserts M's effect lands
+    // in the specific xid it was submitted before -- not merely "present somewhere" -- since a
+    // test that only checked presence could pass even if M were silently dropped or misapplied to
+    // the next generation (see phases/phase-3.md round-1 finding 1 for why that distinction
+    // matters). Must fail without the barrier (finalize() not routed through the queue) and pass
+    // with it -- verified manually while implementing this phase by temporarily reverting
+    // finalize()'s queue-slot acquisition, rebuilding, and confirming this test fails; see
+    // phases/phase-4.md for the record of that verification.
+    TEST_F(SysTblMgr_Test, FinalizeVsQueueRace) {
+        uint64_t tid = 410000;
+        uint64_t decoy_tid = 410001;
+        _create_table(tid, "race_table");
+        _create_table(decoy_tid, "race_decoy_table");
+        _finalize();
+
+        // Dirty a *different* table's roots first, without finalizing it, so finalize() below
+        // always has *something* to flush/advance regardless of timing. Without this, in the
+        // "no barrier" broken scenario finalize() can race ahead of M while `_write[db_id]` is
+        // still completely empty, hit its "nothing to finalize" early return (server.cc's
+        // `if (md_map.empty()) { ...; return; }`), and do nothing at all -- a no-op that happens
+        // not to disturb M's later write and so never demonstrates the hazard. Confirmed this is
+        // exactly what happened on the first version of this test (it passed even with the
+        // barrier removed) before adding this decoy.
+        auto decoy_xid = _next_lsn();
+        TableMetadata decoy_metadata;
+        decoy_metadata.roots.push_back({constant::INDEX_PRIMARY, 0x1});
+        _server->update_roots(_db, decoy_tid, decoy_xid.xid, decoy_metadata);
+
+        // Hold this db's catalog queue slot directly, before M or finalize() are even started, so
+        // both are guaranteed to enqueue (in that order) and wait rather than racing in real time.
+        auto holder = _server->test_only_acquire_catalog_queue_slot(_db);
+
+        auto target_xid = _next_xid();
+        constexpr uint64_t marker_extent_id = 0xABCD1234;
+
+        std::thread mutation_thread([&]() {
+            TableMetadata metadata;
+            metadata.roots.push_back({constant::INDEX_PRIMARY, marker_extent_id});
+            _server->update_roots(_db, tid, target_xid.xid, metadata);
+        });
+
+        // Give M's call time to reach its own queue-slot acquisition and enqueue (it will then
+        // block behind `holder`, which is still held) before finalize() is submitted.
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        std::thread finalize_thread([&]() {
+            _server->finalize(_db, target_xid.xid, true);
+        });
+
+        // Give finalize()'s own acquisition time to enqueue too (behind M's, since M enqueued
+        // first) before releasing the held slot.
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        // Release the held slot: the queue's FIFO ordering now requires M to run to completion
+        // before finalize() is granted its turn.
+        holder.reset();
+
+        mutation_thread.join();
+        finalize_thread.join();
+
+        // Verify against the real on-disk TableRoots content pinned at exactly `target_xid.xid`,
+        // via `SystemTableMgrServer` directly -- *not* `Server::get_roots()`, which turns out not
+        // to discriminate here: `_set_roots_info()` populates `Server::_roots_cache` unconditionally
+        // on every `update_roots()` call, so `get_roots()` reflects the latest in-memory write
+        // immediately regardless of whether finalize() ever committed it, making it blind to
+        // exactly the "landed in the wrong generation" failure mode this test exists to catch
+        // (confirmed: an earlier version of this test using `get_roots()` passed even with the
+        // barrier removed, for this reason). Reading the real system table pinned at `target_xid`
+        // bypasses that cache and shows what was actually committed to that generation.
+        auto roots_table = SystemTableMgrServer::get_instance()->get_table(_db, sys_tbl::TableRoots::ID,
+                target_xid.xid);
+        auto roots_schema = roots_table->extent_schema();
+        auto table_id_f = roots_schema->get_field("table_id");
+        auto index_id_f = roots_schema->get_field("index_id");
+        auto extent_id_f = roots_schema->get_field("extent_id");
+
+        auto search_key = sys_tbl::TableRoots::Primary::key_tuple(tid, constant::INDEX_PRIMARY, target_xid.xid);
+        auto row_i = roots_table->inverse_lower_bound(search_key);
+        bool found = false;
+        if (row_i != roots_table->end()) {
+            auto &&row = *row_i;
+            if (table_id_f->get_uint64(&row) == tid && index_id_f->get_uint64(&row) == constant::INDEX_PRIMARY) {
+                found = (extent_id_f->get_uint64(&row) == marker_extent_id);
+            }
+        }
+        ASSERT_TRUE(found) << "update_roots()'s effect, submitted before finalize(), is missing "
+                              "from the on-disk generation it was submitted before -- lost or "
+                              "misapplied across the finalize boundary";
+    }
+
+    // Regression test for the Server::revert() double-shared-lock fix (architecture.md Sec 11):
+    // exercises revert() concurrently with a reader. The bug as originally written couldn't
+    // deadlock (both locks were shared, on the same mutex), but confirms the fix -- a genuine
+    // exclusive lock on `_read_mutex` plus routing through the catalog queue -- doesn't introduce
+    // one, and that concurrent reads neither crash nor observe a torn state while revert() rewrites
+    // roots symlinks and removes rows.
+    TEST_F(SysTblMgr_Test, RevertConcurrentWithReader) {
+        uint64_t tid = 420000;
+        _create_table(tid, "revert_table");
+        _finalize();
+        uint64_t committed_xid = _xid.xid - 1;
+
+        std::atomic<bool> stop{false};
+        std::atomic<int> read_count{0};
+        std::thread reader([&]() {
+            while (!stop.load()) {
+                auto schema = _server->get_schema(_db, tid, XidLsn(committed_xid));
+                if (schema != nullptr) {
+                    ++read_count;
+                }
+            }
+        });
+
+        // give the reader a head start so it is actively contending with revert()
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+        _server->revert(_db, committed_xid);
+
+        stop.store(true);
+        reader.join();
+
+        // No deadlock/crash above is the primary assertion; confirm the reader made real progress
+        // (i.e. this wasn't a no-op race where the reader happened to never run concurrently).
+        ASSERT_GT(read_count.load(), 0);
+
+        // the table must still be queryable, coherent, at the reverted (== already-committed) xid
+        auto schema_meta = _server->get_schema(_db, tid, XidLsn(committed_xid));
+        ASSERT_NE(schema_meta, nullptr);
     }
 }

@@ -1,3 +1,5 @@
+#include <future>
+
 #include <nlohmann/json.hpp>
 
 #include <postgresql/server/catalog/pg_type_d.h>
@@ -15,6 +17,16 @@
 #include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::sys_tbl_mgr {
+
+namespace {
+    // Fixed thread-pool size backing `Server::_catalog_queue`. Sized generously relative to the
+    // expected number of concurrently-active databases, not relative to table count: since the
+    // queue is scoped per db_id (see `_catalog_queue`'s doc comment in server.hh), at most one
+    // worker is ever tied up per db with a currently-held slot. DDL volume/concurrency is low
+    // (architecture.md Sec 5.4 case 1), so this is not expected to be a throughput bottleneck;
+    // revisit if a deployment regularly has more concurrently-mutating dbs than this.
+    constexpr int CATALOG_QUEUE_THREAD_COUNT = 16;
+}
 
 Server::Server() : Singleton<Server>(ServiceId::SysTblMgrServerId)
 {
@@ -36,13 +48,47 @@ Server::Server() : Singleton<Server>(ServiceId::SysTblMgrServerId)
     _grpc_server_manager.addService(_service.get());
 
     _schema_object_cache = std::make_shared<SchemaCache>(cache_size);
+
+    _catalog_queue = std::make_shared<common::MultiQueueThreadManager>(CATALOG_QUEUE_THREAD_COUNT,
+            "SysTblMgrQueue");
+    _catalog_queue->start();
+
     _grpc_server_manager.startup();
 }
 
 void
 Server::_internal_shutdown()
 {
+    _catalog_queue->notify_shutdown();
+    _catalog_queue->shutdown();
     _grpc_server_manager.shutdown();
+}
+
+Server::CatalogQueueSlot
+Server::_acquire_catalog_queue_slot(uint64_t db_id)
+{
+    // Handed to the queue's own worker thread, which blocks inside it until `release_promise` is
+    // fulfilled -- i.e. until the returned guard is destroyed. `MultiQueueThreadManager` never
+    // dequeues the *next* request for a given queue_id until the current one's callback (this
+    // lambda) returns, so holding this guard is equivalent to holding this db's exclusive slot.
+    auto acquired_promise = std::make_shared<std::promise<void>>();
+    std::future<void> acquired_future = acquired_promise->get_future();
+    auto release_promise = std::make_shared<std::promise<void>>();
+    auto release_future = std::make_shared<std::future<void>>(release_promise->get_future());
+
+    _catalog_queue->queue_request(std::make_shared<common::MultiQueueRequest>(
+        db_id,
+        [acquired_promise, release_future]() {
+            acquired_promise->set_value();
+            release_future->wait();
+        }));
+
+    // block until it is this call's turn
+    acquired_future.wait();
+
+    return CatalogQueueSlot(static_cast<void*>(nullptr), [release_promise](void*) {
+        release_promise->set_value();
+    });
 }
 
 std::vector<proto::DDLOperation>
@@ -53,10 +99,10 @@ Server::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_table() -- db {} table {} xid {} lsn {}", db_id,
             request.table().id(), request.xid(), request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // perform the CREATE TABLE
     return _create_table(request);
@@ -70,10 +116,10 @@ Server::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got alter_table() -- db {} table {} xid {} lsn {}", db_id,
             request.table().id(), xid.xid, xid.lsn);
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // retrieve the id of the namespace
     // this function is called by drop table, so we don't check if
@@ -254,10 +300,10 @@ Server::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_table() -- {}@{}:{}", request.table_id(), request.xid(), request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // perform the DROP TABLE
     auto op = _drop_table(request);
@@ -280,10 +326,10 @@ Server::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace
                 db_id, request.namespace_id(), request.name(), request.xid(),
                 request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     auto ns_info = _get_namespace_info(db_id, request.namespace_id(), xid);
     if (ns_info) {
@@ -322,10 +368,10 @@ Server::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace 
                 db_id, request.namespace_id(), request.name(), request.xid(),
                 request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // retrieve the old namespace name
     auto ns_info = _get_namespace_info(db_id, request.namespace_id(), xid);
@@ -353,10 +399,10 @@ Server::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_namespace() -- db {} namespace_id {} xid {} lsn {}", db_id,
                 request.namespace_id(), request.xid(), request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // update the namespace_names table
     auto op =
@@ -384,10 +430,10 @@ Server::create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &
                 db_id, request.namespace_id(), request.type_id(), request.name(), request.xid(),
                 request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // update the user_types table
     auto op = _mutate_usertype(db_id, request.type_id(), request.name(),
@@ -420,10 +466,10 @@ Server::alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &m
                 db_id, request.namespace_id(), request.type_id(), request.name(), request.xid(),
                 request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // retrieve the old user type name
     auto user_type_info = _get_usertype_info(db_id, request.type_id(), xid);
@@ -466,10 +512,10 @@ Server::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &ms
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_usertype() -- db {} namespace_id {} type_id {} xid {} lsn {}", db_id,
                 request.namespace_id(), request.type_id(), request.xid(), request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     proto::DDLOperation op;
     auto user_type_info = _get_usertype_info(db_id, request.type_id(), xid);
@@ -516,10 +562,10 @@ Server::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPar
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got attach_partition() -- db {} table {} xid {} lsn {}", db_id,
               request.table_id(), request.xid(), request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     std::unordered_map<uint64_t, std::pair<std::string, std::string>> partition_map;
     auto attached_partitions = _get_modified_partition_details(db_id, xid, request.table_id(), request.partition_data(), &partition_map, true);
@@ -598,10 +644,10 @@ Server::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPar
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got detach_partition() -- db {} table {} xid {} lsn {}", db_id,
               request.table_id(), request.xid(), request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     auto detached_partitions = _get_modified_partition_details(db_id, xid, request.table_id(), request.partition_data(), nullptr, false);
 
@@ -664,10 +710,10 @@ Server::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, s
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got create_index() -- db {}, table {}, index {}, xid {}:{}", db_id,
                 request.index().table_id(), request.index().id(), request.xid(), request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // perform the CREATE INDEX
     bool created = false;
@@ -697,10 +743,10 @@ Server::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, ui
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got set_index_state() -- db {}, xid {}:{}, table_id {}, index_id {}, state {}",
                 db_id, xid.xid, xid.lsn, table_id, index_id, (uint32_t)(state));
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     _set_index_state(request);
 
@@ -759,10 +805,10 @@ Server::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got drop_index() -- db {}, index {}, xid {}:{}", db_id,
                 request.index_id(), request.xid(), request.lsn());
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // Create response for the dropped index
     proto::IndexInfo dropped_index;
@@ -805,10 +851,10 @@ Server::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got update_roots() -- db {}, table {}, xid {}",
             db_id, table_id, xid);
 
-    // Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    // every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    // comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot (phase 4): serializes this catalog mutation
+    // against every other catalog mutation and finalize()/sync()/revert() for this db -- see
+    // `_catalog_queue`'s doc comment in server.hh.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // update the metadata and return
     _update_roots(request);
@@ -823,8 +869,14 @@ Server::finalize(uint64_t db_id, uint64_t xid, bool call_sync)
 
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got finalize() -- db {}, xid {}", db_id, xid);
 
-    // block all mutations
-    boost::unique_lock wlock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot as a barrier (architecture.md Decisions log
+    // entry 9): `MultiQueueThreadManager` guarantees strict per-queue_id FIFO with exactly one
+    // request in flight at a time, so finalize() being granted this slot already implies every
+    // mutation submitted before it has fully executed (acquired *and released* its own slot) --
+    // nothing submitted-but-not-yet-drained before this finalize() can be lost or misapplied to
+    // the next generation. No separate barrier item type is needed; this is an ordinary
+    // acquisition like every other catalog-mutation entry point's.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     // note: it is safe to pre-write data from later XIDs into the system tables during a finalize
     //       since if there is a failure they will simply be overwritten during recovery
@@ -868,11 +920,11 @@ Server::finalize(uint64_t db_id, uint64_t xid, bool call_sync)
     Vacuumer::get_instance()->commit_expired_extents(db_id, request.xid());
 }
 
-void 
+void
 Server::sync(uint64_t db_id, uint64_t xid)
 {
-    // block all mutations
-    boost::unique_lock wlock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot -- see finalize()'s identical use just above.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
 
     for (const auto& entry : _write[db_id]) {
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Sync table {}@{}", entry.first, xid);
@@ -896,8 +948,17 @@ Server::revert(uint64_t db_id, uint64_t xid)
     Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
     table_base = Properties::make_absolute_path(table_base);
 
-    boost::shared_lock write_lock(_write_mutex);
-    boost::shared_lock read_lock(_write_mutex);
+    // Fix for the pre-existing double-shared-lock bug (architecture.md Sec 11; phase 4's job to
+    // fix): this used to take `boost::shared_lock` on `_write_mutex` twice (the second lock's
+    // variable name, `read_lock`, implied it meant to lock a separate `_read_mutex`, but actually
+    // locked `_write_mutex` again) -- that provided no exclusion against concurrent readers at
+    // all while this function rewrites roots-file symlinks and removes rows out from under the
+    // on-disk system tables. Fixed by acquiring this db's catalog-mutation queue slot (the same
+    // single serialization point every other mutating entry point and finalize()/sync() now use,
+    // replacing `_write_mutex`'s old role here too) plus a genuine *exclusive* lock on
+    // `_read_mutex`, which is what actually blocks concurrent readers during the swap.
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
+    boost::unique_lock read_lock(_read_mutex);
 
     // ensure that we don't have a partially committed XID currently in-memory
     CHECK(_write[db_id].empty());
@@ -1136,10 +1197,9 @@ Server::swap_sync_table(const proto::NamespaceRequest &namespace_req,
     LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got swap_sync_table()");
     std::vector<proto::DDLOperation> ddl_ops;
 
-    // 1. Exclusive lock (round-1 review finding 2): serializes this catalog mutation against
-    //    every other DDL entry point too, not just finalize()'s swap -- see _write_mutex's doc
-    //    comment in server.hh for why a shared lock here is no longer sufficient.
-    boost::unique_lock lock(_write_mutex);
+    // 1. Acquire this db's catalog-mutation queue slot -- see `_catalog_queue`'s doc comment in
+    //    server.hh. `create_req.db_id()`/`namespace_req.db_id()` are the same db throughout.
+    auto queue_slot = _acquire_catalog_queue_slot(create_req.db_id());
 
     // 2. check if the namespace exists at the end of the target XID, if it doesn't create it
     XidLsn ns_xid(namespace_req.xid(), namespace_req.lsn());
@@ -1279,7 +1339,10 @@ Server::invalidate_db(uint64_t db_id, const XidLsn &xid)
 void
 Server::remove_db(uint64_t db_id)
 {
-    boost::unique_lock write_lock(_write_mutex);
+    // Acquire this db's catalog-mutation queue slot -- see `_catalog_queue`'s doc comment in
+    // server.hh. remove_db() took `_write_mutex` exclusively for the identical reason finalize()/
+    // sync()/revert() did (it erases `_write[db_id]`/`_read[db_id]` outright).
+    auto queue_slot = _acquire_catalog_queue_slot(db_id);
     boost::unique_lock read_lock(_read_mutex);
     boost::unique_lock lock(_mutex);
     {
