@@ -20,8 +20,22 @@ namespace springtail {
     SegmentSet::default_seal_threshold_bytes()
     {
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-        return Json::get_or<uint64_t>(json, "segment_seal_threshold_bytes",
-                                      DEFAULT_SEAL_THRESHOLD_BYTES);
+        uint64_t threshold = Json::get_or<uint64_t>(json, "segment_seal_threshold_bytes",
+                                                    DEFAULT_SEAL_THRESHOLD_BYTES);
+
+        // Always-on, not a DCHECK (phase 6 round-1 review, finding 2): this value comes from
+        // operator-controlled config, not a programming invariant internal to this process, so
+        // a bad value must fail loudly in every build, not just debug ones. A threshold at or
+        // above MAX_OFFSET would let a segment's on-disk size grow past what pack()'s 32
+        // in-segment-offset bits can represent before _maybe_seal_and_rotate() ever gets a
+        // chance to seal it, silently wrapping into the segment_id bits on the next pack() call
+        // (pack()'s own DCHECK_LE would catch *that* in debug builds, but only after the
+        // corruption has already happened -- this is the one check that must run everywhere).
+        CHECK_LE(threshold, MAX_OFFSET) << "segment_seal_threshold_bytes (" << threshold
+                                        << ") must not exceed SegmentSet::MAX_OFFSET ("
+                                        << MAX_OFFSET << "), or a segment's packed real id "
+                                        << "could silently wrap into the wrong segment";
+        return threshold;
     }
 
     SegmentSet::SegmentSet(std::filesystem::path base_file, uint64_t seal_threshold_bytes)

@@ -352,4 +352,200 @@ namespace {
         std::sort(expected.begin(), expected.end());
         EXPECT_EQ(actual, expected);
     }
+
+    /**
+     * Regression coverage for phase-6 round-1 review finding 1: the sealed-segment whole-file
+     * unlink decision (vacuumer.cc's sealed-segment branch) sums `expire_extent()`'s reported
+     * dead-byte sizes and compares against the segment's actual on-disk size. Before the fix,
+     * that reported size was the *replacement* extent's logical byte_count() -- an estimate with
+     * no required relationship to the *superseded* extent's true size. An inflated estimate
+     * could make a segment that still holds other, untouched, live, reachable content look
+     * fully dead and get unlinked out from under a reader -- a direct architecture.md Sec 4
+     * violation (and the opposite case, an underestimate, is a permanent-leak miss of this
+     * phase's own "fully-dead segment is unlinked" acceptance criterion).
+     *
+     * This fixture deliberately uses the *default* (large) seal threshold, not the tiny
+     * threshold SegmentFileTest's other tests use: a real two-plus-leaf split's extents need to
+     * land in *one* segment so that segment can hold a mix of genuinely dead and genuinely live
+     * content at once, which a tiny threshold (one extent per segment) can never produce.
+     * Sealing is triggered explicitly via register_sealed_segment() rather than by crossing the
+     * threshold naturally, to isolate "is the dead-byte sum correct" (what this test checks)
+     * from "did the size threshold fire" (already covered by SegmentFileTest's other tests).
+     */
+    class SegmentDeadByteAccountingTest : public testing::Test {
+    protected:
+        static void SetUpTestSuite() {
+            _base_dir = std::filesystem::temp_directory_path() / "test_segment_file_accounting" / "table";
+            std::filesystem::remove_all(_base_dir);
+            std::filesystem::create_directories(_base_dir);
+
+            springtail_init_test();
+            test::start_services(/*xid_mgr=*/true, /*sys_tbl_mgr=*/false, /*write_cache=*/false);
+        }
+
+        static void TearDownTestSuite() {
+            std::filesystem::remove_all(_base_dir);
+            springtail_shutdown();
+        }
+
+        void SetUp() override {
+            _db_id = _next_db_id++;
+
+            _table_dir = _base_dir / std::to_string(_db_id);
+            std::filesystem::create_directories(_table_dir);
+
+            std::vector<SchemaColumn> columns({
+                    { "key", 0, SchemaType::TEXT, 0, false, 0 },
+                    { "payload", 1, SchemaType::TEXT, 0, false }
+                });
+            _schema = std::make_shared<ExtentSchema>(columns, ExtensionCallback{}, false, false);
+            _keys = { "key" };
+
+            _cache = std::make_shared<IndexExtentCache>(64 * 1024);
+
+            Vacuumer::get_instance()->enable_tracking_extents();
+        }
+
+        void TearDown() override {
+            Vacuumer::get_instance()->cleanup_db(_db_id);
+        }
+
+        TuplePtr _row(const std::string &key, const std::string &payload) {
+            auto fields = std::make_shared<FieldArray>();
+            fields->push_back(std::make_shared<ConstTypeField<std::string>>(key));
+            fields->push_back(std::make_shared<ConstTypeField<std::string>>(payload));
+            return std::make_shared<FieldTuple>(fields, nullptr);
+        }
+
+        std::shared_ptr<BtreeIndexWriter>
+        _create_writer(const std::filesystem::path &name, uint64_t xid, uint64_t max_extent_size)
+        {
+            auto writer = std::make_shared<BtreeIndexWriter>(
+                _db_id, name, _keys, _schema, xid, _cache,
+                BtreeWriteStrategy(max_extent_size));
+            writer->init_empty();
+            return writer;
+        }
+
+        std::shared_ptr<BtreeIndexWriter>
+        _open_writer(const std::filesystem::path &name, uint64_t xid, uint64_t root_offset,
+                     uint64_t max_extent_size)
+        {
+            auto writer = std::make_shared<BtreeIndexWriter>(
+                _db_id, name, _keys, _schema, xid, _cache,
+                BtreeWriteStrategy(max_extent_size));
+            writer->init(root_offset);
+            return writer;
+        }
+
+        std::vector<std::string>
+        _read_all_keys(std::shared_ptr<BtreeIndexWriter> writer)
+        {
+            auto key_f = _schema->get_field("key");
+
+            std::vector<std::string> keys;
+            for (auto i = writer->begin(); i != writer->end(); ++i) {
+                auto row = *i;
+                keys.emplace_back(key_f->get_text(&row));
+            }
+            return keys;
+        }
+
+        uint64_t _db_id = 0;
+        std::filesystem::path _table_dir;
+
+        ExtentSchemaPtr _schema;
+        std::vector<std::string> _keys;
+        std::shared_ptr<IndexExtentCache> _cache;
+
+        static std::filesystem::path _base_dir;
+        static std::atomic<uint64_t> _next_db_id;
+    };
+
+    std::filesystem::path SegmentDeadByteAccountingTest::_base_dir;
+    std::atomic<uint64_t> SegmentDeadByteAccountingTest::_next_db_id{800001};
+
+    TEST_F(SegmentDeadByteAccountingTest, PartiallyDeadSegmentWithInflatedEstimateSurvivesVacuum)
+    {
+        auto path = _table_dir / "0.idx";
+
+        // Generation 1, small split threshold: six short rows across two far-apart key ranges
+        // ("a*", "z*") force exactly one split (midpoint = 3 rows), landing "a0,a1,a2" and
+        // "z0,z1,z2" on two separate leaves, all under one root, all in segment 0.
+        auto writer1 = _create_writer(path, 2, /*max_extent_size=*/60);
+        for (int i = 0; i < 3; i++) {
+            writer1->insert(_row(fmt::format("a{}", i), "short"));
+            writer1->insert(_row(fmt::format("z{}", i), "short"));
+        }
+        uint64_t offset1 = writer1->finalize();
+
+        auto segment0_path = SegmentSet::segment_path(path, SegmentSet::segment_id_of(offset1));
+        ASSERT_TRUE(std::filesystem::exists(segment0_path));
+
+        // Generation 2, deliberately *large* split threshold so this generation's own growth
+        // never re-splits: replace "a1"'s payload with a long, highly compressible string
+        // (LZ4 shrinks it to a small fraction of its logical length on disk). The CoW rewrite of
+        // the "a" leaf is reported to the vacuumer as an estimate of what the *old* "a" leaf's
+        // dead size was (IndexWriter::_flush_node(), pre-fix) -- using the *logical*,
+        // uncompressed byte_count() of the replacement, which for this payload vastly exceeds
+        // its own actual on-disk (compressed) footprint, let alone the old leaf's true size.
+        // "z0,z1,z2" are never touched this generation -- still live, still reachable from the
+        // new root.
+        std::string huge_payload(20000, 'x');
+        auto writer2 = _open_writer(path, 3, offset1, /*max_extent_size=*/1000000);
+        writer2->remove(_row("a1", "short"));
+        writer2->insert(_row("a1", huge_payload));
+        uint64_t offset2 = writer2->finalize();
+        ASSERT_EQ(SegmentSet::segment_id_of(offset2), SegmentSet::segment_id_of(offset1))
+            << "test setup assumption: generation 2 must still land in segment 0 -- this test "
+               "uses the default (large) seal threshold, nowhere near crossed by this little "
+               "data, specifically so segment 0 ends up holding both dead and live content";
+
+        // Explicitly mark segment 0 sealed/eligible for whole-file reclamation (see class
+        // comment for why this is done directly rather than via the size threshold).
+        Vacuumer::get_instance()->register_sealed_segment(segment0_path);
+
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 1, 4, false, 0);
+        Vacuumer::get_instance()->commit_expired_extents(_db_id, 4);
+        Vacuumer::get_instance()->set_global_vacuum_threshold(1);
+        Vacuumer::get_instance()->run_vacuum_once();
+
+        EXPECT_TRUE(std::filesystem::exists(segment0_path))
+            << "segment 0 still holds the untouched, live 'z0,z1,z2' leaf -- it must survive "
+               "vacuum even though the superseded 'a' leaf's *replacement* has a far larger "
+               "logical byte_count() than either the original leaf or the replacement's own "
+               "actual (compressed) on-disk size (an inflated size estimate must never be "
+               "mistaken for 'fully dead')";
+
+        // No data lost either way -- the stronger, always-true property.
+        auto reader = _open_writer(path, 100, offset2, /*max_extent_size=*/1000000);
+        auto actual = _read_all_keys(reader);
+        std::vector<std::string> expected{ "a0", "a1", "a2", "z0", "z1", "z2" };
+        std::sort(expected.begin(), expected.end());
+        EXPECT_EQ(actual, expected);
+    }
+
+    /**
+     * Regression test for phase-6 round-1 review finding 2: segment_seal_threshold_bytes is
+     * operator-controlled config, not an in-process invariant, so a value that would overflow
+     * pack()'s 32-bit in-segment-offset budget must be rejected with an always-on CHECK, not a
+     * debug-only DCHECK that compiles out in release/production builds (NDEBUG) -- exactly the
+     * build a misconfigured value would actually reach in production. Runs in a forked child
+     * (ASSERT_DEATH) so the bad config and the resulting abort are isolated from every other
+     * test in this binary. Lives here (not io_test.cc, where the rest of SegmentSet's pure
+     * unit tests live) because default_seal_threshold_bytes() is out-of-line in segment_set.cc
+     * alongside the stateful, Vacuumer-touching methods (see segment_set.hh's class comment),
+     * so exercising it needs this binary's springtail_xid_mgr link, not io_test's.
+     */
+    TEST(SegmentSetConfigTest, SealThresholdAboveMaxOffsetFailsLoudly)
+    {
+        ASSERT_DEATH(
+            {
+                ::setenv(environment::ENV_OVERRIDE,
+                        "storage.segment_seal_threshold_bytes=5000000000", 1);
+                springtail_init_test();
+                SegmentSet::default_seal_threshold_bytes();
+            },
+            "segment_seal_threshold_bytes.*must not exceed");
+    }
 }

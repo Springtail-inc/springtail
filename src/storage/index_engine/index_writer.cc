@@ -555,22 +555,40 @@ namespace springtail {
         // once would double-count it in the vacuumer's bookkeeping. reported_expired is scoped to
         // one finalize() call and dedupes within it; chained splits *across* generations can't
         // double-report the same prev_offset, since by the next generation it's already a real,
-        // different on-disk id. The reported size is an estimate (node's own just-flushed size,
-        // not prev_offset's exact original size) -- mirroring StorageCache::DataCache::
-        // _flush_and_update_extent()'s identical approximation for the same reason: the exact
-        // original byte size of a superseded extent isn't retained once CoW has moved past it.
+        // different on-disk id.
         //
         // Since phase 6, prev_offset is itself a packed (segment_id, offset) real id (every real
         // id is, post phase-6), so it must be decoded into its own segment's path before being
         // reported -- the vacuumer's dead-byte bookkeeping is keyed by literal, openable file
         // path (see vacuumer.cc), not by the tree's logical base path.
+        //
+        // The reported size must be prev_offset's own *exact* on-disk size, not an estimate --
+        // phase 6 round-1 review (finding 1) caught that this used to report node->extent->
+        // byte_count() (the *new*, replacement extent's logical byte count, mirroring
+        // StorageCache::DataCache::_flush_and_update_extent()'s identical approximation), which
+        // has no required relationship to prev_offset's true size: an inflated estimate could
+        // push the vacuumer's whole-segment dead-byte sum (vacuumer.cc) up to the segment's file
+        // size while other, untouched, live extents still remain in it, causing it to be
+        // unlinked out from under a reader that can still reach them (architecture.md Sec 4
+        // violation) -- "approximate size is harmless for hole-punch" (the original, still
+        // correct, use of this approximation) does not carry over to "approximate size safely
+        // gates an irreversible whole-file delete". IndexExtentCache already tracks every
+        // extent's exact on-disk size for its own LRU bookkeeping; prev_offset's entry is still
+        // cache-resident here in the overwhelmingly common case (this same node was read via
+        // _get_child()/init() earlier this generation, and _touch() clones into a private copy
+        // rather than mutating the cached original in place), so this is a cache hit, not an
+        // extra disk read, except in the rare case the entry was evicted under memory pressure
+        // in between, where re-reading it is the correct (if slightly more costly) fallback.
         if (node->prev_offset != constant::UNKNOWN_EXTENT &&
                 reported_expired.insert(node->prev_offset).second) {
             auto prev_segment_path = SegmentSet::segment_path(
                     _file, SegmentSet::segment_id_of(node->prev_offset));
+            uint32_t prev_size = 0;
+            _cache->get(_database_id, prev_segment_path, SegmentSet::offset_of(node->prev_offset),
+                       &prev_size);
             Vacuumer::get_instance()->expire_extent(prev_segment_path,
                                                     SegmentSet::offset_of(node->prev_offset),
-                                                    node->extent->byte_count(), _xid);
+                                                    prev_size, _xid);
         }
 
         _segments.advance_after_flush();

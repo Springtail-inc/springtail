@@ -364,3 +364,11 @@ TEST(SegmentSetTest, SegmentPathNaming)
     EXPECT_EQ(SegmentSet::segment_path(base, 1), base.native() + ".1");
     EXPECT_EQ(SegmentSet::segment_path(base, 42), base.native() + ".42");
 }
+
+// SegmentSet::default_seal_threshold_bytes()'s own config-validation (phase-6 round-1 review
+// finding 2) isn't tested here: it's out-of-line in segment_set.cc alongside the stateful,
+// Vacuumer-touching methods (deliberately -- see segment_set.hh's class comment on why only the
+// four trivial decode helpers are header-only), so calling it pulls in the same
+// springtail_xid_mgr dependency test_io is deliberately kept free of. See test_segment_file.cc's
+// SegmentSetConfigTest instead, which already links springtail_xid_mgr for its own
+// Vacuumer-integration tests.

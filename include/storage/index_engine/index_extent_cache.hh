@@ -60,10 +60,18 @@ namespace springtail {
          * Read (or return the cached, already-decompressed copy of) the extent at `extent_id` in
          * `file`. Purely mechanical: performs the on-disk IO via IOHandle and returns the result,
          * with no awareness of what the extent's rows mean.
+         *
+         * `size_out`, if non-null, is set to the extent's exact on-disk (compressed, header-
+         * included) byte span -- the same `response->next_offset - response->offset` this cache
+         * already tracks internally per entry for its own LRU/eviction bookkeeping, just also
+         * handed back to the caller. Added for callers (IndexWriter::_flush_node(), phase 6)
+         * that need the *real* size of an already-on-disk extent, as opposed to an estimate
+         * based on some other extent's content.
          */
         std::shared_ptr<Extent> get(uint64_t database_id,
                                     const std::filesystem::path &file,
-                                    uint64_t extent_id);
+                                    uint64_t extent_id,
+                                    uint32_t *size_out = nullptr);
 
         /** Allocate a brand-new, empty, writable extent with the given header. */
         std::shared_ptr<Extent> allocate(const ExtentHeader &header) const;

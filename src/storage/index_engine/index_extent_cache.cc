@@ -23,7 +23,8 @@ namespace springtail {
     std::shared_ptr<Extent>
     IndexExtentCache::get(uint64_t database_id,
                          const std::filesystem::path &file,
-                         uint64_t extent_id)
+                         uint64_t extent_id,
+                         uint32_t *size_out)
     {
         Key key{ file, extent_id };
 
@@ -35,6 +36,9 @@ namespace springtail {
             _lru.erase(i->second.lru_pos);
             _lru.push_front(key);
             i->second.lru_pos = _lru.begin();
+            if (size_out != nullptr) {
+                *size_out = i->second.size;
+            }
             return i->second.extent;
         }
 
@@ -60,12 +64,19 @@ namespace springtail {
             _lru.erase(i->second.lru_pos);
             _lru.push_front(key);
             i->second.lru_pos = _lru.begin();
+            if (size_out != nullptr) {
+                *size_out = i->second.size;
+            }
             return i->second.extent;
         }
 
         _lru.push_front(key);
         _lookup.insert({ key, Entry{ extent, extent_size, _lru.begin() } });
         _size += extent_size;
+
+        if (size_out != nullptr) {
+            *size_out = extent_size;
+        }
 
         _evict_locked(lock);
 
