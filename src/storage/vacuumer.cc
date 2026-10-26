@@ -382,6 +382,13 @@ Vacuumer::expire_extent(const std::filesystem::path &file,
 }
 
 void
+Vacuumer::register_sealed_segment(const std::filesystem::path &file)
+{
+    std::unique_lock lock(_mutex);
+    _sealed_segments.insert(file);
+}
+
+void
 Vacuumer::expire_snapshot(uint64_t db_id,
                           const std::filesystem::path &table_dir,
                           uint64_t xid)
@@ -923,6 +930,42 @@ Vacuumer::_do_vacuum_run()
             auto cutoff_xid = get_vacuum_cutoff_xid(db_id);
             if (cutoff_xid > 0) {
                 _save_last_seen_cutoff_xid(db_id, cutoff_xid);
+            }
+
+            // New-engine sealed segment (architecture.md Sec 7, phase 6): whole-file
+            // reclamation only, never hole-punch. Sum this run's reachable (xid < cutoff_xid)
+            // dead bytes against the segment's actual on-disk size; if that reaches the whole
+            // file, nothing in it is reachable any longer (architecture.md Sec 4) so unlink it
+            // outright. If not yet fully dead, deliberately do *not* erase these xid_map
+            // entries (unlike the hole-punch path below, which can safely discard entries once
+            // it has physically punched holes for them) -- a sparse file has no byte-range
+            // "memory" of partial reclamation the way hole-punch's own holes do, so the global
+            // vacuum log itself (rewritten with this file's entries still intact, further down)
+            // is this segment's only record of what's already been reported dead; losing it
+            // here would leak the segment forever once summed-so-far bytes stop being
+            // re-derivable. Recomputing the full sum from scratch every run (rather than a
+            // separate persisted running counter) keeps this trivially crash-consistent.
+            if (_sealed_segments.count(file)) {
+                uint64_t dead_bytes = 0;
+                for (const auto& [xid, extents] : xid_map) {
+                    if (xid >= cutoff_xid) {
+                        break;
+                    }
+                    for (const auto& [offset, size] : extents) {
+                        dead_bytes += size;
+                    }
+                }
+
+                std::error_code ec;
+                uint64_t file_size = std::filesystem::file_size(file, ec);
+                if (!ec && dead_bytes >= file_size) {
+                    IOMgr::get_instance()->remove(file);
+                    _sealed_segments.erase(file);
+                    file_it = expired_extents_map.erase(file_it);
+                } else {
+                    ++file_it;
+                }
+                continue;
             }
 
             IntervalTree<uint64_t> itree;

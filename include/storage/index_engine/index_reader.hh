@@ -11,6 +11,7 @@
 #include <storage/field.hh>
 #include <storage/index_engine/extent_source.hh>
 #include <storage/index_engine/read_strategy.hh>
+#include <storage/index_engine/segment_set.hh>
 #include <storage/schema.hh>
 
 namespace springtail {
@@ -223,8 +224,14 @@ namespace springtail {
         }
 
     private:
+        /** Decodes `extent_id` (a phase-6 packed (segment_id, in-segment offset) real id) into
+            its segment's own file path before calling through to the ExtentSource -- the source
+            (StorageCacheExtentSource/SharedPoolExtentSource) and everything underneath it
+            (StorageCache, SharedExtentPool) keep their existing (file, extent_id) key shape
+            unmodified; only the *values* fed into it change -- see segment_set.hh. */
         std::shared_ptr<Extent> _get_extent(uint64_t extent_id) const {
-            return _source->get(_database_id, _file, extent_id, _xid);
+            auto segment_path = SegmentSet::segment_path(_file, SegmentSet::segment_id_of(extent_id));
+            return _source->get(_database_id, segment_path, SegmentSet::offset_of(extent_id), _xid);
         }
 
         /** Descend from `frames.back()` leftmost down to a leaf, appending frames along the way

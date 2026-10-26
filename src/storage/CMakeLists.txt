@@ -3,7 +3,7 @@ set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc 
                     numeric_utils.cc vacuumer.cc
                     index_engine/index_extent_cache.cc index_engine/btree_write_strategy.cc index_engine/index_writer.cc
                     index_engine/btree_read_strategy.cc index_engine/storage_cache_extent_source.cc index_engine/index_reader.cc
-                    index_engine/shared_extent_pool.cc index_engine/shared_pool_extent_source.cc)
+                    index_engine/shared_extent_pool.cc index_engine/shared_pool_extent_source.cc index_engine/segment_set.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -151,6 +151,14 @@ springtail_unit_test(test_shared_extent_pool
   SOURCES test/test_shared_extent_pool.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_storage GTest::gtest_main
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+
+# segment-set / sealed-segment-file test (btree phase 6)
+springtail_unit_test(test_segment_file
+  SOURCES test/test_segment_file.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_storage springtail_test springtail_xid_mgr GTest::gtest_main
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 

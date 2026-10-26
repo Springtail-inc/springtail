@@ -25,6 +25,7 @@ namespace springtail {
           _sort_keys(keys),
           _cache(std::move(cache)),
           _strategy(std::move(strategy)),
+          _segments(file),
           _xid(xid),
           _extension_callback(extension_callback)
     {
@@ -90,7 +91,8 @@ namespace springtail {
         DCHECK_LT(root_offset, TEMP_ID_BASE) << "root_offset is a real on-disk extent id, which "
                                                 "must never land in the reserved temp-id range";
 
-        auto extent = _cache->get(_database_id, _file, root_offset);
+        auto segment_path = SegmentSet::segment_path(_file, SegmentSet::segment_id_of(root_offset));
+        auto extent = _cache->get(_database_id, segment_path, SegmentSet::offset_of(root_offset));
         ExtentSchemaPtr schema = extent->header().type.is_branch() ? _branch_schema : _leaf_schema;
 
         auto root = std::make_shared<Node>();
@@ -102,6 +104,8 @@ namespace springtail {
 
         _root = root;
         _finalized = false;
+
+        _segments.resume_from(root_offset);
     }
 
     template <typename Strategy>
@@ -121,7 +125,8 @@ namespace springtail {
         // patched to its real id before being flushed (see TEMP_ID_BASE's comment).
         DCHECK_LT(id, TEMP_ID_BASE);
 
-        auto extent = _cache->get(_database_id, _file, id);
+        auto segment_path = SegmentSet::segment_path(_file, SegmentSet::segment_id_of(id));
+        auto extent = _cache->get(_database_id, segment_path, SegmentSet::offset_of(id));
         ExtentSchemaPtr schema = extent->header().type.is_branch() ? _branch_schema : _leaf_schema;
         MutableFieldArrayPtr key_fields = (schema == _branch_schema) ? _branch_keys : _leaf_keys;
 
@@ -535,7 +540,10 @@ namespace springtail {
         node->extent->header() = ExtentHeader(node->type, _xid, node->schema->row_size(),
                                               node->schema->field_types(), node->prev_offset);
 
-        uint64_t real_id = _cache->flush(_database_id, _file, node->extent);
+        auto segment_path = _segments.current_path();
+        uint64_t within_offset = _cache->flush(_database_id, segment_path, node->extent);
+        uint64_t real_id = SegmentSet::pack(_segments.current_segment_id(), within_offset);
+        DCHECK_LT(real_id, TEMP_ID_BASE);
 
         // Notify the vacuumer that node->prev_offset is now superseded (architecture.md "btree"
         // redesign Sec 4's reachability invariant: once nothing points at it, it's reclaimable).
@@ -551,11 +559,21 @@ namespace springtail {
         // not prev_offset's exact original size) -- mirroring StorageCache::DataCache::
         // _flush_and_update_extent()'s identical approximation for the same reason: the exact
         // original byte size of a superseded extent isn't retained once CoW has moved past it.
+        //
+        // Since phase 6, prev_offset is itself a packed (segment_id, offset) real id (every real
+        // id is, post phase-6), so it must be decoded into its own segment's path before being
+        // reported -- the vacuumer's dead-byte bookkeeping is keyed by literal, openable file
+        // path (see vacuumer.cc), not by the tree's logical base path.
         if (node->prev_offset != constant::UNKNOWN_EXTENT &&
                 reported_expired.insert(node->prev_offset).second) {
-            Vacuumer::get_instance()->expire_extent(_file, node->prev_offset,
+            auto prev_segment_path = SegmentSet::segment_path(
+                    _file, SegmentSet::segment_id_of(node->prev_offset));
+            Vacuumer::get_instance()->expire_extent(prev_segment_path,
+                                                    SegmentSet::offset_of(node->prev_offset),
                                                     node->extent->byte_count(), _xid);
         }
+
+        _segments.advance_after_flush();
 
         node->id = real_id;
         node->dirty = false;
@@ -601,8 +619,13 @@ namespace springtail {
     void
     IndexWriter<Strategy>::_sync_impl()
     {
-        auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
-        handle->sync();
+        // Every segment this tree has actually written to, not just the base file -- a segment
+        // sealed and rolled past earlier this generation (or an earlier one) still needs its
+        // bytes durable before finalize() returns, same as the current one.
+        for (auto &path : _segments.all_paths()) {
+            auto handle = IOMgr::get_instance()->open(path, IOMgr::IO_MODE::APPEND, true);
+            handle->sync();
+        }
     }
 
     template <typename Strategy>

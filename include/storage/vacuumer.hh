@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <list>
 #include <map>
+#include <set>
 #include <thread>
 
 #include <common/filesystem.hh>
@@ -105,6 +106,19 @@ public:
      * @param xid The XID at which the extent was overwritten
      */
     void expire_extent(const std::filesystem::path &file, uint64_t extent_id, uint32_t size, uint64_t xid);
+
+    /**
+     * @brief Mark `file` as a sealed (never written to again) segment of a new-engine tree
+     *        (architecture.md "btree" redesign Sec 7, phase-6's SegmentSet), eligible for
+     *        whole-file reclamation once nothing in it is reachable, instead of the legacy
+     *        hole-punch path's "punch holes in an ever-growing file, never delete it" model.
+     *        Idempotent: safe to call again (e.g. every time a later generation's writer
+     *        resumes into an already-sealed segment) with no effect beyond re-affirming
+     *        membership -- "sealed" is otherwise never persisted anywhere else (see
+     *        SegmentSet's class comment).
+     * @param file The sealed segment file's path.
+     */
+    void register_sealed_segment(const std::filesystem::path &file);
 
     /**
      * Register a table snapshot to be expired by the vacuumer.
@@ -257,6 +271,15 @@ private:
     std::mutex _mutex; ///< Protects the internal maps
     ExtentMap _extent_map; ///< Maps File -> XID -> list of expired extent
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
+
+    /**
+     * New-engine sealed segment files (SegmentSet), registered via register_sealed_segment().
+     * Gates which files in _extent_map are eligible for whole-file reclamation (phase 6) rather
+     * than the legacy hole-punch path -- membership here is the one signal Vacuumer has for
+     * "this is a segment, never hole-punch it," since nothing about a bare file path alone
+     * distinguishes a sealed segment from a legacy ever-growing file.
+     */
+    std::set<std::filesystem::path> _sealed_segments;
     std::condition_variable _cv; ///< Condition variable to wake up the vacuumer thread
 
     /**

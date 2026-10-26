@@ -10,6 +10,7 @@
 #include <storage/extent.hh>
 #include <storage/field.hh>
 #include <storage/index_engine/index_extent_cache.hh>
+#include <storage/index_engine/segment_set.hh>
 #include <storage/index_engine/write_strategy.hh>
 #include <storage/schema.hh>
 
@@ -53,7 +54,9 @@ namespace springtail {
                 synthetic id assigned from IndexWriter::_next_temp_id's reserved range (see
                 TEMP_ID_BASE -- this must never be allowed to collide with a real, on-disk
                 extent_id, round-1 review). Replaced with the real, on-disk extent_id once this
-                node is flushed. */
+                node is flushed. Since phase 6, a real id is a SegmentSet::pack()'d
+                (segment_id, in-segment offset) pair, not a plain tree-wide byte offset -- see
+                TEMP_ID_BASE's comment and segment_set.hh. */
             uint64_t id = constant::UNKNOWN_EXTENT;
 
             /** The on-disk extent_id this node's content supersedes once flushed (becomes
@@ -150,6 +153,15 @@ namespace springtail {
 
         std::filesystem::path get_file_path() const {
             return _file;
+        }
+
+        /** Every segment file this tree could have ever written to (0..current, inclusive) --
+            phase 6's segment-set abstraction means a tree's content can now span more than one
+            physical file; callers that need to fsync or enumerate every on-disk file backing
+            this tree (MutableTable::get_table_files()'s durability path) must use this instead
+            of get_file_path() alone. */
+        std::vector<std::filesystem::path> get_segment_paths() const {
+            return _segments.all_paths();
         }
 
         /**
@@ -323,18 +335,32 @@ namespace springtail {
         std::shared_ptr<IndexExtentCache> _cache;
         Strategy _strategy;
 
+        /** Which segment is current, and when it seals and rolls over (phase 6) -- see
+            segment_set.hh. Constructed fresh at TEMP_ID_BASE==segment 0 for a brand-new tree;
+            init()'s resume_from() catches it up to whichever segment an already-on-disk root
+            lives in (and past it, if that segment was already sealed by an earlier
+            generation). */
+        SegmentSet _segments;
+
         /**
          * Not-yet-flushed nodes (split results, a brand-new root, a brand-new empty tree) need a
          * stable identity before they have a real on-disk extent_id, used both as the value
          * written into a parent's branch row and as the key _get_child() searches a parent's
-         * `children` by. Real extent_ids are plain append-only file byte offsets (IOFile::
-         * reserve_offset()) and so start at 0 and grow with file size -- small values for a long
-         * time. A temp-id counter that also started at 0 would collide with real ids the moment a
-         * second (or later) generation's IndexWriter reopens an existing tree and splits again:
-         * _get_child()'s and _flush_node()'s lookups match an id by *value*, with no other way to
-         * tell "this is a temp id" from "this is a real, untouched sibling's id" apart (round-1
-         * review finding 1). Reserving the top half of the uint64_t space for temp ids makes that
-         * collision structurally impossible -- no real file will ever reach a 2^63-byte offset.
+         * `children` by. Through phase 5, a real extent_id was a plain append-only file byte
+         * offset (IOFile::reserve_offset()) and so started at 0 and grew with file size -- small
+         * values for a long time. A temp-id counter that also started at 0 would collide with
+         * real ids the moment a second (or later) generation's IndexWriter reopens an existing
+         * tree and splits again: _get_child()'s and _flush_node()'s lookups match an id by
+         * *value*, with no other way to tell "this is a temp id" from "this is a real, untouched
+         * sibling's id" apart (round-1 review finding 1). Reserving the top half of the uint64_t
+         * space for temp ids makes that collision structurally impossible.
+         *
+         * Since phase 6 (sealed, size-bounded segment files), a real id is no longer a plain
+         * tree-wide byte offset -- it is SegmentSet::pack(segment_id, in-segment offset), which
+         * fills exactly the remaining 63 bits below this reservation (segment_set.hh's
+         * static_assert enforces this at compile time), so the same disjointness still holds by
+         * construction: no packed real id can ever reach 2^63 regardless of how many segments a
+         * tree accumulates over its lifetime or how large any one segment grows.
          */
         static constexpr uint64_t TEMP_ID_BASE = uint64_t(1) << 63;
 

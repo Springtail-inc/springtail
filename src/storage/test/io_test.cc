@@ -9,6 +9,7 @@
 #include <storage/io.hh>
 #include <storage/io_request.hh>
 #include <storage/io_mgr.hh>
+#include <storage/index_engine/segment_set.hh>
 
 #include <common/init.hh>
 
@@ -307,4 +308,59 @@ TEST_F(IOTest, AsyncAppendTest)
     }
 
     std::filesystem::remove(FILE);
+}
+
+/**
+ * Segment-set layer (btree redesign phase 6): pure, IO-free unit tests of the pack/unpack and
+ * naming helpers IndexWriter/IndexReader use to turn a real extent/root id into the
+ * (segment file path, in-segment offset) pair fed into the unmodified (file, extent_id)-keyed
+ * caches below them -- see segment_set.hh's class comment. The heavier, IndexWriter/Vacuumer-
+ * integrated behavior (seal-at-threshold, multi-segment round trip, whole-segment unlink) lives
+ * in test_segment_file.cc instead; these just cover the mechanical encode/decode this test file's
+ * own IO-level tests above don't otherwise exercise.
+ */
+TEST(SegmentSetTest, PackUnpackRoundTrip)
+{
+    using springtail::SegmentSet;
+
+    struct Case { uint32_t segment_id; uint64_t offset; };
+    std::vector<Case> cases = {
+        {0, 0},
+        {0, 12345},
+        {1, 0},
+        {7, 42},
+        {static_cast<uint32_t>(SegmentSet::MAX_SEGMENT_ID), SegmentSet::MAX_OFFSET},
+    };
+
+    for (const auto &c : cases) {
+        uint64_t packed = SegmentSet::pack(c.segment_id, c.offset);
+        EXPECT_EQ(SegmentSet::segment_id_of(packed), c.segment_id);
+        EXPECT_EQ(SegmentSet::offset_of(packed), c.offset);
+    }
+}
+
+TEST(SegmentSetTest, PackedIdsAreDisjointFromTempIdRange)
+{
+    using springtail::SegmentSet;
+
+    // Mirrors IndexWriter::TEMP_ID_BASE without depending on IndexWriter's private member --
+    // the two must agree by construction (segment_set.hh's static_assert enforces the bit
+    // widths sum to 63), so re-deriving the same constant here and checking against it is a
+    // meaningful cross-check, not a tautology.
+    constexpr uint64_t TEMP_ID_BASE = uint64_t(1) << 63;
+
+    uint64_t max_packed = SegmentSet::pack(static_cast<uint32_t>(SegmentSet::MAX_SEGMENT_ID),
+                                           SegmentSet::MAX_OFFSET);
+    EXPECT_LT(max_packed, TEMP_ID_BASE);
+    EXPECT_EQ(max_packed, TEMP_ID_BASE - 1);
+}
+
+TEST(SegmentSetTest, SegmentPathNaming)
+{
+    using springtail::SegmentSet;
+
+    std::filesystem::path base = "/tmp/test_segment_set_naming/0.idx";
+    EXPECT_EQ(SegmentSet::segment_path(base, 0), base);
+    EXPECT_EQ(SegmentSet::segment_path(base, 1), base.native() + ".1");
+    EXPECT_EQ(SegmentSet::segment_path(base, 42), base.native() + ".42");
 }

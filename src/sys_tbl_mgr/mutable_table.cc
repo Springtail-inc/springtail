@@ -540,9 +540,15 @@ namespace indexer_helpers {
     {
         std::vector<std::filesystem::path> r;
         r.emplace_back(_data_file);
-        r.emplace_back(_primary_index->get_file_path());
+
+        // get_segment_paths() (not get_file_path() alone) -- phase 6's segment-set abstraction
+        // means an index's content can now span more than one physical file, every one of
+        // which needs to be fsync'ed before a commit batch is considered durable.
+        auto primary_segments = _primary_index->get_segment_paths();
+        r.insert(r.end(), primary_segments.begin(), primary_segments.end());
         for (auto &secondary : _secondary_indexes) {
-            r.emplace_back(secondary.second.first->get_file_path());
+            auto secondary_segments = secondary.second.first->get_segment_paths();
+            r.insert(r.end(), secondary_segments.begin(), secondary_segments.end());
         }
 
         if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
