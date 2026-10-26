@@ -144,7 +144,7 @@ namespace springtail {
     template <typename Strategy>
     requires WriteStrategy<Strategy>
     ValueTuplePtr
-    IndexWriter<Strategy>::_make_value_key(Extent &extent, MutableFieldArrayPtr key_fields)
+    IndexWriter<Strategy>::_make_value_key(Extent &extent, MutableFieldArrayPtr key_fields) const
     {
         auto row_i = extent.last();
         auto row = *row_i;
@@ -596,6 +596,160 @@ namespace springtail {
         node->id = real_id;
         node->dirty = false;
         node->children.clear();
+    }
+
+    template <typename Strategy>
+    requires WriteStrategy<Strategy>
+    std::vector<typename IndexWriter<Strategy>::CompactionItem>
+    IndexWriter<Strategy>::bulk_copy_for_compaction(const std::filesystem::path &segment_file,
+                                                    const std::filesystem::path &scratch_file,
+                                                    const std::function<bool(uint64_t)> &is_dead,
+                                                    size_t item_budget) const
+    {
+        std::vector<CompactionItem> items;
+
+        auto maybe_segment_id = SegmentSet::segment_id_for_path(_file, segment_file);
+        if (!maybe_segment_id) {
+            return items;
+        }
+        uint32_t segment_id = *maybe_segment_id;
+
+        std::error_code ec;
+        uint64_t file_size = std::filesystem::file_size(segment_file, ec);
+        if (ec) {
+            return items;
+        }
+
+        // Start clean -- flush()'s append-mode open would otherwise tack this run's copies on
+        // after any stale scratch content a crashed earlier attempt left behind, breaking phase
+        // 2's "read scratch_file sequentially in the same order items was built" assumption.
+        IOMgr::get_instance()->remove(scratch_file);
+
+        auto scan_handle = IOMgr::get_instance()->open(segment_file, IOMgr::IO_MODE::READ, true);
+        uint64_t pos = 0;
+
+        while (pos < file_size && items.size() < item_budget) {
+            auto response = scan_handle->read(pos);
+            if (response->data.empty()) {
+                break;
+            }
+
+            uint64_t old_id = SegmentSet::pack(segment_id, pos);
+
+            if (!is_dead(old_id)) {
+                auto extent = std::make_shared<Extent>(response->data);
+                MutableFieldArrayPtr key_fields =
+                        extent->header().type.is_branch() ? _branch_keys : _leaf_keys;
+                ValueTuplePtr search_key = _make_value_key(*extent, key_fields);
+
+                _cache->flush(_database_id, scratch_file, extent);
+                items.push_back({ old_id, search_key });
+            }
+
+            pos = response->next_offset;
+        }
+
+        return items;
+    }
+
+    template <typename Strategy>
+    requires WriteStrategy<Strategy>
+    bool
+    IndexWriter<Strategy>::_relocate(uint64_t old_id, TuplePtr search_key,
+                                     std::shared_ptr<Extent> dense_copy)
+    {
+        DCHECK_LT(old_id, TEMP_ID_BASE);
+
+        if (_root->id == old_id && !_root->dirty) {
+            // The root itself is the compaction candidate -- no ancestor branch row to patch,
+            // just adopt the new, byte-identical content as the tree's current root. Reported
+            // dead the same way as the general case below (see finalize()'s caller comment).
+            _root->extent = dense_copy;
+            _root->dirty = true;
+            return true;
+        }
+
+        std::vector<NodePtr> path{ _root };
+        while (path.back()->type.is_branch()) {
+            NodePtr cur = path.back();
+            auto row_i = _strategy.choose_child(cur->extent, cur->schema, search_key);
+            uint64_t id = _branch_child_f->get_uint64(&*row_i);
+
+            if (id == old_id) {
+                // Materialize the node currently holding old_id (same lookup _get_child() always
+                // uses). Critically, `id` is a *row value* in cur's own extent, and a node's own
+                // `id` field is never rewritten until it actually flushes (_flush_node() is the
+                // only writer of it) -- so a node this same generation's *foreground* mutation
+                // already touched (dirtied, with real content changes already applied) can still
+                // read back as `id == old_id` here, even though _get_child() will hand back that
+                // exact already-dirty Node object (via its `children` registration), not a fresh
+                // read from disk. Blindly overwriting such a node's extent with the phase-1
+                // snapshot would silently discard whatever the foreground mutation already did
+                // to it this generation -- caught concretely while writing this method's own
+                // regression test. Treat an already-dirty target exactly like "not found": stale,
+                // discarded harmlessly (its eventual flush will supersede old_id via the ordinary
+                // path regardless of what we do here).
+                NodePtr target = _get_child(cur, id);
+                if (target->dirty) {
+                    return false;
+                }
+
+                // Materialize the live node currently holding old_id, swap in the dense copy,
+                // then _touch() exactly as insert()/remove() do -- clones every not-yet-dirty
+                // ancestor up to the root, which is what makes this generation's finalize()
+                // reflush the whole (small) ancestor chain, patch cur's branch row to the new
+                // real id once flushed, and report old_id superseded via the ordinary
+                // _flush_node() path, with no code here needing to duplicate any of that.
+                target->extent = dense_copy;
+                path.push_back(target);
+                _touch(path, path.size() - 1);
+                return true;
+            }
+
+            path.push_back(_get_child(cur, id));
+        }
+
+        // old_id isn't referenced anywhere along search_key's current descent path -- either
+        // the parent already moved on (a newer CoW rewrite superseded this exact row) or the
+        // row itself is gone (e.g. a delete emptied its leaf). Either way: stale, harmless.
+        return false;
+    }
+
+    template <typename Strategy>
+    requires WriteStrategy<Strategy>
+    size_t
+    IndexWriter<Strategy>::apply_compaction_batch(const std::filesystem::path &scratch_file,
+                                                  const std::vector<CompactionItem> &items)
+    {
+        ReentrancyGuard guard(_in_call);
+        CHECK(_root != nullptr);
+        CHECK(!_finalized);
+
+        size_t applied = 0;
+
+        if (!items.empty()) {
+            auto handle = IOMgr::get_instance()->open(scratch_file, IOMgr::IO_MODE::READ, true);
+            uint64_t pos = 0;
+
+            for (const auto &item : items) {
+                auto response = handle->read(pos);
+                CHECK(!response->data.empty())
+                        << "compaction scratch file " << scratch_file.native()
+                        << " is shorter than its own worklist";
+
+                auto dense_copy = std::make_shared<Extent>(response->data);
+                if (_relocate(item.old_id, item.search_key, dense_copy)) {
+                    applied++;
+                }
+
+                pos = response->next_offset;
+            }
+        }
+
+        std::error_code ec;
+        std::filesystem::remove(scratch_file, ec);
+
+        return applied;
     }
 
     template <typename Strategy>

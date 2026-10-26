@@ -1,7 +1,12 @@
 #pragma once
 
+#include <algorithm>
+#include <cctype>
+#include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 #include <absl/log/check.h>
@@ -123,6 +128,40 @@ namespace springtail {
                 return base_file;
             }
             return base_file.native() + "." + std::to_string(segment_id);
+        }
+
+        /** Inverse of segment_path(): the segment_id `path` corresponds to for `base_file`'s
+            tree, or nullopt if `path` isn't one of this tree's segments at all (background
+            space-reclaim compaction, architecture.md Sec 7.1, needs this to turn a Vacuumer-
+            reported candidate path back into the segment_id its real ids pack against -- every
+            other caller of this class already starts from a segment_id and goes forward). */
+        static std::optional<uint32_t> segment_id_for_path(const std::filesystem::path &base_file,
+                                                            const std::filesystem::path &path)
+        {
+            if (path == base_file) {
+                return 0;
+            }
+
+            const std::string &base = base_file.native();
+            const std::string &candidate = path.native();
+            if (candidate.size() <= base.size() + 1 ||
+                    candidate.compare(0, base.size(), base) != 0 ||
+                    candidate[base.size()] != '.') {
+                return std::nullopt;
+            }
+
+            const std::string suffix = candidate.substr(base.size() + 1);
+            if (suffix.empty() || !std::ranges::all_of(suffix, [](char c) { return std::isdigit(c); })) {
+                return std::nullopt;
+            }
+
+            errno = 0;
+            char *end = nullptr;
+            unsigned long parsed = std::strtoul(suffix.c_str(), &end, 10);
+            if (errno != 0 || end == suffix.c_str() || *end != '\0' || parsed > MAX_SEGMENT_ID) {
+                return std::nullopt;
+            }
+            return static_cast<uint32_t>(parsed);
         }
 
         explicit SegmentSet(std::filesystem::path base_file,

@@ -50,6 +50,21 @@ Vacuumer::_init()
         _hole_punch_block_size = VacuumConfig::HOLE_PUNCH_BLOCK_SIZE;
     }
 
+    // Background space-reclaim compaction (architecture.md "btree" redesign Sec 7.1, phase 7):
+    // dead-byte-fraction candidacy threshold and per-cycle extent-copy budget.
+    if (vacuum_config_json.contains("compaction_dead_fraction_threshold")) {
+        Json::get_to<double>(vacuum_config_json, "compaction_dead_fraction_threshold",
+                             _compaction_dead_fraction_threshold);
+    } else {
+        _compaction_dead_fraction_threshold = VacuumConfig::COMPACTION_DEAD_FRACTION_THRESHOLD;
+    }
+
+    if (vacuum_config_json.contains("compaction_item_budget")) {
+        Json::get_to<uint64_t>(vacuum_config_json, "compaction_item_budget", _compaction_item_budget);
+    } else {
+        _compaction_item_budget = VacuumConfig::COMPACTION_ITEM_BUDGET;
+    }
+
     // Vacuum base dir
     Json::get_to<std::filesystem::path>(vacuum_config_json, "vacuum_dir", _vacuum_data_base);
     _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base) / vacuum_global_namespace;
@@ -386,6 +401,29 @@ Vacuumer::register_sealed_segment(const std::filesystem::path &file)
 {
     std::unique_lock lock(_mutex);
     _sealed_segments.insert(file);
+}
+
+std::vector<std::filesystem::path>
+Vacuumer::get_compaction_candidates()
+{
+    std::unique_lock lock(_mutex);
+    std::vector<std::filesystem::path> candidates;
+    candidates.reserve(_compaction_candidates.size());
+    for (const auto &[file, dead_offsets] : _compaction_candidates) {
+        candidates.push_back(file);
+    }
+    return candidates;
+}
+
+std::set<uint64_t>
+Vacuumer::compaction_dead_offsets(const std::filesystem::path &file)
+{
+    std::unique_lock lock(_mutex);
+    auto it = _compaction_candidates.find(file);
+    if (it == _compaction_candidates.end()) {
+        return {};
+    }
+    return it->second;
 }
 
 void
@@ -961,8 +999,37 @@ Vacuumer::_do_vacuum_run()
                 if (!ec && dead_bytes >= file_size) {
                     IOMgr::get_instance()->remove(file);
                     _sealed_segments.erase(file);
+                    _compaction_candidates.erase(file);
                     file_it = expired_extents_map.erase(file_it);
                 } else {
+                    // Background space-reclaim compaction (architecture.md Sec 7.1): not fully
+                    // dead, but check whether it's dead *enough* to be worth compacting rather
+                    // than left as-is. The dead-byte-fraction trigger recomputes from this same
+                    // in-memory xid_map every run -- same crash-consistency rationale as the
+                    // whole-file-unlink sum just above (no separate persisted counter to get out
+                    // of sync with reality; see phases/phase-7.md's "Throttling and dead-byte
+                    // bookkeeping design" section for why this was chosen over a persisted
+                    // counter). The dead-*offset* snapshot recorded for a candidate, unlike
+                    // dead_bytes above, deliberately covers every xid in xid_map (not just
+                    // xid < cutoff_xid) -- a superseded extent is categorically unreachable from
+                    // this tree's *current* structure the moment something newer replaced it,
+                    // whether or not it's yet safe to physically reclaim (architecture.md Sec 4).
+                    if (!ec && file_size > 0) {
+                        std::set<uint64_t> dead_offsets;
+                        for (const auto& [xid, extents] : xid_map) {
+                            for (const auto& [offset, size] : extents) {
+                                dead_offsets.insert(offset);
+                            }
+                        }
+
+                        double dead_fraction = static_cast<double>(dead_bytes) /
+                                              static_cast<double>(file_size);
+                        if (dead_fraction >= _compaction_dead_fraction_threshold) {
+                            _compaction_candidates[file] = std::move(dead_offsets);
+                        } else {
+                            _compaction_candidates.erase(file);
+                        }
+                    }
                     ++file_it;
                 }
                 continue;

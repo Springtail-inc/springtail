@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <unordered_set>
 #include <vector>
@@ -34,6 +35,14 @@ namespace springtail {
      * something this class coordinates internally. Nothing here adds a lock or a "wait in case a
      * reader might still be looking at this" step -- architecture.md Sec 4's reachability
      * invariant already rules that out.
+     *
+     * Since phase 7 (architecture.md Sec 7.1), also exposes background space-reclaim
+     * compaction's two phases as narrow primitives: bulk_copy_for_compaction() (phase 1) is the
+     * one deliberate exception to "every public method needs this tree's single-writer
+     * exclusivity" -- it touches only this tree's (already thread-safe) extent cache and
+     * construction-time-fixed schema state, never _root/_segments/_in_call, so it's safe to call
+     * without that exclusivity; apply_compaction_batch() (phase 2) is an ordinary mutating call
+     * like insert()/remove() and needs it like any other.
      */
     template <typename Strategy>
     requires WriteStrategy<Strategy>
@@ -154,6 +163,73 @@ namespace springtail {
         std::filesystem::path get_file_path() const {
             return _file;
         }
+
+        /**
+         * One still-reachable extent found by bulk_copy_for_compaction()'s segment scan
+         * (architecture.md "btree" redesign Sec 7.1, phase 1): its real id as of the scan, and
+         * the max key recorded in its own content (used by apply_compaction_batch()'s phase 2
+         * to re-locate wherever it's currently referenced from, the same way an ordinary
+         * mutation's key-based descent would -- see the .cc for why this routes correctly
+         * through any ancestor CoW-rewrites/splits that happened in between, as long as the
+         * extent's own row range -- immutable once sealed -- hasn't changed).
+         */
+        struct CompactionItem {
+            uint64_t old_id;
+            ValueTuplePtr search_key;
+        };
+
+        /**
+         * Background space-reclaim compaction, phase 1 (architecture.md Sec 7.1): scan
+         * `segment_file` (one of this tree's own, already-sealed segments that the caller's
+         * Vacuumer-side bookkeeping judged partially dead) for every extent not already
+         * reported dead, and copy each one's content verbatim into a fresh, dense
+         * `scratch_file` (freshly created here; never a real segment of this tree -- phase 2
+         * reads it back and it is deleted afterward regardless of outcome). Stops after
+         * `item_budget` copies (phase-7.md's Throttling task: small batches, never one large
+         * pass).
+         *
+         * Touches only this tree's extent cache (already internally thread-safe across trees)
+         * and schema/key-field state set once at construction and never reassigned after --
+         * never `_root`, `_segments`, or `_in_call`. Unlike every other public method here,
+         * this is therefore safe to call without this tree's single-writer exclusivity
+         * (architecture.md Sec 7.1: "fully concurrent... needs zero coordination") and does not
+         * take the reentrancy guard for that reason. In this implementation it is in practice
+         * still called from the same thread that owns this tree's ordinary mutation turn (the
+         * Decisions log's resolution for where compaction work is claimed), but nothing about
+         * this method itself requires that.
+         *
+         * @param segment_file One of this tree's own sealed segments (get_segment_paths()).
+         * @param scratch_file Destination for the dense copy; removed and recreated here.
+         * @param is_dead Returns true if a given real id is already known superseded -- see
+         *        Vacuumer::compaction_dead_offsets(), decoded against `segment_file`'s own
+         *        segment_id by the caller.
+         * @param item_budget Max extents to copy this call.
+         * @return One CompactionItem per extent copied, in the order copied (matches
+         *         `scratch_file`'s own append order -- apply_compaction_batch() relies on this).
+         */
+        std::vector<CompactionItem> bulk_copy_for_compaction(
+                const std::filesystem::path &segment_file,
+                const std::filesystem::path &scratch_file,
+                const std::function<bool(uint64_t)> &is_dead,
+                size_t item_budget) const;
+
+        /**
+         * Background space-reclaim compaction, phase 2 (architecture.md Sec 7.1): re-validate
+         * and relocate each of `items` (bulk_copy_for_compaction()'s output, phase 1) from
+         * `scratch_file` into this tree's *current* live structure, through the ordinary
+         * single-writer mutation path -- same exclusivity contract as insert()/remove(), the
+         * caller must already hold it (a Committer worker's claimed table_id turn, or a
+         * system-table catalog-queue callback; see Decisions log entry 2). An item whose old_id
+         * is no longer referenced anywhere in the live tree (the parent moved on, or the
+         * pointer is simply gone) is skipped, not an error -- the phase-1 copy was wasted but
+         * harmless work. Does not call finalize() -- whatever this relocates rides along with
+         * the caller's own already-scheduled finalize() for this generation, exactly like any
+         * other mutation this generation. Always removes `scratch_file` before returning,
+         * regardless of how many items actually applied.
+         * @return How many of `items` were actually relocated (<= items.size()).
+         */
+        size_t apply_compaction_batch(const std::filesystem::path &scratch_file,
+                                      const std::vector<CompactionItem> &items);
 
         /** Every segment file this tree could have ever written to (0..current, inclusive) --
             phase 6's segment-set abstraction means a tree's content can now span more than one
@@ -289,7 +365,7 @@ namespace springtail {
 
         /** Build a stable ValueTuple key from the last row of `extent`, projected onto
             `key_fields` -- mirrors MutableBTree::Page::set_cache_page()'s repeated pattern. */
-        ValueTuplePtr _make_value_key(Extent &extent, MutableFieldArrayPtr key_fields);
+        ValueTuplePtr _make_value_key(Extent &extent, MutableFieldArrayPtr key_fields) const;
 
         /** Split `node` in two via the strategy's split_point(), returning the replacement pair;
             `node` itself is discarded (never flushed, never referenced again). If `node` is a
@@ -323,6 +399,24 @@ namespace springtail {
             finalize() call) since sibling split results can share the same prev_offset -- see the
             .cc for the full reasoning. */
         void _flush_node(NodePtr node, std::unordered_set<uint64_t> &reported_expired);
+
+        /** apply_compaction_batch()'s per-item worker: if `old_id` is still referenced -- either
+            as the tree's own root, or as some current node's branch-row child pointer, found by
+            descending from the root via `search_key` exactly as an ordinary mutation would --
+            adopt `dense_copy` as that node's content and mark it (and every ancestor up to the
+            root) dirty for the next finalize() to flush, reporting `old_id` itself as superseded
+            in the process (mirrors _flush_node()'s own prev_offset reporting, since nothing else
+            ever flushes `old_id`'s own content again to do that for us). Returns false, doing
+            nothing, if `old_id` isn't found -- see the .cc for why `search_key`-based descent
+            still finds the right (possibly since-CoW-rewritten-or-split) current node, as long
+            as `old_id`'s own row range -- immutable once sealed -- hasn't changed. Also returns
+            false (rather than overwriting) if the node found is *already* dirty from this same
+            generation's own foreground mutation -- a node's `id` field isn't rewritten until it
+            actually flushes, so an already-touched node can still read back as `id == old_id`;
+            blindly adopting `dense_copy` there would silently discard whatever that foreground
+            mutation already did to it (caught concretely, not just reasoned about, while writing
+            this method's own regression test). */
+        bool _relocate(uint64_t old_id, TuplePtr search_key, std::shared_ptr<Extent> dense_copy);
 
         /** Descend from `frames.back()` leftmost down to a leaf, appending frames along the way
             (used by Iterator::operator++() after moving to a new branch entry, and by begin()). */

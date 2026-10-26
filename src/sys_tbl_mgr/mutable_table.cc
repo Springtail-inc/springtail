@@ -1,8 +1,12 @@
+#include <algorithm>
 #include <memory>
 
 #include <common/constants.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
+
+#include <storage/index_engine/segment_set.hh>
+#include <storage/vacuumer.hh>
 
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/mutable_table.hh>
@@ -556,6 +560,59 @@ namespace indexer_helpers {
         }
 
         return r;
+    }
+
+    std::vector<IndexWriterPtr>
+    MutableTable::all_index_writers() const
+    {
+        std::vector<IndexWriterPtr> writers;
+        writers.push_back(_primary_index);
+        if (_look_aside_index) {
+            writers.push_back(_look_aside_index);
+        }
+        for (auto &secondary : _secondary_indexes) {
+            writers.push_back(secondary.second.first);
+        }
+        return writers;
+    }
+
+    void
+    MutableTable::run_compaction_cycle()
+    {
+        auto *vacuumer = Vacuumer::get_instance();
+        auto candidates = vacuumer->get_compaction_candidates();
+        if (candidates.empty()) {
+            return;
+        }
+
+        for (auto &writer : all_index_writers()) {
+            for (auto &segment : writer->get_segment_paths()) {
+                if (std::find(candidates.begin(), candidates.end(), segment) == candidates.end()) {
+                    continue;
+                }
+
+                auto scratch_file = segment;
+                scratch_file += ".compact_scratch";
+
+                auto is_dead = [&segment, vacuumer](uint64_t real_id) {
+                    return vacuumer->compaction_dead_offsets(segment).count(
+                            SegmentSet::offset_of(real_id)) > 0;
+                };
+
+                auto items = writer->bulk_copy_for_compaction(segment, scratch_file, is_dead,
+                                                               vacuumer->compaction_item_budget());
+                if (!items.empty()) {
+                    writer->apply_compaction_batch(scratch_file, items);
+                }
+
+                // One candidate segment per cycle across the whole table keeps this bounded
+                // (phase-7.md's Throttling task) -- a segment not fully reclaimed this call
+                // (because it wasn't fully compacted, or wasn't fully dead yet after compacting)
+                // will simply be offered again on a later claim/finalize once the Vacuumer's
+                // own background thread re-derives candidacy.
+                return;
+            }
+        }
     }
 
     void

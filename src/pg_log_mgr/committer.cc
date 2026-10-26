@@ -934,6 +934,19 @@ namespace springtail::committer {
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "{} table {} for batch (target_xid={})",
                   is_new ? "Created new" : "Reusing", tid, final_xid);
 
+        // Background space-reclaim compaction (architecture.md "btree" redesign Sec 7.1,
+        // Decisions log entry 2): for ordinary (non-system) tables, this worker claiming `tid`
+        // for its next commit batch is also the point that claims any pending compaction work
+        // for it -- run_compaction_cycle() executes inline, interleaved with (not blocking)
+        // this batch's own foreground mutations below, on this worker's already-owned
+        // IndexWriter instances. System/catalog tables are explicitly excluded here -- they
+        // route through sys_tbl_mgr::Server's per-db_id catalog queue instead (Server::finalize()),
+        // since a Committer worker is not their sole mutator the way it is for an ordinary
+        // table (architecture.md Sec 5.4 case 1 vs. case 3).
+        if (tid > constant::MAX_SYSTEM_TABLE_ID) {
+            table->run_compaction_cycle();
+        }
+
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
         std::optional<WriteCacheTableSet::Metadata> min_md;

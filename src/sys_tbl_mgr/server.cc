@@ -889,6 +889,15 @@ Server::finalize(uint64_t db_id, uint64_t xid, bool call_sync)
     // XXX we currently don't store the metadata, but re-read it from the roots file each time
     std::map<uint64_t, TableMetadata> md_map;
     for (const auto& entry : _write[db_id]) {
+        // Background space-reclaim compaction for system/catalog tables (architecture.md "btree"
+        // redesign Sec 7.1, Decisions log entry 2): routed through this same per-db_id catalog
+        // queue slot already held above, rather than a Committer worker -- a Committer worker is
+        // not this table's sole mutator the way it is for an ordinary table (architecture.md
+        // Sec 5.4 case 1), so compaction work for it must go through the same serialization
+        // point every other catalog mutation does. Runs before finalize() so any relocation it
+        // performs rides along with this same finalize() call, not a separate one.
+        entry.second->run_compaction_cycle();
+
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize table {}@{}", entry.first, request.xid());
         md_map[entry.first] = entry.second->finalize(call_sync);
     }

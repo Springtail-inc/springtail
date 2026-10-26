@@ -176,6 +176,32 @@ namespace springtail {
         /** Get the list of table data and index files. */
         std::vector<std::filesystem::path> get_table_files() const;
 
+        /** Every index writer this table owns: the primary index, the look-aside index (if one
+            has been built yet -- see §5.6/create_look_aside_root()), and every secondary index,
+            in no particular order. Used by run_compaction_cycle() to check each index's own
+            segments against the Vacuumer's current compaction candidates -- the natural place
+            for this is here, not in the caller, since this class is the one that already owns
+            and enumerates _secondary_indexes. */
+        std::vector<IndexWriterPtr> all_index_writers() const;
+
+        /**
+         * Run one bounded cycle of background space-reclaim compaction (architecture.md "btree"
+         * redesign Sec 7.1) across this table's indexes: checks the Vacuumer's current
+         * compaction-candidate segments against each index's own segment files
+         * (IndexWriter::get_segment_paths()) and, for at most one matching segment, bulk-copies
+         * its still-reachable extents (phase 1) and relocates them into that index's live
+         * structure (phase 2) -- both performed inline here. This is safe to call from either of
+         * this phase's two owning-component call sites (a Committer worker's claimed table_id
+         * turn, or Server's per-db_id catalog-queue callback during finalize()) because both
+         * already hold this MutableTable's exclusive single-writer turn per this class's own
+         * contract (architecture.md Sec 5.4; Decisions log entry 2) -- this method does not
+         * itself acquire or check any exclusivity. A no-op if none of this table's segments are
+         * currently a candidate. Never calls finalize() -- any relocation performed here rides
+         * along with the caller's own already-scheduled finalize() for this generation, exactly
+         * like any other mutation.
+         */
+        void run_compaction_cycle();
+
         /**
          * @brief Get next internal row ID to be used for the row in the mutation
          */
