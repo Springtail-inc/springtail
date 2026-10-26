@@ -89,6 +89,22 @@ namespace springtail {
                                            const ExtentHeader &header) const;
 
         /**
+         * Append `count` rows starting at `start` from `src` (laid out per `schema`) onto the
+         * *end* of an already-existing `dst` extent, in place. The mechanical inverse half of
+         * what background structural-reclaim merge needs (architecture.md "btree" redesign Sec
+         * 7.1, phase 8) -- combining two siblings' content into one denser extent is just
+         * copy_range() to seed the first half plus this to append the second, mirroring how
+         * _split_node() already uses copy_range() twice for the opposite (one extent into two)
+         * operation. Purely mechanical row movement, same as copy_range() -- never decides
+         * *whether* to merge; that's WriteStrategy::underfull()/can_merge()'s job.
+         */
+        void append_range(std::shared_ptr<Extent> dst,
+                          std::shared_ptr<Extent> src,
+                          ExtentSchemaPtr schema,
+                          uint32_t start,
+                          uint32_t count) const;
+
+        /**
          * Flush a dirty extent to `file`, returning its newly assigned extent_id. The flushed
          * extent (now immutable, decompressed, in hand) is published into the clean cache so a
          * subsequent read of the same extent_id doesn't have to immediately re-read what was

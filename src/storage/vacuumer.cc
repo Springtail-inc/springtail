@@ -65,6 +65,21 @@ Vacuumer::_init()
         _compaction_item_budget = VacuumConfig::COMPACTION_ITEM_BUDGET;
     }
 
+    // Background structural-reclaim (merge, architecture.md "btree" redesign Sec 7.1, phase 8):
+    // occupancy threshold and per-cycle item budget.
+    if (vacuum_config_json.contains("underfull_occupancy_fraction")) {
+        Json::get_to<double>(vacuum_config_json, "underfull_occupancy_fraction",
+                             _underfull_occupancy_fraction);
+    } else {
+        _underfull_occupancy_fraction = VacuumConfig::UNDERFULL_OCCUPANCY_FRACTION;
+    }
+
+    if (vacuum_config_json.contains("merge_item_budget")) {
+        Json::get_to<uint64_t>(vacuum_config_json, "merge_item_budget", _merge_item_budget);
+    } else {
+        _merge_item_budget = VacuumConfig::MERGE_ITEM_BUDGET;
+    }
+
     // Vacuum base dir
     Json::get_to<std::filesystem::path>(vacuum_config_json, "vacuum_dir", _vacuum_data_base);
     _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base) / vacuum_global_namespace;
@@ -424,6 +439,43 @@ Vacuumer::compaction_dead_offsets(const std::filesystem::path &file)
         return {};
     }
     return it->second;
+}
+
+void
+Vacuumer::raise_underfull_flag(const std::filesystem::path &tree_file, uint64_t old_id,
+                               ValueTuplePtr search_key)
+{
+    std::unique_lock lock(_mutex);
+    _underfull_flags[tree_file].push_back(UnderfullFlag{ old_id, std::move(search_key) });
+}
+
+std::vector<Vacuumer::UnderfullFlag>
+Vacuumer::get_underfull_flags(const std::filesystem::path &tree_file)
+{
+    std::unique_lock lock(_mutex);
+    auto it = _underfull_flags.find(tree_file);
+    if (it == _underfull_flags.end()) {
+        return {};
+    }
+    return it->second;
+}
+
+void
+Vacuumer::clear_underfull_flag(const std::filesystem::path &tree_file, uint64_t old_id)
+{
+    std::unique_lock lock(_mutex);
+    auto it = _underfull_flags.find(tree_file);
+    if (it == _underfull_flags.end()) {
+        return;
+    }
+
+    std::erase_if(it->second, [old_id](const UnderfullFlag &flag) {
+        return flag.old_id == old_id;
+    });
+
+    if (it->second.empty()) {
+        _underfull_flags.erase(it);
+    }
 }
 
 void

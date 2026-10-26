@@ -15,6 +15,7 @@
 #include <redis/redis_ddl.hh>
 #include <storage/cache.hh>
 #include <storage/extent.hh>
+#include <storage/field.hh>
 #include <storage/io_mgr.hh>
 #include <storage/schema.hh>
 
@@ -37,6 +38,20 @@ namespace springtail {
             segment_seal_threshold_bytes used (phase 6). */
         constexpr double COMPACTION_DEAD_FRACTION_THRESHOLD = 0.5;
         constexpr uint64_t COMPACTION_ITEM_BUDGET = 32;
+
+        /** architecture.md "btree" redesign Sec 7.1 / phase-8.md OQ5: background structural-
+            reclaim (merge) occupancy threshold and per-cycle item budget. In the same
+            storage.vacuum_config namespace as compaction's own knobs above (consumed by
+            BtreeWriteStrategy via Vacuumer::underfull_occupancy_fraction(), not read directly
+            by the strategy -- same indirection max_extent_size itself already uses). The budget
+            default is deliberately smaller than COMPACTION_ITEM_BUDGET: unlike compaction's
+            phase-1 bulk copy (a cheap sequential scan), each merge item does a fresh root-to-
+            node descent *plus* a sibling lookup *plus* the combine itself, so a smaller per-
+            cycle cap keeps one cycle's wall-clock cost comparable despite the larger per-item
+            cost. Both tuning decisions, not measured values (same posture as every other
+            VacuumConfig default). */
+        constexpr double UNDERFULL_OCCUPANCY_FRACTION = 0.25;
+        constexpr uint64_t MERGE_ITEM_BUDGET = 8;
 
         constexpr char GLOBAL_FILE_SUFFIX[] = ".global.vcm";
         constexpr char GLOBAL_RUNFILE_SUFFIX[] = ".global.vcm.run";
@@ -181,6 +196,75 @@ public:
      *        "storage.vacuum_config.compaction_item_budget" for the config knob.
      */
     uint64_t compaction_item_budget() const { return _compaction_item_budget; }
+
+    /**
+     * @brief One underfull-node flag raised by the delete path (architecture.md "btree"
+     *        redesign Sec 7.1, phase 8: background structural-reclaim/merge). Mirrors
+     *        IndexWriter::CompactionItem's shape exactly, for the same reason CompactionItem
+     *        has that shape: a real id plus a search key is enough for a later, independent
+     *        lookup to re-find and re-validate a specific node, and nothing about storing that
+     *        pair needs tree-shape knowledge -- only *consuming* one (ask the parent for a
+     *        sibling) does, which is why consumption lives in IndexWriter/MutableTable, not
+     *        here (see phases/phase-8.md's "Design notes" for the full reasoning).
+     */
+    struct UnderfullFlag {
+        uint64_t old_id;
+        ValueTuplePtr search_key;
+    };
+
+    /**
+     * @brief Raise a "node at old_id is underfull" flag for `tree_file` (architecture.md Sec
+     *        7.1, phase 8). Called inline by IndexWriter::_flush_node() the moment a non-root,
+     *        non-empty node it flushes is below the strategy's occupancy threshold -- never
+     *        called directly by anything else. In-memory only, deliberately *not* given
+     *        _compaction_candidates's recompute-from-log crash-consistency treatment: losing a
+     *        flag (process restart) only delays a merge that would otherwise eventually have
+     *        happened, it never under-protects anything irreversible the way losing a dead-byte
+     *        count could (that gates an actual whole-file delete) -- see phases/phase-8.md's
+     *        Design notes for the full argument.
+     * @param tree_file The tree's own base file path (IndexWriter::get_file_path()), *not* a
+     *        segment path -- a flagged node's real id can land in any segment this tree ever
+     *        writes to over its lifetime, so flags are grouped per tree, not per segment.
+     */
+    void raise_underfull_flag(const std::filesystem::path &tree_file, uint64_t old_id,
+                              ValueTuplePtr search_key);
+
+    /**
+     * @brief Every underfull flag currently raised for `tree_file`, in raise order. Read-only --
+     *        does not retire anything (see clear_underfull_flag()). Call once per merge cycle,
+     *        not once per candidate node (mirrors compaction_dead_offsets()'s own usage
+     *        contract -- round-1 review finding 2 is the precedent for why that distinction
+     *        matters: this is the same process-wide-singleton mutex the vacuum thread itself
+     *        takes).
+     * @param tree_file A tree's base file path, as passed to raise_underfull_flag().
+     * @return The currently-raised flags, or empty if none.
+     */
+    std::vector<UnderfullFlag> get_underfull_flags(const std::filesystem::path &tree_file);
+
+    /**
+     * @brief Retire exactly the one flag matching `old_id` for `tree_file` -- never a broader
+     *        clear (e.g. "every flag for this tree"), mirroring the lesson that a tracker's
+     *        retirement path needs the same ownership gating as its claim path. Called by the
+     *        background merge consumer once it has resolved `old_id`'s flag, whatever the
+     *        outcome (merged, found stale, or no sibling had room) -- all three are terminal
+     *        for that one flag; a no-op if already cleared or never raised.
+     */
+    void clear_underfull_flag(const std::filesystem::path &tree_file, uint64_t old_id);
+
+    /**
+     * @brief The configured occupancy threshold (as a fraction of a tree's max extent size)
+     *        below which background structural-reclaim (merge) considers a node underfull --
+     *        see VacuumConfig::UNDERFULL_OCCUPANCY_FRACTION for the default and
+     *        "storage.vacuum_config.underfull_occupancy_fraction" for the config knob.
+     */
+    double underfull_occupancy_fraction() const { return _underfull_occupancy_fraction; }
+
+    /**
+     * @brief The configured per-cycle item budget for background structural-reclaim (merge) --
+     *        see VacuumConfig::MERGE_ITEM_BUDGET for the default and
+     *        "storage.vacuum_config.merge_item_budget" for the config knob.
+     */
+    uint64_t merge_item_budget() const { return _merge_item_budget; }
 
     /**
      * Register a table snapshot to be expired by the vacuumer.
@@ -358,6 +442,25 @@ private:
 
     /** Per-cycle extent-copy budget -- see VacuumConfig::COMPACTION_ITEM_BUDGET. */
     uint64_t _compaction_item_budget = VacuumConfig::COMPACTION_ITEM_BUDGET;
+
+    /**
+     * Background structural-reclaim (merge) flags (architecture.md "btree" redesign Sec 7.1,
+     * phase 8): tree base file path -> every currently-raised UnderfullFlag for that tree, in
+     * raise order. Unlike _compaction_candidates (a point-in-time snapshot recomputed fresh
+     * every vacuum run), these are discrete events raised inline by IndexWriter::_flush_node()
+     * and explicitly claimed/retired one at a time by clear_underfull_flag() -- see that
+     * method's doc comment. Guarded by `_mutex`, same as every other map here; raise/get/clear
+     * are all plain, O(1)-ish bookkeeping -- no sibling lookup or merge ever runs while holding
+     * it.
+     */
+    std::map<std::filesystem::path, std::vector<UnderfullFlag>> _underfull_flags;
+
+    /** architecture.md Sec 7.1 occupancy threshold -- see
+        VacuumConfig::UNDERFULL_OCCUPANCY_FRACTION. */
+    double _underfull_occupancy_fraction = VacuumConfig::UNDERFULL_OCCUPANCY_FRACTION;
+
+    /** Per-cycle merge-item budget -- see VacuumConfig::MERGE_ITEM_BUDGET. */
+    uint64_t _merge_item_budget = VacuumConfig::MERGE_ITEM_BUDGET;
 
     std::condition_variable _cv; ///< Condition variable to wake up the vacuumer thread
 

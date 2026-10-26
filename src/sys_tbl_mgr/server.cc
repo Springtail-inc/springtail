@@ -924,6 +924,14 @@ Server::finalize(uint64_t db_id, uint64_t xid, bool call_sync)
             prepared_compactions.erase(prepared_it);
         }
 
+        // Background structural-reclaim (merge, architecture.md "btree" redesign Sec 7.1,
+        // phase 8): unlike compaction, this has no slow, lock-free-safe phase to run before this
+        // slot was acquired (phases/phase-8.md OQ2) -- the background lookup itself is small and
+        // local, so it runs here, entirely within the slot, exactly like compaction's own phase
+        // 2. Same per-table single-writer exclusivity this slot already provides for system
+        // tables (Decisions log entry 2).
+        entry.second->run_merge_cycle();
+
         LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Finalize table {}@{}", entry.first, request.xid());
         md_map[entry.first] = entry.second->finalize(call_sync);
     }

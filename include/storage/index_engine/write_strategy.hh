@@ -57,5 +57,20 @@ namespace springtail {
             ranges into fresh extents is IndexExtentCache's (Sec 8) -- see
             IndexExtentCache::copy_range(). */
         { strategy.split_point(extent) } -> std::convertible_to<uint32_t>;
+
+        /** True once `extent`'s content has shrunk enough (btree redesign Sec 7.1, phase 8:
+            "structural waste") that it's a candidate for background merge with a sibling --
+            never true for a *fully* empty extent, which the existing _remove_empty_leaf() path
+            already handles inline, unconditionally, with no sibling coordination needed. The
+            strategy owns the exact occupancy threshold, the same way it owns needs_split()'s
+            overflow threshold. */
+        { strategy.underfull(extent) } -> std::convertible_to<bool>;
+
+        /** True if `extent` and `sibling_extent`'s combined content would still fit within one
+            extent -- the "does a sibling have room" half of background merge. Reuses whatever
+            budget needs_split()/split_point() already enforce; decides only whether this one
+            candidate pair fits, never whether a merge should be attempted in the first place
+            (that's underfull()'s job, plus the caller's sibling-lookup). */
+        { strategy.can_merge(extent, extent) } -> std::convertible_to<bool>;
     };
 }

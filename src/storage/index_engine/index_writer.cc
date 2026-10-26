@@ -545,18 +545,53 @@ namespace springtail {
         uint64_t real_id = SegmentSet::pack(_segments.current_segment_id(), within_offset);
         DCHECK_LT(real_id, TEMP_ID_BASE);
 
-        // Notify the vacuumer that node->prev_offset is now superseded (architecture.md "btree"
-        // redesign Sec 4's reachability invariant: once nothing points at it, it's reclaimable).
-        // Phase 1 deliberately left this unwired (nothing referenced IndexWriter in production
-        // yet) and flagged exactly this phase as the one to wire it up, and to decide how to
-        // de-duplicate: a split's "first"/"second" results both inherit the same prev_offset
-        // (_split_node), and if both independently flush (e.g. across different calls this
-        // generation, or one now and one after a later re-split), reporting prev_offset more than
-        // once would double-count it in the vacuumer's bookkeeping. reported_expired is scoped to
-        // one finalize() call and dedupes within it; chained splits *across* generations can't
-        // double-report the same prev_offset, since by the next generation it's already a real,
-        // different on-disk id.
-        //
+        // Notify the vacuumer that node->prev_offset (and, for a merge result, second_prev_offset
+        // -- phase 8) are now superseded (architecture.md "btree" redesign Sec 4's reachability
+        // invariant: once nothing points at it, it's reclaimable). Phase 1 deliberately left this
+        // unwired (nothing referenced IndexWriter in production yet) and flagged exactly this
+        // phase as the one to wire it up, and to decide how to de-duplicate: a split's
+        // "first"/"second" results both inherit the same prev_offset (_split_node), and if both
+        // independently flush (e.g. across different calls this generation, or one now and one
+        // after a later re-split), reporting prev_offset more than once would double-count it in
+        // the vacuumer's bookkeeping. reported_expired is scoped to one finalize() call and
+        // dedupes within it; chained splits/merges *across* generations can't double-report the
+        // same prev_offset, since by the next generation it's already a real, different on-disk
+        // id. See _report_superseded() for the rest (exact-size reporting, segment-path decoding).
+        _report_superseded(node->prev_offset, reported_expired);
+        _report_superseded(node->second_prev_offset, reported_expired);
+
+        // Background structural-reclaim (merge, architecture.md Sec 7.1, phase 8): the delete
+        // path's signal is raised *here*, not at the point remove() shrinks a node in memory --
+        // only once a node actually flushes does it have the stable, on-disk real_id a later,
+        // independent background consumer can look up (an in-memory temp id, by contrast, is
+        // meaningless outside this one generation). Checking at flush time rather than tracking
+        // a separate pending-candidate list also gets phase-8.md OQ7 ("recursive underflow")
+        // correct for free: a parent left underfull by a merge dropping one of its child rows is
+        // *itself* dirtied by that merge (ordinary _touch() cascading) and so is *always*
+        // reconsidered right here the next time it flushes, with no separate propagation step
+        // needed. Never raised for the root (no parent to merge with -- phase-8.md OQ6, mirrors
+        // _remove_empty_leaf()'s own root-exclusion for the fully-empty case) or for an empty
+        // extent (the existing, unchanged "remove when fully empty" path already handles that
+        // case inline before the node in question would ever reach a flush here at all).
+        if (node != _root && !node->extent->empty() && _strategy.underfull(node->extent)) {
+            MutableFieldArrayPtr key_fields = (node->schema == _branch_schema) ? _branch_keys : _leaf_keys;
+            Vacuumer::get_instance()->raise_underfull_flag(_file, real_id,
+                                                           _make_value_key(*node->extent, key_fields));
+        }
+
+        _segments.advance_after_flush();
+
+        node->id = real_id;
+        node->dirty = false;
+        node->children.clear();
+    }
+
+    template <typename Strategy>
+    requires WriteStrategy<Strategy>
+    void
+    IndexWriter<Strategy>::_report_superseded(uint64_t prev_offset,
+                                              std::unordered_set<uint64_t> &reported_expired)
+    {
         // Since phase 6, prev_offset is itself a packed (segment_id, offset) real id (every real
         // id is, post phase-6), so it must be decoded into its own segment's path before being
         // reported -- the vacuumer's dead-byte bookkeeping is keyed by literal, openable file
@@ -579,23 +614,15 @@ namespace springtail {
         // rather than mutating the cached original in place), so this is a cache hit, not an
         // extra disk read, except in the rare case the entry was evicted under memory pressure
         // in between, where re-reading it is the correct (if slightly more costly) fallback.
-        if (node->prev_offset != constant::UNKNOWN_EXTENT &&
-                reported_expired.insert(node->prev_offset).second) {
-            auto prev_segment_path = SegmentSet::segment_path(
-                    _file, SegmentSet::segment_id_of(node->prev_offset));
-            uint32_t prev_size = 0;
-            _cache->get(_database_id, prev_segment_path, SegmentSet::offset_of(node->prev_offset),
-                       &prev_size);
-            Vacuumer::get_instance()->expire_extent(prev_segment_path,
-                                                    SegmentSet::offset_of(node->prev_offset),
-                                                    prev_size, _xid);
+        if (prev_offset == constant::UNKNOWN_EXTENT || !reported_expired.insert(prev_offset).second) {
+            return;
         }
 
-        _segments.advance_after_flush();
-
-        node->id = real_id;
-        node->dirty = false;
-        node->children.clear();
+        auto prev_segment_path = SegmentSet::segment_path(_file, SegmentSet::segment_id_of(prev_offset));
+        uint32_t prev_size = 0;
+        _cache->get(_database_id, prev_segment_path, SegmentSet::offset_of(prev_offset), &prev_size);
+        Vacuumer::get_instance()->expire_extent(prev_segment_path, SegmentSet::offset_of(prev_offset),
+                                                prev_size, _xid);
     }
 
     template <typename Strategy>
@@ -750,6 +777,150 @@ namespace springtail {
         std::filesystem::remove(scratch_file, ec);
 
         return applied;
+    }
+
+    template <typename Strategy>
+    requires WriteStrategy<Strategy>
+    bool
+    IndexWriter<Strategy>::try_merge_underfull(uint64_t old_id, ValueTuplePtr search_key)
+    {
+        ReentrancyGuard guard(_in_call);
+        CHECK(_root != nullptr);
+        CHECK(!_finalized);
+
+        DCHECK_LT(old_id, TEMP_ID_BASE);
+
+        if (_root->id == old_id) {
+            // The root has no parent and therefore no sibling to merge with (phase-8.md OQ6) --
+            // _flush_node() never raises a flag for the root in the first place, so this should
+            // be unreachable in practice; kept as a defensive no-op rather than a CHECK, same
+            // posture _relocate() takes toward its own "not found" case.
+            return false;
+        }
+
+        std::vector<NodePtr> path{ _root };
+        while (path.back()->type.is_branch()) {
+            NodePtr parent = path.back();
+            auto row_i = _strategy.choose_child(parent->extent, parent->schema, search_key);
+            uint64_t id = _branch_child_f->get_uint64(&*row_i);
+
+            if (id != old_id) {
+                path.push_back(_get_child(parent, id));
+                continue;
+            }
+
+            // Found old_id's current row. Materialize the node it points at (same lookup
+            // _get_child() always uses -- dirty-or-clean, it doesn't matter here: unlike
+            // _relocate()'s hard swap of a stale precomputed copy, merge only ever reads this
+            // node's *current* content live, right now, so whatever this generation's own
+            // foreground mutation may already have done to it is exactly what gets carried
+            // into the merge, never discarded).
+            NodePtr node = _get_child(parent, id);
+
+            if (!_strategy.underfull(node->extent)) {
+                // Stale: node received enough further inserts since the flag was raised that
+                // it's no longer underfull -- a benign no-op, not an error (phase-8.md's own
+                // "staled flag" test).
+                return false;
+            }
+
+            auto node_row_i = std::ranges::find_if(*parent->extent, [this, old_id](const Extent::Row &row) {
+                return _branch_child_f->get_uint64(&row) == old_id;
+            });
+            CHECK(node_row_i != parent->extent->end());
+            int64_t node_index = node_row_i - parent->extent->begin();
+
+            // Check both neighboring siblings where the tree shape allows it (architecture.md
+            // Sec 7.1: improves the odds of finding room, not required for correctness).
+            for (int64_t sib_index : { node_index - 1, node_index + 1 }) {
+                if (sib_index < 0 || sib_index >= static_cast<int64_t>(parent->extent->row_count())) {
+                    continue;
+                }
+
+                uint64_t sibling_id = _branch_child_f->get_uint64(
+                        &*parent->extent->at(static_cast<uint32_t>(sib_index)));
+                NodePtr sibling = _get_child(parent, sibling_id);
+                CHECK_EQ(node->type.is_branch(), sibling->type.is_branch());
+
+                if (!_strategy.can_merge(node->extent, sibling->extent)) {
+                    continue;
+                }
+
+                bool sibling_is_first = sib_index < node_index;
+                _merge_nodes(path, parent, sibling_is_first ? sibling : node,
+                             sibling_is_first ? node : sibling);
+                return true;
+            }
+
+            // No sibling currently has room -- a legitimate, stable, benign outcome
+            // (architecture.md Sec 7.1): not a failure, not a retry-forever case. The caller
+            // retires this flag regardless of this return value.
+            return false;
+        }
+
+        // old_id isn't referenced anywhere along search_key's current descent path -- same
+        // staleness handling as _relocate()'s identical final case.
+        return false;
+    }
+
+    template <typename Strategy>
+    requires WriteStrategy<Strategy>
+    void
+    IndexWriter<Strategy>::_merge_nodes(std::vector<NodePtr> &path, NodePtr parent,
+                                        NodePtr first, NodePtr second)
+    {
+        // `path` is the root-to-parent path (path.back() == parent); touch it before mutating
+        // anything, exactly like insert()/remove() touch their own path up front -- clones every
+        // not-yet-dirty ancestor (including parent itself) into a private copy first.
+        _touch(path, path.size() - 1);
+
+        ExtentType child_type(first->type.is_branch());
+        ExtentHeader header(child_type, _xid, first->schema->row_size(), first->schema->field_types());
+        auto merged_extent = _cache->copy_range(first->extent, first->schema, 0,
+                                                first->extent->row_count(), header);
+        _cache->append_range(merged_extent, second->extent, second->schema, 0,
+                             second->extent->row_count());
+
+        MutableFieldArrayPtr key_fields = (first->schema == _branch_schema) ? _branch_keys : _leaf_keys;
+
+        auto merged = std::make_shared<Node>();
+        merged->id = _next_temp_id++;
+        merged->prev_offset = first->prev_offset;
+        merged->second_prev_offset = second->prev_offset;
+        merged->type = child_type;
+        merged->extent = merged_extent;
+        merged->schema = first->schema;
+        merged->dirty = true;
+        merged->prev_key = _make_value_key(*merged_extent, key_fields);
+
+        // The mechanical inverse of _split_node()'s own children-partition step (phase-8.md OQ4
+        // / phase 1's lesson 2): both halves' materialized-but-not-yet-flushed descendants must
+        // carry over into the merged node, or a descendant already split-but-unflushed earlier
+        // this generation would be silently dropped from the flush walk.
+        merged->children.reserve(first->children.size() + second->children.size());
+        merged->children.insert(merged->children.end(), first->children.begin(), first->children.end());
+        merged->children.insert(merged->children.end(), second->children.begin(), second->children.end());
+
+        // parent (just touched/cloned above) loses both source rows, gains one for `merged` --
+        // located by child-pointer id, not by any recorded key, same as _split_node()'s and
+        // _remove_empty_leaf()'s identical pattern.
+        auto first_row_i = std::ranges::find_if(*parent->extent, [this, &first](const Extent::Row &row) {
+            return _branch_child_f->get_uint64(&row) == first->id;
+        });
+        CHECK(first_row_i != parent->extent->end());
+        parent->extent->remove(first_row_i);
+
+        auto second_row_i = std::ranges::find_if(*parent->extent, [this, &second](const Extent::Row &row) {
+            return _branch_child_f->get_uint64(&row) == second->id;
+        });
+        CHECK(second_row_i != parent->extent->end());
+        parent->extent->remove(second_row_i);
+
+        std::erase(parent->children, first);
+        std::erase(parent->children, second);
+        parent->children.push_back(merged);
+
+        _insert_branch_row(parent, merged);
     }
 
     template <typename Strategy>

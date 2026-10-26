@@ -241,6 +241,23 @@ namespace springtail {
         void run_compaction_cycle();
 
         /**
+         * Background structural-reclaim (merge), phase 8 (architecture.md "btree" redesign Sec
+         * 7.1): resolve every underfull flag Vacuumer currently holds for each of this table's
+         * index writers, up to Vacuumer::merge_item_budget() total across all of them this
+         * call. Unlike compaction, this is a single phase, not a prepare/apply split
+         * (phases/phase-8.md OQ2) -- the background lookup itself (re-find the node, ask its
+         * parent for a sibling) is small and local, with no slow scan to run outside this
+         * table's single-writer exclusivity the way compaction's segment scan needed, so there
+         * is nothing to split a "prepare" out of. Needs this table's ordinary exclusivity
+         * throughout, exactly like insert()/remove()/apply_compaction_cycle() -- the caller
+         * must already hold it (a Committer worker's claimed table_id turn, or a system-table
+         * catalog-queue callback; mirrors Decisions log entry 2's routing for compaction). Every
+         * flag this call examines is retired (merged, found stale, or dropped for "no sibling
+         * had room") regardless of outcome -- see Vacuumer::clear_underfull_flag().
+         */
+        void run_merge_cycle();
+
+        /**
          * @brief Get next internal row ID to be used for the row in the mutation
          */
         uint64_t get_next_internal_row_id() {

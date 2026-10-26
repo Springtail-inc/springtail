@@ -26,6 +26,16 @@ static auto get_max_extent_size_secondary() {
     return constant::MAX_EXTENT_SIZE_SECONDARY;
 }
 
+// Background structural-reclaim (merge, architecture.md "btree" redesign Sec 7.1 / phase-8.md
+// OQ5): every BtreeWriteStrategy this table constructs shares the same Vacuumer-configured
+// occupancy threshold, read fresh at construction time rather than baked into a constant the
+// way max_extent_size is -- underfull() is actually consulted at runtime against a live config
+// knob (storage.vacuum_config.underfull_occupancy_fraction), unlike max_extent_size's own
+// never-configured constants above.
+static auto get_underfull_occupancy_fraction() {
+    return Vacuumer::get_instance()->underfull_occupancy_fraction();
+}
+
 namespace indexer_helpers {
 
     /**
@@ -244,7 +254,7 @@ namespace indexer_helpers {
                                                             primary_schema,
                                                             _target_xid,
                                                             IndexExtentCache::get_instance(),
-                                                            BtreeWriteStrategy{get_max_extent_size()},
+                                                            BtreeWriteStrategy{get_max_extent_size(), get_underfull_occupancy_fraction()},
                                                             extension_callback);
         } else {
             primary_schema = _schema->create_index_schema(primary_key, { extent_c }, primary_key, extension_callback);
@@ -255,7 +265,7 @@ namespace indexer_helpers {
                                                             primary_schema,
                                                             _target_xid,
                                                             IndexExtentCache::get_instance(),
-                                                            BtreeWriteStrategy{get_max_extent_size()},
+                                                            BtreeWriteStrategy{get_max_extent_size(), get_underfull_occupancy_fraction()},
                                                             extension_callback);
         }
 
@@ -637,6 +647,34 @@ namespace indexer_helpers {
     }
 
     void
+    MutableTable::run_merge_cycle()
+    {
+        auto *vacuumer = Vacuumer::get_instance();
+        uint64_t budget = vacuumer->merge_item_budget();
+        uint64_t processed = 0;
+
+        for (auto &writer : all_index_writers()) {
+            if (processed >= budget) {
+                break;
+            }
+
+            // Read-only (get_underfull_flags() retires nothing) -- resolution below retires
+            // each flag it examines individually via clear_underfull_flag(), never a broader
+            // "clear everything for this tree" sweep.
+            auto flags = vacuumer->get_underfull_flags(writer->get_file_path());
+            for (auto &flag : flags) {
+                if (processed >= budget) {
+                    break;
+                }
+
+                writer->try_merge_underfull(flag.old_id, flag.search_key);
+                vacuumer->clear_underfull_flag(writer->get_file_path(), flag.old_id);
+                processed++;
+            }
+        }
+    }
+
+    void
     MutableTable::sync_data_and_indexes()
     {
         // sync the data file
@@ -754,7 +792,7 @@ namespace indexer_helpers {
                 _look_aside_schema,
                 _target_xid,
                 IndexExtentCache::get_instance(),
-                BtreeWriteStrategy{get_max_extent_size_secondary()},
+                BtreeWriteStrategy{get_max_extent_size_secondary(), get_underfull_occupancy_fraction()},
                 extension_callback);
 
         return _look_aside_index;
@@ -778,7 +816,9 @@ namespace indexer_helpers {
                 key, index_schema,
                 _target_xid,
                 IndexExtentCache::get_instance(),
-                BtreeWriteStrategy{index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary()},
+                BtreeWriteStrategy{
+                        index_id == constant::INDEX_PRIMARY ? get_max_extent_size() : get_max_extent_size_secondary(),
+                        get_underfull_occupancy_fraction()},
                 extension_callback
                 );
         return btree;

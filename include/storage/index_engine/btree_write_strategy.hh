@@ -18,8 +18,18 @@ namespace springtail {
      */
     class BtreeWriteStrategy {
     public:
-        explicit BtreeWriteStrategy(uint64_t max_extent_size)
-            : _max_extent_size(max_extent_size)
+        /** Default occupancy threshold for underfull() (architecture.md "btree" redesign Sec
+            7.1 / phase-8.md OQ5): a node below this fraction of max_extent_size is a
+            structural-reclaim (merge) candidate. Picked, not derived -- see
+            Vacuumer::underfull_occupancy_fraction()'s doc comment (phases/phase-8.md's Design
+            notes) for why this lives on VacuumConfig as the real tunable and this is only the
+            fallback for direct (non-Vacuumer-configured) construction, e.g. in tests. */
+        static constexpr double DEFAULT_UNDERFULL_FRACTION = 0.25;
+
+        explicit BtreeWriteStrategy(uint64_t max_extent_size,
+                                    double underfull_fraction = DEFAULT_UNDERFULL_FRACTION)
+            : _max_extent_size(max_extent_size),
+              _underfull_fraction(underfull_fraction)
         { }
 
         /** Plain field-wise comparison; both tuples must already be projected onto the same sort
@@ -46,7 +56,23 @@ namespace springtail {
             return extent->row_count() / 2;
         }
 
+        /** True once `extent` has shrunk below `_underfull_fraction` of the split budget
+            (phase 8: architecture.md Sec 7.1's "structural waste"). An empty extent trivially
+            satisfies this too, but _remove_empty_leaf()'s existing fully-empty path removes
+            such a node before it ever reaches a flush this method would be consulted for (see
+            IndexWriter::_flush_node()'s own non-empty guard) -- not re-checked here. */
+        bool underfull(std::shared_ptr<Extent> extent) const {
+            return extent->byte_count() < static_cast<uint64_t>(_max_extent_size * _underfull_fraction);
+        }
+
+        /** True if `extent` and `sibling_extent`'s combined content would still fit within one
+            extent -- reuses the same max-size budget needs_split()/split_point() enforce. */
+        bool can_merge(std::shared_ptr<Extent> extent, std::shared_ptr<Extent> sibling_extent) const {
+            return extent->byte_count() + sibling_extent->byte_count() <= _max_extent_size;
+        }
+
     private:
         uint64_t _max_extent_size;
+        double _underfull_fraction;
     };
 }

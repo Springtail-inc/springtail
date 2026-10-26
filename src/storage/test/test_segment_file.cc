@@ -966,4 +966,382 @@ namespace {
             << "concurrent background compaction scanning must not corrupt foreground mutation "
                "happening on the same tree/instance";
     }
+
+    /**
+     * Phase 8 (architecture.md "btree" redesign Sec 7.1): background structural-reclaim
+     * (merge). Reuses CompactionReclaimTest's fixture shape (small seal threshold, services
+     * started) since the node-count assertions below rely on the same "scan a *fresh* segment,
+     * with is_dead=false, to read off exactly what this generation just flushed" technique
+     * BulkCopyProducesDenseCopyWithIdenticalContent/CompactionReclaimTest already established --
+     * here used to read a branch extent's own row_count() (its current child count) rather
+     * than to prove dense-copy content, since that's a precise, segment-accounting-free way to
+     * observe "the tree got shallower/denser" without needing a dedicated node-counting API on
+     * IndexWriter itself.
+     *
+     * _run_merge_cycle() below mirrors MutableTable::run_merge_cycle()'s logic exactly (Vacuumer
+     * flag lookup -> per-flag try_merge_underfull() -> retire), so these tests exercise the same
+     * orchestration shape the real callers (Committer, sys_tbl_mgr::Server) use, without needing
+     * a full MutableTable/Committer stack.
+     */
+    class MergeReclaimTest : public testing::Test {
+    protected:
+        static void SetUpTestSuite() {
+            _base_dir = std::filesystem::temp_directory_path() / "test_merge_reclaim" / "table";
+            std::filesystem::remove_all(_base_dir);
+            std::filesystem::create_directories(_base_dir);
+
+            ::setenv(environment::ENV_OVERRIDE, "storage.segment_seal_threshold_bytes=500", 1);
+            springtail_init_test();
+            test::start_services(/*xid_mgr=*/true, /*sys_tbl_mgr=*/false, /*write_cache=*/false);
+        }
+
+        static void TearDownTestSuite() {
+            std::filesystem::remove_all(_base_dir);
+            springtail_shutdown();
+        }
+
+        void SetUp() override {
+            _db_id = _next_db_id++;
+            _table_dir = _base_dir / std::to_string(_db_id);
+            std::filesystem::create_directories(_table_dir);
+
+            std::vector<SchemaColumn> columns({
+                    { "key", 0, SchemaType::TEXT, 0, false, 0 },
+                    { "payload", 1, SchemaType::TEXT, 0, false }
+                });
+            _schema = std::make_shared<ExtentSchema>(columns, ExtensionCallback{}, false, false);
+            _keys = { "key" };
+
+            _cache = std::make_shared<IndexExtentCache>(64 * 1024);
+
+            Vacuumer::get_instance()->enable_tracking_extents();
+        }
+
+        void TearDown() override {
+            Vacuumer::get_instance()->cleanup_db(_db_id);
+        }
+
+        TuplePtr _row(const std::string &key, const std::string &payload) {
+            auto fields = std::make_shared<FieldArray>();
+            fields->push_back(std::make_shared<ConstTypeField<std::string>>(key));
+            fields->push_back(std::make_shared<ConstTypeField<std::string>>(payload));
+            return std::make_shared<FieldTuple>(fields, nullptr);
+        }
+
+        std::shared_ptr<BtreeIndexWriter>
+        _create_writer(const std::filesystem::path &name, uint64_t xid, uint64_t max_extent_size)
+        {
+            auto writer = std::make_shared<BtreeIndexWriter>(
+                _db_id, name, _keys, _schema, xid, _cache,
+                BtreeWriteStrategy(max_extent_size));
+            writer->init_empty();
+            return writer;
+        }
+
+        std::shared_ptr<BtreeIndexWriter>
+        _open_writer(const std::filesystem::path &name, uint64_t xid, uint64_t root_offset,
+                     uint64_t max_extent_size)
+        {
+            auto writer = std::make_shared<BtreeIndexWriter>(
+                _db_id, name, _keys, _schema, xid, _cache,
+                BtreeWriteStrategy(max_extent_size));
+            writer->init(root_offset);
+            return writer;
+        }
+
+        std::vector<std::string>
+        _read_all_keys(std::shared_ptr<BtreeIndexWriter> writer) {
+            auto key_f = _schema->get_field("key");
+            std::vector<std::string> keys;
+            for (auto i = writer->begin(); i != writer->end(); ++i) {
+                auto row = *i;
+                keys.emplace_back(key_f->get_text(&row));
+            }
+            return keys;
+        }
+
+        /**
+         * MutableTable::run_merge_cycle()'s logic, reproduced directly against one writer
+         * (rather than a whole table's all_index_writers()) so these tests don't need a full
+         * MutableTable stack. Drains (reads, then retires one at a time) every flag currently
+         * raised for `writer`'s own file, resolving each via try_merge_underfull(); returns how
+         * many actually merged.
+         */
+        size_t _run_merge_cycle(std::shared_ptr<BtreeIndexWriter> writer) {
+            size_t merged = 0;
+            auto flags = Vacuumer::get_instance()->get_underfull_flags(writer->get_file_path());
+            for (auto &flag : flags) {
+                if (writer->try_merge_underfull(flag.old_id, flag.search_key)) {
+                    merged++;
+                }
+                Vacuumer::get_instance()->clear_underfull_flag(writer->get_file_path(), flag.old_id);
+            }
+            return merged;
+        }
+
+        /**
+         * Scans `segment_path` raw (mirrors BulkCopyProducesDenseCopyWithIdenticalContent's own
+         * technique) and returns the row_count() of the *last* branch-type extent found --
+         * post-order flush (child-before-parent, _flush_node()) means a generation's own root is
+         * always the last branch extent its finalize() call appends, and later generations'
+         * appends always come after earlier ones', so this is the current root's child count
+         * regardless of how many older (possibly now-dead) branch extents share the segment.
+         */
+        uint32_t _root_row_count(const std::filesystem::path &segment_path) {
+            auto handle = IOMgr::get_instance()->open(segment_path, IOMgr::IO_MODE::READ, true);
+            uint64_t pos = 0;
+            uint32_t last_branch_row_count = 0;
+            bool found = false;
+            while (true) {
+                auto response = handle->read(pos);
+                if (response->data.empty()) {
+                    break;
+                }
+                Extent e(response->data);
+                if (e.header().type.is_branch()) {
+                    last_branch_row_count = e.row_count();
+                    found = true;
+                }
+                pos = response->next_offset;
+            }
+            CHECK(found) << "no branch (root) extent found in " << segment_path.native();
+            return last_branch_row_count;
+        }
+
+        uint64_t _db_id = 0;
+        std::filesystem::path _table_dir;
+
+        ExtentSchemaPtr _schema;
+        std::vector<std::string> _keys;
+        std::shared_ptr<IndexExtentCache> _cache;
+
+        static std::filesystem::path _base_dir;
+        static std::atomic<uint64_t> _next_db_id;
+    };
+
+    std::filesystem::path MergeReclaimTest::_base_dir;
+    std::atomic<uint64_t> MergeReclaimTest::_next_db_id{1000001};
+
+    TEST_F(MergeReclaimTest, DeleteHeavyWorkloadRaisesFlagAndMergeShrinksNodeCount)
+    {
+        auto path = _table_dir / "0.idx";
+
+        // Generation 1: four short rows, two per key range ("a*", "z*"), force exactly one
+        // split (midpoint = 2 rows) into two leaves of two rows each, directly under a
+        // two-child branch root -- confirmed empirically (unlike the 3-per-range/6-row pattern
+        // used elsewhere in this file, which splits into a deeper, 3-level shape for this same
+        // 60-byte threshold; this test needs the flat, 2-level shape specifically, so it uses
+        // its own smaller dataset rather than reusing that one).
+        auto writer1 = _create_writer(path, 2, /*max_extent_size=*/60);
+        for (int i = 0; i < 2; i++) {
+            writer1->insert(_row(fmt::format("a{}", i), "short"));
+            writer1->insert(_row(fmt::format("z{}", i), "short"));
+        }
+        uint64_t offset1 = writer1->finalize();
+        auto segment0_path = SegmentSet::segment_path(path, SegmentSet::segment_id_of(offset1));
+        ASSERT_TRUE(std::filesystem::exists(segment0_path));
+        ASSERT_EQ(_root_row_count(segment0_path), 2u)
+            << "test setup assumption: generation 1 splits into exactly two leaves";
+
+        // Generation 2: shrink the "a" leaf without emptying it (remove 1 of its 2 rows), using
+        // a much larger max_extent_size so this generation's own growth never re-splits. Segment
+        // 0 is already sealed (its generation-1 size already exceeds this fixture's 500-byte
+        // threshold), so this flush lands in segment 1.
+        auto writer2 = _open_writer(path, 3, offset1, /*max_extent_size=*/1000000);
+        writer2->remove(_row("a1", "short"));
+        uint64_t offset2 = writer2->finalize();
+
+        auto flags = Vacuumer::get_instance()->get_underfull_flags(path);
+        ASSERT_EQ(flags.size(), 1u)
+            << "shrinking the 'a' leaf to a single row (well below the default 25% occupancy "
+               "threshold against a 1,000,000-byte max_extent_size) must raise exactly one flag; "
+               "the untouched 'z' leaf and the root are never flushed this generation";
+
+        // Background consumer: a fresh writer instance at offset2 (mirrors run_merge_cycle()'s
+        // own "later, independent" consumption -- MutableTable/IndexWriter instances don't
+        // persist across commit batches in production).
+        auto writer3 = _open_writer(path, 4, offset2, /*max_extent_size=*/1000000);
+        size_t merged = _run_merge_cycle(writer3);
+        EXPECT_EQ(merged, 1u) << "the 'a' leaf's only sibling ('z') has ample room (both tiny) "
+                                 "-- this merge must actually happen, not be dropped as no-room";
+        EXPECT_TRUE(Vacuumer::get_instance()->get_underfull_flags(path).empty())
+            << "the flag must be retired either way -- here, because it merged";
+
+        uint64_t offset3 = writer3->finalize();
+        auto segment_after = SegmentSet::segment_path(path, SegmentSet::segment_id_of(offset3));
+        EXPECT_EQ(_root_row_count(segment_after), 1u)
+            << "merging the tree's only two leaves into one must drop the root's child count "
+               "from 2 to 1";
+
+        auto final_reader = _open_writer(path, 100, offset3, /*max_extent_size=*/1000000);
+        auto actual = _read_all_keys(final_reader);
+        std::vector<std::string> expected{"a0", "z0", "z1"};
+        std::sort(expected.begin(), expected.end());
+        std::sort(actual.begin(), actual.end());
+        EXPECT_EQ(actual, expected) << "no data lost or duplicated by the merge";
+    }
+
+    TEST_F(MergeReclaimTest, StaleFlagUnderfullNodeGotMoreInsertsIsNoOp)
+    {
+        auto path = _table_dir / "0.idx";
+
+        auto writer1 = _create_writer(path, 2, /*max_extent_size=*/60);
+        for (int i = 0; i < 2; i++) {
+            writer1->insert(_row(fmt::format("a{}", i), "short"));
+            writer1->insert(_row(fmt::format("z{}", i), "short"));
+        }
+        uint64_t offset1 = writer1->finalize();
+
+        auto writer2 = _open_writer(path, 3, offset1, /*max_extent_size=*/1000000);
+        writer2->remove(_row("a1", "short"));
+        uint64_t offset2 = writer2->finalize();
+
+        ASSERT_EQ(Vacuumer::get_instance()->get_underfull_flags(path).size(), 1u);
+
+        // Before the background consumer ever runs, a *separate*, later generation inserts
+        // enough more into the same leaf that it's no longer underfull by the time
+        // try_merge_underfull() re-checks -- the staleness case where "the underfull node
+        // itself received more inserts". The key ("a05") must sort between "a0" (leaf_a's only
+        // remaining row) and "a1" (leaf_a's *recorded* routing key in the parent, stale and
+        // unchanged since the remove() above -- removal never calls _propagate_key_increase) so
+        // choose_child() still routes it into leaf_a specifically, not past it into "z"'s leaf.
+        auto writer2b = _open_writer(path, 4, offset2, /*max_extent_size=*/1000000);
+        std::string padding(400000, 'x');
+        writer2b->insert(_row("a05", padding));
+        uint64_t offset2b = writer2b->finalize();
+
+        auto writer3 = _open_writer(path, 5, offset2b, /*max_extent_size=*/1000000);
+        size_t merged = _run_merge_cycle(writer3);
+        EXPECT_EQ(merged, 0u) << "the node is no longer underfull -- this must be a silent "
+                                 "no-op, not an incorrect merge";
+        EXPECT_TRUE(Vacuumer::get_instance()->get_underfull_flags(path).empty())
+            << "the flag must still be retired even though nothing merged";
+
+        uint64_t offset3 = writer3->finalize();
+        auto final_reader = _open_writer(path, 100, offset3, /*max_extent_size=*/1000000);
+        auto actual = _read_all_keys(final_reader);
+        std::vector<std::string> expected{"a0", "a05", "z0", "z1"};
+        std::sort(expected.begin(), expected.end());
+        std::sort(actual.begin(), actual.end());
+        EXPECT_EQ(actual, expected)
+            << "no data lost -- in particular, the padding insert this staleness hinges on must "
+               "still be present, not silently discarded by a wrongly-attempted merge";
+    }
+
+    TEST_F(MergeReclaimTest, StaleFlagNoSiblingHasRoomIsNoOpAndDoesNotRetry)
+    {
+        auto path = _table_dir / "0.idx";
+        constexpr uint64_t M = 2000;
+
+        auto writer1 = _create_writer(path, 2, /*max_extent_size=*/60);
+        for (int i = 0; i < 2; i++) {
+            writer1->insert(_row(fmt::format("a{}", i), "short"));
+            writer1->insert(_row(fmt::format("z{}", i), "short"));
+        }
+        uint64_t offset1 = writer1->finalize();
+
+        // Shrink the "a" leaf (raises the flag) using the same max_extent_size (M) the rest of
+        // this test's writers use for underfull()/can_merge() -- a real tree's max_extent_size
+        // is a per-table constant, not something that varies generation to generation the way
+        // this file's other tests sometimes do for setup convenience.
+        auto writer2 = _open_writer(path, 3, offset1, /*max_extent_size=*/M);
+        writer2->remove(_row("a1", "short"));
+        uint64_t offset2 = writer2->finalize();
+
+        ASSERT_EQ(Vacuumer::get_instance()->get_underfull_flags(path).size(), 1u);
+
+        // "Sibling filled back up before the consumer got to it": a *separate*, later generation
+        // (not the one that raised the flag) grows the "z" leaf -- still well under M itself, so
+        // it doesn't re-split -- enough that it no longer has room for the already-shrunk "a"
+        // leaf's content by the time the background consumer actually runs.
+        auto writer2b = _open_writer(path, 4, offset2, /*max_extent_size=*/M);
+        writer2b->insert(_row("z2", std::string(1930, 'x')));
+        uint64_t offset2b = writer2b->finalize();
+
+        ASSERT_EQ(Vacuumer::get_instance()->get_underfull_flags(path).size(), 1u)
+            << "growing 'z' must not disturb the still-pending flag against the untouched 'a' "
+               "leaf";
+
+        auto writer3 = _open_writer(path, 5, offset2b, /*max_extent_size=*/M);
+        size_t merged = _run_merge_cycle(writer3);
+        EXPECT_EQ(merged, 0u) << "the only sibling no longer has room -- a legitimate, benign "
+                                 "no-op, not a failure";
+        EXPECT_TRUE(Vacuumer::get_instance()->get_underfull_flags(path).empty())
+            << "the flag must still be retired even though no merge happened";
+
+        // Bounded-iteration check (not timing-based) that this doesn't retry in a tight loop:
+        // with the flag already retired above and no new mutation raising a fresh one, repeated
+        // cycles against the same writer must keep finding nothing to do.
+        for (int i = 0; i < 5; i++) {
+            EXPECT_EQ(_run_merge_cycle(writer3), 0u);
+            EXPECT_TRUE(Vacuumer::get_instance()->get_underfull_flags(path).empty());
+        }
+
+        uint64_t offset3 = writer3->finalize();
+        auto final_reader = _open_writer(path, 100, offset3, /*max_extent_size=*/M);
+        auto actual = _read_all_keys(final_reader);
+        std::vector<std::string> expected{"a0", "z0", "z1", "z2"};
+        std::sort(expected.begin(), expected.end());
+        std::sort(actual.begin(), actual.end());
+        EXPECT_EQ(actual, expected);
+    }
+
+    TEST_F(MergeReclaimTest, ChurnOverManyCommitsDoesNotAccumulateUnboundedSparseNodes)
+    {
+        auto path = _table_dir / "0.idx";
+
+        std::vector<std::string> groups{"a", "b", "c", "d"};
+        auto writer1 = _create_writer(path, 2, /*max_extent_size=*/60);
+        for (int i = 0; i < 3; i++) {
+            for (auto &g : groups) {
+                writer1->insert(_row(fmt::format("{}{}", g, i), "short"));
+            }
+        }
+        uint64_t offset = writer1->finalize();
+
+        auto segment0_path = SegmentSet::segment_path(path, SegmentSet::segment_id_of(offset));
+        uint32_t root_children_before = _root_row_count(segment0_path);
+        ASSERT_GT(root_children_before, 1u)
+            << "test setup assumption: 12 rows across 4 key groups at this threshold splits "
+               "into more than one child under the root";
+
+        // Across several commits, thin every group down to a single row (leaving every original
+        // leaf sparse but never empty), running a merge cycle after each generation's delete --
+        // the steady-state ingest pattern (one Committer batch finalizing, the next cycle's
+        // background consumer picking up whatever that batch's deletes flagged).
+        uint64_t xid = 3;
+        for (auto &g : groups) {
+            auto writer = _open_writer(path, xid++, offset, /*max_extent_size=*/1000000);
+            writer->remove(_row(fmt::format("{}{}", g, 1), "short"));
+            writer->remove(_row(fmt::format("{}{}", g, 2), "short"));
+            offset = writer->finalize();
+
+            auto merge_writer = _open_writer(path, xid++, offset, /*max_extent_size=*/1000000);
+            _run_merge_cycle(merge_writer);
+            offset = merge_writer->finalize();
+        }
+
+        EXPECT_TRUE(Vacuumer::get_instance()->get_underfull_flags(path).empty())
+            << "every flag raised across this churn must have been resolved (merged, stale, or "
+               "no-room) by the merge cycle run right after it, none left dangling";
+
+        auto final_segment = SegmentSet::segment_path(path, SegmentSet::segment_id_of(offset));
+        uint32_t root_children_after = _root_row_count(final_segment);
+        EXPECT_LT(root_children_after, root_children_before)
+            << "thinning every original leaf down to a single row and running a merge cycle "
+               "after each generation must shrink the tree's child count over time, not leave "
+               "every original leaf permanently sparse (the operational property Sec 7 exists "
+               "to fix, mirroring phase 7's CompactionReclaimTest assertion for the structural-"
+               "waste side)";
+
+        auto final_reader = _open_writer(path, xid, offset, /*max_extent_size=*/1000000);
+        auto actual = _read_all_keys(final_reader);
+        std::vector<std::string> expected;
+        for (auto &g : groups) {
+            expected.push_back(g + "0");
+        }
+        std::sort(expected.begin(), expected.end());
+        std::sort(actual.begin(), actual.end());
+        EXPECT_EQ(actual, expected) << "no data lost or duplicated across the whole churn run";
+    }
 }

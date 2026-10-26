@@ -73,6 +73,15 @@ namespace springtail {
                 in-memory splits) never corresponded to on-disk content. */
             uint64_t prev_offset = constant::UNKNOWN_EXTENT;
 
+            /** A *second* superseded predecessor, used only by background structural-reclaim
+                merge (phase 8): a merge result combines two existing siblings' content, so it
+                has two predecessors to report superseded once it flushes, not one -- unlike
+                prev_offset, this has no on-disk header counterpart (nothing reads it back; see
+                _flush_node()'s comment on why that's fine), it exists purely so _flush_node()'s
+                existing Vacuumer-reporting step can report both without a second Node-level
+                field class of its own. UNKNOWN_EXTENT for every node except a merge result. */
+            uint64_t second_prev_offset = constant::UNKNOWN_EXTENT;
+
             ExtentType type;
 
             /** The key recorded for this node in its parent's branch row; unset while this node
@@ -231,6 +240,47 @@ namespace springtail {
         size_t apply_compaction_batch(const std::filesystem::path &scratch_file,
                                       const std::vector<CompactionItem> &items);
 
+        /**
+         * Background structural-reclaim (merge), phase 8 (architecture.md Sec 7.1): resolve one
+         * underfull flag (Vacuumer::UnderfullFlag -- same shape as CompactionItem, re-used here
+         * as `old_id`/`search_key` directly rather than a dedicated type, since the two fields
+         * mean exactly the same thing in both cases) against this tree's *current* live
+         * structure. Unlike compaction, this is a single phase, not a prepare/apply split
+         * (phase-8.md OQ2): the background lookup here -- re-find the node, ask its parent for
+         * a sibling -- is itself small and local (architecture.md's own framing), so there is
+         * no slow, lock-free-safe scan to run outside this tree's single-writer exclusivity the
+         * way compaction's segment scan needed. Needs that exclusivity throughout, exactly like
+         * insert()/remove().
+         *
+         * Re-validates before doing anything: descends from `_root` via `search_key` (same
+         * mechanism _relocate() uses) to find the branch row whose child pointer is `old_id`.
+         * Not found -- the node moved on or is gone -- is a silent no-op, same as _relocate()'s
+         * identical case. If found, re-checks occupancy against the node's *current* extent
+         * (which may already include whatever this generation's own foreground mutation did to
+         * it since the flag was raised) -- no longer underfull is also a silent no-op, not an
+         * error (unlike apply_compaction_batch(), merge never needs an "already dirty this
+         * generation" special case for the flagged node itself: it always reads the node's
+         * live, current content to build the combined result, never blindly overwrites with a
+         * stale precomputed copy the way a compaction relocation does).
+         *
+         * If still underfull, checks both the immediately preceding and following sibling rows
+         * in the parent (whichever exist) for one with enough room (WriteStrategy::can_merge())
+         * -- not required to check both for correctness, just improves the odds of finding
+         * room. If one qualifies, combines the two extents into one new node (the mechanical
+         * inverse of _split_node(), including carrying over both halves' `children` the same
+         * way _split_node()'s own partition step does -- see its comment), drops one child row
+         * from the parent, and marks the parent (and every ancestor) dirty for this
+         * generation's finalize() to flush -- exactly like an ordinary mutation. If no sibling
+         * currently has room, that is a legitimate, stable, benign outcome (architecture.md Sec
+         * 7.1), not a failure: returns false with no mutation performed. Either way, retiring
+         * the flag itself is the caller's responsibility (Vacuumer::clear_underfull_flag()) --
+         * this method only ever reports whether a merge actually happened.
+         *
+         * @return True if a merge was performed; false if the flag was stale or no sibling had
+         *         room (the caller should still retire the flag either way).
+         */
+        bool try_merge_underfull(uint64_t old_id, ValueTuplePtr search_key);
+
         /** Every segment file this tree could have ever written to (0..current, inclusive) --
             phase 6's segment-set abstraction means a tree's content can now span more than one
             physical file; callers that need to fsync or enumerate every on-disk file backing
@@ -375,6 +425,15 @@ namespace springtail {
             patched into a real extent_id) would be silently dropped from the flush walk. */
         std::pair<NodePtr, NodePtr> _split_node(NodePtr node);
 
+        /** try_merge_underfull()'s mechanical worker, the inverse of _split_node(): combine
+            `first` and `second` (the lower- and higher-keyed of an already-confirmed-mergeable
+            sibling pair) into one new node, carrying over both halves' `children` the same way
+            _split_node()'s own partition step does (phase-8.md OQ4), and update `parent`
+            (`path.back()`) to drop both source rows and insert one for the merged result.
+            Touches `path` (root-to-parent) up front via _touch(), exactly like insert()/
+            remove() touch their own path before mutating anything. */
+        void _merge_nodes(std::vector<NodePtr> &path, NodePtr parent, NodePtr first, NodePtr second);
+
         /** After inserting `new_key` into `path.back()`, walk ancestors upward refreshing each
             one's recorded routing key for its child along `path` wherever `new_key` exceeds what
             is currently recorded there -- see the .cc for why this is needed for routing
@@ -399,6 +458,13 @@ namespace springtail {
             finalize() call) since sibling split results can share the same prev_offset -- see the
             .cc for the full reasoning. */
         void _flush_node(NodePtr node, std::unordered_set<uint64_t> &reported_expired);
+
+        /** _flush_node()'s per-predecessor Vacuumer-reporting step, factored out so a merge
+            result (two predecessors: prev_offset and second_prev_offset) and an ordinary
+            split/touch result (one: prev_offset) share the same exact-size-reporting and
+            reported_expired-dedup logic. A no-op if `prev_offset` is UNKNOWN_EXTENT or already
+            reported this finalize() call. */
+        void _report_superseded(uint64_t prev_offset, std::unordered_set<uint64_t> &reported_expired);
 
         /** apply_compaction_batch()'s per-item worker: if `old_id` is still referenced -- either
             as the tree's own root, or as some current node's branch-row child pointer, found by

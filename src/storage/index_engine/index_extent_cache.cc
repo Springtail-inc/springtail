@@ -97,7 +97,17 @@ namespace springtail {
                                 const ExtentHeader &header) const
     {
         auto dst = std::make_shared<Extent>(header);
+        append_range(dst, src, schema, start, count);
+        return dst;
+    }
 
+    void
+    IndexExtentCache::append_range(std::shared_ptr<Extent> dst,
+                                   std::shared_ptr<Extent> src,
+                                   ExtentSchemaPtr schema,
+                                   uint32_t start,
+                                   uint32_t count) const
+    {
         auto mutable_fields = schema->get_mutable_fields();
         auto fields = schema->get_fields();
 
@@ -107,8 +117,6 @@ namespace springtail {
             MutableTuple tuple(mutable_fields, &dst_row);
             tuple.assign(FieldTuple(fields, &*(src->at(i))));
         }
-
-        return dst;
     }
 
     uint64_t

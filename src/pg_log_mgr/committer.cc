@@ -945,6 +945,13 @@ namespace springtail::committer {
         // table (architecture.md Sec 5.4 case 1 vs. case 3).
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
             table->run_compaction_cycle();
+
+            // Background structural-reclaim (merge, architecture.md "btree" redesign Sec 7.1,
+            // phase 8): same claimed-work-item routing as compaction just above (Decisions log
+            // entry 2) -- this worker already owns this table_id's IndexWriter instances for
+            // this batch, so it is also the one to resolve any underfull flags raised against
+            // them, interleaved with (not blocking) this batch's own foreground mutations below.
+            table->run_merge_cycle();
         }
 
         // retrieve extents and apply the mutations to them
