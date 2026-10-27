@@ -5,6 +5,7 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 
+#include <common/constants.hh>
 #include <common/object_cache.hh>
 
 #include <storage/exception.hh>
@@ -109,6 +110,14 @@ namespace springtail {
         struct Column {
             uint32_t idx_position;
             uint32_t position;
+
+            /** The opclass this column was indexed with (e.g. "gist_text_ops"), or empty for a
+                plain btree column -- carried from the catalog's per-column Indexes::OPCLASS
+                (btree redesign phase 9) so a GiST/GIN strategy reconstructed from catalog data
+                (phase 10/11) knows which opclass-calling glue to use. Defaults empty rather than
+                throwing when absent since every pre-phase-9 index, and every BTREE column, never
+                set one. */
+            std::string opclass;
         };
         uint64_t id;
         std::string schema;
@@ -117,6 +126,16 @@ namespace springtail {
         bool is_unique;
         uint8_t state;
         std::vector<Column> columns;
+
+        /** Which engine strategy built this index's tree (btree redesign phase 10, closing the
+            gap phase-9.md's handoff named explicitly: without this field, Table::init()'s and
+            MutableTable's reload loops had no way to avoid misinterpreting an existing GiST/GIN
+            index's content as a btree once a non-BTREE index could reach READY). Defaults to
+            BTREE for every construction site that pre-dates this field (the internal
+            primary/look-aside role indexes, and any catalog-read path not yet updated to
+            populate it) -- matching index_access_method_from_string()'s own "empty string means
+            BTREE" convention, since BTREE is the only access method that ever existed before. */
+        IndexAccessMethod access_method = IndexAccessMethod::BTREE;
     };
 
     /**

@@ -153,7 +153,14 @@ struct FmgrInfo {
     bool fn_retset;               /* function returns a set */
     unsigned char fn_stats;       /* collect stats if track_functions > this */
     void *fn_extra;               /* extra space for use by handler */
-    MemoryContext fn_mcxt; /* memory context to store fn_extra in */
+    // `void *`, not the C++ `MemoryContext` class (pg_ext/memory.hh) -- matches real Postgres's
+    // own ABI (a plain pointer) and the rest of this layer's void*-based memory-context
+    // convention (CurrentMemoryContext, MemoryContextAlloc()). Confirmed unread/unwritten
+    // anywhere else in this tree before fixing (grep for fn_mcxt) -- a real extension .so (e.g.
+    // pg_trgm's gtrgm_consistent(), btree redesign phase 10) dereferences this field directly,
+    // and a by-value C++ class here would silently corrupt FmgrInfo's ABI layout for any such
+    // call.
+    void *fn_mcxt;
     fmNodePtr fn_expr;            /* expression parse tree for call, or NULL */
 };
 
@@ -233,6 +240,8 @@ extern "C" PGEXT_API Datum DirectFunctionCall3(PGFunction func,
                                                Datum arg2,
                                                Datum arg3);
 extern "C" PGEXT_API Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
+extern "C" PGEXT_API Datum DirectFunctionCall4(PGFunction func, Datum arg1, Datum arg2, Datum arg3, Datum arg4);
+extern "C" PGEXT_API Datum DirectFunctionCall5(PGFunction func, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5);
 extern "C" PGEXT_API Datum InputFunctionCall(FmgrInfo *flinfo,
                                              char *str,
                                              Oid typioparam,

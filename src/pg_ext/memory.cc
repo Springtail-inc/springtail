@@ -17,7 +17,8 @@ MemoryContext::MemoryContext(MemoryContext* parent,
 {
     // Create the initial block
     auto block = std::make_unique<MemoryBlock>(init_size);
-    _blocks[block->remaining()] = std::move(block);
+    size_t key = block->remaining();
+    _blocks.emplace(key, std::move(block));
 }
 
 void*
@@ -76,7 +77,8 @@ MemoryContext::alloc(size_t size)
     if (block->pos == block->size) {
         _full_blocks.push_back(std::move(block));
     } else {
-        _blocks[block->remaining()] = std::move(block);
+        size_t key = block->remaining();
+        _blocks.emplace(key, std::move(block));
     }
 
     return ptr;

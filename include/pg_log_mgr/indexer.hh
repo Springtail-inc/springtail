@@ -114,7 +114,7 @@ namespace springtail::committer {
         void _drop(const Key& key, const IndexParams& idx, uint64_t end_xid);
 
         bool _was_dropped(const Key& key);
-        void _commit_build(IndexWriterPtr root, const Key& key, const IndexParams& idx,
+        void _commit_build(AnyIndexRoot root, const Key& key, const IndexParams& idx,
                 uint64_t end_xid, IndexWriterPtr look_aside_root);
 
         // work state
@@ -138,10 +138,15 @@ namespace springtail::committer {
          * - `idx` contains `dbid`, `indexid`, and `ddl`.
          */
         struct IndexState {
-            IndexWriterPtr _root;
+            /** btree redesign phase 10: AnyIndexRoot (table.hh), not IndexWriterPtr -- the
+                index's own root may be either a btree or a GiST Writer; see AnyIndexRoot's
+                class comment for why Indexer needs this (not MutableTable::create_index_root()
+                itself) to be kind-polymorphic. */
+            AnyIndexRoot _root;
             Key _key;
             IndexParams _idx;
             uint64_t _tid;
+            /** Always a btree -- the look-aside index is never GiST (architecture.md Sec 5.5). */
             IndexWriterPtr _look_aside_root;
         };
 
@@ -248,6 +253,11 @@ namespace springtail::committer {
         void _cleanup_for_db(uint64_t db_id);
 
         std::vector<uint32_t> _get_index_cols(proto::IndexInfo index_info);
+
+        /** Same column ordering as _get_index_cols() (sorted by idx_position), but returning
+            each column's opclass instead of its position -- btree redesign phase 10, needed to
+            construct a GistWriteStrategy/GistReadStrategy with opclasses in the right order. */
+        std::vector<std::string> _get_index_opclasses(proto::IndexInfo index_info);
 
         /**
          * @brief Helper method to get index ddl for create action

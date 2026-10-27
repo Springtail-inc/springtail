@@ -19,7 +19,7 @@ namespace springtail::test::ddl_helpers {
 
     proto::IndexProcessRequest create_index(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t index_id,
             std::string idx_name, std::vector<PgMsgSchemaColumn> columns, sys_tbl::IndexNames::State idx_state, bool is_unique,
-            std::string index_type)
+            std::string index_type, std::vector<std::string> opclasses)
     {
 
         PgMsgIndex msg{};
@@ -35,7 +35,9 @@ namespace springtail::test::ddl_helpers {
 
         int idx_position = 0;
         for(const auto& column: columns) {
-            msg.columns.push_back({column.name, column.position, idx_position++});
+            std::string opclass = (static_cast<size_t>(idx_position) < opclasses.size())
+                    ? opclasses[static_cast<size_t>(idx_position)] : "";
+            msg.columns.push_back({column.name, column.position, idx_position++, opclass});
         }
 
         XidLsn xid_lsn{xid};

@@ -21,6 +21,14 @@
 #include <storage/vacuumer.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
+#include <pg_ext/extn_registry.hh>
+// pg_ext/extn_registry.hh transitively includes postgresql/server/catalog/pg_type_d.h, which
+// #defines INT4OID (and friends) as raw integer literals -- colliding with this file's own,
+// pre-existing `static constexpr int32_t INT4OID = 23;` fixture member below. Undefine the
+// macro right after the include so the rest of this file's (unrelated, pre-existing) uses of
+// the identifier `INT4OID` keep meaning the fixture's own constant, not the macro.
+#undef INT4OID
+
 using namespace springtail;
 using namespace springtail::committer;
 using namespace springtail::test::ddl_helpers;
@@ -120,12 +128,17 @@ namespace {
         }
 
         void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name,
-                bool process_requests_in_indexer=true, bool is_unique=false, std::string index_type="btree") {
+                bool process_requests_in_indexer=true, bool is_unique=false, std::string index_type="btree",
+                std::optional<std::vector<PgMsgSchemaColumn>> columns_override=std::nullopt,
+                std::vector<std::string> opclasses={}) {
             // Create index at an XID
             std::list<proto::IndexProcessRequest> index_requests;
+            auto index_columns = columns_override.has_value()
+                    ? *columns_override
+                    : std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end());
             auto create_idx_request = create_index(_db_id, table_id, index_xid, index_id, index_name,
-                    std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY, is_unique,
-                    index_type);
+                    index_columns, sys_tbl::IndexNames::State::NOT_READY, is_unique,
+                    index_type, opclasses);
             index_requests.push_back(std::move(create_idx_request));
 
             // Validate index as NOT_READY
@@ -598,14 +611,18 @@ namespace {
     }
 
     // Regression test for the btree redesign phase 9 dispatch point (architecture.md Decisions
-    // log entry 8): GIST/GIN index builds must fail explicitly at Indexer::_build, leaving the
-    // index NOT_READY (never crashing, never silently building a btree), while an ordinary BTREE
-    // build on the same table is unaffected.
-    TEST_F(Indexer_Test, Test_GistGinDispatchNotImplemented)
+    // log entry 8): GIN index builds must fail explicitly at Indexer::_build, leaving the index
+    // NOT_READY (never crashing, never silently building a btree), while an ordinary BTREE build
+    // on the same table is unaffected. GIST half removed by phase 10 (see
+    // Test_GistBuildReachesReady above): GIST now has a real GistWriter-backed implementation
+    // behind the dispatch point, so "GIST build stays NOT_READY" stopped being the correct
+    // expectation -- confirmed directly (not assumed): this test's own GIST case started failing
+    // its NOT_READY assertion once phase 10 landed, because the build now actually succeeds.
+    // GIN remains untouched (phase 11's job), so its half of this regression test is unchanged.
+    TEST_F(Indexer_Test, Test_GinDispatchNotImplemented)
     {
         uint64_t table_id = _tid++;
         uint64_t btree_index_id = _secondary_index_id + 13;
-        uint64_t gist_index_id = _secondary_index_id + 14;
         uint64_t gin_index_id = _secondary_index_id + 15;
         uint64_t table_xid = access_xid++;
 
@@ -613,7 +630,7 @@ namespace {
 
         for (auto const& [index_id, index_type] :
                 std::vector<std::pair<uint64_t, std::string>>{
-                    {gist_index_id, "gist"}, {gin_index_id, "gin"}}) {
+                    {gin_index_id, "gin"}}) {
             uint64_t index_xid = access_xid++;
             uint64_t data_xid = access_xid++;
 
@@ -621,19 +638,19 @@ namespace {
                     index_type);
 
             // Insert rows *after* the failed build but *before* reconciliation runs -- this is
-            // the exact scenario that crashed before this phase's fix to _reconcile_index():
+            // the exact scenario that crashed before phase 9's fix to _reconcile_index():
             // ordinary (non-abort) reconciliation unconditionally dereferenced idx_state._root
             // to catch up on rows written while the index was "building", an invariant that held
             // as long as a null root only ever meant st.stop_requested() (process shutting down,
             // so this code path never actually ran again) or a drop-in-progress (routed to
-            // _commit_build() instead, which already null-checks). The GIST/GIN dispatch stub
-            // breaks that invariant: it returns a null root while the process keeps running and
-            // ordinary DML keeps arriving. Reverting _reconcile_index()'s own null-root guard
-            // reproduces a SIGSEGV in IndexWriter::insert() on this exact test.
+            // _commit_build() instead, which already null-checks). The GIN dispatch stub breaks
+            // that invariant: it returns a null root while the process keeps running and ordinary
+            // DML keeps arriving. Reverting _reconcile_index()'s own null-root guard reproduces a
+            // SIGSEGV in IndexWriter::insert() on this exact test.
             _populate_table_with_data(table_id, table_xid, data_xid, 10, 5);
 
             // task()'s own _add_to_pending_reconciliation() call runs regardless of whether
-            // _build() produced a real root (see its doc comment) -- the GIST/GIN stub's failure
+            // _build() produced a real root (see its doc comment) -- the GIN stub's failure
             // still reaches the reconciliation queue the same way a successful build would, so
             // wait on it the same way _process_index_and_validate() does.
             auto max_tries = 5;
@@ -659,18 +676,91 @@ namespace {
             // Not READY (the stub never built anything) and not some invented "permanently
             // failed" state either -- NOT_READY is exactly what an interrupted/not-yet-attempted
             // build already leaves behind today, which is what makes this retriable once phase
-            // 10/11 replaces the stub (see Indexer::_build's catch block comment).
+            // 11 replaces the stub (see Indexer::_build's catch block comment).
             ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info.state()),
                     sys_tbl::IndexNames::State::NOT_READY);
         }
 
-        // Control: an ordinary BTREE build on the same table, after the two failed GIST/GIN
-        // attempts, still succeeds -- the dispatch point doesn't wedge or poison anything shared
-        // (e.g. the table's look-aside bootstrap tracker) for a subsequent real build.
+        // Control: an ordinary BTREE build on the same table, after the failed GIN attempt,
+        // still succeeds -- the dispatch point doesn't wedge or poison anything shared (e.g. the
+        // table's look-aside bootstrap tracker) for a subsequent real build.
         uint64_t btree_index_xid = access_xid++;
         _create_index(table_id, btree_index_id, btree_index_xid, "idx_dispatch_btree");
         uint64_t btree_reconcile_xid = access_xid++;
         _process_index_and_validate(btree_index_id, btree_index_xid, btree_reconcile_xid);
     }
+
+    // btree redesign phase 10: a real GIST index build, driven through Indexer's actual
+    // process_requests()/_build() pipeline (not a direct GistWriter unit test -- see
+    // src/storage/test/test_gist_strategy.cc for that), reaches READY -- the dispatch point
+    // phase 9 left as "not yet implemented" (see Test_GistGinDispatchNotImplemented below) now
+    // has a real GistWriter-backed implementation behind it.
+    //
+    // Deliberately 2 rows (never triggers a split): this phase's own test_gist_strategy.cc found
+    // and extensively documented a real, not-fully-root-caused crash in pg_trgm.so's own compiled
+    // gtrgm_union()/gtrgm_penalty() under multi-entry/split conditions (confirmed independent of
+    // several real pg_ext bugs fixed along the way -- see phases/phase-10.md's Design notes).
+    // This test exercises the real Indexer build pipeline for the confirmed-stable few-row case;
+    // split/fan-out correctness is covered by test_gist_strategy.cc's own tests against a
+    // pure-C++ reference opclass instead, specifically to avoid this flagged crash risk.
+    TEST_F(Indexer_Test, Test_GistBuildReachesReady)
+    {
+        // Register pg_trgm's real gist_trgm_ops opclass support functions the same way
+        // test_gist_strategy.cc does (dlopen + dlsym by known contrib/pg_trgm function names) --
+        // this is a C++ unit test with no live FDW/primary connection of its own, unlike the real
+        // daemon's PgCopyTable::init_pg_extn_registry() path.
+        auto registry = PgExtnRegistry::get_instance();
+        registry->init_libraries(_db_id, "gist_trgm_ops", "/usr/lib/postgresql/16/lib/pg_trgm.so");
+        auto add_opclass_method = [&](int support_number, const std::string &function_name) {
+            PgOpsClass opclass;
+            opclass.name = "gist_trgm_ops";
+            opclass.access_method = "gist";
+            PgOpsClassMethod method;
+            method.function_name = function_name;
+            method.support_number = support_number;
+            registry->add_opclass("gist_trgm_ops", opclass, method);
+        };
+        add_opclass_method(GIST_COMPRESS, "gtrgm_compress");
+        add_opclass_method(GIST_UNION, "gtrgm_union");
+        add_opclass_method(GIST_PENALTY, "gtrgm_penalty");
+        add_opclass_method(GIST_PICKSPLIT, "gtrgm_picksplit");
+        add_opclass_method(GIST_CONSISTENT, "gtrgm_consistent");
+
+        uint64_t table_id = _tid++;
+        uint64_t table_xid = access_xid++;
+
+        constexpr int32_t text_pg_oid = 25; // postgres TEXTOID; named to avoid pg_type_d.h's own macro
+        std::vector<PgMsgSchemaColumn> text_columns = {
+            {"gist_id", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
+            {"gist_val", static_cast<uint8_t>(SchemaType::TEXT), text_pg_oid, std::nullopt, 2, 0, true, false, false},
+        };
+        create_table(_db_id, table_id, table_xid, "test_indexer_gist_build_table", text_columns);
+
+        uint64_t data_xid = access_xid++;
+        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
+        for (int i = 0; i < 2; ++i) {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(i + 1));
+            fields.push_back(std::make_shared<ConstTypeField<std::string>>(i == 0 ? "alpha" : "beta"));
+            fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(static_cast<uint64_t>(i + 1)));
+            mtable->insert(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        }
+        auto &&metadata = mtable->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
+
+        uint64_t gist_index_id = _secondary_index_id + 20;
+        uint64_t index_xid = access_xid++;
+        _create_index(table_id, gist_index_id, index_xid, "idx_gist_build", true, false, "gist",
+                std::vector<PgMsgSchemaColumn>{ text_columns[1] }, { "gist_trgm_ops" });
+
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(gist_index_id, index_xid, reconcile_xid);
+
+        auto info = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, gist_index_id,
+                {reconcile_xid, constant::MAX_LSN});
+        ASSERT_EQ(info.index_type(), "gist");
+        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info.state()), sys_tbl::IndexNames::State::READY);
+    }
+
 
 } // namespace

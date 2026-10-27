@@ -300,25 +300,55 @@ namespace indexer_helpers {
             }
             if (!idx_cols.empty()) {
 
-                auto btree = create_index_root(idx.id, idx_cols, extension_callback);
-
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
 
-                if (it->extent_id != constant::UNKNOWN_EXTENT) {
-                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init with root: {}", idx.id, it->extent_id);
-                    btree->init(it->extent_id);
+                // Dispatch on access_method (btree redesign phase 10, closing the gap
+                // phase-9.md's handoff named explicitly) -- see Table::init()'s identical fix
+                // (table.cc) and AnyIndexRoot's class comment (table.hh) for why GIST gets its
+                // own map/construction method rather than reusing create_index_root().
+                if (idx.access_method == IndexAccessMethod::GIST) {
+                    std::vector<std::string> opclass_names;
+                    opclass_names.reserve(idx.columns.size());
+                    for (auto const &col : idx.columns) {
+                        opclass_names.push_back(col.opclass);
+                    }
+                    auto gist_root = create_gist_index_root(idx.id, idx_cols, opclass_names, extension_callback);
+
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} (gist) init with root: {}", idx.id, it->extent_id);
+                        gist_root->init(it->extent_id);
+                    } else {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} (gist) init empty", idx.id);
+                        gist_root->init_empty();
+                    }
+                    assert(_gist_indexes.find(idx.id) == _gist_indexes.end());
+                    _gist_indexes[idx.id] = {gist_root, idx_cols};
                 } else {
-                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init empty", idx.id);
-                    btree->init_empty();
+                    auto btree = create_index_root(idx.id, idx_cols, extension_callback);
+
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init with root: {}", idx.id, it->extent_id);
+                        btree->init(it->extent_id);
+                    } else {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init empty", idx.id);
+                        btree->init_empty();
+                    }
+                    assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
+                    _secondary_indexes[idx.id] = {btree, idx_cols};
                 }
-                assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
-                _secondary_indexes[idx.id] = {btree, idx_cols};
             }
         }
 
-        // Look-aside exists only with secondary indexes
-        auto initialize_look_aside = !_secondary_indexes.empty();
+        // Look-aside exists whenever any secondary index does, regardless of kind -- a table
+        // whose only secondary index is a GiST one still needs the shared look-aside index
+        // reloaded (architecture.md Sec 5.5 generalizes look-aside indirection to every index
+        // kind; GistWriter's leaf entries reference rows via internal_row_id through this same
+        // table-wide look-aside index). Missing this would silently skip reloading look-aside for
+        // any table whose only secondary index happens to be GiST -- caught while widening this
+        // loop for phase 10, not a pre-existing bug (no non-btree secondary index could exist
+        // before this phase).
+        auto initialize_look_aside = !_secondary_indexes.empty() || !_gist_indexes.empty();
 
         if (initialize_look_aside) {
             // find look-aside index root
@@ -837,6 +867,19 @@ namespace indexer_helpers {
                 extension_callback
                 );
         return btree;
+    }
+
+    GistWriterPtr
+    MutableTable::create_gist_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+            const std::vector<std::string> &opclass_names, const ExtensionCallback &extension_callback)
+    {
+        (void)index_columns;
+        (void)extension_callback;
+        return std::make_shared<GistWriter>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                _target_xid,
+                GistWriteStrategy{opclass_names, get_max_extent_size_secondary()},
+                IndexExtentCache::get_instance());
     }
 
     template <MutableTable::MutationType m_type>

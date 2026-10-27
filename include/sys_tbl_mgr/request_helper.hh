@@ -1,5 +1,6 @@
 #pragma once
 
+#include <common/logging.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <proto/sys_tbl_mgr.grpc.pb.h>
 #include <storage/schema.hh>
@@ -175,8 +176,25 @@ namespace springtail::sys_tbl_mgr {
                 info.state = idx.state();
                 info.table_id = idx.table_id();
                 info.is_unique = idx.is_unique();
+                // index_type is an empty string for every pre-phase-9 index and for the
+                // internally-constructed primary/look-aside role indexes (which never go
+                // through Postgres DDL) -- index_access_method_from_string() maps that to BTREE,
+                // the only access method any of them could ever be. Catch locally rather than
+                // let it propagate: this is a read of already-validated, already-persisted
+                // catalog data (never raw external input), but pack_metadata() is called from
+                // enough places (including client.cc's RPC boundary) that a throwing validator
+                // must not assume every caller has its own try/catch (phase 9 round-1 review's
+                // lesson) -- fall back to BTREE and log loudly rather than crash on a read path.
+                try {
+                    info.access_method = index_access_method_from_string(idx.index_type());
+                } catch (const Error &e) {
+                    LOG_ERROR("Unrecognized index_type for index {} ({}): {} -- defaulting to BTREE",
+                              idx.id(), idx.name(), e.what());
+                }
                 for (const auto &col : idx.columns()) {
-                    info.columns.emplace_back(col.idx_position(), col.position());
+                    Index::Column column(col.idx_position(), col.position());
+                    column.opclass = col.opclass();
+                    info.columns.push_back(std::move(column));
                 }
                 // sort by index position
                 std::ranges::sort(info.columns, [](auto const &a, auto const &b) {

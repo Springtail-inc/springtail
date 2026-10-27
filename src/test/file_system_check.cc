@@ -268,7 +268,7 @@ FSCheck::_read_tables(uint64_t db_id, uint64_t max_xid)
 
                 // 8. set primary key positions in the table
                 if (index_id == constant::INDEX_PRIMARY) {
-                    for (auto col_iter: fs_index.index.columns) {
+                    for (const auto &col_iter: fs_index.index.columns) {
                         _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).pos_to_column.at(col_iter.position).pkey_position = col_iter.idx_position;
                     }
                 }
@@ -584,7 +584,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
         LOG_INFO("\tVerifying Index {}:{}:{}, is_unique {}, state {}",
             index.schema, index.id, index.name, index.is_unique, index.state
         );
-        for (auto idx_col_it: index.columns) {
+        for (const auto &idx_col_it: index.columns) {
             LOG_INFO("\t\tIndex position: {}, table column: {}:{}",
                 idx_col_it.idx_position, idx_col_it.position, fs_table.pos_to_column.at(idx_col_it.position).name
             );

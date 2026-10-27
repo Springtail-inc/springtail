@@ -158,9 +158,27 @@ get_table_dir(const std::filesystem::path &base,
             if (!idx_cols.empty()) {
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
-                auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id, extension_callback);
-                assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
-                _secondary_indexes[idx.id] = {btree, idx_cols};
+
+                // Dispatch on access_method (btree redesign phase 10, closing the gap phase-9.md's
+                // handoff named explicitly): a READY GIST index must never be reconstructed via
+                // _create_index_root() (which would misinterpret its content as a btree) just
+                // because this reload loop didn't know any better -- see AnyIndexRoot's/
+                // _create_gist_index_root()'s class comments (table.hh).
+                if (idx.access_method == IndexAccessMethod::GIST) {
+                    std::vector<std::string> opclass_names;
+                    opclass_names.reserve(idx.columns.size());
+                    for (auto const &col : idx.columns) {
+                        opclass_names.push_back(col.opclass);
+                    }
+                    auto gist_root = _create_gist_index_root(idx.id, idx_cols, opclass_names,
+                                                             it->extent_id, extension_callback);
+                    assert(_gist_indexes.find(idx.id) == _gist_indexes.end());
+                    _gist_indexes[idx.id] = {gist_root, idx_cols};
+                } else {
+                    auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id, extension_callback);
+                    assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
+                    _secondary_indexes[idx.id] = {btree, idx_cols};
+                }
             }
         }
 
@@ -497,6 +515,21 @@ get_table_dir(const std::filesystem::path &base,
                 BtreeReadStrategy{},
                 extension_callback);
         return btree;
+    }
+
+    GistReaderPtr
+    Table::_create_gist_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+            const std::vector<std::string> &opclass_names, uint64_t offset,
+            const ExtensionCallback &extension_callback)
+    {
+        (void)index_columns;
+        (void)extension_callback;
+        return std::make_shared<GistReader>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                _xid,
+                offset,
+                std::make_shared<SharedPoolExtentSource>(get_max_extent_size_secondary()),
+                GistReadStrategy{opclass_names});
     }
 
     void Table::Iterator::Primary::next()

@@ -148,6 +148,17 @@ namespace springtail {
                 IndexAccessMethod access_method = IndexAccessMethod::BTREE);
 
         /**
+         * Create a GiST index's Writer root (btree redesign phase 10) -- the GIST counterpart of
+         * create_index_root(), kept as its own method rather than a widened create_index_root()
+         * return type; see AnyIndexRoot's class comment (table.hh) for why. `opclass_names` is
+         * per-column, same order as `index_columns` (phase 9's Indexes::OPCLASS catalog column,
+         * threaded through storage::Index::Column::opclass).
+         */
+        GistWriterPtr create_gist_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+                const std::vector<std::string> &opclass_names,
+                const ExtensionCallback &extension_callback = {});
+
+        /**
          * Create a btree that can be used for look aside index.
          */
         IndexWriterPtr create_look_aside_root(const ExtensionCallback& extension_callback = {});
@@ -459,6 +470,16 @@ namespace springtail {
          * second.second are the index columns
          */
         SecondaryIndexesCache _secondary_indexes; ///< The mutable secondary index btrees.
+
+        /** GiST secondary indexes (btree redesign phase 10) -- kept separate from
+            _secondary_indexes rather than merged into it; see AnyIndexRoot's class comment
+            (table.hh). Not yet consulted by this class's own generic mutation machinery
+            (indexer_helpers::mutation_handler, _mutation_wrapper()) -- ordinary per-row DML
+            maintenance for a GiST index is a known, explicitly-flagged gap of this phase (see
+            phases/phase-10.md's Design notes): only Indexer's own build-time scan (and its
+            reconciliation catch-up, via AnyIndexRoot) populates one today. */
+        std::map<uint64_t, std::pair<GistWriterPtr, std::vector<uint32_t>>> _gist_indexes;
+
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
         ExtentSchemaPtr _schema_without_row_id; ///< The schema of the data extents of
                                                 ///the table without internal row id.

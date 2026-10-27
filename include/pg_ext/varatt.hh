@@ -105,7 +105,18 @@ struct varatt_expanded
 	 (VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) : \
 	  VARSIZE_4B(PTR)))
 
-#define SET_VARSIZE_4B(PTR, len) (((varattrib_4b *)(PTR))->va_4byte.va_header = (len) & 0x3FFFFFFF)
+// NOSONAR - must shift the stored length left by 2 bits (real Postgres's own
+// SET_VARSIZE_4B, src/include/varatt.h), reserving the low 2 bits for the 4B/1B and
+// compressed-vs-plain flags VARATT_IS_1B()/VARSIZE_4B() read back out of bits 0-1 -- storing the
+// raw, unshifted length (as this previously did) sets bit 0 whenever len is odd, which
+// VARATT_IS_1B() then misreads as "this is a 1-byte-header short varlena", and VARSIZE_4B()'s own
+// `>> 2` silently truncates the length by a factor of 4 even when VARATT_IS_1B() correctly says
+// 4B. Confirmed dormant until btree redesign phase 10: no existing caller in this tree writes via
+// SET_VARSIZE() and then reads the size back via VARSIZE_4B()/VARSIZE_ANY()/VARATT_IS_1B() on the
+// same buffer (grep shows existing SET_VARSIZE() writers never get read back through those three
+// macros) -- GistReader/GistWriter's opclass-calling glue (gist_helpers.cc) is the first caller
+// to round-trip a value through both sides.
+#define SET_VARSIZE_4B(PTR, len) (((varattrib_4b *)(PTR))->va_4byte.va_header = ((uint32_t)(len) << 2))
 #define SET_VARSIZE_1B(PTR,len) (((varattrib_1b *) (PTR))->va_header = (((uint8_t) (len)) << 1) | 0x01)
 #define SET_VARSIZE(PTR, len) SET_VARSIZE_4B(PTR, len)
 
