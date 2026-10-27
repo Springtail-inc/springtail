@@ -31,6 +31,17 @@ namespace springtail {
      * extent) is already schema-generic and is deliberately *not* part of this seam -- it has
      * nothing to do with tree shape and is reused as-is by IndexWriter for any strategy with a
      * total order (btree and GIN's entry/posting trees).
+     *
+     * **Confirmed, not corrected, for GIN (phase 11)** -- this claim was written speculatively in
+     * phase 1, before phase 10's decision 11 found the "one generic engine" framing (architecture.md
+     * Sec 5.1) needed correcting for GiST (whose own split/fan-out shape genuinely doesn't fit
+     * IndexWriter<Strategy>/IndexReader<Strategy>'s bodies). GIN turned out differently: both its
+     * entry tree (keyed by extracted term) and every spilled posting tree (keyed by
+     * internal_row_id) really are plain `IndexWriter<BtreeWriteStrategy>` instantiations, reusing
+     * `Tuple::less_than()` exactly as this comment always claimed -- see
+     * gin_write_strategy.hh's class comment for the full re-derivation (not an assumption) of why,
+     * including the one scoped caveat it names (no seam here for a per-opclass `GIN_COMPARE`
+     * comparator, which happens not to matter for any opclass this phase tests).
      */
     template <typename S>
     concept WriteStrategy = requires(const S strategy,

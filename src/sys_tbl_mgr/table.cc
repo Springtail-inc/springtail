@@ -159,11 +159,12 @@ get_table_dir(const std::filesystem::path &base,
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
 
-                // Dispatch on access_method (btree redesign phase 10, closing the gap phase-9.md's
-                // handoff named explicitly): a READY GIST index must never be reconstructed via
-                // _create_index_root() (which would misinterpret its content as a btree) just
-                // because this reload loop didn't know any better -- see AnyIndexRoot's/
-                // _create_gist_index_root()'s class comments (table.hh).
+                // Dispatch on access_method (btree redesign phase 10/11, closing the gap
+                // phase-9.md's handoff named explicitly): a READY GIST/GIN index must never be
+                // reconstructed via _create_index_root() (which would misinterpret its content
+                // as a btree) just because this reload loop didn't know any better -- see
+                // AnyIndexRoot's/_create_gist_index_root()'s/_create_gin_index_root()'s class
+                // comments (table.hh).
                 if (idx.access_method == IndexAccessMethod::GIST) {
                     std::vector<std::string> opclass_names;
                     opclass_names.reserve(idx.columns.size());
@@ -174,6 +175,16 @@ get_table_dir(const std::filesystem::path &base,
                                                              it->extent_id, extension_callback);
                     assert(_gist_indexes.find(idx.id) == _gist_indexes.end());
                     _gist_indexes[idx.id] = {gist_root, idx_cols};
+                } else if (idx.access_method == IndexAccessMethod::GIN) {
+                    std::vector<std::string> opclass_names;
+                    opclass_names.reserve(idx.columns.size());
+                    for (auto const &col : idx.columns) {
+                        opclass_names.push_back(col.opclass);
+                    }
+                    auto gin_root = _create_gin_index_root(idx.id, idx_cols, opclass_names,
+                                                           it->extent_id, extension_callback);
+                    assert(_gin_indexes.find(idx.id) == _gin_indexes.end());
+                    _gin_indexes[idx.id] = {gin_root, idx_cols};
                 } else {
                     auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id, extension_callback);
                     assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
@@ -530,6 +541,21 @@ get_table_dir(const std::filesystem::path &base,
                 offset,
                 std::make_shared<SharedPoolExtentSource>(get_max_extent_size_secondary()),
                 GistReadStrategy{opclass_names});
+    }
+
+    GinReaderPtr
+    Table::_create_gin_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+            const std::vector<std::string> &opclass_names, uint64_t offset,
+            const ExtensionCallback &extension_callback)
+    {
+        (void)index_columns;
+        (void)opclass_names;
+        (void)extension_callback;
+        return std::make_shared<GinReadStrategy>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                _xid,
+                offset,
+                std::make_shared<SharedPoolExtentSource>(get_max_extent_size_secondary()));
     }
 
     void Table::Iterator::Primary::next()

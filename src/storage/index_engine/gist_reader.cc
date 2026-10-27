@@ -7,7 +7,7 @@
  * read_branch -- pure row decode, no opclass calls). GistReader::search()/_search_recursive(),
  * which call consistent() (needing pg_ext), live in the sibling gist_reader_search.cc instead,
  * deliberately -- see that file's header comment and src/storage/CMakeLists.txt's
- * springtail_gist_engine comment for why: `Table` (sys_tbl_mgr/table.cc) constructs a GistReader
+ * springtail_opclass_engine comment for why: `Table` (sys_tbl_mgr/table.cc) constructs a GistReader
  * from both the daemon-side and the FDW-side build of sys_tbl_mgr (springtail_sys_tbl_mgr and
  * springtail_sys_tbl_mgr_client respectively), and the FDW-side one ends up inside
  * springtail_pg_fdw.so, which must never pull in pg_ext (see gist_helpers_opclass.cc's header

@@ -18,7 +18,7 @@
 /**
  * The opclass-CALLING half of gist_helpers (compress/penalty/union/picksplit/consistent),
  * deliberately split out of the sibling gist_helpers.cc into its own translation unit, in its
- * own library (springtail_gist_engine, see src/storage/CMakeLists.txt) -- NOT springtail_storage.
+ * own library (springtail_opclass_engine, see src/storage/CMakeLists.txt) -- NOT springtail_storage.
  * This file needs pg_ext (to dlopen and call into real Postgres contrib opclass .so's), and
  * pg_ext is a shared library whose symbols (palloc/elog/MemoryContextAlloc/etc) collide by name
  * with the real Postgres backend's own identically-named globals. springtail_pg_fdw.so gets

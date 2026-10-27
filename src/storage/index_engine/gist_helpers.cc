@@ -10,7 +10,7 @@
  * picksplit/consistent, and everything pg_ext-dependent they need -- dlopen'd .so calls,
  * FmgrInfo, the fake GIST page, the pure-C++ reference opclass) lives in the sibling
  * gist_helpers_opclass.cc instead, deliberately -- see that file's header comment and
- * src/storage/CMakeLists.txt's springtail_gist_engine comment for why: this file (and
+ * src/storage/CMakeLists.txt's springtail_opclass_engine comment for why: this file (and
  * gist_reader.cc's own pure half) must stay link-safe for springtail_pg_fdw.so, which dlopens
  * into a real, unmodified Postgres backend process and must never pull in pg_ext's symbols
  * (confirmed directly: doing so once broke CREATE EXTENSION springtail_fdw with a backend

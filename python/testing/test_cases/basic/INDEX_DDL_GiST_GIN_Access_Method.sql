@@ -9,11 +9,16 @@
 --
 -- Note: this test intentionally does not use "### schema_check" -- that directive waits,
 -- database-wide (not scoped to any one table), for *every* secondary index to leave state 0
--- (NOT_READY). The GiST/GIN indexes below are *never* going to leave state 0 under this phase's
--- dispatch stub (that's the point), so schema_check would time out for the whole test run until
--- "## cleanup" drops this table. CREATE INDEX ... USING btree(...) regression coverage already
--- exists via INDEX_DDL_Alter_Add_Secondary_Index.sql's own ### schema_check, unaffected by
--- anything in this file.
+-- (NOT_READY). At phase 9 (when this test was written), neither GiST nor GIN ever left state 0
+-- under that phase's dispatch stub, so schema_check would have timed out for the whole test run
+-- until "## cleanup" drops this table. Phase 10 (GiST) and phase 11 (GIN) have since replaced
+-- that stub with real builds -- both indexes below now actually reach READY (see
+-- GIST_Index_Build_And_Search.sql/GIN_Index_Build_And_Search.sql for dedicated build-and-search
+-- coverage of that) -- but this test still only asserts index_exists (not state), so it remains
+-- correct either way; schema_check still isn't used here to avoid widening this file's own scope
+-- into re-asserting what those two dedicated tests already cover. CREATE INDEX ... USING
+-- btree(...) regression coverage already exists via INDEX_DDL_Alter_Add_Secondary_Index.sql's own
+-- ### schema_check, unaffected by anything in this file.
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS btree_gin;
 
@@ -54,12 +59,12 @@ CREATE TABLE gist_inline_access_method_test (
 ## verify
 -- The GiST/GIN secondary indexes reach the catalog (proving the request carried index_type/
 -- opclass correctly all the way from DDL replication through to catalog storage -- see
--- src/sys_tbl_mgr/test/test_sys_tbl_mgr.cc's CreateIndexAccessMethod and
--- src/pg_log_mgr/test/test_indexer.cc's Test_GistGinDispatchNotImplemented unit tests for the
--- exact index_type/opclass/NOT_READY-state content assertions this integration test can't make
--- directly -- __pg_springtail_catalog isn't queryable from a plain SQL line here, since this
--- statement also runs, unmodified, against the primary's real Postgres, which has no such
--- schema).
+-- src/sys_tbl_mgr/test/test_sys_tbl_mgr.cc's CreateIndexAccessMethod unit test for the exact
+-- index_type/opclass content assertions this integration test can't make directly --
+-- __pg_springtail_catalog isn't queryable from a plain SQL line here, since this statement also
+-- runs, unmodified, against the primary's real Postgres, which has no such schema; and see
+-- src/pg_log_mgr/test/test_indexer.cc's Test_GistBuildReachesReady/Test_GinBuildReachesReady for
+-- the READY-state assertions this file no longer needs, now that both kinds build for real).
 ### index_exists public gist_gin_access_method_test gist_gin_access_method_test_gist_idx true
 ### index_exists public gist_gin_access_method_test gist_gin_access_method_test_gin_idx true
 

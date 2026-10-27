@@ -5,10 +5,20 @@ set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc 
                     index_engine/btree_read_strategy.cc index_engine/storage_cache_extent_source.cc index_engine/index_reader.cc
                     index_engine/shared_extent_pool.cc index_engine/shared_pool_extent_source.cc index_engine/segment_set.cc
                     # GiST (btree phase 10): only the opclass-INDEPENDENT halves. See
-                    # springtail_gist_engine below for why the opclass-calling halves
-                    # (gist_helpers_opclass.cc, gist_reader_search.cc, gist_writer.cc) are a
-                    # separate library instead of being folded in here too.
-                    index_engine/gist_helpers.cc index_engine/gist_reader.cc)
+                    # springtail_opclass_engine below for why the opclass-calling halves
+                    # (gist_helpers_opclass.cc, gist_reader_search.cc, gist_writer.cc,
+                    # gin_helpers_opclass.cc, gin_write_strategy.cc) are a separate library
+                    # instead of being folded in here too.
+                    index_engine/gist_helpers.cc index_engine/gist_reader.cc
+                    # GIN (btree phase 11): both halves are opclass-independent -- see
+                    # gin_read_strategy.hh's own header comment for why, unlike GiST, GIN's
+                    # *read* side (gin_read_strategy.cc) never needs the opclass-calling library
+                    # at all (query-time term extraction is phase 12's job, out of this phase's
+                    # scope); only gin_helpers.cc's codec/schema pieces and gin_read_strategy.cc
+                    # itself land here, gin_helpers_opclass.cc/gin_write_strategy.cc go into
+                    # springtail_opclass_engine below, mirroring gist_helpers_opclass.cc/
+                    # gist_writer.cc's placement exactly.
+                    index_engine/gin_helpers.cc index_engine/gin_read_strategy.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -33,33 +43,42 @@ target_link_libraries(springtail_storage
          springtail_xid_mgr_client
          springtail_write_cache absl::check)
 
-# GiST opclass-calling glue (btree redesign phase 10) is deliberately a SEPARATE library from
-# springtail_storage above, not folded into STORAGE_SOURCES. It needs springtail_pgext (to dlopen
-# and call into real Postgres opclass .so's), and springtail_pgext is a SHARED library -- linking
-# it into springtail_storage, even PRIVATE, still adds it as a DT_NEEDED dependency of every final
-# binary/.so that links springtail_storage transitively, including springtail_pg_fdw.so. That .so
-# gets dlopen'd directly into a real, unmodified Postgres backend process, which already exports
-# its own globals named palloc/elog/MemoryContextAlloc/etc.; pg_ext re-defines those same names
-# with different ABI/semantics, and once pg_ext became a transitive link dependency of the FDW,
-# those definitions started colliding (confirmed directly: `ldd` on the built springtail_fdw.so
-# showed libspringtail_pgext.so as a dependency for the first time in this phase, and the backend
-# segfaulted inside CREATE EXTENSION springtail_fdw, before even reaching its own _PG_init() log
-# line -- consistent with bad symbol resolution during dlopen's own relocation/ctor pass, not FDW
-# logic). GistReader/GistWriter's pg_ext calls are only ever reached from the Indexer/
-# pg_log_mgr_daemon build path (query-time routing is deferred to phase 12), so isolating them into
-# their own library -- linked by springtail_sys_tbl_mgr (the daemon-side, full Table/MutableTable
-# library) but NOT by springtail_sys_tbl_mgr_client/springtail_pg_fdw -- keeps pg_ext out of the
-# FDW's link graph entirely. GistWriter is used only by MutableTable (daemon-side only --
-# mutable_table.cc isn't part of springtail_sys_tbl_mgr_client), so it stays here undivided;
-# GistReader is used by Table (both the daemon-side and FDW-side builds of sys_tbl_mgr), so only
-# its opclass-calling half (gist_reader_search.cc) is here -- see gist_reader.cc/
-# gist_reader_search.cc's own header comments.
-add_library(springtail_gist_engine
-  index_engine/gist_helpers_opclass.cc index_engine/gist_writer.cc index_engine/gist_reader_search.cc)
-target_include_directories(springtail_gist_engine
+# Opclass-calling glue, GiST (btree redesign phase 10) and GIN (phase 11) both, is deliberately a
+# SEPARATE library from springtail_storage above, not folded into STORAGE_SOURCES. It needs
+# springtail_pgext (to dlopen and call into real Postgres opclass .so's), and springtail_pgext is a
+# SHARED library -- linking it into springtail_storage, even PRIVATE, still adds it as a DT_NEEDED
+# dependency of every final binary/.so that links springtail_storage transitively, including
+# springtail_pg_fdw.so. That .so gets dlopen'd directly into a real, unmodified Postgres backend
+# process, which already exports its own globals named palloc/elog/MemoryContextAlloc/etc.; pg_ext
+# re-defines those same names with different ABI/semantics, and once pg_ext became a transitive
+# link dependency of the FDW, those definitions started colliding (confirmed directly during phase
+# 10: `ldd` on the built springtail_fdw.so showed libspringtail_pgext.so as a dependency for the
+# first time in that phase, and the backend segfaulted inside CREATE EXTENSION springtail_fdw,
+# before even reaching its own _PG_init() log line -- consistent with bad symbol resolution during
+# dlopen's own relocation/ctor pass, not FDW logic).
+#
+# This library was named springtail_gist_engine through phase 10; phase 11 renamed it to
+# springtail_opclass_engine (Open question (f), resolved in favor of folding GIN's opclass-calling
+# glue in here rather than inventing a parallel springtail_gin_engine) once it stopped being
+# GiST-specific: GinWriteStrategy::insert() needs GIN_EXTRACTVALUE (gin_helpers_opclass.cc) at
+# build time, exactly the same shape of dependency (opclass-calling, pg_ext-needing, daemon-side-
+# only) as GistWriter's compress/penalty/union/picksplit calls, and both are consumed only by the
+# daemon-side springtail_sys_tbl_mgr -- never by springtail_sys_tbl_mgr_client/springtail_pg_fdw.
+# Re-verified via `ldd` after the rename (see phases/phase-11.md's Design notes for the exact
+# command/output) that springtail_pg_fdw.so and springtail_sys_tbl_mgr_client's own consumers still
+# do not depend on libspringtail_pgext.so.
+#
+# GinReadStrategy (gin_read_strategy.cc, in STORAGE_SOURCES above, not here) does *not* link this
+# library at all: unlike GistReader, it never calls into an opclass (query-time term extraction is
+# explicitly phase 12's job, out of this phase's scope -- see gin_read_strategy.hh), so there is no
+# GIN equivalent of gist_reader_search.cc's read-side opclass-calling split.
+add_library(springtail_opclass_engine
+  index_engine/gist_helpers_opclass.cc index_engine/gist_writer.cc index_engine/gist_reader_search.cc
+  index_engine/gin_helpers_opclass.cc index_engine/gin_write_strategy.cc)
+target_include_directories(springtail_opclass_engine
   PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
-target_link_libraries(springtail_gist_engine
+target_link_libraries(springtail_opclass_engine
   PUBLIC springtail_storage
   PRIVATE springtail_pgext
 )
@@ -215,7 +234,18 @@ springtail_unit_test(test_gist_strategy
   # occurrences, leaving vacuumer.cc.o's XidMgrServer references unresolved -- confirmed directly
   # by reading the generated link.txt, not guessed) makes the final link line order-independent
   # by letting ld re-scan the whole group until every symbol resolves.
-  LIBS -Wl,--start-group springtail_storage springtail_gist_engine springtail_pgext springtail_xid_mgr -Wl,--end-group GTest::gtest_main
+  LIBS -Wl,--start-group springtail_storage springtail_opclass_engine springtail_pgext springtail_xid_mgr -Wl,--end-group GTest::gtest_main
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+
+# GIN strategy/engine test (btree phase 11) -- links springtail_opclass_engine for the same
+# link-order reason test_gist_strategy does (see its own comment above); GIN's test needs it too
+# since gin_helpers::extract_terms() (opclass-calling, including the pure-C++ reference opclass
+# dispatch) lives there even though gin_read_strategy.cc itself does not.
+springtail_unit_test(test_gin_strategy
+  SOURCES test/test_gin_strategy.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS -Wl,--start-group springtail_storage springtail_opclass_engine springtail_pgext springtail_xid_mgr -Wl,--end-group GTest::gtest_main
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 

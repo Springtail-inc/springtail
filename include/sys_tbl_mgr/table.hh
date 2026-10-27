@@ -7,6 +7,8 @@
 #include <storage/cache.hh>
 #include <storage/index_engine/btree_read_strategy.hh>
 #include <storage/index_engine/btree_write_strategy.hh>
+#include <storage/index_engine/gin_read_strategy.hh>
+#include <storage/index_engine/gin_write_strategy.hh>
 #include <storage/index_engine/gist_reader.hh>
 #include <storage/index_engine/gist_writer.hh>
 #include <storage/index_engine/index_reader.hh>
@@ -33,59 +35,72 @@ namespace springtail {
     using IndexWriterPtr = std::shared_ptr<IndexWriterT>;
 
     /**
-     * Holds exactly one of a btree (IndexWriterPtr) or GiST (GistWriterPtr) Writer root (btree
-     * redesign phase 10). `Indexer::_build()`/`_commit_build()`/`_reconcile_index()` are the one
-     * place that must build/finalize/catch-up an index's root without knowing its kind at compile
-     * time -- `MutableTable::create_index_root()` stays strictly btree-typed (unchanged, matching
-     * phase 9's framing of it as "the one place phase 10/11 touch"), but `Indexer` itself needs a
-     * single nameable type it can hold across both kinds, since its whole build/commit/reconcile
-     * pipeline (IndexState, _commit_build's signature) is written once, not duplicated per kind.
+     * Holds exactly one of a btree (IndexWriterPtr), GiST (GistWriterPtr, phase 10), or GIN
+     * (GinWriterPtr, phase 11) Writer root. `Indexer::_build()`/`_commit_build()`/
+     * `_reconcile_index()` are the one place that must build/finalize/catch-up an index's root
+     * without knowing its kind at compile time -- `MutableTable::create_index_root()` stays
+     * strictly btree-typed (unchanged, matching phase 9's framing of it as "the one place phase
+     * 10/11 touch"), but `Indexer` itself needs a single nameable type it can hold across every
+     * kind, since its whole build/commit/reconcile pipeline (IndexState, _commit_build's
+     * signature) is written once, not duplicated per kind.
      * Deliberately a tiny hand-rolled tagged union, not a type-erased interface wrapping
      * IndexWriter<Strategy>: only the handful of methods Indexer's pipeline actually calls
-     * (insert/remove/truncate/finalize/init_empty) need forwarding, and GistWriter has no
-     * compaction/merge counterparts to paper over (architecture.md Sec 7.1 is explicitly out of
-     * this phase's GiST scope) -- see phases/phase-10.md's Design notes for the full reasoning
-     * behind not widening IndexWriterPtr/IndexReaderPtr themselves (Table/MutableTable's
-     * _secondary_indexes, Table::Iterator, Committer, and Vacuumer's compaction loop are all
-     * written once against the concrete btree type, and making all of that kind-polymorphic is a
-     * far bigger change than this phase's brief scopes).
+     * (insert/remove/truncate/finalize/init_empty) need forwarding, and neither GistWriter nor
+     * GinWriteStrategy has compaction/merge counterparts to paper over (architecture.md Sec 7.1
+     * is explicitly out of scope for both) -- see phases/phase-10.md's and phases/phase-11.md's
+     * Design notes for the full reasoning behind not widening IndexWriterPtr/IndexReaderPtr
+     * themselves (Table/MutableTable's _secondary_indexes, Table::Iterator, Committer, and
+     * Vacuumer's compaction loop are all written once against the concrete btree type, and making
+     * all of that kind-polymorphic is a far bigger change than either phase's brief scopes).
      */
     class AnyIndexRoot {
     public:
         AnyIndexRoot() = default;
         AnyIndexRoot(IndexWriterPtr btree) : _btree(std::move(btree)) { } // NOLINT(*-explicit-constructor)
         AnyIndexRoot(GistWriterPtr gist) : _gist(std::move(gist)) { } // NOLINT(*-explicit-constructor)
+        AnyIndexRoot(GinWriterPtr gin) : _gin(std::move(gin)) { } // NOLINT(*-explicit-constructor)
 
-        explicit operator bool() const { return _btree != nullptr || _gist != nullptr; }
+        explicit operator bool() const { return _btree != nullptr || _gist != nullptr || _gin != nullptr; }
 
         void init_empty() {
-            if (_btree) { _btree->init_empty(); } else if (_gist) { _gist->init_empty(); }
+            if (_btree) { _btree->init_empty(); }
+            else if (_gist) { _gist->init_empty(); }
+            else if (_gin) { _gin->init_empty(); }
         }
 
         void insert(TuplePtr value) {
-            if (_btree) { _btree->insert(value); } else if (_gist) { _gist->insert(value); }
+            if (_btree) { _btree->insert(value); }
+            else if (_gist) { _gist->insert(value); }
+            else if (_gin) { _gin->insert(value); }
         }
 
         void remove(TuplePtr value) {
-            if (_btree) { _btree->remove(value); } else if (_gist) { _gist->remove(value); }
+            if (_btree) { _btree->remove(value); }
+            else if (_gist) { _gist->remove(value); }
+            else if (_gin) { _gin->remove(value); }
         }
 
         void truncate() {
-            if (_btree) { _btree->truncate(); } else if (_gist) { _gist->truncate(); }
+            if (_btree) { _btree->truncate(); }
+            else if (_gist) { _gist->truncate(); }
+            else if (_gin) { _gin->truncate(); }
         }
 
         uint64_t finalize(bool fs_sync = true) {
             if (_btree) { return _btree->finalize(fs_sync); }
             if (_gist) { return _gist->finalize(fs_sync); }
+            if (_gin) { return _gin->finalize(fs_sync); }
             return constant::UNKNOWN_EXTENT;
         }
 
         IndexWriterPtr btree() const { return _btree; }
         GistWriterPtr gist() const { return _gist; }
+        GinWriterPtr gin() const { return _gin; }
 
     private:
         IndexWriterPtr _btree;
         GistWriterPtr _gist;
+        GinWriterPtr _gin;
     };
 
     /**
@@ -745,6 +760,21 @@ namespace indexer_helpers {
                 const std::vector<std::string> &opclass_names, uint64_t offset,
                 const ExtensionCallback &extension_callback = {});
 
+        /**
+         * Creates a read-only GIN index root (btree redesign phase 11) -- the GIN counterpart of
+         * _create_gist_index_root(), kept as its own method/map for the same reason: GinReadStrategy
+         * is not an IndexReaderPtr (see gin_read_strategy.hh's class comment -- unlike GiST, GIN
+         * needs no new engine body, but it is still its own orchestrator class, not a plain
+         * IndexReader<Strategy> instantiation itself). Not yet wired into any of this class's
+         * generic read machinery -- query-time GIN usage is phase 12's job; this method/the
+         * `_gin_indexes` map exist purely so Table::init()'s reload loop can reconstruct an
+         * already-READY GIN index's root correctly.
+         */
+        GinReaderPtr
+        _create_gin_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+                const std::vector<std::string> &opclass_names, uint64_t offset,
+                const ExtensionCallback &extension_callback = {});
+
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
@@ -779,6 +809,13 @@ namespace indexer_helpers {
             12's job) -- exists so reload reconstructs these correctly instead of skipping or
             misinterpreting them. */
         std::map<uint64_t, std::pair<GistReaderPtr, std::vector<uint32_t>>> _gist_indexes;
+
+        /** GIN secondary indexes (btree redesign phase 11) -- kept separate from
+            _secondary_indexes/_gist_indexes for the identical reason; see AnyIndexRoot's class
+            comment. Not yet consulted by this class's own read machinery (query-time GIN usage
+            is phase 12's job) -- exists so reload reconstructs these correctly instead of
+            skipping or misinterpreting them. */
+        std::map<uint64_t, std::pair<GinReaderPtr, std::vector<uint32_t>>> _gin_indexes;
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.

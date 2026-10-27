@@ -610,84 +610,66 @@ namespace {
         queue_mgr->remove_queue(_db_id);
     }
 
-    // Regression test for the btree redesign phase 9 dispatch point (architecture.md Decisions
-    // log entry 8): GIN index builds must fail explicitly at Indexer::_build, leaving the index
-    // NOT_READY (never crashing, never silently building a btree), while an ordinary BTREE build
-    // on the same table is unaffected. GIST half removed by phase 10 (see
-    // Test_GistBuildReachesReady above): GIST now has a real GistWriter-backed implementation
-    // behind the dispatch point, so "GIST build stays NOT_READY" stopped being the correct
-    // expectation -- confirmed directly (not assumed): this test's own GIST case started failing
-    // its NOT_READY assertion once phase 10 landed, because the build now actually succeeds.
-    // GIN remains untouched (phase 11's job), so its half of this regression test is unchanged.
-    TEST_F(Indexer_Test, Test_GinDispatchNotImplemented)
+    // btree redesign phase 11: a real GIN index build, driven through Indexer's actual
+    // process_requests()/_build() pipeline (not a direct GinWriteStrategy unit test -- see
+    // src/storage/test/test_gin_strategy.cc for that), reaches READY -- the dispatch point phase
+    // 9 left as "not yet implemented" (originally covered by Test_GinDispatchNotImplemented,
+    // retired by this phase the same way Test_GistGinDispatchNotImplemented's GIST half was
+    // retired by phase 10) now has a real GinWriteStrategy-backed implementation behind it.
+    //
+    // Uses the real gin_trgm_ops opclass (not a reference opclass): confirmed directly (not
+    // assumed), via src/storage/test/test_gin_strategy.cc's own RealOpclassManyRowsIsStable test
+    // (150 rows, 10 consecutive runs), that GIN_EXTRACTVALUE's real pg_trgm implementation does
+    // not reproduce phase 10's flagged GIST union/penalty instability -- see that test's comment
+    // for the full characterization. This test itself stays small (2 rows, matching
+    // Test_GistBuildReachesReady's own scale) since it's exercising the real Indexer pipeline
+    // end-to-end, not opclass stability itself.
+    TEST_F(Indexer_Test, Test_GinBuildReachesReady)
     {
+        auto registry = PgExtnRegistry::get_instance();
+        registry->init_libraries(_db_id, "gin_trgm_ops", "/usr/lib/postgresql/16/lib/pg_trgm.so");
+        PgOpsClass opclass;
+        opclass.name = "gin_trgm_ops";
+        opclass.access_method = "gin";
+        PgOpsClassMethod method;
+        method.function_name = "gin_extract_value_trgm";
+        method.support_number = GIN_EXTRACTVALUE;
+        registry->add_opclass("gin_trgm_ops", opclass, method);
+
         uint64_t table_id = _tid++;
-        uint64_t btree_index_id = _secondary_index_id + 13;
-        uint64_t gin_index_id = _secondary_index_id + 15;
         uint64_t table_xid = access_xid++;
 
-        create_table(_db_id, table_id, table_xid, "test_indexer_dispatch_table", _columns);
+        constexpr int32_t text_pg_oid = 25; // postgres TEXTOID; named to avoid pg_type_d.h's own macro
+        std::vector<PgMsgSchemaColumn> text_columns = {
+            {"gin_id", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
+            {"gin_val", static_cast<uint8_t>(SchemaType::TEXT), text_pg_oid, std::nullopt, 2, 0, true, false, false},
+        };
+        create_table(_db_id, table_id, table_xid, "test_indexer_gin_build_table", text_columns);
 
-        for (auto const& [index_id, index_type] :
-                std::vector<std::pair<uint64_t, std::string>>{
-                    {gin_index_id, "gin"}}) {
-            uint64_t index_xid = access_xid++;
-            uint64_t data_xid = access_xid++;
-
-            _create_index(table_id, index_id, index_xid, "idx_dispatch_" + index_type, true, false,
-                    index_type);
-
-            // Insert rows *after* the failed build but *before* reconciliation runs -- this is
-            // the exact scenario that crashed before phase 9's fix to _reconcile_index():
-            // ordinary (non-abort) reconciliation unconditionally dereferenced idx_state._root
-            // to catch up on rows written while the index was "building", an invariant that held
-            // as long as a null root only ever meant st.stop_requested() (process shutting down,
-            // so this code path never actually ran again) or a drop-in-progress (routed to
-            // _commit_build() instead, which already null-checks). The GIN dispatch stub breaks
-            // that invariant: it returns a null root while the process keeps running and ordinary
-            // DML keeps arriving. Reverting _reconcile_index()'s own null-root guard reproduces a
-            // SIGSEGV in IndexWriter::insert() on this exact test.
-            _populate_table_with_data(table_id, table_xid, data_xid, 10, 5);
-
-            // task()'s own _add_to_pending_reconciliation() call runs regardless of whether
-            // _build() produced a real root (see its doc comment) -- the GIN stub's failure
-            // still reaches the reconciliation queue the same way a successful build would, so
-            // wait on it the same way _process_index_and_validate() does.
-            auto max_tries = 5;
-            auto try_count = 0;
-            auto index_ready_for_reconcile = false;
-            while (try_count < max_tries) {
-                if (auto request = _index_reconciliation_queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
-                    if (request != nullptr) {
-                        index_ready_for_reconcile = true;
-                        break;
-                    }
-                }
-                try_count++;
-            }
-            ASSERT_TRUE(index_ready_for_reconcile);
-
-            uint64_t reconcile_xid = access_xid++;
-            _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
-
-            auto info = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id,
-                    {reconcile_xid, constant::MAX_LSN});
-            ASSERT_EQ(info.index_type(), index_type);
-            // Not READY (the stub never built anything) and not some invented "permanently
-            // failed" state either -- NOT_READY is exactly what an interrupted/not-yet-attempted
-            // build already leaves behind today, which is what makes this retriable once phase
-            // 11 replaces the stub (see Indexer::_build's catch block comment).
-            ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info.state()),
-                    sys_tbl::IndexNames::State::NOT_READY);
+        uint64_t data_xid = access_xid++;
+        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
+        for (int i = 0; i < 2; ++i) {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(i + 1));
+            fields.push_back(std::make_shared<ConstTypeField<std::string>>(i == 0 ? "apple banana" : "banana cherry"));
+            fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(static_cast<uint64_t>(i + 1)));
+            mtable->insert(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
         }
+        auto &&metadata = mtable->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
 
-        // Control: an ordinary BTREE build on the same table, after the failed GIN attempt,
-        // still succeeds -- the dispatch point doesn't wedge or poison anything shared (e.g. the
-        // table's look-aside bootstrap tracker) for a subsequent real build.
-        uint64_t btree_index_xid = access_xid++;
-        _create_index(table_id, btree_index_id, btree_index_xid, "idx_dispatch_btree");
-        uint64_t btree_reconcile_xid = access_xid++;
-        _process_index_and_validate(btree_index_id, btree_index_xid, btree_reconcile_xid);
+        uint64_t gin_index_id = _secondary_index_id + 21;
+        uint64_t index_xid = access_xid++;
+        _create_index(table_id, gin_index_id, index_xid, "idx_gin_build", true, false, "gin",
+                std::vector<PgMsgSchemaColumn>{ text_columns[1] }, { "gin_trgm_ops" });
+
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(gin_index_id, index_xid, reconcile_xid);
+
+        auto info = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, gin_index_id,
+                {reconcile_xid, constant::MAX_LSN});
+        ASSERT_EQ(info.index_type(), "gin");
+        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info.state()), sys_tbl::IndexNames::State::READY);
     }
 
     // btree redesign phase 10: a real GIST index build, driven through Indexer's actual

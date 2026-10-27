@@ -5,7 +5,7 @@
  * GistReader's consistent()-driven, fan-out-capable search -- the half of GistReader that needs
  * pg_ext (via GistReadStrategy::consistent() -> gist_helpers::consistent(), which dlopens and
  * calls into real Postgres opclass .so's). Deliberately its own translation unit, in its own
- * library (springtail_gist_engine, not springtail_storage) -- see gist_reader.cc's and
+ * library (springtail_opclass_engine, not springtail_storage) -- see gist_reader.cc's and
  * gist_helpers_opclass.cc's header comments for why: springtail_pg_fdw.so, which dlopens into a
  * real, unmodified Postgres backend, must never link pg_ext. GistReader's constructor (needed by
  * Table, which the FDW does link) lives in gist_reader.cc, which has no such dependency; nothing

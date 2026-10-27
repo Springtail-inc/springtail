@@ -302,6 +302,19 @@ namespace springtail::committer {
                         gist_root->truncate();
                         gist_root->finalize();
                     }
+                } else if (access_method == IndexAccessMethod::GIN) {
+                    // Dispatch on access_method (btree redesign phase 11, mirroring phase 10's
+                    // identical GIST fix above): dropping a GIN index must construct its root via
+                    // create_gin_index_root(), never create_index_root(), or it would misinterpret
+                    // the GIN entry tree's content as a btree while truncating it.
+                    auto opclass_names = _get_index_opclasses(info);
+                    auto gin_root = table->create_gin_index_root(index_id, idx_cols, opclass_names,
+                            {PgExtnRegistry::get_instance()->comparator_func});
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        gin_root->init(it->extent_id);
+                        gin_root->truncate();
+                        gin_root->finalize();
+                    }
                 } else {
                     auto root = table->create_index_root(index_id, idx_cols,
                             {PgExtnRegistry::get_instance()->comparator_func}, access_method);
@@ -369,10 +382,11 @@ namespace springtail::committer {
 
         // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8):
         // resolve the index's access method from the catalog-carried index_type string. GIST
-        // (phase 10) builds a GistWriter via create_gist_index_root(), wrapped in AnyIndexRoot so
-        // the rest of this function (and _commit_build()/_reconcile_index()'s catch-up) can stay
-        // kind-agnostic; GIN (phase 11) and any unrecognized/corrupt index_type string still fail
-        // exactly like the original stub (never silently defaults to BTREE) -- see
+        // (phase 10) builds a GistWriter via create_gist_index_root(), GIN (phase 11) builds a
+        // GinWriteStrategy via create_gin_index_root(), both wrapped in AnyIndexRoot so the rest
+        // of this function (and _commit_build()/_reconcile_index()'s catch-up) can stay
+        // kind-agnostic; any unrecognized/corrupt index_type string still fails exactly like the
+        // original stub (never silently defaults to BTREE) -- see
         // index_access_method_from_string()'s own doc comment.
         AnyIndexRoot root;
         try {
@@ -381,6 +395,10 @@ namespace springtail::committer {
             if (access_method == IndexAccessMethod::GIST) {
                 auto opclass_names = _get_index_opclasses(idx._index_request.index());
                 root = mutable_table->create_gist_index_root(index_id, idx_cols, opclass_names,
+                        {PgExtnRegistry::get_instance()->comparator_func});
+            } else if (access_method == IndexAccessMethod::GIN) {
+                auto opclass_names = _get_index_opclasses(idx._index_request.index());
+                root = mutable_table->create_gin_index_root(index_id, idx_cols, opclass_names,
                         {PgExtnRegistry::get_instance()->comparator_func});
             } else {
                 root = mutable_table->create_index_root(index_id, idx_cols,
