@@ -469,8 +469,23 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     IndexReaderPtr
-    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ExtensionCallback &extension_callback)
+    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset,
+            const ExtensionCallback &extension_callback, IndexAccessMethod access_method)
     {
+        // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8): the
+        // only place phase 10/11 need to touch to go from "not yet implemented" to a real
+        // GistReadStrategy-/GinReadStrategy-backed construction.
+        switch (access_method) {
+            case IndexAccessMethod::BTREE:
+                break;
+            case IndexAccessMethod::GIST:
+                throw Error("GIST index reads are not yet implemented (index " +
+                        std::to_string(index_id) + ")");
+            case IndexAccessMethod::GIN:
+                throw Error("GIN index reads are not yet implemented (index " +
+                        std::to_string(index_id) + ")");
+        }
+
         auto index_schema = schema_helpers::create_index_schema(_schema, index_columns, index_id, extension_callback);
         auto btree = std::make_shared<IndexReaderT>(_db_id,
                 _table_dir / fmt::format(constant::INDEX_FILE, index_id),

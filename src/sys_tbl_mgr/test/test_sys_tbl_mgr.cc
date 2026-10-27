@@ -78,7 +78,8 @@ namespace {
         void _verify_schema(uint64_t tid, uint64_t index_id);
         void _drop_table(uint64_t tid, const std::string &name);
         void _alter_table(const PgMsgTable &msg);
-        PgMsgIndex _create_index(uint64_t tid, const std::string& name, uint64_t index_id);
+        PgMsgIndex _create_index(uint64_t tid, const std::string& name, uint64_t index_id,
+                const std::string& index_type = "btree");
         PgMsgDropIndex _drop_index(uint64_t index_id);
         void _set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
         std::filesystem::path _get_system_table_dir(uint64_t system_table_id);
@@ -161,7 +162,8 @@ namespace {
         return msg;
     }
 
-    PgMsgIndex SysTblMgr_Test::_create_index(uint64_t tid, const std::string& name, uint64_t index_id) {
+    PgMsgIndex SysTblMgr_Test::_create_index(uint64_t tid, const std::string& name, uint64_t index_id,
+            const std::string& index_type) {
         auto xid = _next_lsn();
 
         std::vector<PgMsgSchemaIndexColumn> columns;
@@ -174,9 +176,10 @@ namespace {
         msg.is_unique = true;
         msg.table_oid = tid;
         msg.oid = index_id;
+        msg.index_type = index_type;
 
-        msg.columns.push_back({"col2", 2, 0});
-        msg.columns.push_back({"col1", 1, 1});
+        msg.columns.push_back({"col2", 2, 0, "int4_ops"});
+        msg.columns.push_back({"col1", 1, 1, "text_ops"});
 
         _server->create_index(_db, xid, msg, sys_tbl::IndexNames::State::NOT_READY);
         _client->invalidate_table(_db, msg.table_oid, xid);
@@ -417,6 +420,83 @@ namespace {
 
         ASSERT_TRUE(it != schema_meta->indexes.end());
         ASSERT_EQ(it->state, (uint8_t)sys_tbl::IndexNames::State::BEING_DELETED);
+    }
+
+    // Tests that index_type (IndexNames) and per-column opclass (Indexes) -- the btree redesign
+    // phase 9 index-kind plumbing -- round-trip through the catalog correctly for every access
+    // method, and that an IndexInfo with no index_type set (as for a pre-phase-9 row, or the
+    // internally-constructed primary/look-aside role indexes) reads back as BTREE.
+    TEST_F(SysTblMgr_Test, CreateIndexAccessMethod)
+    {
+        uint64_t tid = 100005;
+
+        _create_table(tid, "x");
+        _finalize();
+
+        struct Case {
+            uint64_t index_id;
+            std::string requested_type;
+            std::string expected_type;
+        };
+        std::vector<Case> cases = {
+            {5010, "btree", "btree"},
+            {5011, "gist", "gist"},
+            {5012, "gin", "gin"},
+        };
+
+        // Indexes rows are keyed by (table_id, index_id, xid, lsn, position) -- scan the real
+        // on-disk table directly, pinned at this write's own xid (mirroring FinalizeVsQueueRace's
+        // approach), rather than through get_index_info(), which the "This doesn't return
+        // information about index columns" doc comment on Server::_find_index confirms never
+        // populates columns at all (pre-existing, independent of this phase).
+        for (auto const& c : cases) {
+            auto &&msg = _create_index(tid, "idx_" + c.expected_type, c.index_id, c.requested_type);
+            _finalize();
+
+            // force a read from the on-disk IndexNames table, not the in-memory per-request
+            // cache -- _finalize() clears _index_cache for the whole db (see
+            // Server::finalize()/_index_cache.erase(db_id)).
+            auto info = _server->get_index_info(_db, c.index_id, _xid, tid);
+            ASSERT_EQ(info.id(), c.index_id);
+            ASSERT_EQ(info.index_type(), c.expected_type);
+
+            auto indexes_table = SystemTableMgrServer::get_instance()->get_table(_db, sys_tbl::Indexes::ID,
+                    msg.xid);
+            auto indexes_schema = indexes_table->extent_schema();
+            auto idx_table_id_f = indexes_schema->get_field("table_id");
+            auto idx_index_id_f = indexes_schema->get_field("index_id");
+            auto idx_xid_f = indexes_schema->get_field("xid");
+            auto idx_lsn_f = indexes_schema->get_field("lsn");
+            auto idx_position_f = indexes_schema->get_field("position");
+            auto idx_opclass_f = indexes_schema->get_field("opclass");
+
+            std::map<uint32_t, std::string> opclass_by_position;
+            auto search_key = sys_tbl::Indexes::Primary::key_tuple(tid, c.index_id, msg.xid, msg.lsn, 0);
+            for (auto row_i = indexes_table->lower_bound(search_key); row_i != indexes_table->end();
+                    ++row_i) {
+                auto& row = *row_i;
+                if (idx_table_id_f->get_uint64(&row) != tid || idx_index_id_f->get_uint64(&row) != c.index_id ||
+                        idx_xid_f->get_uint64(&row) != static_cast<uint64_t>(msg.xid) ||
+                        idx_lsn_f->get_uint64(&row) != static_cast<uint64_t>(msg.lsn)) {
+                    break;
+                }
+                opclass_by_position[idx_position_f->get_uint32(&row)] = std::string(idx_opclass_f->get_text(&row));
+            }
+
+            ASSERT_EQ(opclass_by_position.size(), 2u);
+            ASSERT_EQ(opclass_by_position.at(0), "int4_ops");
+            ASSERT_EQ(opclass_by_position.at(1), "text_ops");
+        }
+
+        // The primary/look-aside role indexes never go through Postgres DDL and so never set
+        // index_type on the IndexInfo they're built from (see Server::_set_primary_index/
+        // _set_lookaside_index) -- confirm they still read back as "btree" (see
+        // index_access_method_from_string()'s doc comment), not an empty/unrecognized string.
+        auto primary_info = _server->get_index_info(_db, constant::INDEX_PRIMARY, _xid, tid);
+        ASSERT_EQ(primary_info.index_type(), "btree");
+
+        auto look_aside_info = _server->get_index_info(_db, constant::INDEX_LOOK_ASIDE, _xid, tid);
+        ASSERT_EQ(look_aside_info.index_type(), "btree");
     }
 
     // Tests table create / alter / drop

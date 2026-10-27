@@ -799,8 +799,23 @@ namespace indexer_helpers {
     }
 
     IndexWriterPtr
-    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback)
+    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns,
+            const ExtensionCallback& extension_callback, IndexAccessMethod access_method)
     {
+        // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8): the
+        // only place phase 10/11 need to touch to go from "not yet implemented" to a real
+        // GistWriteStrategy-/GinWriteStrategy-backed construction.
+        switch (access_method) {
+            case IndexAccessMethod::BTREE:
+                break;
+            case IndexAccessMethod::GIST:
+                throw Error("GIST index builds are not yet implemented (index " +
+                        std::to_string(index_id) + ")");
+            case IndexAccessMethod::GIN:
+                throw Error("GIN index builds are not yet implemented (index " +
+                        std::to_string(index_id) + ")");
+        }
+
         // Get the index schema - bypass cache if this is a snapshot table without system table metadata
         auto index_schema = _bypass_schema_cache
             ? schema_helpers::create_index_schema(_schema, index_columns, index_id, extension_callback)

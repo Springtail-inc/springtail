@@ -1580,23 +1580,41 @@ Server::_upsert_index_name(uint64_t db_id,
         is_unique = true;
     }
 
+    // An empty index_type means either a pre-phase-9 IndexNames row being rewritten, or one of
+    // the internally-constructed primary/look-aside role indexes (_set_primary_index/
+    // _set_lookaside_index), which never go through Postgres DDL and so never set index_type --
+    // both cases are, and can only ever be, BTREE under today's engine. Validate eagerly so a
+    // corrupt/unrecognized index_type fails loudly here rather than persisting silently and
+    // surfacing later at the dispatch point.
+    std::string resolved_index_type =
+        index_info.index_type().empty() ? std::string(constant::INDEX_TYPE_BTREE) : index_info.index_type();
+    (void) index_access_method_from_string(resolved_index_type);
+
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         index_info.namespace_id(), index_info.name(), index_info.table_id(), index_info.id(), xid.xid, xid.lsn,
-        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique, index_names_t->get_next_internal_row_id());
+        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique, resolved_index_type,
+        index_names_t->get_next_internal_row_id());
 
 
     // update the index state
     index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
+    // per-column opclass, keyed the same way as `keys` (by idx_position) -- see _write_index's
+    // doc comment.
+    std::map<uint32_t, std::string> opclasses;
+    for (const auto& column : index_info.columns()) {
+        opclasses[column.idx_position()] = column.opclass();
+    }
+
     // update columns with the state XID
     if (index_type == Server::IndexType::PRIMARY) {
         if(!keys.empty()) {
-            _write_index(xid, db_id, index_info.table_id(), constant::INDEX_PRIMARY, keys);
+            _write_index(xid, db_id, index_info.table_id(), constant::INDEX_PRIMARY, keys, opclasses);
         }
     } else if (index_type == Server::IndexType::LOOKASIDE) {
-        _write_index(xid, db_id, index_info.table_id(), constant::INDEX_LOOK_ASIDE, keys);
+        _write_index(xid, db_id, index_info.table_id(), constant::INDEX_LOOK_ASIDE, keys, opclasses);
     } else {
-        _write_index(xid, db_id, index_info.table_id(), index_info.id(), keys);
+        _write_index(xid, db_id, index_info.table_id(), index_info.id(), keys, opclasses);
     }
 
     // add to index cache
@@ -1710,6 +1728,7 @@ Server::_find_index(uint64_t db_id,
     std::string name;
     uint64_t namespace_id = 0;
     uint8_t state = 0;
+    std::string index_type;
     bool found = false;
 
     // find the last XID for this index
@@ -1750,6 +1769,7 @@ Server::_find_index(uint64_t db_id,
         name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row);
         namespace_id = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(&row);
         state = names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row);
+        index_type = names_fields->at(sys_tbl::IndexNames::Data::INDEX_TYPE)->get_text(&row);
 
         found = true;
     }
@@ -1764,6 +1784,7 @@ Server::_find_index(uint64_t db_id,
     info.set_is_unique(is_unique);
     info.set_table_id(table_id);
     info.set_state(state);
+    info.set_index_type(index_type);
 
     // need to look up the schema name in the namespace_names table
     auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid, false);
@@ -3357,6 +3378,7 @@ Server::_read_schema_indexes(SchemaInfoPtr schema_info,
         proto::IndexInfo info;
         info.set_id(names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(&row));
         info.set_state(names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row));
+        info.set_index_type(names_fields->at(sys_tbl::IndexNames::Data::INDEX_TYPE)->get_text(&row));
 
         if (static_cast<sys_tbl::IndexNames::State>(info.state()) ==
             sys_tbl::IndexNames::State::DELETED) {
@@ -3437,6 +3459,8 @@ Server::_populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn i
                 indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row));
         col->set_idx_position(
                 indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row));
+        col->set_opclass(
+                indexes_fields->at(sys_tbl::Indexes::Data::OPCLASS)->get_text(&row));
     }
 }
 
@@ -4091,7 +4115,8 @@ Server::_write_index(const XidLsn& xid,
                       uint64_t db_id,
                       uint64_t tab_id,
                       uint64_t index_id,
-                      const std::map<uint32_t, uint32_t>& keys)
+                      const std::map<uint32_t, uint32_t>& keys,
+                      const std::map<uint32_t, std::string>& opclasses)
 {
     if (keys.empty()) {
         LOG_INFO("The index has no keys: {}:{} - {}", db_id, tab_id, index_id);
@@ -4102,6 +4127,7 @@ Server::_write_index(const XidLsn& xid,
     auto fields = sys_tbl::Indexes::Data::fields(tab_id, index_id, xid.xid, xid.lsn,
                                                  0,   // empty position; filled below
                                                  0,   // empty column ID; filled below
+                                                 "",  // empty opclass; filled below
                                                  0);  // empty internal row ID; filled below
 
     for (auto& [pos, col_id] : keys) {
@@ -4109,6 +4135,10 @@ Server::_write_index(const XidLsn& xid,
             std::make_shared<ConstTypeField<uint32_t>>(pos);
         fields->at(sys_tbl::Indexes::Data::COLUMN_ID) =
             std::make_shared<ConstTypeField<uint32_t>>(col_id);
+
+        auto opclass_i = opclasses.find(pos);
+        fields->at(sys_tbl::Indexes::Data::OPCLASS) = std::make_shared<ConstTypeField<std::string>>(
+            opclass_i != opclasses.end() ? opclass_i->second : std::string());
 
         fields->at(sys_tbl::Indexes::Data::INTERNAL_ROW_ID) =
             std::make_shared<ConstTypeField<uint64_t>>(indexes_t->get_next_internal_row_id());

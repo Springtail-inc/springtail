@@ -659,9 +659,17 @@ namespace indexer_helpers {
 
         /**
          * Creates read-only index of the table.
+         * @param access_method The index's access method (btree redesign phase 9). Defaults to
+         * BTREE since every call site reconstructing an already-READY index (no other kind can
+         * reach READY yet) doesn't thread it through. GIST/GIN are not yet implemented: this
+         * throws rather than silently building a btree or a real GiST/GIN reader. Phase 10/11 add
+         * a case here, replacing the throw with real construction -- this is the only place in
+         * this function they need to touch.
          */
         IndexReaderPtr
-        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ExtensionCallback &extension_callback = {});
+        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset,
+                const ExtensionCallback &extension_callback = {},
+                IndexAccessMethod access_method = IndexAccessMethod::BTREE);
 
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.

@@ -132,11 +132,20 @@ namespace springtail {
             return _id;
         }
 
-        /** Create a btree that can be used for indexes.
+        /** Create a writer root that can be used for indexes.
          * @param index_id PG index ID.
          * @param index_columns Positions of the index columns.
+         * @param access_method The index's access method (btree redesign phase 9). Defaults to
+         * BTREE since every call site reconstructing an already-READY index (no other kind can
+         * reach READY yet) doesn't thread it through -- callers that know the real access method
+         * (Indexer::_build) must pass it explicitly. GIST/GIN are not yet implemented: this
+         * throws rather than silently building a btree or a real GiST/GIN tree. Phase 10/11 add a
+         * case here, replacing the throw with real construction -- this is the only place in this
+         * function they need to touch.
          */
-        IndexWriterPtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback = {});
+        IndexWriterPtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns,
+                const ExtensionCallback& extension_callback = {},
+                IndexAccessMethod access_method = IndexAccessMethod::BTREE);
 
         /**
          * Create a btree that can be used for look aside index.

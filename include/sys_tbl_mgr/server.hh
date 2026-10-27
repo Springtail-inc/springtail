@@ -627,12 +627,16 @@ private:
      * @param index_id The index ID.
      * @param keys The index keys consisting of (column index position, column position in the
      * table).
+     * @param opclasses Per-column operator class, keyed by the same column index position as
+     * `keys`. A column with no entry (e.g. the primary/look-aside role indexes, which have no
+     * Postgres opclass) is persisted as an empty string.
      */
     void _write_index(const XidLsn& xid,
                       uint64_t db_id,
                       uint64_t tab_id,
                       uint64_t index_id,
-                      const std::map<uint32_t, uint32_t>& keys);
+                      const std::map<uint32_t, uint32_t>& keys,
+                      const std::map<uint32_t, std::string>& opclasses = {});
 
     /**
      * Performs a create_index() assuming that the correct locks are already held.

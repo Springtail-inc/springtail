@@ -177,8 +177,12 @@ BEGIN
             c.relname AS table_name,
             i.indisunique AS is_unique,
             i.indisprimary AS primary_idx,
-            i.indkey AS indkey
+            i.indkey AS indkey,
+            i.indclass AS indclass,
+            am.amname AS index_type
         FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+        JOIN pg_class ic ON ic.oid = i.indexrelid
+        JOIN pg_am am ON am.oid = ic.relam
         WHERE i.indexrelid = %s', obj_id) INTO ind_obj;
 
     IF ind_obj.primary_idx IS true THEN
@@ -190,9 +194,12 @@ BEGIN
     FROM (
         SELECT json_build_object('name', pga.attname,
             'position', pga.attnum,
-            'idx_position', array_position(ind_obj.indkey, pga.attnum)
+            'idx_position', array_position(ind_obj.indkey, pga.attnum),
+            'opclass', opc.opcname
         ) AS json_col
         FROM pg_attribute pga
+        JOIN pg_opclass opc
+            ON opc.oid = ind_obj.indclass[array_position(ind_obj.indkey, pga.attnum)]
         WHERE
             pga.attrelid=ind_obj.table_oid
             AND pga.attisdropped IS FALSE
@@ -211,6 +218,7 @@ BEGIN
         'table_oid', ind_obj.table_oid::bigint,
         'table_name', ind_obj.table_name,
         'is_unique', ind_obj.is_unique,
+        'index_type', ind_obj.index_type,
         'columns', json_columns);
 
     -- command_tag is CREATE INDEX
@@ -442,11 +450,14 @@ BEGIN
                     c.relname AS table_name,
                     i.indisunique AS is_unique,
                     i.indisprimary AS primary_idx,
-                    i.indkey AS indkey
+                    i.indkey AS indkey,
+                    i.indclass AS indclass,
+                    am.amname AS index_type
                 FROM pg_index i
                 JOIN pg_class c ON c.oid = i.indexrelid
                 JOIN pg_class ci ON ci.oid = i.indrelid
                 JOIN pg_namespace n ON n.oid = c.relnamespace
+                JOIN pg_am am ON am.oid = c.relam
                 WHERE i.indisprimary IS FALSE
                 AND c.oid IN (SELECT indexrelid FROM pg_index WHERE indrelid = obj.objid)
             LOOP
@@ -455,9 +466,12 @@ BEGIN
                 FROM (
                     SELECT json_build_object('name', pga.attname,
                         'position', pga.attnum,
-                        'idx_position', array_position(ind_obj.indkey, pga.attnum)
+                        'idx_position', array_position(ind_obj.indkey, pga.attnum),
+                        'opclass', opc.opcname
                     ) AS json_col
                     FROM pg_attribute pga
+                    JOIN pg_opclass opc
+                        ON opc.oid = ind_obj.indclass[array_position(ind_obj.indkey, pga.attnum)]
                     WHERE
                         pga.attrelid=obj.objid
                         AND pga.attisdropped IS FALSE
@@ -477,6 +491,7 @@ BEGIN
                     'table_oid', ind_obj.table_oid::bigint,
                     'table_name', ind_obj.table_name,
                     'is_unique', ind_obj.is_unique,
+                    'index_type', ind_obj.index_type,
                     'columns', index_columns
                 );
 

@@ -327,7 +327,29 @@ namespace springtail::committer {
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
         auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid, {PgExtnRegistry::get_instance()->comparator_func});
-        IndexWriterPtr root = mutable_table->create_index_root(index_id, idx_cols, {PgExtnRegistry::get_instance()->comparator_func});
+
+        // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8):
+        // resolve the index's access method from the catalog-carried index_type string and pass
+        // it to create_index_root, which is the single place phase 10/11 touch to replace the
+        // GIST/GIN "not yet implemented" stub with a real build. An unrecognized/corrupt
+        // index_type string fails exactly the same way as the stub (never silently defaults to
+        // BTREE) -- see index_access_method_from_string()'s own doc comment.
+        IndexWriterPtr root;
+        try {
+            auto access_method =
+                index_access_method_from_string(idx._index_request.index().index_type());
+            root = mutable_table->create_index_root(index_id, idx_cols,
+                    {PgExtnRegistry::get_instance()->comparator_func}, access_method);
+        } catch (const Error& e) {
+            // Leave the index at NOT_READY -- the same outcome _commit_build() already gives a
+            // build interrupted by st.stop_requested() below -- rather than inventing a new
+            // "permanently failed" state: IndexNames::State has no such state, and once phase
+            // 10/11 lands, the next recover_indexes() pass (daemon restart) retries this exact
+            // still-NOT_READY row and builds it for real instead of reusing a stale failure.
+            LOG_ERROR("Index build failed, index will remain not-ready: {}:{} - {}", db_id,
+                    index_id, e.what());
+            return {nullptr, key, idx, tid, nullptr};
+        }
         root->init_empty();
 
         auto look_aside_index = mutable_table->look_aside_index();
@@ -654,6 +676,20 @@ namespace springtail::committer {
             // since btree inserts have a possibility of partial flush,
             // we will do full flush of root once at whichever stage it is in,
             // truncate and flush again
+            _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid, idx_state._look_aside_root);
+        } else if (!idx_state._root) {
+            // The build never produced a root -- for an ordinary (non-abort/non-drop) work item
+            // this previously could only mean st.stop_requested() (process shutting down, so
+            // this code never ran again on the stale IndexState) or _was_dropped() (which routes
+            // through is_drop_while_processing above instead). Phase 9's GIST/GIN dispatch stub
+            // (Indexer::_build's catch block) is a third, new way to reach a null root while the
+            // work item stays BUILDING -- with the process very much still running and ordinary
+            // DML on the table still triggering catch-up reconciliation for it. Skip straight to
+            // _commit_build(), which is already null-root-safe (leaves the index NOT_READY)
+            // rather than falling into the catch-up loop below, which unconditionally
+            // dereferences idx_state._root and would crash.
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1,
+                    "Index reconciliation skipped, build never produced a root: {}:{}", db_id, index_id);
             _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid, idx_state._look_aside_root);
         } else {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index reconciliation in progress: {}:{}", db_id, index_id);

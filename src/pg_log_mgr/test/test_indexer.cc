@@ -120,11 +120,12 @@ namespace {
         }
 
         void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name,
-                bool process_requests_in_indexer=true, bool is_unique=false) {
+                bool process_requests_in_indexer=true, bool is_unique=false, std::string index_type="btree") {
             // Create index at an XID
             std::list<proto::IndexProcessRequest> index_requests;
             auto create_idx_request = create_index(_db_id, table_id, index_xid, index_id, index_name,
-                    std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY, is_unique);
+                    std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY, is_unique,
+                    index_type);
             index_requests.push_back(std::move(create_idx_request));
 
             // Validate index as NOT_READY
@@ -594,6 +595,82 @@ namespace {
         ASSERT_EQ(count_c, 500u);
 
         queue_mgr->remove_queue(_db_id);
+    }
+
+    // Regression test for the btree redesign phase 9 dispatch point (architecture.md Decisions
+    // log entry 8): GIST/GIN index builds must fail explicitly at Indexer::_build, leaving the
+    // index NOT_READY (never crashing, never silently building a btree), while an ordinary BTREE
+    // build on the same table is unaffected.
+    TEST_F(Indexer_Test, Test_GistGinDispatchNotImplemented)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t btree_index_id = _secondary_index_id + 13;
+        uint64_t gist_index_id = _secondary_index_id + 14;
+        uint64_t gin_index_id = _secondary_index_id + 15;
+        uint64_t table_xid = access_xid++;
+
+        create_table(_db_id, table_id, table_xid, "test_indexer_dispatch_table", _columns);
+
+        for (auto const& [index_id, index_type] :
+                std::vector<std::pair<uint64_t, std::string>>{
+                    {gist_index_id, "gist"}, {gin_index_id, "gin"}}) {
+            uint64_t index_xid = access_xid++;
+            uint64_t data_xid = access_xid++;
+
+            _create_index(table_id, index_id, index_xid, "idx_dispatch_" + index_type, true, false,
+                    index_type);
+
+            // Insert rows *after* the failed build but *before* reconciliation runs -- this is
+            // the exact scenario that crashed before this phase's fix to _reconcile_index():
+            // ordinary (non-abort) reconciliation unconditionally dereferenced idx_state._root
+            // to catch up on rows written while the index was "building", an invariant that held
+            // as long as a null root only ever meant st.stop_requested() (process shutting down,
+            // so this code path never actually ran again) or a drop-in-progress (routed to
+            // _commit_build() instead, which already null-checks). The GIST/GIN dispatch stub
+            // breaks that invariant: it returns a null root while the process keeps running and
+            // ordinary DML keeps arriving. Reverting _reconcile_index()'s own null-root guard
+            // reproduces a SIGSEGV in IndexWriter::insert() on this exact test.
+            _populate_table_with_data(table_id, table_xid, data_xid, 10, 5);
+
+            // task()'s own _add_to_pending_reconciliation() call runs regardless of whether
+            // _build() produced a real root (see its doc comment) -- the GIST/GIN stub's failure
+            // still reaches the reconciliation queue the same way a successful build would, so
+            // wait on it the same way _process_index_and_validate() does.
+            auto max_tries = 5;
+            auto try_count = 0;
+            auto index_ready_for_reconcile = false;
+            while (try_count < max_tries) {
+                if (auto request = _index_reconciliation_queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
+                    if (request != nullptr) {
+                        index_ready_for_reconcile = true;
+                        break;
+                    }
+                }
+                try_count++;
+            }
+            ASSERT_TRUE(index_ready_for_reconcile);
+
+            uint64_t reconcile_xid = access_xid++;
+            _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
+
+            auto info = sys_tbl_mgr::Server::get_instance()->get_index_info(_db_id, index_id,
+                    {reconcile_xid, constant::MAX_LSN});
+            ASSERT_EQ(info.index_type(), index_type);
+            // Not READY (the stub never built anything) and not some invented "permanently
+            // failed" state either -- NOT_READY is exactly what an interrupted/not-yet-attempted
+            // build already leaves behind today, which is what makes this retriable once phase
+            // 10/11 replaces the stub (see Indexer::_build's catch block comment).
+            ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info.state()),
+                    sys_tbl::IndexNames::State::NOT_READY);
+        }
+
+        // Control: an ordinary BTREE build on the same table, after the two failed GIST/GIN
+        // attempts, still succeeds -- the dispatch point doesn't wedge or poison anything shared
+        // (e.g. the table's look-aside bootstrap tracker) for a subsequent real build.
+        uint64_t btree_index_xid = access_xid++;
+        _create_index(table_id, btree_index_id, btree_index_xid, "idx_dispatch_btree");
+        uint64_t btree_reconcile_xid = access_xid++;
+        _process_index_and_validate(btree_index_id, btree_index_xid, btree_reconcile_xid);
     }
 
 } // namespace

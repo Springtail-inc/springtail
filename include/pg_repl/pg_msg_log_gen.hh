@@ -53,7 +53,8 @@ namespace springtail {
          */
         uint32_t create_index(const std::string &index,
             const std::string& table_name,
-            uint32_t table_oid, const std::vector<PgMsgSchemaIndexColumn> &columns);
+            uint32_t table_oid, const std::vector<PgMsgSchemaIndexColumn> &columns,
+            const std::string &index_type = "btree");
 
         /**
          * @brief Alter table

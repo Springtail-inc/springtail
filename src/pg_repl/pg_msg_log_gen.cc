@@ -222,7 +222,8 @@ namespace springtail {
 
     uint32_t PgMsgLogGen::create_index(const std::string &index,
             const std::string& table_name,
-            uint32_t table_oid, const std::vector<PgMsgSchemaIndexColumn> &columns) {
+            uint32_t table_oid, const std::vector<PgMsgSchemaIndexColumn> &columns,
+            const std::string &index_type) {
         uint32_t oid = _next_table_id++;
 
         nlohmann::json msg;
@@ -235,6 +236,7 @@ namespace springtail {
         msg["table_oid"] = table_oid;
         msg["table_name"] = table_name;
         msg["identity"] = index;
+        msg["index_type"] = index_type;
 
         nlohmann::json columns_json;
 
@@ -243,6 +245,7 @@ namespace springtail {
             col["name"] = c.name;
             col["position"] = c.position;
             col["idx_position"] = c.idx_position;
+            col["opclass"] = c.opclass;
             columns_json.push_back(col);
         }
 
@@ -747,9 +750,11 @@ namespace springtail {
             col.name = c["name"];
             col.position = c["position"];
             col.idx_position = c["idx_position"];
+            col.opclass = c["opclass"];
             columns.push_back(col);
         }
-        _log_gen.create_index(index, json["table_name"], json["table_oid"], columns);
+        _log_gen.create_index(index, json["table_name"], json["table_oid"], columns,
+            json["index_type"]);
     }
 
 
