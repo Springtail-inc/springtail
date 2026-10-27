@@ -9,16 +9,29 @@
 --
 -- Note: this test intentionally does not use "### schema_check" -- that directive waits,
 -- database-wide (not scoped to any one table), for *every* secondary index to leave state 0
--- (NOT_READY). At phase 9 (when this test was written), neither GiST nor GIN ever left state 0
--- under that phase's dispatch stub, so schema_check would have timed out for the whole test run
--- until "## cleanup" drops this table. Phase 10 (GiST) and phase 11 (GIN) have since replaced
--- that stub with real builds -- both indexes below now actually reach READY (see
--- GIST_Index_Build_And_Search.sql/GIN_Index_Build_And_Search.sql for dedicated build-and-search
--- coverage of that) -- but this test still only asserts index_exists (not state), so it remains
--- correct either way; schema_check still isn't used here to avoid widening this file's own scope
--- into re-asserting what those two dedicated tests already cover. CREATE INDEX ... USING
--- btree(...) regression coverage already exists via INDEX_DDL_Alter_Add_Secondary_Index.sql's own
--- ### schema_check, unaffected by anything in this file.
+-- (NOT_READY). Neither index created below ever leaves state 0, so schema_check would time out
+-- for the whole test run until "## cleanup" drops this table -- confirmed directly against a live
+-- daemon stack (round-1 review of phase 11), not assumed from "phase 10/11 replaced the stub with
+-- real builds":
+--   - gist_gin_access_method_test_gist_idx (USING gist (val), val is INT, no explicit opclass):
+--     GiST's own pre-existing TEXT-only scope limit (phase 10) rejects it --
+--     "gist_helpers: only TEXT-typed GiST columns are supported in this phase".
+--   - gist_gin_access_method_test_gin_idx (USING gin (tags), tags is TEXT, no explicit opclass):
+--     Postgres resolves the implicit opclass to btree_gin's text_ops (confirmed against pg_opclass/
+--     pg_index on the live primary), which is never registered with PgExtnRegistry because
+--     btree_gin isn't in system.json.settings' extension_config (only cube/hstore/pg_trgm are) --
+--     "gin_helpers: no GIN_EXTRACTVALUE registered for opclass text_ops".
+-- Both failures are handled exactly as designed (a thrown Error, caught, index left NOT_READY
+-- forever, no crash, no corruption) -- this is not a bug, but it does mean a bare
+-- `CREATE INDEX ... USING gin(text_col)`/`USING gist(int_col)` with no explicit opclass silently
+-- never becomes usable today, with no catalog-visible "failed" state. GIST_Index_Build_And_Search.
+-- sql/GIN_Index_Build_And_Search.sql are the dedicated tests exercising the one opclass pair
+-- (gist_trgm_ops/gin_trgm_ops) actually confirmed to reach READY. This test only ever asserted
+-- index_exists (catalog presence), never state, so it remains correct regardless; schema_check
+-- still isn't used here to avoid widening this file's own scope into re-asserting what those two
+-- dedicated tests already cover. CREATE INDEX ... USING btree(...) regression coverage already
+-- exists via INDEX_DDL_Alter_Add_Secondary_Index.sql's own ### schema_check, unaffected by
+-- anything in this file.
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS btree_gin;
 
@@ -62,9 +75,10 @@ CREATE TABLE gist_inline_access_method_test (
 -- src/sys_tbl_mgr/test/test_sys_tbl_mgr.cc's CreateIndexAccessMethod unit test for the exact
 -- index_type/opclass content assertions this integration test can't make directly --
 -- __pg_springtail_catalog isn't queryable from a plain SQL line here, since this statement also
--- runs, unmodified, against the primary's real Postgres, which has no such schema; and see
--- src/pg_log_mgr/test/test_indexer.cc's Test_GistBuildReachesReady/Test_GinBuildReachesReady for
--- the READY-state assertions this file no longer needs, now that both kinds build for real).
+-- runs, unmodified, against the primary's real Postgres, which has no such schema). Both stay
+-- NOT_READY forever (see the "## test" comment above for why); src/pg_log_mgr/test/test_indexer.cc's
+-- Test_GistBuildReachesReady/Test_GinBuildReachesReady are the tests asserting a real READY
+-- transition, using gist_trgm_ops/gin_trgm_ops explicitly rather than an implicit opclass.
 ### index_exists public gist_gin_access_method_test gist_gin_access_method_test_gist_idx true
 ### index_exists public gist_gin_access_method_test gist_gin_access_method_test_gin_idx true
 

@@ -501,9 +501,20 @@ get_table_dir(const std::filesystem::path &base,
     Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset,
             const ExtensionCallback &extension_callback, IndexAccessMethod access_method)
     {
-        // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8): the
-        // only place phase 10/11 need to touch to go from "not yet implemented" to a real
-        // GistReadStrategy-/GinReadStrategy-backed construction.
+        // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8). This
+        // was originally written as "the only place phase 10/11 need to touch to go from 'not
+        // yet implemented' to a real construction" -- that stopped being true once decision 11
+        // (GiST) and its phase-11 follow-on (GIN) found that neither GistReaderPtr nor
+        // GinReaderPtr is an IndexReaderPtr, so neither can actually be returned from this
+        // function. The GIST/GIN cases below are therefore permanently unreachable in practice
+        // (every caller of this 5-arg overload is itself gated behind an access_method dispatch
+        // that routes GIST/GIN to _create_gist_index_root()/_create_gin_index_root() instead,
+        // never here -- confirmed by grep) and structurally can't be filled in without changing
+        // this function's return type. They're kept only so this switch stays exhaustive over
+        // IndexAccessMethod's three variants, not as a marker for future work -- real GiST/GIN
+        // read-root construction lives in _create_gist_index_root()/_create_gin_index_root()
+        // (this file) and is reached via Table::init()'s reload loop's own access_method
+        // dispatch, not through here.
         switch (access_method) {
             case IndexAccessMethod::BTREE:
                 break;
