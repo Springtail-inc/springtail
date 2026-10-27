@@ -1367,6 +1367,29 @@ namespace {
     // writer instance resolves both in sequence, chaining the second merge's inputs through
     // the first merge's still-unflushed result -- precisely the scenario the fixed code must
     // get right.
+    //
+    // Round-2 review (non-blocking finding 2): this test is order-dependent *outside*
+    // ctest's one-process-per-test model -- it fails if run via a combined
+    // `--gtest_filter='MergeReclaimTest.*'` against the raw binary after its four sibling
+    // tests in the same fixture, because each of those tests' TearDown() (cleanup_db(),
+    // every one of them with nothing of its own in the global vacuum log to preserve) renames/
+    // removes Vacuumer's shared `_global_vacuum_file` directly via std::filesystem, bypassing
+    // IOMgr's path-keyed file-object cache entirely; by the time *this* test's own
+    // commit_expired_extents()+run_vacuum_once() actually writes-then-reads that same path,
+    // IOMgr's cached handle for it can be stale. Traced and confirmed root cause is pre-
+    // existing Vacuumer/IOMgr behavior, not anything in this phase's production code (see
+    // phases/phase-8.md's Verification section and round-2-response.md for the full
+    // analysis, including why switching this assertion to a narrower seam like
+    // Vacuumer::compaction_dead_offsets() does not avoid it -- empirically confirmed that
+    // seam reads back equally stale/empty in the exact same failing scenario, since it is
+    // populated by the identical run_vacuum_once() call). Always run this test via `ctest`
+    // (`ctest -R MergeReclaimTest` or the full suite) -- never via a raw
+    // `--gtest_filter='MergeReclaimTest.*'` invocation of the binary itself, which shares
+    // one process (and one Vacuumer singleton) across every case in the fixture. This mirrors
+    // the existing `TimeTraceTest.Basic` precedent (phases/phase-7.md's Verification section):
+    // a known, pre-existing environment/library interaction that AGENTS.md's documented
+    // `ctest`-based commands are not exposed to, recorded here rather than silently worked
+    // around.
     TEST_F(MergeReclaimTest, ChainedMergeInOneCycleReportsEveryPredecessorSuperseded)
     {
         auto path = _table_dir / "0.idx";
