@@ -1344,4 +1344,104 @@ namespace {
         std::sort(actual.begin(), actual.end());
         EXPECT_EQ(actual, expected) << "no data lost or duplicated across the whole churn run";
     }
+
+    // Round-1 review (blocking finding 1): a merge result (or a split result) only ever
+    // recorded a fixed two superseded predecessors (`prev_offset`/`second_prev_offset`). If
+    // either input to a merge is itself an unflushed merge result from earlier in the *same*
+    // generation -- exactly what happens when `run_merge_cycle()`'s shared budget resolves more
+    // than one flag against the same tree in one call -- that input's own second predecessor
+    // was silently dropped, never reported to the Vacuumer, permanently leaking that extent's
+    // dead-byte accounting. Fixed by replacing the fixed two-slot fields with
+    // `Node::superseded_offsets` (a list, concatenated on merge, copied in full on split) --
+    // see that field's own doc comment.
+    //
+    // This test reproduces the exact chain the review's own repro used: three leaf siblings
+    // under one root ("first" = a0,a1; "second" = a2,a3, the untouched middle one; "z" =
+    // z0,z1), built via a deliberate two-generation setup (insert four rows to get a flat
+    // 2-leaf/1-root tree, then insert two more into the "a" range specifically to split that
+    // leaf in place, landing "second" as a third sibling without disturbing "z") rather than
+    // left to chance via BtreeWriteStrategy's own split behavior for an arbitrary row pattern
+    // (confirmed empirically while writing this test that insert-pattern alone does not
+    // reliably produce this exact shape). Both outer siblings are then shrunk (never emptied)
+    // in one generation, raising two flags; one `run_merge_cycle()` call against a single
+    // writer instance resolves both in sequence, chaining the second merge's inputs through
+    // the first merge's still-unflushed result -- precisely the scenario the fixed code must
+    // get right.
+    TEST_F(MergeReclaimTest, ChainedMergeInOneCycleReportsEveryPredecessorSuperseded)
+    {
+        auto path = _table_dir / "0.idx";
+
+        // Generation 1: a flat 2-leaf/1-root tree (same dataset as
+        // DeleteHeavyWorkloadRaisesFlagAndMergeShrinksNodeCount, confirmed there to split into
+        // exactly two leaves).
+        auto writer1 = _create_writer(path, 2, /*max_extent_size=*/60);
+        writer1->insert(_row("a0", "short"));
+        writer1->insert(_row("a1", "short"));
+        writer1->insert(_row("z0", "short"));
+        writer1->insert(_row("z1", "short"));
+        uint64_t offset1 = writer1->finalize();
+        auto segment0_path = SegmentSet::segment_path(path, SegmentSet::segment_id_of(offset1));
+        ASSERT_TRUE(std::filesystem::exists(segment0_path));
+
+        // Generation 2 (same max_extent_size, so this split is deliberate, not a side effect of
+        // a size-budget mismatch): grow the "a" leaf past the split threshold with two more
+        // rows in its own key range, splitting it into "first" (a0,a1) and "second" (a2,a3) --
+        // "z" (z0,z1) is untouched, landing as the third sibling without ever being touched.
+        // By this point segment 0's six extents (both generations' roots, the original "a"
+        // leaf, "z", and the two split results) exceed this fixture's 500-byte seal threshold,
+        // sealing it -- confirmed via the ASSERT below rather than assumed.
+        auto writer2 = _open_writer(path, 3, offset1, /*max_extent_size=*/60);
+        writer2->insert(_row("a2", "short"));
+        writer2->insert(_row("a3", "short"));
+        uint64_t offset2 = writer2->finalize();
+        ASSERT_GT(std::filesystem::file_size(segment0_path), 500u)
+            << "test setup assumption: generation 1 + 2's combined content seals segment 0, so "
+               "every later generation's fresh writes land outside it";
+        ASSERT_EQ(_root_row_count(segment0_path), 3u)
+            << "test setup assumption: three leaf siblings (first, second, z) under one root";
+
+        // Generation 3: shrink *both outer* siblings (never emptying either), leaving "second"
+        // (the middle one) untouched -- raises exactly two flags.
+        auto writer3 = _open_writer(path, 4, offset2, /*max_extent_size=*/1000000);
+        writer3->remove(_row("a1", "short"));
+        writer3->remove(_row("z1", "short"));
+        uint64_t offset3 = writer3->finalize();
+        ASSERT_EQ(Vacuumer::get_instance()->get_underfull_flags(path).size(), 2u);
+
+        // Generation 4: one run_merge_cycle()-shaped call against a single writer instance
+        // resolves both flags. The first resolved merge ("first" + "second", its only sibling)
+        // produces an unflushed result that becomes "z"'s new immediate sibling; the second
+        // resolved merge ("z" + that unflushed result) is the exact chain the bug dropped a
+        // predecessor from.
+        auto writer4 = _open_writer(path, 5, offset3, /*max_extent_size=*/1000000);
+        size_t merged = _run_merge_cycle(writer4);
+        EXPECT_EQ(merged, 2u) << "both flags should actually merge -- everything here is tiny";
+        EXPECT_TRUE(Vacuumer::get_instance()->get_underfull_flags(path).empty());
+        uint64_t offset4 = writer4->finalize();
+
+        // Drive segment 0's dead-byte fraction to 100% and vacuum: if (and only if) *every*
+        // one of segment 0's six extents -- including "second", the middle leaf never directly
+        // touched by generation 3, only ever carried forward through the merge chain -- was
+        // actually reported superseded, nothing in it is reachable anymore and phase 6's
+        // whole-file unlink removes it outright. Exposing the bug through this existing,
+        // already-trusted mechanism (rather than a new test-only hook) is the review's own fix
+        // direction for this regression test.
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 1, 6, false, 0);
+        Vacuumer::get_instance()->commit_expired_extents(_db_id, 6);
+        Vacuumer::get_instance()->set_global_vacuum_threshold(1);
+        Vacuumer::get_instance()->run_vacuum_once();
+
+        EXPECT_FALSE(std::filesystem::exists(segment0_path))
+            << "segment 0 should be fully reclaimed -- if this fails, something in its six "
+               "extents (most likely 'second', the middle leaf only ever carried through the "
+               "merge chain, never directly touched) was never reported superseded to the "
+               "Vacuumer";
+
+        auto final_reader = _open_writer(path, 100, offset4, /*max_extent_size=*/1000000);
+        auto actual = _read_all_keys(final_reader);
+        std::vector<std::string> expected{"a0", "a2", "a3", "z0"};
+        std::sort(expected.begin(), expected.end());
+        std::sort(actual.begin(), actual.end());
+        EXPECT_EQ(actual, expected) << "no data lost or duplicated across the merge chain";
+    }
 }

@@ -68,19 +68,22 @@ namespace springtail {
                 TEMP_ID_BASE's comment and segment_set.hh. */
             uint64_t id = constant::UNKNOWN_EXTENT;
 
-            /** The on-disk extent_id this node's content supersedes once flushed (becomes
-                ExtentHeader::prev_offset); UNKNOWN_EXTENT if this node (or its entire chain of
-                in-memory splits) never corresponded to on-disk content. */
-            uint64_t prev_offset = constant::UNKNOWN_EXTENT;
-
-            /** A *second* superseded predecessor, used only by background structural-reclaim
-                merge (phase 8): a merge result combines two existing siblings' content, so it
-                has two predecessors to report superseded once it flushes, not one -- unlike
-                prev_offset, this has no on-disk header counterpart (nothing reads it back; see
-                _flush_node()'s comment on why that's fine), it exists purely so _flush_node()'s
-                existing Vacuumer-reporting step can report both without a second Node-level
-                field class of its own. UNKNOWN_EXTENT for every node except a merge result. */
-            uint64_t second_prev_offset = constant::UNKNOWN_EXTENT;
+            /** Every on-disk extent_id this node's in-memory lineage has superseded since it
+                was last read from disk, not yet reported to the Vacuumer -- empty if this node
+                (or its entire chain of in-memory splits/merges) never corresponded to on-disk
+                content. A node materialized from disk (_get_child()/init()) starts with exactly
+                one entry (its own id); a split's two results each inherit the *full* list from
+                the node they came from (not just its first entry -- round-1 review, phase 8);
+                a merge's result is the concatenation of both inputs' full lists. This can grow
+                past two entries within a single generation if structural operations chain
+                before a flush (e.g. two merges landing on the same lineage, or a split of an
+                unflushed merge result) -- do not assume a fixed cap the way an earlier version
+                of this field did (a single extra `second_prev_offset` slot, sized for "one
+                merge, once" and silently dropping anything beyond that). _flush_node() reports
+                every entry via _report_superseded(), one on-disk ExtentHeader::prev_offset slot
+                is written from the first entry purely for on-disk informational purposes
+                (nothing reads it back -- see _flush_node()'s comment). */
+            std::vector<uint64_t> superseded_offsets;
 
             ExtentType type;
 
@@ -453,29 +456,31 @@ namespace springtail {
 
         /** Recursive, post-order (child-before-parent) flush of every dirty node reachable from
             `node`, patching each parent's branch row with its child's real, now-known extent_id
-            as each child finishes flushing. Also notifies the Vacuumer that each flushed node's
-            prev_offset is now superseded, de-duplicated against `reported_expired` (scoped to one
-            finalize() call) since sibling split results can share the same prev_offset -- see the
-            .cc for the full reasoning. */
+            as each child finishes flushing. Also notifies the Vacuumer that every entry in each
+            flushed node's `superseded_offsets` is now superseded, de-duplicated against
+            `reported_expired` (scoped to one finalize() call) since sibling split results (and,
+            since phase 8, chained merge/split results) can share entries -- see the .cc for the
+            full reasoning. */
         void _flush_node(NodePtr node, std::unordered_set<uint64_t> &reported_expired);
 
-        /** _flush_node()'s per-predecessor Vacuumer-reporting step, factored out so a merge
-            result (two predecessors: prev_offset and second_prev_offset) and an ordinary
-            split/touch result (one: prev_offset) share the same exact-size-reporting and
-            reported_expired-dedup logic. A no-op if `prev_offset` is UNKNOWN_EXTENT or already
+        /** _flush_node()'s per-entry Vacuumer-reporting step for one id out of a flushed node's
+            `superseded_offsets` list, factored out so every entry (there can be more than two,
+            per that field's own doc comment) shares the same exact-size-reporting and
+            `reported_expired`-dedup logic. A no-op if `offset` is UNKNOWN_EXTENT or already
             reported this finalize() call. */
-        void _report_superseded(uint64_t prev_offset, std::unordered_set<uint64_t> &reported_expired);
+        void _report_superseded(uint64_t offset, std::unordered_set<uint64_t> &reported_expired);
 
         /** apply_compaction_batch()'s per-item worker: if `old_id` is still referenced -- either
             as the tree's own root, or as some current node's branch-row child pointer, found by
             descending from the root via `search_key` exactly as an ordinary mutation would --
             adopt `dense_copy` as that node's content and mark it (and every ancestor up to the
             root) dirty for the next finalize() to flush, reporting `old_id` itself as superseded
-            in the process (mirrors _flush_node()'s own prev_offset reporting, since nothing else
-            ever flushes `old_id`'s own content again to do that for us). Returns false, doing
-            nothing, if `old_id` isn't found -- see the .cc for why `search_key`-based descent
-            still finds the right (possibly since-CoW-rewritten-or-split) current node, as long
-            as `old_id`'s own row range -- immutable once sealed -- hasn't changed. Also returns
+            in the process (mirrors _flush_node()'s own superseded_offsets reporting, since
+            nothing else ever flushes `old_id`'s own content again to do that for us). Returns
+            false, doing nothing, if `old_id` isn't found -- see the .cc for why
+            `search_key`-based descent still finds the right (possibly since-CoW-rewritten-
+            or-split) current node, as long as `old_id`'s own row range -- immutable once
+            sealed -- hasn't changed. Also returns
             false (rather than overwriting) if the node found is *already* dirty from this same
             generation's own foreground mutation -- a node's `id` field isn't rewritten until it
             actually flushes, so an already-touched node can still read back as `id == old_id`;

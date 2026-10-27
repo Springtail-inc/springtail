@@ -63,7 +63,6 @@ namespace springtail {
 
         auto root = std::make_shared<Node>();
         root->id = _next_temp_id++;
-        root->prev_offset = constant::UNKNOWN_EXTENT;
         root->type = ExtentType(false, true);
         root->extent = extent;
         root->schema = _leaf_schema;
@@ -97,7 +96,7 @@ namespace springtail {
 
         auto root = std::make_shared<Node>();
         root->id = root_offset;
-        root->prev_offset = root_offset;
+        root->superseded_offsets = { root_offset };
         root->type = extent->header().type;
         root->extent = extent;
         root->schema = schema;
@@ -132,7 +131,7 @@ namespace springtail {
 
         auto node = std::make_shared<Node>();
         node->id = id;
-        node->prev_offset = id;
+        node->superseded_offsets = { id };
         node->type = extent->header().type;
         node->extent = extent;
         node->schema = schema;
@@ -281,9 +280,15 @@ namespace springtail {
 
         MutableFieldArrayPtr key_fields = (node->schema == _branch_schema) ? _branch_keys : _leaf_keys;
 
+        // Both results inherit the *full* list of `node`'s still-unreported superseded offsets,
+        // not just a single representative entry -- `node` itself may already be carrying more
+        // than one (e.g. it's an earlier merge result from this same generation that hasn't
+        // flushed yet, round-1 review phase 8). reported_expired already dedupes whichever of
+        // `first`/`second` flushes an entry first, so duplicating the full list across both is
+        // safe, exactly like the single-prev_offset case this generalizes.
         auto first = std::make_shared<Node>();
         first->id = _next_temp_id++;
-        first->prev_offset = node->prev_offset;
+        first->superseded_offsets = node->superseded_offsets;
         first->type = child_type;
         first->extent = first_extent;
         first->schema = node->schema;
@@ -292,7 +297,7 @@ namespace springtail {
 
         auto second = std::make_shared<Node>();
         second->id = _next_temp_id++;
-        second->prev_offset = node->prev_offset;
+        second->superseded_offsets = node->superseded_offsets;
         second->type = child_type;
         second->extent = second_extent;
         second->schema = node->schema;
@@ -344,7 +349,6 @@ namespace springtail {
 
                 auto root = std::make_shared<Node>();
                 root->id = _next_temp_id++;
-                root->prev_offset = constant::UNKNOWN_EXTENT;
                 root->type = ExtentType(true, true);
                 root->extent = root_extent;
                 root->schema = _branch_schema;
@@ -537,28 +541,37 @@ namespace springtail {
             _branch_child_f->set_uint64(&row, child->id);
         }
 
+        // The on-disk ExtentHeader::prev_offset field is purely informational -- nothing in the
+        // new engine reads it back (see _report_superseded()'s own comment) -- so it's written
+        // from the first entry of `superseded_offsets`, or UNKNOWN_EXTENT if this node's lineage
+        // never corresponded to on-disk content. The *correctness*-relevant reporting below
+        // iterates every entry, not just this one.
+        uint64_t header_prev_offset = node->superseded_offsets.empty()
+                ? constant::UNKNOWN_EXTENT : node->superseded_offsets.front();
         node->extent->header() = ExtentHeader(node->type, _xid, node->schema->row_size(),
-                                              node->schema->field_types(), node->prev_offset);
+                                              node->schema->field_types(), header_prev_offset);
 
         auto segment_path = _segments.current_path();
         uint64_t within_offset = _cache->flush(_database_id, segment_path, node->extent);
         uint64_t real_id = SegmentSet::pack(_segments.current_segment_id(), within_offset);
         DCHECK_LT(real_id, TEMP_ID_BASE);
 
-        // Notify the vacuumer that node->prev_offset (and, for a merge result, second_prev_offset
-        // -- phase 8) are now superseded (architecture.md "btree" redesign Sec 4's reachability
-        // invariant: once nothing points at it, it's reclaimable). Phase 1 deliberately left this
-        // unwired (nothing referenced IndexWriter in production yet) and flagged exactly this
-        // phase as the one to wire it up, and to decide how to de-duplicate: a split's
-        // "first"/"second" results both inherit the same prev_offset (_split_node), and if both
-        // independently flush (e.g. across different calls this generation, or one now and one
-        // after a later re-split), reporting prev_offset more than once would double-count it in
-        // the vacuumer's bookkeeping. reported_expired is scoped to one finalize() call and
-        // dedupes within it; chained splits/merges *across* generations can't double-report the
-        // same prev_offset, since by the next generation it's already a real, different on-disk
-        // id. See _report_superseded() for the rest (exact-size reporting, segment-path decoding).
-        _report_superseded(node->prev_offset, reported_expired);
-        _report_superseded(node->second_prev_offset, reported_expired);
+        // Notify the vacuumer that every entry in node->superseded_offsets is now superseded
+        // (architecture.md "btree" redesign Sec 4's reachability invariant: once nothing points
+        // at it, it's reclaimable). Phase 1 deliberately left this unwired (nothing referenced
+        // IndexWriter in production yet) and flagged exactly this phase as the one to wire it
+        // up, and to decide how to de-duplicate: a split's "first"/"second" results both inherit
+        // the same list (_split_node), and a merge's result is the concatenation of both its
+        // inputs' lists (_merge_nodes) -- so the same entry can appear in more than one
+        // not-yet-flushed node's list at once, and reporting it more than once would double-
+        // count it in the vacuumer's bookkeeping. reported_expired is scoped to one finalize()
+        // call and dedupes within it; chained splits/merges *across* generations can't double-
+        // report the same entry, since by the next generation it's already a real, different
+        // on-disk id. See _report_superseded() for the rest (exact-size reporting, segment-path
+        // decoding).
+        for (uint64_t offset : node->superseded_offsets) {
+            _report_superseded(offset, reported_expired);
+        }
 
         // Background structural-reclaim (merge, architecture.md Sec 7.1, phase 8): the delete
         // path's signal is raised *here*, not at the point remove() shrinks a node in memory --
@@ -589,40 +602,44 @@ namespace springtail {
     template <typename Strategy>
     requires WriteStrategy<Strategy>
     void
-    IndexWriter<Strategy>::_report_superseded(uint64_t prev_offset,
+    IndexWriter<Strategy>::_report_superseded(uint64_t offset,
                                               std::unordered_set<uint64_t> &reported_expired)
     {
-        // Since phase 6, prev_offset is itself a packed (segment_id, offset) real id (every real
-        // id is, post phase-6), so it must be decoded into its own segment's path before being
+        // Since phase 6, offset is itself a packed (segment_id, offset) real id (every real id
+        // is, post phase-6), so it must be decoded into its own segment's path before being
         // reported -- the vacuumer's dead-byte bookkeeping is keyed by literal, openable file
         // path (see vacuumer.cc), not by the tree's logical base path.
         //
-        // The reported size must be prev_offset's own *exact* on-disk size, not an estimate --
-        // phase 6 round-1 review (finding 1) caught that this used to report node->extent->
+        // The reported size must be offset's own *exact* on-disk size, not an estimate -- phase
+        // 6 round-1 review (finding 1) caught that this used to report node->extent->
         // byte_count() (the *new*, replacement extent's logical byte count, mirroring
         // StorageCache::DataCache::_flush_and_update_extent()'s identical approximation), which
-        // has no required relationship to prev_offset's true size: an inflated estimate could
-        // push the vacuumer's whole-segment dead-byte sum (vacuumer.cc) up to the segment's file
-        // size while other, untouched, live extents still remain in it, causing it to be
-        // unlinked out from under a reader that can still reach them (architecture.md Sec 4
-        // violation) -- "approximate size is harmless for hole-punch" (the original, still
-        // correct, use of this approximation) does not carry over to "approximate size safely
-        // gates an irreversible whole-file delete". IndexExtentCache already tracks every
-        // extent's exact on-disk size for its own LRU bookkeeping; prev_offset's entry is still
-        // cache-resident here in the overwhelmingly common case (this same node was read via
-        // _get_child()/init() earlier this generation, and _touch() clones into a private copy
-        // rather than mutating the cached original in place), so this is a cache hit, not an
-        // extra disk read, except in the rare case the entry was evicted under memory pressure
-        // in between, where re-reading it is the correct (if slightly more costly) fallback.
-        if (prev_offset == constant::UNKNOWN_EXTENT || !reported_expired.insert(prev_offset).second) {
+        // has no required relationship to offset's true size: an inflated estimate could push
+        // the vacuumer's whole-segment dead-byte sum (vacuumer.cc) up to the segment's file size
+        // while other, untouched, live extents still remain in it, causing it to be unlinked out
+        // from under a reader that can still reach them (architecture.md Sec 4 violation) --
+        // "approximate size is harmless for hole-punch" (the original, still correct, use of
+        // this approximation) does not carry over to "approximate size safely gates an
+        // irreversible whole-file delete". IndexExtentCache already tracks every extent's exact
+        // on-disk size for its own LRU bookkeeping; offset's entry is still cache-resident here
+        // in the overwhelmingly common case (this same node was read via _get_child()/init()
+        // earlier this generation, and _touch() clones into a private copy rather than mutating
+        // the cached original in place), so this is a cache hit, not an extra disk read, except
+        // in the rare case the entry was evicted under memory pressure in between, where
+        // re-reading it is the correct (if slightly more costly) fallback.
+        //
+        // This is called once per entry in a flushed node's `superseded_offsets` (plural, since
+        // round-1 review phase 8) rather than a fixed one-or-two hardcoded calls -- see that
+        // field's own doc comment for why a fixed cap was wrong.
+        if (offset == constant::UNKNOWN_EXTENT || !reported_expired.insert(offset).second) {
             return;
         }
 
-        auto prev_segment_path = SegmentSet::segment_path(_file, SegmentSet::segment_id_of(prev_offset));
-        uint32_t prev_size = 0;
-        _cache->get(_database_id, prev_segment_path, SegmentSet::offset_of(prev_offset), &prev_size);
-        Vacuumer::get_instance()->expire_extent(prev_segment_path, SegmentSet::offset_of(prev_offset),
-                                                prev_size, _xid);
+        auto offset_segment_path = SegmentSet::segment_path(_file, SegmentSet::segment_id_of(offset));
+        uint32_t offset_size = 0;
+        _cache->get(_database_id, offset_segment_path, SegmentSet::offset_of(offset), &offset_size);
+        Vacuumer::get_instance()->expire_extent(offset_segment_path, SegmentSet::offset_of(offset),
+                                                offset_size, _xid);
     }
 
     template <typename Strategy>
@@ -883,10 +900,19 @@ namespace springtail {
 
         MutableFieldArrayPtr key_fields = (first->schema == _branch_schema) ? _branch_keys : _leaf_keys;
 
+        // The merged result's superseded-offsets list is the concatenation of *both* inputs'
+        // full lists, not just their own single id -- either `first` or `second` may itself
+        // already be carrying more than one unreported entry (an earlier merge or split result
+        // from this same generation that hasn't flushed yet). Dropping anything beyond a fixed
+        // "one per side" was round-1 review's finding for this exact phase: a second merge
+        // landing on an already-merged, not-yet-flushed sibling silently lost the middle
+        // extent's id, permanently leaking its dead-byte accounting.
         auto merged = std::make_shared<Node>();
         merged->id = _next_temp_id++;
-        merged->prev_offset = first->prev_offset;
-        merged->second_prev_offset = second->prev_offset;
+        merged->superseded_offsets = first->superseded_offsets;
+        merged->superseded_offsets.insert(merged->superseded_offsets.end(),
+                                          second->superseded_offsets.begin(),
+                                          second->superseded_offsets.end());
         merged->type = child_type;
         merged->extent = merged_extent;
         merged->schema = first->schema;
