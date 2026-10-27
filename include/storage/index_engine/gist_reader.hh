@@ -47,7 +47,7 @@ namespace springtail {
          * gist_helpers::make_text_query().
          */
         std::vector<gist_helpers::GistEntry> search(const std::string &query_bytes, uint16_t strategy_num,
-                                                    size_t *branches_visited = nullptr) const;
+                                                    size_t *leaves_visited = nullptr) const;
 
         /** Every leaf entry in the tree, unfiltered -- this phase's look-aside-indirection test
             (and any other test needing to see every row without a predicate) uses this instead

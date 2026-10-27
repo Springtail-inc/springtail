@@ -481,8 +481,12 @@ namespace springtail::gist_helpers {
     }
 
     bool consistent(const GistEntry &entry, int col, const std::string &query_bytes,
-                     uint16_t strategy, bool is_leaf, const std::vector<std::string> &opclass_names) {
+                     uint16_t strategy, bool is_leaf, const std::vector<std::string> &opclass_names,
+                     bool *recheck_out) {
         if (opclass_names[col] == TEST_RANGE_OPCLASS) {
+            if (recheck_out) {
+                *recheck_out = false; // exact string comparisons only -- never lossy.
+            }
             return test_range_ops::consistent(entry.keys[col], query_bytes, strategy);
         }
 
@@ -502,6 +506,9 @@ namespace springtail::gist_helpers {
                 static_cast<Datum>(strategy),
                 ObjectIdGetDatum(0),
                 PointerGetDatum(&recheck) });
+        if (recheck_out) {
+            *recheck_out = recheck;
+        }
         return DatumGetBool(result);
     }
 

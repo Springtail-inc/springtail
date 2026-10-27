@@ -44,13 +44,13 @@ namespace springtail {
     }
 
     std::vector<GistEntry> GistReader::search(const std::string &query_bytes, uint16_t strategy_num,
-                                              size_t *branches_visited) const {
+                                              size_t *leaves_visited) const {
         std::vector<GistEntry> out;
-        if (branches_visited) {
-            *branches_visited = 0;
+        if (leaves_visited) {
+            *leaves_visited = 0;
         }
         if (_root_offset != constant::UNKNOWN_EXTENT) {
-            _search_recursive(_root_offset, query_bytes, strategy_num, out, branches_visited);
+            _search_recursive(_root_offset, query_bytes, strategy_num, out, leaves_visited);
         }
         return out;
     }

@@ -276,24 +276,45 @@ namespace springtail::committer {
             // phase-9.md's handoff named explicitly): dropping a GIST index must construct its
             // root via create_gist_index_root(), never create_index_root(), or it would
             // misinterpret the GiST tree's content as a btree while truncating it.
-            auto access_method = index_access_method_from_string(info.index_type());
-            if (access_method == IndexAccessMethod::GIST) {
-                auto opclass_names = _get_index_opclasses(info);
-                auto gist_root = table->create_gist_index_root(index_id, idx_cols, opclass_names,
-                        {PgExtnRegistry::get_instance()->comparator_func});
-                if (it->extent_id != constant::UNKNOWN_EXTENT) {
-                    gist_root->init(it->extent_id);
-                    gist_root->truncate();
-                    gist_root->finalize();
+            //
+            // index_access_method_from_string() throws on any unrecognized index_type string by
+            // design (phase 9, architecture.md Decisions log entry 10) -- "a throwing validator
+            // is only as safe as its least-protected caller", so this call site needs its own
+            // local catch, matching _build()'s dispatch four lines below in this same file (round-
+            // 1 review of this phase, finding 1: this call site was new in this commit and was
+            // the one sibling of that pattern left unprotected -- info.index_type() is read fresh
+            // from the catalog here, and nothing upstream of _drop() re-validates it, so this
+            // can't assume _upsert_index_name's write-side guard is the only thing ever able to
+            // reach this line). Unlike _build(), there's no valid root to truncate if the access
+            // method can't even be classified, so log and leave this index's `IndexNames` row as
+            // whatever the caller already set it (BEING_DELETED) rather than inventing a partial
+            // drop -- non-destructive, and this call site is unreachable today under ordinary DDL
+            // for the same reason _build()'s dispatch is: the write-side guard already stops
+            // this exact string from reaching the catalog.
+            try {
+                auto access_method = index_access_method_from_string(info.index_type());
+                if (access_method == IndexAccessMethod::GIST) {
+                    auto opclass_names = _get_index_opclasses(info);
+                    auto gist_root = table->create_gist_index_root(index_id, idx_cols, opclass_names,
+                            {PgExtnRegistry::get_instance()->comparator_func});
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        gist_root->init(it->extent_id);
+                        gist_root->truncate();
+                        gist_root->finalize();
+                    }
+                } else {
+                    auto root = table->create_index_root(index_id, idx_cols,
+                            {PgExtnRegistry::get_instance()->comparator_func}, access_method);
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        root->init(it->extent_id);
+                        root->truncate();
+                        root->finalize();
+                    }
                 }
-            } else {
-                auto root = table->create_index_root(index_id, idx_cols,
-                        {PgExtnRegistry::get_instance()->comparator_func}, access_method);
-                if (it->extent_id != constant::UNKNOWN_EXTENT) {
-                    root->init(it->extent_id);
-                    root->truncate();
-                    root->finalize();
-                }
+            } catch (const Error& e) {
+                LOG_ERROR("Index drop failed to resolve access method, index left at its current "
+                        "state: {}:{} - {}", db_id, index_id, e.what());
+                return;
             }
 
             // Truncate look-aside index if this is the last index in the table getting dropped

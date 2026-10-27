@@ -44,10 +44,14 @@ namespace springtail {
         /** GIST_CONSISTENT for indexed column `col`: does `entry` satisfy `query` under
             `strategy`? The only opclass support function the read side ever calls -- descent and
             leaf matching both reduce to this one predicate (real GiST has no separate "choose
-            child" primitive for search, unlike insertion's penalty-driven choose_subtree). */
+            child" primitive for search, unlike insertion's penalty-driven choose_subtree).
+            `recheck_out` forwards gist_helpers::consistent()'s own recheck out-param (round-1
+            review of this phase, finding 3) -- see that function's doc comment; unused by this
+            phase's own callers (GistReader::search() passes nullptr), kept so the value is
+            retrievable rather than silently dropped. */
         bool consistent(const gist_helpers::GistEntry &entry, int col, const std::string &query_bytes,
-                        uint16_t strategy, bool is_leaf) const {
-            return gist_helpers::consistent(entry, col, query_bytes, strategy, is_leaf, _opclass_names);
+                        uint16_t strategy, bool is_leaf, bool *recheck_out = nullptr) const {
+            return gist_helpers::consistent(entry, col, query_bytes, strategy, is_leaf, _opclass_names, recheck_out);
         }
 
     private:

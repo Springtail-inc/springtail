@@ -129,9 +129,24 @@ namespace springtail::gist_helpers {
      * 5=> for btree_gist's opclasses)? `is_leaf` must reflect whether `entry` came from a leaf or
      * branch row -- GIST_LEAF(entry) inside the opclass's own consistent function changes whether it
      * applies an exact check or (for a branch's union bounding box) a conservative overlap check.
+     *
+     * `recheck_out`, if non-null, receives the real GIST_CONSISTENT ABI's `recheck` out-param
+     * (round-1 review of this phase, finding 3: this value used to be computed and then silently
+     * discarded, with no way for any caller to ever retrieve it). `recheck=true` means the
+     * opclass's compression is lossy for this entry and the match is a conservative over-
+     * approximation the caller must re-verify against the real indexed value before trusting --
+     * real GiST's `gistget()` unconditionally honors this; `pg_trgm`'s `gist_trgm_ops` sets it for
+     * longer/more numerous inputs whose trigram set is signature-summarized. No caller in this
+     * phase reads it yet (query-time routing -- the first place that would need to act on it by
+     * re-checking the real row -- is phase 12's job; see phases/phase-10.md's Design notes), but
+     * the value must be retrievable rather than dropped on the floor, so a later phase doesn't
+     * have to rediscover that `GistReader::search()`'s results can be false positives for a lossy
+     * opclass. The pure-C++ `TEST_RANGE_OPCLASS` reference opclass is never lossy (exact string
+     * comparisons only) and always reports `recheck=false`.
      */
     bool consistent(const GistEntry &entry, int col, const std::string &query_bytes,
-                     uint16_t strategy, bool is_leaf, const std::vector<std::string> &opclass_names);
+                     uint16_t strategy, bool is_leaf, const std::vector<std::string> &opclass_names,
+                     bool *recheck_out = nullptr);
 
     /** Build a raw query Datum (varlena bytes, same convention as a compressed/union GistEntry key)
         for a text value -- the one helper this phase's own tests need to drive consistent() without
