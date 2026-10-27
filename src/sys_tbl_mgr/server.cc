@@ -1584,11 +1584,27 @@ Server::_upsert_index_name(uint64_t db_id,
     // the internally-constructed primary/look-aside role indexes (_set_primary_index/
     // _set_lookaside_index), which never go through Postgres DDL and so never set index_type --
     // both cases are, and can only ever be, BTREE under today's engine. Validate eagerly so a
-    // corrupt/unrecognized index_type fails loudly here rather than persisting silently and
-    // surfacing later at the dispatch point.
+    // corrupt/unrecognized index_type (e.g. a real "CREATE INDEX ... USING hash(...)" -- hash/
+    // spgist/brin are ordinary, common Postgres access methods this engine has never built
+    // correctly, but previously did so silently as a wrong btree rather than rejecting) is
+    // rejected here the same way Server::_check_index_columns rejects an unsupported column type
+    // -- log clearly and decline to create the index (created=false, no catalog row) -- rather
+    // than throwing: this is reached directly from PgLogReader's DDL-replication thread
+    // (Server::create_index -> _create_index -> here), which has no try/catch anywhere between it
+    // and PgLogReader::_msg_worker()'s message loop, so an uncaught exception here would call
+    // std::terminate() and crash the whole pg_log_mgr daemon, not just reject one statement.
+    // index_access_method_from_string() itself stays throwing -- Indexer::_build's own
+    // try/catch (its *only* other caller) is exercised and correct at that call site -- this is
+    // the one site that must not let the exception escape.
     std::string resolved_index_type =
         index_info.index_type().empty() ? std::string(constant::INDEX_TYPE_BTREE) : index_info.index_type();
-    (void) index_access_method_from_string(resolved_index_type);
+    try {
+        (void) index_access_method_from_string(resolved_index_type);
+    } catch (const Error& e) {
+        LOG_ERROR("Unsupported index access method for index {} on table {}: {}",
+            index_info.id(), index_info.table_id(), e.what());
+        return false;
+    }
 
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         index_info.namespace_id(), index_info.name(), index_info.table_id(), index_info.id(), xid.xid, xid.lsn,

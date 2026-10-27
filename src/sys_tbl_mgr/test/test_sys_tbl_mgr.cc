@@ -499,6 +499,50 @@ namespace {
         ASSERT_EQ(look_aside_info.index_type(), "btree");
     }
 
+    // Regression test for round-1 review finding 1: a real "CREATE INDEX ... USING hash(...)"
+    // (or spgist, brin, or any other access method this engine has never built) must be rejected
+    // the same way Server::_check_index_columns rejects an unsupported column type -- logged and
+    // declined (no catalog row, "no_op") -- not thrown. index_access_method_from_string() throws
+    // on an unrecognized string by design; Server::create_index()'s call path (reached directly
+    // from PgLogReader's DDL-replication thread, with no try/catch anywhere between it and
+    // PgLogReader::_msg_worker()'s message loop) must never let that exception escape, or an
+    // ordinary hash/spgist/brin index crashes the whole pg_log_mgr daemon via std::terminate().
+    TEST_F(SysTblMgr_Test, CreateIndexUnsupportedAccessMethod)
+    {
+        uint64_t tid = 100006;
+        uint64_t index_id = 5013;
+
+        _create_table(tid, "x");
+        _finalize();
+
+        auto xid = _next_lsn();
+        PgMsgIndex msg{};
+        msg.lsn = xid.lsn;
+        msg.xid = xid.xid;
+        msg.namespace_name = "public";
+        msg.index = "idx_hash";
+        msg.is_unique = false;
+        msg.table_oid = tid;
+        msg.oid = index_id;
+        msg.index_type = "hash";
+        msg.columns.push_back({"col2", 2, 0, ""});
+
+        // Must not throw -- that's the whole bug this test guards against.
+        proto::IndexProcessRequest response;
+        ASSERT_NO_THROW({
+            response = _server->create_index(_db, xid, msg, sys_tbl::IndexNames::State::NOT_READY);
+        });
+        _client->invalidate_table(_db, msg.table_oid, xid);
+
+        // Declined like any other unsupported-DDL case (mirrors _check_index_columns' own
+        // unsupported-column-type rejection, which also surfaces as "no_op") -- no catalog row.
+        EXPECT_EQ(response.action(), "no_op");
+
+        _finalize();
+        auto info = _server->get_index_info(_db, index_id, _xid, tid);
+        EXPECT_EQ(info.id(), 0u);
+    }
+
     // Tests table create / alter / drop
     TEST_F(SysTblMgr_Test, CreateAlterDrop)
     {
