@@ -616,6 +616,48 @@ namespace indexer_helpers {
         }
 
         /**
+         * Returns the requested GiST index reader (btree redesign phase 12), or nullptr if
+         * `idx` doesn't name a READY GiST index on this table. _gist_indexes was populated by
+         * Table::init()'s reload loop since phase 10, but (per that phase's own Design notes)
+         * had no accessor reaching outside the class until this phase's query-time routing
+         * needed one -- see phases/phase-12.md's Design notes.
+         */
+        GistReaderPtr gist_index(uint64_t idx) const
+        {
+            auto it = _gist_indexes.find(idx);
+            return it == _gist_indexes.end() ? nullptr : it->second.first;
+        }
+
+        /**
+         * Returns the requested GIN index reader (btree redesign phase 12), or nullptr if `idx`
+         * doesn't name a READY GIN index on this table. Mirrors gist_index() exactly -- see its
+         * comment.
+         */
+        GinReaderPtr gin_index(uint64_t idx) const
+        {
+            auto it = _gin_indexes.find(idx);
+            return it == _gin_indexes.end() ? nullptr : it->second.first;
+        }
+
+        /**
+         * Materializes the full row for a single `internal_row_id` (btree redesign phase 12),
+         * generalizing Table::Iterator::Secondary::update_page()'s existing look-aside-then-
+         * primary-read pattern (table.cc) to a public, single-id entry point -- GiST/GIN query
+         * results come back as a list of internal_row_ids with no secondary-index iterator of
+         * their own to drive that lookup the way an ordinary btree secondary scan has.
+         *
+         * The returned Extent::Row is only valid as long as the returned SafePagePtr (first) is
+         * kept alive -- callers must hold onto it for exactly as long as they use the row,
+         * mirroring Table::Iterator::Secondary's own `_page` member lifetime.
+         *
+         * @param internal_row_id The internal_row_id to look up (must currently exist in the
+         *        look-aside index -- this is a programming error to call otherwise, not a
+         *        recoverable "not found" case, matching update_page()'s own DCHECK).
+         */
+        std::pair<StorageCache::SafePagePtr, Extent::Row> read_row_by_internal_id(
+            uint64_t internal_row_id) const;
+
+        /**
          * Get the index schema.
          */
         ExtentSchemaPtr get_index_schema(uint64_t index_id) const;

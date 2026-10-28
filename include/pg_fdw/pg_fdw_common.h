@@ -41,6 +41,13 @@ typedef enum {
     LESS_THAN_EQUALS,
     GREATER_THAN,
     GREATER_THAN_EQUALS,
+    /** pg_trgm's "%" similarity operator (btree redesign phase 12) -- the one GIN-eligible
+        operator this phase recognizes for gin_trgm_ops columns (see phases/phase-12.md's
+        Design notes for why only this operator, not also LIKE/regex, this phase). Never
+        reaches a btree range-scan bound comparison the way the ops above do -- PgFdwMgr
+        routes it to a GinReadStrategy lookup instead, entirely outside _set_scan_iterators'
+        switch, except for the placeholder case that switch needs to stay exhaustive. */
+    GIN_SIMILAR,
 } QualOpName;
 
 /** Base qual for predicates */

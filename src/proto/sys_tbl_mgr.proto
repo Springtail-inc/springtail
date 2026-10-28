@@ -284,6 +284,25 @@ message RevertRequest {
   int64 xid = 2;
 }
 
+// btree redesign phase 12: query-time GIN term extraction. PgFdwMgr (inside a real Postgres
+// backend process via the FDW) can never link springtail_opclass_engine/springtail_pgext
+// (architecture.md Decisions log entries 11/12 -- that library's exported symbols collide with
+// the real backend's own), so it can't call a real opclass's GIN_EXTRACTQUERY/GIN_EXTRACTVALUE
+// support function directly. SysTblMgr's daemon-side binary already links
+// springtail_opclass_engine (it needs it for GinWriteStrategy's build-time term extraction), so
+// it does this call on PgFdwMgr's behalf -- one RPC per query (not per row/node), reusing
+// gin_helpers::extract_terms() exactly as GinWriteStrategy does at build time. See
+// phases/phase-12.md's Design notes for why this is extract_terms()/EXTRACTVALUE rather than a
+// full EXTRACTQUERY call for pg_trgm's similarity strategy specifically.
+message GinExtractQueryTermsRequest {
+  string opclass = 1;
+  string query = 2;
+}
+
+message GinExtractQueryTermsResponse {
+  repeated bytes terms = 1;
+}
+
 // Service for managing system tables
 service SysTblMgr {
   // Health check
@@ -303,4 +322,8 @@ service SysTblMgr {
 
   // Get user defined type
   rpc GetUserType(GetUserTypeRequest) returns (GetUserTypeResponse) {}
+
+  // Extract GIN query-time term bytes for an opclass (btree redesign phase 12) -- see
+  // GinExtractQueryTermsRequest's own comment for why this exists.
+  rpc GinExtractQueryTerms(GinExtractQueryTermsRequest) returns (GinExtractQueryTermsResponse) {}
 }

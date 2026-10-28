@@ -483,6 +483,34 @@ get_table_dir(const std::filesystem::path &base,
         return _read_page(extent_id);
     }
 
+    std::pair<StorageCache::SafePagePtr, Extent::Row>
+    Table::read_row_by_internal_id(uint64_t internal_row_id) const
+    {
+        // Mirrors Table::Iterator::Secondary::update_page()'s look-aside-then-primary-read
+        // pattern exactly (btree redesign phase 12), generalized to a single public entry point
+        // -- see this method's own header comment for why GiST/GIN query results need it.
+        auto look_aside_key_fields = std::make_shared<FieldArray>(1);
+        look_aside_key_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+        auto lookup_tuple = std::make_shared<FieldTuple>(look_aside_key_fields, nullptr);
+
+        auto extent_id_f = _look_aside_schema->get_field(constant::INDEX_EID_FIELD);
+        auto row_id_f = _look_aside_schema->get_field(constant::INDEX_RID_FIELD);
+
+        auto &&lookup_i = _look_aside_index->lower_bound(lookup_tuple);
+        DCHECK(lookup_i != _look_aside_index->end());
+
+        auto &&look_aside_row = *lookup_i;
+        uint64_t eid = extent_id_f->get_uint64(&look_aside_row);
+        uint32_t row_id = row_id_f->get_uint32(&look_aside_row);
+
+        auto page = _read_page(eid);
+        DCHECK(page->extent_count() == 1);
+        auto page_i = page->begin();
+        page_i += row_id;
+        Extent::Row row = *page_i;
+        return {std::move(page), row};
+    }
+
     StorageCache::SafePagePtr
     Table::_read_page_via_primary(IndexReaderT::Iterator &pos) const
     {

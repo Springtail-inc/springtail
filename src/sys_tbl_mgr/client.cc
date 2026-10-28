@@ -275,4 +275,25 @@ Client::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
                                                 response.exists());
 }
 
+std::vector<std::vector<char>>
+Client::extract_gin_query_terms(const std::string &opclass, const std::string &query)
+{
+    proto::GinExtractQueryTermsRequest request;
+    request.set_opclass(opclass);
+    request.set_query(query);
+
+    proto::GinExtractQueryTermsResponse response;
+    grpc_client::retry_rpc("SysTblMgr", "GinExtractQueryTerms",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->GinExtractQueryTerms(context, request, &response);
+                           });
+
+    std::vector<std::vector<char>> terms;
+    terms.reserve(response.terms_size());
+    for (auto &term : response.terms()) {
+        terms.emplace_back(term.begin(), term.end());
+    }
+    return terms;
+}
+
 }  // namespace springtail::sys_tbl_mgr

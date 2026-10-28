@@ -117,6 +117,26 @@ namespace springtail::pg_fdw {
         std::vector<TargetColumn> target_columns;
 
         std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
+
+        /** GIN-routed scan state (btree redesign phase 12): the full, materialized list of
+         *  internal_row_ids matching a GIN-eligible qual, or std::nullopt for every other scan
+         *  (the overwhelming majority -- full table scan or an ordinary btree index scan).
+         *  Populated by PgFdwMgr::_try_init_gin_scan(); consumed by a dedicated branch in
+         *  fdw_iterate_scan() instead of the ordinary iter_start/iter_end MergeTable::Iterator
+         *  pair, since GIN indexes aren't reachable through MergeTable's btree-shaped
+         *  lower_bound()/upper_bound() at all (see Table::gin_index()'s own comment) and a
+         *  candidate id set has no sorted-key range for those to express anyway. See
+         *  phases/phase-12.md's Design notes for why this is a separate scan mode rather than
+         *  an iterator. */
+        std::optional<std::vector<uint64_t>> gin_match_ids = std::nullopt;
+        size_t gin_scan_pos = 0;  ///< Current position into gin_match_ids during iteration.
+
+        /** The GIN index a GIN-routed scan matched, for EXPLAIN/bookkeeping purposes only --
+         *  deliberately *not* the same field as `index` (see _try_init_gin_scan()'s own comment
+         *  for why `index` itself must stay unset: get_index_column_names()/get_index_schema()
+         *  and the index-only-scan optimization in fdw_begin_scan() assume a btree-shaped
+         *  secondary index). Mirrors gin_match_ids.has_value() -- always set together. */
+        std::optional<Index> gin_index = std::nullopt;
         std::vector<Index> indexes; ///< List of table indexes including the primary index.
                                     /// Index columns are sorted by their position in the index.
         std::optional<Index> sortgroup_index; ///< Index matching the sortgroup.
@@ -271,6 +291,15 @@ namespace springtail::pg_fdw {
          */
         static bool check_type_compatibility(const SchemaColumn &column, ConstQualPtr qual);
 
+        /** Helper to determine if a type can be used in a where clause */
+        static bool _is_type_sortable(Oid pg_type, QualOpName op);
+
+        /** Helper to get the index quals for a given index */
+        static std::vector<ConstQualPtr> _get_index_quals(
+            const std::map<uint32_t, SchemaColumn> &columns,
+            Index const &idx,
+            List const *qual_list);
+
         /**
          * @brief Initialization function
          *
@@ -405,9 +434,6 @@ namespace springtail::pg_fdw {
 
         static void _handle_exception(const Error &e);
 
-        /** Helper to determine if a type can be used in a where clause */
-        static bool _is_type_sortable(Oid pg_type, QualOpName op);
-
         /** Helper to compare a primary key const qual field to the data within a row */
         static bool _compare_field(const void* row,
                                    const FieldPtr& row_field,
@@ -416,6 +442,21 @@ namespace springtail::pg_fdw {
 
         /** Helper to set/reset scan iterators from beginning based on quals */
         static void _set_scan_iterators(PgFdwState *state);
+
+        /** Helper (btree redesign phase 12): try to route a GIN-eligible qual to a
+         *  GinReadStrategy scan instead of the ordinary full-scan/filter behavior. On success,
+         *  populates state->gin_match_ids (and resets gin_scan_pos) and returns true; on any
+         *  failure (no matching READY GIN index, query-term extraction failed/returned nothing
+         *  usable) leaves state untouched and returns false, so the caller falls through to the
+         *  existing behavior unchanged. Only ever called when the ordinary btree index
+         *  selection in _init_quals() found no usable index -- see that function's call site.
+         */
+        static bool _try_init_gin_scan(PgFdwState *state, const List *qual_list);
+
+        /** Helper (btree redesign phase 12): emit one row of a GIN-routed scan (see
+         *  gin_match_ids) in fdw_iterate_scan()'s place. Not static: needs
+         *  _get_datum_from_field(), exactly like fdw_iterate_scan() itself. */
+        bool _gin_iterate_scan(PgFdwState *state, Datum *values, bool *nulls, bool *eos);
 
         /** Helper to generate tuple used in upper/lower bound calculations for scan iter */
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
@@ -431,12 +472,6 @@ namespace springtail::pg_fdw {
         static Datum _binary_to_datum(const std::span<const char> &value,
                                       Oid pg_oid,
                                       int32_t atttypmod);
-
-        /** Helper to get the index quals for a given index */
-        static std::vector<ConstQualPtr>
-        _get_index_quals(const std::map<uint32_t, SchemaColumn>& columns,
-                        Index const& idx,
-                        List const* qual_list);
 
         /** Helper to create an IPC cache for table roots */
         void _try_create_cache();

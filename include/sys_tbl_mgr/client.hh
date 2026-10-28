@@ -33,6 +33,21 @@ public:
     std::shared_ptr<UserType> get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid);
 
     /**
+     * Extract GIN query-time term bytes for an opclass (btree redesign phase 12) --
+     * SysTblMgrClient's daemon already links the opclass-calling engine PgFdwMgr itself never
+     * can (see GinExtractQueryTermsRequest's proto comment); this is the RPC PgFdwMgr uses to
+     * get an opclass's real extracted-term bytes without linking springtail_opclass_engine/
+     * springtail_pgext itself. Throws Error on RPC/opclass failure -- callers reached from a
+     * real Postgres backend process must catch this and fall back to the existing full-scan/
+     * filter behavior, never let it propagate into the backend.
+     * @param opclass Opclass name (e.g. "gin_trgm_ops").
+     * @param query The raw query-side text (e.g. the LIKE pattern/similarity argument).
+     * @return The extracted term byte-strings, or empty if the opclass extracted none.
+     */
+    std::vector<std::vector<char>> extract_gin_query_terms(const std::string &opclass,
+                                                           const std::string &query);
+
+    /**
      * Invalidates the schema entry for a given table from a given XID/LSN
      */
     void invalidate_table(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
