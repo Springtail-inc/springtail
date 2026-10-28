@@ -102,11 +102,18 @@ namespace springtail {
          * springtail_xid_mgr) when these were first written as out-of-line calls into
          * segment_set.cc.
          *
-         * pack()'s DCHECKs guard against a violation that would otherwise silently wrap into the
-         * wrong segment or corrupt the top (TEMP_ID_BASE-reserved) bit.
+         * pack()'s checks guard against a violation that would otherwise silently wrap into the
+         * wrong segment or corrupt the top (TEMP_ID_BASE-reserved) bit. The segment_id bound is an
+         * always-on CHECK_LE (btree redesign final-2, matching default_seal_threshold_bytes()'s/
+         * _maybe_seal_and_rotate()'s identical promotion, phase 6 round-1 review finding 2) --
+         * silent wraparound here means a wrong segment gets decoded, i.e. data corruption, in a
+         * release build too, not just a debug-build assertion. The offset bound stays a DCHECK:
+         * it is independently guarded in every build by default_seal_threshold_bytes()'s own
+         * always-on CHECK_LE against MAX_OFFSET, so an offset this large can't be reached via the
+         * operator-controlled config path the segment_id bound has no equivalent gate for.
          */
         static uint64_t pack(uint32_t segment_id, uint64_t offset) {
-            DCHECK_LE(segment_id, MAX_SEGMENT_ID) << "segment_id space exhausted for this tree";
+            CHECK_LE(segment_id, MAX_SEGMENT_ID) << "segment_id space exhausted for this tree";
             DCHECK_LE(offset, MAX_OFFSET) << "segment grew past the in-segment offset range -- "
                                              "segment_seal_threshold_bytes is set too high";
             return (uint64_t(segment_id) << OFFSET_BITS) | offset;

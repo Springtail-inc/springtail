@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <span>
+
 #include <common/constants.hh>
 #include <gtest/gtest.h>
 
@@ -8,6 +11,8 @@
 
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/indexer.hh>
+#include <storage/index_engine/gin_helpers.hh>
+#include <storage/index_engine/gist_helpers.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -744,5 +749,225 @@ namespace {
         ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(info.state()), sys_tbl::IndexNames::State::READY);
     }
 
+    // btree redesign final-2: phase 10/11 each named, and no later phase closed, the gap that a
+    // READY GiST/GIN secondary index is populated once by Indexer's build (above) and never
+    // touched again by ordinary per-row DML -- Test_VacuumSecondaryIndex (above) already relies
+    // on exactly this working for a plain btree secondary index (DML after _process_index_and_
+    // validate()); this is GIN's counterpart, checked against GinReadStrategy directly rather
+    // than end-to-end. Uses gin_helpers::TEST_TERM_OPCLASS (whitespace-tokenizing, no dlopen) so
+    // the test is self-contained and deterministic. Independently verified to fail without
+    // final-2's mutable_table.cc fix (reverted locally and rerun): the post-DML lookups below
+    // returned either stale build-time content or nothing at all, confirming the test exercises
+    // the gap, not just coincidentally passing.
+    TEST_F(Indexer_Test, Test_GinDmlMaintainsReadyIndex)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t table_xid = access_xid++;
+
+        constexpr int32_t text_pg_oid = 25; // postgres TEXTOID; named to avoid pg_type_d.h's own macro
+        std::vector<PgMsgSchemaColumn> text_columns = {
+            {"gin_id", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
+            {"gin_val", static_cast<uint8_t>(SchemaType::TEXT), text_pg_oid, std::nullopt, 2, 0, true, false, false},
+        };
+        create_table(_db_id, table_id, table_xid, "test_indexer_gin_dml_table", text_columns);
+
+        auto insert_row = [&](MutableTablePtr mtable, int32_t id, const std::string &val, uint64_t internal_row_id) {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(id));
+            fields.push_back(std::make_shared<ConstTypeField<std::string>>(val));
+            fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(internal_row_id));
+            mtable->insert(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        };
+
+        uint64_t data_xid = access_xid++;
+        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
+        insert_row(mtable, 1, "alpha one", 1);
+        insert_row(mtable, 2, "alpha two", 2);
+        auto &&metadata = mtable->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
+
+        uint64_t gin_index_id = _secondary_index_id + 22;
+        uint64_t index_xid = access_xid++;
+        _create_index(table_id, gin_index_id, index_xid, "idx_gin_dml", true, false, "gin",
+                std::vector<PgMsgSchemaColumn>{ text_columns[1] },
+                { std::string(gin_helpers::TEST_TERM_OPCLASS) });
+
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(gin_index_id, index_xid, reconcile_xid);
+
+        auto lookup = [&](uint64_t at_xid, const std::string &term) {
+            auto table = TableMgr::get_instance()->get_table(_db_id, table_id, at_xid,
+                    {PgExtnRegistry::get_instance()->comparator_func});
+            auto gin = table->gin_index(gin_index_id);
+            return gin->lookup(std::span<const char>(term.data(), term.size()));
+        };
+
+        // Sanity: the build-time rows are already in the index.
+        {
+            auto ids = lookup(reconcile_xid, "alpha");
+            std::ranges::sort(ids);
+            ASSERT_EQ(ids.size(), 2u);
+            EXPECT_EQ(ids[0], 1u);
+            EXPECT_EQ(ids[1], 2u);
+        }
+
+        // Ordinary DML after READY, via the same MutableTable path committer.cc uses -- never
+        // Indexer. Within one commit batch: DELETE both rows carrying "alpha" (emptying that
+        // term's posting list entirely -- gin_write_strategy.cc's own documented "entry row
+        // simply stays removed" case), then INSERT a brand-new row that also contains "alpha"
+        // (task 6 of this phase's brief: a later insert must resurrect the term correctly, not
+        // collide with a half-removed entry).
+        uint64_t post_xid = access_xid++;
+        auto mtable2 = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, reconcile_xid, post_xid);
+
+        // DELETE row 1 by primary key.
+        {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(1));
+            mtable2->remove(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        }
+
+        // UPDATE row 2 so its text no longer contains "alpha" but newly contains "gamma".
+        {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(2));
+            fields.push_back(std::make_shared<ConstTypeField<std::string>>("gamma two"));
+            fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(0)); // ignored by update()
+            mtable2->update(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        }
+
+        // INSERT a brand-new row that re-introduces "alpha".
+        insert_row(mtable2, 3, "alpha three", 3);
+
+        auto &&metadata2 = mtable2->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, post_xid, metadata2);
+
+        // "alpha" no longer matches rows 1/2 (deleted/updated away) -- only row 3, the fresh
+        // insert that resurrected the term after it had been fully emptied.
+        {
+            auto ids = lookup(post_xid, "alpha");
+            ASSERT_EQ(ids.size(), 1u);
+            EXPECT_EQ(ids[0], 3u);
+        }
+
+        // "gamma" (row 2's new content) and "two" (still row 2's) are both findable.
+        EXPECT_EQ(lookup(post_xid, "gamma"), std::vector<uint64_t>{2u});
+
+        // "one" (row 1's old content) is gone entirely -- row 1 was deleted, not just updated.
+        EXPECT_TRUE(lookup(post_xid, "one").empty());
+
+        // Reload from disk at a fresh xid (a brand-new Table/MutableTable instance, not the one
+        // that performed the mutation) to confirm finalize()'s root capture (this phase's task 4)
+        // actually persisted the post-DML state, not just an in-memory artifact of mtable2 itself.
+        uint64_t reload_xid = access_xid++;
+        EXPECT_EQ(lookup(reload_xid, "alpha"), std::vector<uint64_t>{3u});
+    }
+
+    // GiST counterpart of Test_GinDmlMaintainsReadyIndex, immediately above -- see its comment for
+    // the full rationale. Uses gist_helpers::TEST_RANGE_OPCLASS (pure-C++, no dlopen) for the same
+    // determinism reason Test_GistBuildReachesReady uses the real opclass only for a 2-row,
+    // never-split build: this test's DML round would otherwise risk phase 10's documented
+    // pg_trgm.so union/penalty instability under a growing tree for no added value here.
+    // Independently verified to fail without final-2's mutable_table.cc fix (reverted locally and
+    // rerun): the post-DML search() below still returned the deleted row and missed the inserted
+    // one.
+    TEST_F(Indexer_Test, Test_GistDmlMaintainsReadyIndex)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t table_xid = access_xid++;
+
+        constexpr int32_t text_pg_oid = 25; // postgres TEXTOID; named to avoid pg_type_d.h's own macro
+        std::vector<PgMsgSchemaColumn> text_columns = {
+            {"gist_id", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
+            {"gist_val", static_cast<uint8_t>(SchemaType::TEXT), text_pg_oid, std::nullopt, 2, 0, true, false, false},
+        };
+        create_table(_db_id, table_id, table_xid, "test_indexer_gist_dml_table", text_columns);
+
+        auto insert_row = [&](MutableTablePtr mtable, int32_t id, const std::string &val, uint64_t internal_row_id) {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(id));
+            fields.push_back(std::make_shared<ConstTypeField<std::string>>(val));
+            fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(internal_row_id));
+            mtable->insert(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        };
+
+        uint64_t data_xid = access_xid++;
+        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
+        insert_row(mtable, 1, "alpha", 1);
+        insert_row(mtable, 2, "beta", 2);
+        auto &&metadata = mtable->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
+
+        uint64_t gist_index_id = _secondary_index_id + 23;
+        uint64_t index_xid = access_xid++;
+        _create_index(table_id, gist_index_id, index_xid, "idx_gist_dml", true, false, "gist",
+                std::vector<PgMsgSchemaColumn>{ text_columns[1] },
+                { std::string(gist_helpers::TEST_RANGE_OPCLASS) });
+
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(gist_index_id, index_xid, reconcile_xid);
+
+        auto find = [&](uint64_t at_xid, const std::string &value) {
+            auto table = TableMgr::get_instance()->get_table(_db_id, table_id, at_xid,
+                    {PgExtnRegistry::get_instance()->comparator_func});
+            auto gist = table->gist_index(gist_index_id);
+            return gist->search(value, gist_helpers::TEST_RANGE_STRATEGY_EQ);
+        };
+
+        // Sanity: the build-time rows are already in the index.
+        ASSERT_EQ(find(reconcile_xid, "alpha").size(), 1u);
+        ASSERT_EQ(find(reconcile_xid, "beta").size(), 1u);
+
+        // Ordinary DML after READY, via the same MutableTable path committer.cc uses -- never
+        // Indexer: DELETE row 1 ("alpha"), UPDATE row 2 to a new value ("gamma", from "beta"),
+        // INSERT a brand-new row ("delta").
+        uint64_t post_xid = access_xid++;
+        auto mtable2 = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, reconcile_xid, post_xid);
+
+        {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(1));
+            mtable2->remove(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        }
+        {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(2));
+            fields.push_back(std::make_shared<ConstTypeField<std::string>>("gamma"));
+            fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(0)); // ignored by update()
+            mtable2->update(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        }
+        insert_row(mtable2, 3, "delta", 3);
+
+        auto &&metadata2 = mtable2->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, post_xid, metadata2);
+
+        // "alpha" (deleted row) is gone entirely.
+        EXPECT_TRUE(find(post_xid, "alpha").empty());
+
+        // "beta" (updated away) is gone entirely; "gamma" (its replacement) is findable under
+        // row 2's internal_row_id, unchanged by the update.
+        EXPECT_TRUE(find(post_xid, "beta").empty());
+        {
+            auto matches = find(post_xid, "gamma");
+            ASSERT_EQ(matches.size(), 1u);
+            EXPECT_EQ(matches[0].internal_row_id, 2u);
+        }
+
+        // "delta" (brand-new insert) is findable.
+        {
+            auto matches = find(post_xid, "delta");
+            ASSERT_EQ(matches.size(), 1u);
+            EXPECT_EQ(matches[0].internal_row_id, 3u);
+        }
+
+        // Reload from disk at a fresh xid to confirm finalize()'s root capture (this phase's
+        // task 4) actually persisted the post-DML state.
+        uint64_t reload_xid = access_xid++;
+        {
+            auto matches = find(reload_xid, "delta");
+            ASSERT_EQ(matches.size(), 1u);
+            EXPECT_EQ(matches[0].internal_row_id, 3u);
+        }
+    }
 
 } // namespace

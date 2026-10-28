@@ -9,7 +9,10 @@
 -- Builds on GIN_Index_Build_And_Search.sql's own setup exactly (same small, unsplit 3-row
 -- table, same gin_trgm_ops opclass, same "insert before CREATE INDEX" ordering) -- see that
 -- file's own comment for why pg_trgm, not btree_gin, is required in this environment, and why
--- the tree is deliberately kept tiny.
+-- the tree is deliberately kept tiny. (This file's own "insert before CREATE INDEX" choice is
+-- kept for the same reason GIN_Index_Build_And_Search.sql keeps it -- GIN_DML_After_Build.sql
+-- covers query routing composing correctly with rows that arrive/change/disappear *after* the
+-- index is READY, closing what was a real gap here before btree redesign final-2.)
 --
 -- What this test can and can't assert, declaratively: plain SQL statements under "## verify"
 -- below run against *both* the primary (real Postgres, real pg_trgm) and the replica (FDW) and

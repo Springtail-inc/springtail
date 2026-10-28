@@ -13,10 +13,12 @@
 -- load at startup sync (data_init.sql's own "CREATE EXTENSION IF NOT EXISTS pg_trgm", shared with
 -- the GiST test above).
 --
--- Inserted *before* CREATE INDEX (so Indexer's build-time full-table scan populates all rows,
--- rather than relying on post-build DML maintenance -- see phases/phase-11.md's Design notes for
--- why ongoing per-row DML maintenance for GIN indexes is the identical, explicitly flagged,
--- deferred gap phase 10 left for GiST).
+-- Inserted *before* CREATE INDEX, so Indexer's build-time full-table scan is what populates these
+-- rows -- kept this way for this test's own purpose (asserting the build itself reaches READY
+-- and is populated), not because post-build DML maintenance is untested: that gap (phase 10/11
+-- named it, no later phase closed it until btree redesign final-2) is covered by
+-- GIN_DML_After_Build.sql instead, added alongside this file rather than changing this one's
+-- already-asserted setup.
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE gin_index_build_test (

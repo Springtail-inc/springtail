@@ -108,6 +108,16 @@ namespace springtail {
      */
     using SecondaryIndexesCache = std::map<uint64_t, std::pair<IndexWriterPtr, std::vector<uint32_t>>>;
 
+    /**
+     * GiST/GIN counterparts of SecondaryIndexesCache (btree redesign final-2) -- same
+     * index_id => (root, index_cols) shape, just a different root pointer kind. Named so
+     * MutableTable's _gist_indexes/_gin_indexes members and indexer_helpers::
+     * index_mutation_handler()'s template parameter have a nameable type instead of repeating
+     * the raw std::map<...> spelling at every use site.
+     */
+    using GistIndexesCache = std::map<uint64_t, std::pair<GistWriterPtr, std::vector<uint32_t>>>;
+    using GinIndexesCache = std::map<uint64_t, std::pair<GinWriterPtr, std::vector<uint32_t>>>;
+
 namespace table_helpers {
 
 /** Constructs the full directory path for a table given the parameters. */

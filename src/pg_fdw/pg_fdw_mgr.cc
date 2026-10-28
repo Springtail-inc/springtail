@@ -1683,6 +1683,17 @@ namespace springtail::pg_fdw {
         auto join_indexes = planstate->get_cached_join_indexes();
 
         for (auto const& idx: indexes) {
+            // btree redesign final-2: same guard as _get_index_quals()/fdw_can_sort()'s
+            // check_index (grep'd as sibling call sites phase 12's round-1 review already fixed;
+            // this one was missed). Not a correctness bug today -- confirmed independently that
+            // the pathkey entries built below only ever feed join/equivalence-class costing via
+            // multicorn_util.c's findPaths(), never an asserted sort order -- but added anyway for
+            // consistency with the established pattern, since a future consumer of these pathkeys
+            // might not stay equally tolerant of a GiST/GIN index appearing here.
+            if (idx.access_method != IndexAccessMethod::BTREE) {
+                continue;
+            }
+
             // note: rel_rows has taken quals into account in fdw_get_rel_size
             auto rows = rel_rows;
 

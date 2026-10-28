@@ -69,8 +69,12 @@ namespace springtail {
         // comment on why "sealed" is always re-derived rather than trusted from a prior run).
         Vacuumer::get_instance()->register_sealed_segment(path);
 
-        DCHECK_LT(_current_segment_id, MAX_SEGMENT_ID) << "segment_id space exhausted for tree "
-                                                        << _base_file.native();
+        // Always-on, not a DCHECK (btree redesign final-2, matching default_seal_threshold_bytes()'s
+        // identical promotion above, phase 6 round-1 review finding 2): wrapping past
+        // MAX_SEGMENT_ID would silently decode as the wrong segment on the next pack() call,
+        // the same data-corruption-in-a-release-build risk that promotion was made for.
+        CHECK_LT(_current_segment_id, MAX_SEGMENT_ID) << "segment_id space exhausted for tree "
+                                                       << _base_file.native();
         ++_current_segment_id;
     }
 

@@ -78,24 +78,52 @@ namespace indexer_helpers {
             row_id);
     }
 
-    template <IndexOperation op>            // Operation on the index - insert/remove
+    /**
+     * Applies an insert/remove to every index in `indexes` for one row -- templated on the
+     * indexes-cache type (btree redesign final-2) rather than hardcoded to SecondaryIndexesCache,
+     * so the identical body serves _secondary_indexes (IndexWriterPtr), _gist_indexes
+     * (GistWriterPtr), and _gin_indexes (GinWriterPtr) alike: all three maps share the same
+     * (root, index_cols) shape, and GistWriter::insert()/remove()/GinWriteStrategy::insert()/
+     * remove() are deliberately call-compatible with IndexWriter's (see those classes' own doc
+     * comments) -- the KeyValueTuple this builds (indexed column(s) + internal_row_id) is exactly
+     * the calling convention all three expect.
+     *
+     * Each index's insert/remove is individually try/catch-guarded: GistWriter::insert()/
+     * GinWriteStrategy::insert() can throw Error for a row whose opclass/column-type combination
+     * isn't supported (gist_helpers.hh/gin_helpers.hh's own documented scope limits) -- in
+     * practice unreachable for a READY index (the same check already passed on every existing row
+     * during Indexer's build), but this per-row dispatch runs on Committer's call chain
+     * (committer.cc), which (unlike Indexer::_build()'s own loop) has no outer try/catch of its
+     * own -- "a throw-based validator is only as safe as its least-protected caller" (this
+     * project's established lesson, phase 9/10). Catching here logs and skips just that one
+     * index's maintenance for this one row, matching Indexer::_reconcile_index()'s own catch-up
+     * loop precedent (indexer.cc), rather than letting an ordinary DML commit crash the daemon.
+     * A no-op for IndexWriterPtr (confirmed: IndexWriter<Strategy>::insert()/remove() never
+     * throw), so wrapping the pre-existing _secondary_indexes call site too changes nothing there.
+     */
+    template <IndexOperation op, typename IndexesCacheT>
     void index_mutation_handler(
             const ExtentSchemaPtr schema,
-            const SecondaryIndexesCache& secondary_indexes,
+            const IndexesCacheT& indexes,
             const Extent::Row& row)
     {
         auto internal_row_id_f = schema->get_field(constant::INTERNAL_ROW_ID);
         auto internal_row_id = internal_row_id_f->get_uint64(&row);
         auto value_fields = std::make_shared<FieldArray>(1);
 
-        for (auto const& [index_id, idx]: secondary_indexes) {
+        for (auto const& [index_id, idx]: indexes) {
             auto idx_col_fields = schema->get_fields(schema->get_column_names(idx.second));
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-            if constexpr (op == IndexOperation::Insert) {
-                idx.first->insert(svalue);
-            } else { /* op == IndexOperation::Remove */
-                idx.first->remove(svalue);
+            try {
+                if constexpr (op == IndexOperation::Insert) {
+                    idx.first->insert(svalue);
+                } else { /* op == IndexOperation::Remove */
+                    idx.first->remove(svalue);
+                }
+            } catch (const Error& e) {
+                LOG_ERROR("Secondary index {} mutation failed on row data, internal_row_id={}: {}",
+                        index_id, internal_row_id, e.what());
             }
         }
     }
@@ -143,16 +171,23 @@ namespace indexer_helpers {
     }
 
     /**
-     * Struct to hold context to be passed to the callback from cache
+     * Struct to hold context to be passed to the callback from cache. Carries all three
+     * indexes-cache kinds (btree redesign final-2) so one mutation_handler() call maintains
+     * _secondary_indexes, _gist_indexes, and _gin_indexes together -- every MutationType
+     * (INSERT/APPEND/UPDATE/UPSERT/REMOVE/REMOVE_BY_SCAN) already routes through this one
+     * ctx/callback pair (_mutation_wrapper()), so widening it here is the single place that
+     * reaches every per-row mutation path at once.
      */
     struct IndexMutationContext
     {
         const ExtentSchemaPtr schema;
         const SecondaryIndexesCache& indexes;
+        const GistIndexesCache& gist_indexes;
+        const GinIndexesCache& gin_indexes;
     };
 
     /**
-     * Handler that does the secondary index mutations
+     * Handler that does the secondary/GiST/GIN index mutations
      * @param row   Extent row holding the content
      * @param ctx   Generic pointer to an IndexMutationContext
      */
@@ -160,6 +195,8 @@ namespace indexer_helpers {
     static void mutation_handler(const Extent::Row& row, void* ctx) {
         auto* c = static_cast<const IndexMutationContext*>(ctx);
         index_mutation_handler<op>(c->schema, c->indexes, row);
+        index_mutation_handler<op>(c->schema, c->gist_indexes, row);
+        index_mutation_handler<op>(c->schema, c->gin_indexes, row);
     }
 
 } // namespace indexer_helpers
@@ -611,6 +648,19 @@ namespace indexer_helpers {
             auto secondary_segments = secondary.second.first->get_segment_paths();
             r.insert(r.end(), secondary_segments.begin(), secondary_segments.end());
         }
+        // GiST/GIN secondary indexes (btree redesign final-2): now that ordinary DML dirties
+        // their segments too (mutation_handler(), above), they need the same pre-ack fsync
+        // coverage from TableSyncProcessor (committer.cc) that _secondary_indexes already gets --
+        // without this, a crash after commit-ack but before some later, unrelated fsync could
+        // lose a GiST/GIN mutation that was never actually durable.
+        for (auto &gist : _gist_indexes) {
+            auto gist_segments = gist.second.first->get_segment_paths();
+            r.insert(r.end(), gist_segments.begin(), gist_segments.end());
+        }
+        for (auto &gin : _gin_indexes) {
+            auto gin_segments = gin.second.first->get_segment_paths();
+            r.insert(r.end(), gin_segments.begin(), gin_segments.end());
+        }
 
         if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
             r.emplace_back(_table_dir / constant::ROOTS_FILE);
@@ -735,6 +785,12 @@ namespace indexer_helpers {
         for (auto &secondary : _secondary_indexes) {
             secondary.second.first->sync();
         }
+        for (auto &gist : _gist_indexes) {
+            gist.second.first->sync();
+        }
+        for (auto &gin : _gin_indexes) {
+            gin.second.first->sync();
+        }
 
         if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
             // sync the roots file for sysntem tables
@@ -783,6 +839,19 @@ namespace indexer_helpers {
         // now flush the indexes, capturing the roots
         for (auto &secondary : _secondary_indexes) {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize(false));
+        }
+
+        // Flush GiST/GIN secondary indexes too (btree redesign final-2) -- without this, a
+        // mutation applied in-memory by this generation's per-row maintenance (mutation_handler(),
+        // above) has nowhere durable to land, and the next Table::init()/MutableTable reload would
+        // reconstruct the index at its stale, pre-mutation root. Table::init()'s reload loop
+        // (table.cc) looks these up by index_id in metadata.roots exactly like any other secondary
+        // index -- no change needed there, confirmed by reading it directly.
+        for (auto &gist : _gist_indexes) {
+            metadata.roots.emplace_back(gist.first, gist.second.first->finalize(false));
+        }
+        for (auto &gin : _gin_indexes) {
+            metadata.roots.emplace_back(gin.first, gin.second.first->finalize(false));
         }
 
         metadata.stats = _stats;
@@ -931,7 +1000,7 @@ namespace indexer_helpers {
 
         // Create a context to passed to cache and so the same will be
         // passed back to the mutation_handler
-        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes };
+        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes, _gist_indexes, _gin_indexes };
 
         // Find and invoke appropriate mutations in the cache
         if constexpr (m_type == MutationType::INSERT) {

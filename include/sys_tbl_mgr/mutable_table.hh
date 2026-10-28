@@ -485,21 +485,20 @@ namespace springtail {
 
         /** GiST secondary indexes (btree redesign phase 10) -- kept separate from
             _secondary_indexes rather than merged into it; see AnyIndexRoot's class comment
-            (table.hh). Not yet consulted by this class's own generic mutation machinery
-            (indexer_helpers::mutation_handler, _mutation_wrapper()) -- ordinary per-row DML
-            maintenance for a GiST index is a known, explicitly-flagged gap of this phase (see
-            phases/phase-10.md's Design notes): only Indexer's own build-time scan (and its
-            reconciliation catch-up, via AnyIndexRoot) populates one today. */
-        std::map<uint64_t, std::pair<GistWriterPtr, std::vector<uint32_t>>> _gist_indexes;
+            (table.hh). Reached by this class's own generic mutation machinery
+            (indexer_helpers::mutation_handler(), _mutation_wrapper()) since btree redesign
+            final-2, which closed the gap phase 10/11 left open (ordinary per-row DML against a
+            READY GiST/GIN index silently not updating it) -- see final-2's phase doc for the
+            full fix. Not in all_index_writers() / prepare_compaction_cycle() / run_merge_cycle():
+            background structural-reclaim was never extended to GiST/GIN (architecture.md Sec
+            7.1), and final-2 deliberately did not change that. */
+        GistIndexesCache _gist_indexes;
 
         /** GIN secondary indexes (btree redesign phase 11) -- kept separate from
             _secondary_indexes/_gist_indexes for the identical reason; see AnyIndexRoot's class
-            comment (table.hh). Not yet consulted by this class's own generic mutation machinery
-            either -- ordinary per-row DML maintenance for a GIN index is the same known,
-            explicitly-flagged gap phase 10 left for GiST (see phases/phase-11.md's handoff
-            notes): only Indexer's own build-time scan (and its reconciliation catch-up, via
-            AnyIndexRoot) populates one today. */
-        std::map<uint64_t, std::pair<GinWriterPtr, std::vector<uint32_t>>> _gin_indexes;
+            comment (table.hh) and _gist_indexes' comment immediately above (final-2 closed both
+            kinds' DML-maintenance gap the same way, at the same call sites). */
+        GinIndexesCache _gin_indexes;
 
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
         ExtentSchemaPtr _schema_without_row_id; ///< The schema of the data extents of
