@@ -1,5 +1,5 @@
 # source files
-set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc cache.cc cache_tracing.cc
+set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc cache.cc cache_tracing.cc
                     numeric_utils.cc vacuumer.cc
                     index_engine/index_extent_cache.cc index_engine/btree_write_strategy.cc index_engine/index_writer.cc
                     index_engine/btree_read_strategy.cc index_engine/storage_cache_extent_source.cc index_engine/index_reader.cc
@@ -116,14 +116,6 @@ else()
     set(GCOV_LIB "")
 endif()
 
-# btree benchmark
-add_executable(benchmark_btree test/benchmark_btree.cc)
-target_include_directories(benchmark_btree PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(benchmark_btree
-    PUBLIC springtail_storage
-    PRIVATE benchmark::benchmark ${GCOV_LIB})
-add_dsymutil_command(benchmark_btree)
-
 # extent benchmark
 add_executable(benchmark_extents test/benchmark_extents.cc)
 target_include_directories(benchmark_extents PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -137,15 +129,6 @@ springtail_unit_test(test_io
   SOURCES test/io_test.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_storage GTest::gtest_main
-)
-
-# btree test
-springtail_unit_test(test_btree
-  SOURCES test/test_btree.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LINK_OPTIONS "--coverage"
-  LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
-  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 
 # table test

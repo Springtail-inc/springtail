@@ -1,8 +1,6 @@
 #include <common/init.hh>
 
 #include <storage/csv_field.hh>
-#include <storage/btree.hh>
-#include <storage/mutable_btree.hh>
 
 using namespace springtail;
 
