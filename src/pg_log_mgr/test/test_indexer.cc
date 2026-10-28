@@ -970,4 +970,146 @@ namespace {
         }
     }
 
+    // Regression test for final-3: UserMutableTable::truncate() (table_mgr.cc) is a fifth call
+    // site, independent of the four final-2 already wired up, that iterates _secondary_indexes
+    // to reset it on TRUNCATE TABLE -- but never touched _gist_indexes/_gin_indexes, so a READY
+    // GIN secondary index's on-disk structure survived a TRUNCATE fully intact. Drives a real
+    // GIN index through Indexer's build/reconcile pipeline to READY (same pattern as
+    // Test_GinDmlMaintainsReadyIndex, above), then calls truncate() on a fresh MutableTable
+    // instance -- the same entry point committer.cc's TRUNCATE case calls, never Indexer -- and
+    // checks directly against GinReadStrategy::lookup() that the index is empty immediately
+    // after, before any re-insert (final-2's own GIN_DML_After_Build.sql lesson: "a later insert
+    // is findable" can pass for the wrong reason and must not be the only check).
+    // Independently verified to fail without this phase's table_mgr.cc fix (reverted locally and
+    // rerun): the post-truncate lookup below still returned both pre-truncate rows.
+    TEST_F(Indexer_Test, Test_GinTruncateResetsReadyIndex)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t table_xid = access_xid++;
+
+        constexpr int32_t text_pg_oid = 25; // postgres TEXTOID; named to avoid pg_type_d.h's own macro
+        std::vector<PgMsgSchemaColumn> text_columns = {
+            {"gin_id", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
+            {"gin_val", static_cast<uint8_t>(SchemaType::TEXT), text_pg_oid, std::nullopt, 2, 0, true, false, false},
+        };
+        create_table(_db_id, table_id, table_xid, "test_indexer_gin_truncate_table", text_columns);
+
+        auto insert_row = [&](MutableTablePtr mtable, int32_t id, const std::string &val, uint64_t internal_row_id) {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(id));
+            fields.push_back(std::make_shared<ConstTypeField<std::string>>(val));
+            fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(internal_row_id));
+            mtable->insert(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        };
+
+        uint64_t data_xid = access_xid++;
+        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
+        insert_row(mtable, 1, "alpha one", 1);
+        insert_row(mtable, 2, "alpha two", 2);
+        auto &&metadata = mtable->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
+
+        uint64_t gin_index_id = _secondary_index_id + 24;
+        uint64_t index_xid = access_xid++;
+        _create_index(table_id, gin_index_id, index_xid, "idx_gin_truncate", true, false, "gin",
+                std::vector<PgMsgSchemaColumn>{ text_columns[1] },
+                { std::string(gin_helpers::TEST_TERM_OPCLASS) });
+
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(gin_index_id, index_xid, reconcile_xid);
+
+        auto lookup = [&](uint64_t at_xid, const std::string &term) {
+            auto table = TableMgr::get_instance()->get_table(_db_id, table_id, at_xid,
+                    {PgExtnRegistry::get_instance()->comparator_func});
+            auto gin = table->gin_index(gin_index_id);
+            return gin->lookup(std::span<const char>(term.data(), term.size()));
+        };
+
+        // Sanity: the build-time rows are already in the index.
+        ASSERT_EQ(lookup(reconcile_xid, "alpha").size(), 2u);
+
+        // TRUNCATE TABLE, via the same MutableTable::truncate() entry point committer.cc's
+        // TRUNCATE case calls (Committer::_process_extent()) -- never Indexer.
+        uint64_t truncate_xid = access_xid++;
+        auto mtable2 = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, reconcile_xid, truncate_xid);
+        mtable2->truncate();
+
+        // Pre-insert, post-truncate: the index must be empty, checked directly against
+        // GinReadStrategy -- not merely "a later insert is findable."
+        EXPECT_TRUE(lookup(truncate_xid, "alpha").empty());
+
+        // Reload from disk at a fresh xid (a brand-new Table instance) to confirm the reset
+        // root actually persisted via Server::_set_roots_info()'s per-(table_id, index_id)
+        // upsert, not merely an in-memory artifact of mtable2 itself.
+        uint64_t reload_xid = access_xid++;
+        EXPECT_TRUE(lookup(reload_xid, "alpha").empty());
+    }
+
+    // GiST counterpart of Test_GinTruncateResetsReadyIndex, immediately above -- see its comment
+    // for the full rationale. Uses gist_helpers::TEST_RANGE_OPCLASS for the same determinism
+    // reason Test_GistDmlMaintainsReadyIndex does.
+    TEST_F(Indexer_Test, Test_GistTruncateResetsReadyIndex)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t table_xid = access_xid++;
+
+        constexpr int32_t text_pg_oid = 25; // postgres TEXTOID; named to avoid pg_type_d.h's own macro
+        std::vector<PgMsgSchemaColumn> text_columns = {
+            {"gist_id", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
+            {"gist_val", static_cast<uint8_t>(SchemaType::TEXT), text_pg_oid, std::nullopt, 2, 0, true, false, false},
+        };
+        create_table(_db_id, table_id, table_xid, "test_indexer_gist_truncate_table", text_columns);
+
+        auto insert_row = [&](MutableTablePtr mtable, int32_t id, const std::string &val, uint64_t internal_row_id) {
+            std::vector<ConstFieldPtr> fields;
+            fields.push_back(std::make_shared<ConstTypeField<int32_t>>(id));
+            fields.push_back(std::make_shared<ConstTypeField<std::string>>(val));
+            fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(internal_row_id));
+            mtable->insert(std::make_shared<ValueTuple>(fields), constant::UNKNOWN_EXTENT);
+        };
+
+        uint64_t data_xid = access_xid++;
+        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
+        insert_row(mtable, 1, "alpha", 1);
+        insert_row(mtable, 2, "beta", 2);
+        auto &&metadata = mtable->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
+
+        uint64_t gist_index_id = _secondary_index_id + 25;
+        uint64_t index_xid = access_xid++;
+        _create_index(table_id, gist_index_id, index_xid, "idx_gist_truncate", true, false, "gist",
+                std::vector<PgMsgSchemaColumn>{ text_columns[1] },
+                { std::string(gist_helpers::TEST_RANGE_OPCLASS) });
+
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(gist_index_id, index_xid, reconcile_xid);
+
+        auto find = [&](uint64_t at_xid, const std::string &value) {
+            auto table = TableMgr::get_instance()->get_table(_db_id, table_id, at_xid,
+                    {PgExtnRegistry::get_instance()->comparator_func});
+            auto gist = table->gist_index(gist_index_id);
+            return gist->search(value, gist_helpers::TEST_RANGE_STRATEGY_EQ);
+        };
+
+        // Sanity: the build-time rows are already in the index.
+        ASSERT_EQ(find(reconcile_xid, "alpha").size(), 1u);
+        ASSERT_EQ(find(reconcile_xid, "beta").size(), 1u);
+
+        // TRUNCATE TABLE, via the same MutableTable::truncate() entry point committer.cc's
+        // TRUNCATE case calls -- never Indexer.
+        uint64_t truncate_xid = access_xid++;
+        auto mtable2 = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, reconcile_xid, truncate_xid);
+        mtable2->truncate();
+
+        // Pre-insert, post-truncate: both build-time rows must be gone, checked directly
+        // against GistReader -- not merely "a later insert is findable."
+        EXPECT_TRUE(find(truncate_xid, "alpha").empty());
+        EXPECT_TRUE(find(truncate_xid, "beta").empty());
+
+        // Reload from disk at a fresh xid to confirm the reset root actually persisted.
+        uint64_t reload_xid = access_xid++;
+        EXPECT_TRUE(find(reload_xid, "alpha").empty());
+        EXPECT_TRUE(find(reload_xid, "beta").empty());
+    }
+
 } // namespace
