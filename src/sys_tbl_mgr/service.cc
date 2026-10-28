@@ -177,8 +177,18 @@ Service::GinExtractQueryTerms(grpc::ServerContext* context,
         // must become a Status the client can catch and fall back on, not an exception
         // propagating out through gRPC's C callback boundary (see this phase's own Behavioral
         // notes on throw-based validators only being as safe as their least-protected caller).
+        //
+        // FAILED_PRECONDITION, not INTERNAL (round-1 review finding 1): this failure is
+        // deterministic for a given (opclass, db) pair -- retrying the identical request
+        // cannot succeed -- but include/grpc/grpc_client.hh's should_retry() treats INTERNAL as
+        // retryable and retry_rpc_status() retries it up to 50 times with exponential backoff
+        // (~226s worst case) before giving up, blocking the issuing Postgres backend connection
+        // that whole time before the safe full-scan/filter fallback in
+        // PgFdwMgr::_try_init_gin_scan() ever gets a chance to run. FAILED_PRECONDITION is not
+        // in should_retry()'s set, matching the existing non-retryable NOT_FOUND convention
+        // this file already uses for a comparably deterministic condition (Exists(), above).
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
-        return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
+        return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, e.what());
     }
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
