@@ -1047,6 +1047,7 @@ namespace springtail {
         json["table_oid"].get_to(msg.table_oid);
         json["is_unique"].get_to(msg.is_unique);
         json["identity"].get_to(msg.index);
+        json["index_type"].get_to(msg.index_type);
 
         const nlohmann::json& cols = json["columns"];
         for (const auto &el: cols.items()) {
@@ -1055,6 +1056,7 @@ namespace springtail {
             v["name"].get_to(col.name);
             v["position"].get_to(col.position);
             v["idx_position"].get_to(col.idx_position);
+            v["opclass"].get_to(col.opclass);
             msg.columns.push_back(col);
         }
 

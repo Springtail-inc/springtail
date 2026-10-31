@@ -125,12 +125,14 @@ get_table_dir(const std::filesystem::path &base,
         auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
         assert(it != roots.end());
 
-        _primary_index = std::make_shared<BTree>(_db_id,
+        _primary_index = std::make_shared<IndexReaderT>(_db_id,
                                                  _table_dir / constant::INDEX_PRIMARY_FILE,
-                                                 xid,
+                                                 primary_schema->get_sort_keys(),
                                                  primary_schema,
+                                                 xid,
                                                  it->extent_id,
-                                                 get_max_extent_size(),
+                                                 std::make_shared<SharedPoolExtentSource>(get_max_extent_size()),
+                                                 BtreeReadStrategy{},
                                                  extension_callback);
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
@@ -156,9 +158,38 @@ get_table_dir(const std::filesystem::path &base,
             if (!idx_cols.empty()) {
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
-                auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id, extension_callback);
-                assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
-                _secondary_indexes[idx.id] = {btree, idx_cols};
+
+                // Dispatch on access_method (btree redesign phase 10/11, closing the gap
+                // phase-9.md's handoff named explicitly): a READY GIST/GIN index must never be
+                // reconstructed via _create_index_root() (which would misinterpret its content
+                // as a btree) just because this reload loop didn't know any better -- see
+                // AnyIndexRoot's/_create_gist_index_root()'s/_create_gin_index_root()'s class
+                // comments (table.hh).
+                if (idx.access_method == IndexAccessMethod::GIST) {
+                    std::vector<std::string> opclass_names;
+                    opclass_names.reserve(idx.columns.size());
+                    for (auto const &col : idx.columns) {
+                        opclass_names.push_back(col.opclass);
+                    }
+                    auto gist_root = _create_gist_index_root(idx.id, idx_cols, opclass_names,
+                                                             it->extent_id, extension_callback);
+                    assert(_gist_indexes.find(idx.id) == _gist_indexes.end());
+                    _gist_indexes[idx.id] = {gist_root, idx_cols};
+                } else if (idx.access_method == IndexAccessMethod::GIN) {
+                    std::vector<std::string> opclass_names;
+                    opclass_names.reserve(idx.columns.size());
+                    for (auto const &col : idx.columns) {
+                        opclass_names.push_back(col.opclass);
+                    }
+                    auto gin_root = _create_gin_index_root(idx.id, idx_cols, opclass_names,
+                                                           it->extent_id, extension_callback);
+                    assert(_gin_indexes.find(idx.id) == _gin_indexes.end());
+                    _gin_indexes[idx.id] = {gin_root, idx_cols};
+                } else {
+                    auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id, extension_callback);
+                    assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
+                    _secondary_indexes[idx.id] = {btree, idx_cols};
+                }
             }
         }
 
@@ -168,12 +199,15 @@ get_table_dir(const std::filesystem::path &base,
         // Initialize look aside index
         it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_LOOK_ASIDE; });
         if (it != roots.end()) {
-            _look_aside_index = std::make_shared<BTree>(_db_id,
+            _look_aside_index = std::make_shared<IndexReaderT>(_db_id,
                     _table_dir / constant::INDEX_LOOK_ASIDE_FILE,
-                    xid,
+                    _look_aside_schema->get_sort_keys(),
                     _look_aside_schema,
+                    xid,
                     it->extent_id,
-                    get_max_extent_size_secondary(), extension_callback);
+                    std::make_shared<SharedPoolExtentSource>(get_max_extent_size_secondary()),
+                    BtreeReadStrategy{},
+                    extension_callback);
         }
     }
 
@@ -231,7 +265,7 @@ get_table_dir(const std::filesystem::path &base,
 
         CHECK(!index_only);
 
-        BTreePtr btree = index(index_id);
+        IndexReaderPtr btree = index(index_id);
 
         // find the extent that could contain the lower_bound() key
         auto &&i = btree->lower_bound(search_key);
@@ -449,8 +483,36 @@ get_table_dir(const std::filesystem::path &base,
         return _read_page(extent_id);
     }
 
+    std::pair<StorageCache::SafePagePtr, Extent::Row>
+    Table::read_row_by_internal_id(uint64_t internal_row_id) const
+    {
+        // Mirrors Table::Iterator::Secondary::update_page()'s look-aside-then-primary-read
+        // pattern exactly (btree redesign phase 12), generalized to a single public entry point
+        // -- see this method's own header comment for why GiST/GIN query results need it.
+        auto look_aside_key_fields = std::make_shared<FieldArray>(1);
+        look_aside_key_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
+        auto lookup_tuple = std::make_shared<FieldTuple>(look_aside_key_fields, nullptr);
+
+        auto extent_id_f = _look_aside_schema->get_field(constant::INDEX_EID_FIELD);
+        auto row_id_f = _look_aside_schema->get_field(constant::INDEX_RID_FIELD);
+
+        auto &&lookup_i = _look_aside_index->lower_bound(lookup_tuple);
+        DCHECK(lookup_i != _look_aside_index->end());
+
+        auto &&look_aside_row = *lookup_i;
+        uint64_t eid = extent_id_f->get_uint64(&look_aside_row);
+        uint32_t row_id = row_id_f->get_uint32(&look_aside_row);
+
+        auto page = _read_page(eid);
+        DCHECK(page->extent_count() == 1);
+        auto page_i = page->begin();
+        page_i += row_id;
+        Extent::Row row = *page_i;
+        return {std::move(page), row};
+    }
+
     StorageCache::SafePagePtr
-    Table::_read_page_via_primary(BTree::Iterator &pos) const
+    Table::_read_page_via_primary(IndexReaderT::Iterator &pos) const
     {
         auto &&row = *pos;
         uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
@@ -463,17 +525,76 @@ get_table_dir(const std::filesystem::path &base,
         return StorageCache::get_instance()->get(_db_id, _table_dir / constant::DATA_FILE, extent_id, _xid, constant::LATEST_XID, get_max_extent_size());
     }
 
-    BTreePtr
-    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, const ExtensionCallback &extension_callback)
+    IndexReaderPtr
+    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset,
+            const ExtensionCallback &extension_callback, IndexAccessMethod access_method)
     {
+        // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8). This
+        // was originally written as "the only place phase 10/11 need to touch to go from 'not
+        // yet implemented' to a real construction" -- that stopped being true once decision 11
+        // (GiST) and its phase-11 follow-on (GIN) found that neither GistReaderPtr nor
+        // GinReaderPtr is an IndexReaderPtr, so neither can actually be returned from this
+        // function. The GIST/GIN cases below are therefore permanently unreachable in practice
+        // (every caller of this 5-arg overload is itself gated behind an access_method dispatch
+        // that routes GIST/GIN to _create_gist_index_root()/_create_gin_index_root() instead,
+        // never here -- confirmed by grep) and structurally can't be filled in without changing
+        // this function's return type. They're kept only so this switch stays exhaustive over
+        // IndexAccessMethod's three variants, not as a marker for future work -- real GiST/GIN
+        // read-root construction lives in _create_gist_index_root()/_create_gin_index_root()
+        // (this file) and is reached via Table::init()'s reload loop's own access_method
+        // dispatch, not through here.
+        switch (access_method) {
+            case IndexAccessMethod::BTREE:
+                break;
+            case IndexAccessMethod::GIST:
+                throw Error("GIST index reads are not yet implemented (index " +
+                        std::to_string(index_id) + ")");
+            case IndexAccessMethod::GIN:
+                throw Error("GIN index reads are not yet implemented (index " +
+                        std::to_string(index_id) + ")");
+        }
+
         auto index_schema = schema_helpers::create_index_schema(_schema, index_columns, index_id, extension_callback);
-        auto btree = std::make_shared<BTree>(_db_id,
+        auto btree = std::make_shared<IndexReaderT>(_db_id,
                 _table_dir / fmt::format(constant::INDEX_FILE, index_id),
-                _xid, index_schema,
+                index_schema->get_sort_keys(), index_schema,
+                _xid,
                 offset,
-                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary(),
+                std::make_shared<SharedPoolExtentSource>(
+                        index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary()),
+                BtreeReadStrategy{},
                 extension_callback);
         return btree;
+    }
+
+    GistReaderPtr
+    Table::_create_gist_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+            const std::vector<std::string> &opclass_names, uint64_t offset,
+            const ExtensionCallback &extension_callback)
+    {
+        (void)index_columns;
+        (void)extension_callback;
+        return std::make_shared<GistReader>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                _xid,
+                offset,
+                std::make_shared<SharedPoolExtentSource>(get_max_extent_size_secondary()),
+                GistReadStrategy{opclass_names});
+    }
+
+    GinReaderPtr
+    Table::_create_gin_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+            const std::vector<std::string> &opclass_names, uint64_t offset,
+            const ExtensionCallback &extension_callback)
+    {
+        (void)index_columns;
+        (void)opclass_names;
+        (void)extension_callback;
+        return std::make_shared<GinReadStrategy>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                _xid,
+                offset,
+                std::make_shared<SharedPoolExtentSource>(get_max_extent_size_secondary()));
     }
 
     void Table::Iterator::Primary::next()
@@ -529,7 +650,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     Table::Iterator::Secondary::Secondary(const Table *table,
-            BTreePtr btree, const BTree::Iterator &btree_i,
+            IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i,
             ExtentSchemaPtr schema )
         :
             Tracker{table, btree, btree_i}
@@ -590,7 +711,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     Table::Iterator::SecondaryIndexOnly::SecondaryIndexOnly(const Table *table,
-            BTreePtr btree, const BTree::Iterator &btree_i)
+            IndexReaderPtr btree, const IndexReaderT::Iterator &btree_i)
         :
             Tracker{table, btree, btree_i}
     {}

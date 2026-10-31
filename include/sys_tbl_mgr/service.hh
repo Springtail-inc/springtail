@@ -56,6 +56,13 @@ public:
                         const proto::ExistsRequest* request,
                         google::protobuf::Empty* response) override;
 
+    /** Extracts query-time GIN term bytes for an opclass on PgFdwMgr's behalf (btree redesign
+        phase 12) -- see GinExtractQueryTermsRequest's proto comment for why this call can only
+        happen here, not in the FDW process directly. */
+    grpc::Status GinExtractQueryTerms(grpc::ServerContext* context,
+                                      const proto::GinExtractQueryTermsRequest* request,
+                                      proto::GinExtractQueryTermsResponse* response) override;
+
 private:
     Server &_srv;
 };

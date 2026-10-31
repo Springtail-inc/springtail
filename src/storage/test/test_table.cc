@@ -8,6 +8,8 @@
 #include <common/threaded_test.hh>
 #include <common/filesystem.hh>
 
+#include <mutex>
+
 #include <storage/csv_field.hh>
 #include <storage/vacuumer.hh>
 
@@ -233,17 +235,30 @@ namespace {
             Request(MutableTablePtr table,
                     uint64_t xid,
                     uint64_t extent_id,
-                    std::vector<TuplePtr> &&tuples)
+                    std::vector<TuplePtr> &&tuples,
+                    std::shared_ptr<std::mutex> table_mutex)
                 : _table(table),
                   _extent_id(extent_id),
-                  _tuples(tuples)
+                  _tuples(tuples),
+                  _table_mutex(std::move(table_mutex))
             { }
 
             /**
              * @brief Overload () for execution from worker thread.
              *        Main entry from worker thread
+             *
+             * The IndexWriter engine (architecture.md Sec 5.4) requires single-writer, exclusive
+             * access per MutableTable -- unlike MutableBTree, it has no internal per-page locking
+             * to safely interleave calls from multiple threads against the *same* MutableTable.
+             * This test's premise is many worker threads concurrently mutating one shared
+             * MutableTable's different extents; under the new engine that needs an explicit
+             * external serialization point (the same requirement architecture.md Sec 5.4 case 1
+             * describes for system tables), provided here by the test itself rather than inside
+             * the engine, so the test keeps exercising "many concurrently-dispatched mutations,
+             * correctly merged" without violating the single-writer contract.
              */
             void operator()() {
+                std::lock_guard lock(*_table_mutex);
                 for (auto &tuple : _tuples) {
                     _table->update(tuple, _extent_id);
                 }
@@ -253,6 +268,7 @@ namespace {
             MutableTablePtr _table;
             uint64_t _extent_id;
             std::vector<TuplePtr> _tuples;
+            std::shared_ptr<std::mutex> _table_mutex;
         };
         typedef std::shared_ptr<Request> RequestPtr;
     };
@@ -393,6 +409,80 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000);
+    }
+
+    // Regression test for phases/phase-3.md's open question 2: Table::advance_to_xid()'s cheap
+    // in-place rebase (bumping a cached Table's root/xid without reconstructing it, used by
+    // TableMgrClient to refresh a cached Table on each commit) must keep working against
+    // IndexReader::set_root_and_xid() exactly as it did against BTree::set_root_and_xid() --
+    // flagged by phase-2.md as untested at the engine level. Builds a Table, advances it in place
+    // to a second generation's root with one additional row, and confirms the same, already-
+    // constructed Table object sees the new content (not stale, not a crash) afterward.
+    TEST_P(Table_Test, AdvanceToXid) {
+        auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        _init_sys_tbls(target_xid, 1007, "test_advance_to_xid");
+
+        TableMetadata metadata;
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {std::numeric_limits<uint64_t>::max(), constant::UNKNOWN_EXTENT} };
+        auto mtable = _create_mtable(1007, target_xid, metadata.roots);
+        _populate_table(mtable);
+
+        metadata = mtable->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        server->commit_xid(1, 1, target_xid, false, 0);
+
+        access_xid = target_xid;
+        auto table = _create_table(1007, access_xid, metadata.roots);
+
+        int count_before = 0;
+        for (auto &row : *table) {
+            (void)row;
+            ++count_before;
+        }
+        ASSERT_EQ(count_before, 5000);
+        ASSERT_EQ(table->get_xid(), access_xid);
+
+        // advance to a second generation adding one more row, with a key that sorts after every
+        // CSV name so the new row's position is unambiguous
+        uint64_t target_xid2 = target_xid + 1;
+        auto mtable2 = _create_mtable(1007, target_xid2, metadata.roots);
+        mtable2->insert(_create_value(99999, "zzz_advance_to_xid_new_row", 424242), constant::UNKNOWN_EXTENT);
+        auto metadata2 = mtable2->finalize(true);
+        sys_tbl_mgr::Server::get_instance()->update_roots(mtable2->db(), mtable2->id(), target_xid2, metadata2);
+        server->commit_xid(1, 1, target_xid2, false, 0);
+
+        // rebase the *existing* Table object in place, rather than reconstructing it
+        table->advance_to_xid(target_xid2, metadata2.roots);
+        ASSERT_EQ(table->get_xid(), target_xid2);
+
+        int count_after = 0;
+        std::string prev;
+        bool found_new_row = false;
+        for (auto &row : *table) {
+            auto name = std::string(_fields->at(1)->get_text(&row));
+            if (!prev.empty()) {
+                ASSERT_GT(name, prev);
+            }
+            prev = name;
+            if (name == "zzz_advance_to_xid_new_row") {
+                found_new_row = true;
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 424242u);
+            }
+            ++count_after;
+        }
+        ASSERT_EQ(count_after, 5001);
+        ASSERT_TRUE(found_new_row);
+
+        // a fresh lookup through the rebased Table (not just full iteration) also sees it
+        auto new_key = _create_key("zzz_advance_to_xid_new_row");
+        ASSERT_NE(table->primary_lookup(new_key), constant::UNKNOWN_EXTENT);
+        auto it = table->lower_bound(new_key);
+        ASSERT_TRUE(it != table->end());
+        ASSERT_EQ(std::string(_fields->at(1)->get_text(&*it)), "zzz_advance_to_xid_new_row");
     }
 
     TEST_P(Table_Test, SingleXactMutations) {
@@ -932,8 +1022,12 @@ namespace {
         // mutate the individual extents in separate concurrent threads
         PhasedThreadTest<Request> tester;
 
+        // External serialization point for mtable's single-writer IndexWriter engine -- see
+        // Request::operator()()'s comment.
+        auto mtable_mutex = std::make_shared<std::mutex>();
+
         for (auto &entry : tuple_map) {
-            auto request = std::make_shared<Request>(mtable, target_xid, entry.first, std::move(entry.second));
+            auto request = std::make_shared<Request>(mtable, target_xid, entry.first, std::move(entry.second), mtable_mutex);
             tester.add_request(request);
         }
 

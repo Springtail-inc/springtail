@@ -50,6 +50,36 @@ Vacuumer::_init()
         _hole_punch_block_size = VacuumConfig::HOLE_PUNCH_BLOCK_SIZE;
     }
 
+    // Background space-reclaim compaction (architecture.md "btree" redesign Sec 7.1, phase 7):
+    // dead-byte-fraction candidacy threshold and per-cycle extent-copy budget.
+    if (vacuum_config_json.contains("compaction_dead_fraction_threshold")) {
+        Json::get_to<double>(vacuum_config_json, "compaction_dead_fraction_threshold",
+                             _compaction_dead_fraction_threshold);
+    } else {
+        _compaction_dead_fraction_threshold = VacuumConfig::COMPACTION_DEAD_FRACTION_THRESHOLD;
+    }
+
+    if (vacuum_config_json.contains("compaction_item_budget")) {
+        Json::get_to<uint64_t>(vacuum_config_json, "compaction_item_budget", _compaction_item_budget);
+    } else {
+        _compaction_item_budget = VacuumConfig::COMPACTION_ITEM_BUDGET;
+    }
+
+    // Background structural-reclaim (merge, architecture.md "btree" redesign Sec 7.1, phase 8):
+    // occupancy threshold and per-cycle item budget.
+    if (vacuum_config_json.contains("underfull_occupancy_fraction")) {
+        Json::get_to<double>(vacuum_config_json, "underfull_occupancy_fraction",
+                             _underfull_occupancy_fraction);
+    } else {
+        _underfull_occupancy_fraction = VacuumConfig::UNDERFULL_OCCUPANCY_FRACTION;
+    }
+
+    if (vacuum_config_json.contains("merge_item_budget")) {
+        Json::get_to<uint64_t>(vacuum_config_json, "merge_item_budget", _merge_item_budget);
+    } else {
+        _merge_item_budget = VacuumConfig::MERGE_ITEM_BUDGET;
+    }
+
     // Vacuum base dir
     Json::get_to<std::filesystem::path>(vacuum_config_json, "vacuum_dir", _vacuum_data_base);
     _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base) / vacuum_global_namespace;
@@ -379,6 +409,73 @@ Vacuumer::expire_extent(const std::filesystem::path &file,
     std::unique_lock lock(_mutex);
     _extent_map[file][xid].emplace_back(extent_id, size);
     _entries_count_in_memory++;
+}
+
+void
+Vacuumer::register_sealed_segment(const std::filesystem::path &file)
+{
+    std::unique_lock lock(_mutex);
+    _sealed_segments.insert(file);
+}
+
+std::vector<std::filesystem::path>
+Vacuumer::get_compaction_candidates()
+{
+    std::unique_lock lock(_mutex);
+    std::vector<std::filesystem::path> candidates;
+    candidates.reserve(_compaction_candidates.size());
+    for (const auto &[file, dead_offsets] : _compaction_candidates) {
+        candidates.push_back(file);
+    }
+    return candidates;
+}
+
+std::set<uint64_t>
+Vacuumer::compaction_dead_offsets(const std::filesystem::path &file)
+{
+    std::unique_lock lock(_mutex);
+    auto it = _compaction_candidates.find(file);
+    if (it == _compaction_candidates.end()) {
+        return {};
+    }
+    return it->second;
+}
+
+void
+Vacuumer::raise_underfull_flag(const std::filesystem::path &tree_file, uint64_t old_id,
+                               ValueTuplePtr search_key)
+{
+    std::unique_lock lock(_mutex);
+    _underfull_flags[tree_file].push_back(UnderfullFlag{ old_id, std::move(search_key) });
+}
+
+std::vector<Vacuumer::UnderfullFlag>
+Vacuumer::get_underfull_flags(const std::filesystem::path &tree_file)
+{
+    std::unique_lock lock(_mutex);
+    auto it = _underfull_flags.find(tree_file);
+    if (it == _underfull_flags.end()) {
+        return {};
+    }
+    return it->second;
+}
+
+void
+Vacuumer::clear_underfull_flag(const std::filesystem::path &tree_file, uint64_t old_id)
+{
+    std::unique_lock lock(_mutex);
+    auto it = _underfull_flags.find(tree_file);
+    if (it == _underfull_flags.end()) {
+        return;
+    }
+
+    std::erase_if(it->second, [old_id](const UnderfullFlag &flag) {
+        return flag.old_id == old_id;
+    });
+
+    if (it->second.empty()) {
+        _underfull_flags.erase(it);
+    }
 }
 
 void
@@ -923,6 +1020,71 @@ Vacuumer::_do_vacuum_run()
             auto cutoff_xid = get_vacuum_cutoff_xid(db_id);
             if (cutoff_xid > 0) {
                 _save_last_seen_cutoff_xid(db_id, cutoff_xid);
+            }
+
+            // New-engine sealed segment (architecture.md Sec 7, phase 6): whole-file
+            // reclamation only, never hole-punch. Sum this run's reachable (xid < cutoff_xid)
+            // dead bytes against the segment's actual on-disk size; if that reaches the whole
+            // file, nothing in it is reachable any longer (architecture.md Sec 4) so unlink it
+            // outright. If not yet fully dead, deliberately do *not* erase these xid_map
+            // entries (unlike the hole-punch path below, which can safely discard entries once
+            // it has physically punched holes for them) -- a sparse file has no byte-range
+            // "memory" of partial reclamation the way hole-punch's own holes do, so the global
+            // vacuum log itself (rewritten with this file's entries still intact, further down)
+            // is this segment's only record of what's already been reported dead; losing it
+            // here would leak the segment forever once summed-so-far bytes stop being
+            // re-derivable. Recomputing the full sum from scratch every run (rather than a
+            // separate persisted running counter) keeps this trivially crash-consistent.
+            if (_sealed_segments.count(file)) {
+                uint64_t dead_bytes = 0;
+                for (const auto& [xid, extents] : xid_map) {
+                    if (xid >= cutoff_xid) {
+                        break;
+                    }
+                    for (const auto& [offset, size] : extents) {
+                        dead_bytes += size;
+                    }
+                }
+
+                std::error_code ec;
+                uint64_t file_size = std::filesystem::file_size(file, ec);
+                if (!ec && dead_bytes >= file_size) {
+                    IOMgr::get_instance()->remove(file);
+                    _sealed_segments.erase(file);
+                    _compaction_candidates.erase(file);
+                    file_it = expired_extents_map.erase(file_it);
+                } else {
+                    // Background space-reclaim compaction (architecture.md Sec 7.1): not fully
+                    // dead, but check whether it's dead *enough* to be worth compacting rather
+                    // than left as-is. The dead-byte-fraction trigger recomputes from this same
+                    // in-memory xid_map every run -- same crash-consistency rationale as the
+                    // whole-file-unlink sum just above (no separate persisted counter to get out
+                    // of sync with reality; see phases/phase-7.md's "Throttling and dead-byte
+                    // bookkeeping design" section for why this was chosen over a persisted
+                    // counter). The dead-*offset* snapshot recorded for a candidate, unlike
+                    // dead_bytes above, deliberately covers every xid in xid_map (not just
+                    // xid < cutoff_xid) -- a superseded extent is categorically unreachable from
+                    // this tree's *current* structure the moment something newer replaced it,
+                    // whether or not it's yet safe to physically reclaim (architecture.md Sec 4).
+                    if (!ec && file_size > 0) {
+                        std::set<uint64_t> dead_offsets;
+                        for (const auto& [xid, extents] : xid_map) {
+                            for (const auto& [offset, size] : extents) {
+                                dead_offsets.insert(offset);
+                            }
+                        }
+
+                        double dead_fraction = static_cast<double>(dead_bytes) /
+                                              static_cast<double>(file_size);
+                        if (dead_fraction >= _compaction_dead_fraction_threshold) {
+                            _compaction_candidates[file] = std::move(dead_offsets);
+                        } else {
+                            _compaction_candidates.erase(file);
+                        }
+                    }
+                    ++file_it;
+                }
+                continue;
             }
 
             IntervalTree<uint64_t> itree;

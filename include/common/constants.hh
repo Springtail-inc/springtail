@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <span>
 
+#include <common/exception.hh>
+
 namespace springtail {
     struct ExtensionContext {
         uint64_t db_id;
@@ -93,6 +95,14 @@ namespace springtail::constant {
     /** An index ID that represents the look-aside index. */
     static constexpr uint64_t INDEX_LOOK_ASIDE = std::numeric_limits<uint64_t>::max();
 
+    /** Index access-method names, matching Postgres's own pg_am.amname (lower-case) -- the
+        string form `proto::IndexInfo.index_type` carries end-to-end from `scripts/triggers.sql`
+        through to the catalog. See `IndexAccessMethod`/`index_access_method_from_string()` below
+        for the typed value dispatch code actually switches on. */
+    static constexpr std::string_view INDEX_TYPE_BTREE = "btree";
+    static constexpr std::string_view INDEX_TYPE_GIST = "gist";
+    static constexpr std::string_view INDEX_TYPE_GIN = "gin";
+
     /** The name of the child pointer field in a BTree branch extent. */
     static const std::string BTREE_CHILD_FIELD = "__springtail_child";
 
@@ -130,4 +140,38 @@ namespace springtail::constant {
     /** User defined types */
     static constexpr int8_t USER_TYPE_ENUM = 'E';
     static constexpr int8_t USER_TYPE_EXTENSION = 'U';
+}
+
+namespace springtail {
+    /**
+     * Index access method (btree redesign phase 9, architecture.md Decisions log entry 8):
+     * the index *kind* a catalog row was built with -- distinct from, and never to be conflated
+     * with, sys_tbl_mgr::Server::IndexType (which is a role: primary/secondary/look-aside key).
+     * This is the typed value dispatch code (Indexer::_build, MutableTable::create_index_root,
+     * Table::_create_index_root) switches on, instead of comparing Postgres's raw pg_am.amname
+     * string directly.
+     */
+    enum class IndexAccessMethod { BTREE, GIST, GIN };
+
+    /**
+     * Maps a Postgres access-method name (pg_am.amname, as carried through
+     * proto::IndexInfo.index_type) to its typed IndexAccessMethod. An empty string maps to
+     * BTREE: every IndexInfo built before this field existed, and every internally-constructed
+     * primary/look-aside role index (which never goes through Postgres DDL and so never sets
+     * index_type), is -- and can only ever be -- a btree under today's engine. Any other,
+     * unrecognized string is a corrupt/unexpected catalog value and must fail loudly rather than
+     * silently default to BTREE.
+     */
+    inline IndexAccessMethod index_access_method_from_string(std::string_view index_type) {
+        if (index_type.empty() || index_type == constant::INDEX_TYPE_BTREE) {
+            return IndexAccessMethod::BTREE;
+        }
+        if (index_type == constant::INDEX_TYPE_GIST) {
+            return IndexAccessMethod::GIST;
+        }
+        if (index_type == constant::INDEX_TYPE_GIN) {
+            return IndexAccessMethod::GIN;
+        }
+        throw Error("Unrecognized index access method: " + std::string(index_type));
+    }
 }

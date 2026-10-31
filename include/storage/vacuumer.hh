@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <list>
 #include <map>
+#include <set>
 #include <thread>
 
 #include <common/filesystem.hh>
@@ -14,6 +15,7 @@
 #include <redis/redis_ddl.hh>
 #include <storage/cache.hh>
 #include <storage/extent.hh>
+#include <storage/field.hh>
 #include <storage/io_mgr.hh>
 #include <storage/schema.hh>
 
@@ -26,6 +28,30 @@ namespace springtail {
         constexpr uint64_t HOLE_PUNCH_BLOCK_SIZE = 4 * 1024;
         constexpr uint64_t GLOBAL_FILE_SIZE_THRESHOLD = 20 * 1024;
         constexpr uint64_t MAX_ENTRIES_IN_MEMORY = 10000;
+
+        /** architecture.md "btree" redesign Sec 7.1 / Decisions log entry 6: background
+            space-reclaim compaction's dead-byte-*fraction* candidacy threshold (a segment with
+            this fraction or more of its on-disk bytes already superseded, but not yet fully
+            dead, is worth compacting) and the per-cycle extent-copy budget (phase-7.md's
+            Throttling task -- small batches, never one large pass). Both tuning decisions, not
+            measured values, following the same "pick a sane default, expose as config" pattern
+            segment_seal_threshold_bytes used (phase 6). */
+        constexpr double COMPACTION_DEAD_FRACTION_THRESHOLD = 0.5;
+        constexpr uint64_t COMPACTION_ITEM_BUDGET = 32;
+
+        /** architecture.md "btree" redesign Sec 7.1 / phase-8.md OQ5: background structural-
+            reclaim (merge) occupancy threshold and per-cycle item budget. In the same
+            storage.vacuum_config namespace as compaction's own knobs above (consumed by
+            BtreeWriteStrategy via Vacuumer::underfull_occupancy_fraction(), not read directly
+            by the strategy -- same indirection max_extent_size itself already uses). The budget
+            default is deliberately smaller than COMPACTION_ITEM_BUDGET: unlike compaction's
+            phase-1 bulk copy (a cheap sequential scan), each merge item does a fresh root-to-
+            node descent *plus* a sibling lookup *plus* the combine itself, so a smaller per-
+            cycle cap keeps one cycle's wall-clock cost comparable despite the larger per-item
+            cost. Both tuning decisions, not measured values (same posture as every other
+            VacuumConfig default). */
+        constexpr double UNDERFULL_OCCUPANCY_FRACTION = 0.25;
+        constexpr uint64_t MERGE_ITEM_BUDGET = 8;
 
         constexpr char GLOBAL_FILE_SUFFIX[] = ".global.vcm";
         constexpr char GLOBAL_RUNFILE_SUFFIX[] = ".global.vcm.run";
@@ -92,7 +118,15 @@ private:
 
 };
 /**
- * Vacuumer to clear dead extents and table snapshots.
+ * Vacuumer to clear dead extents and table snapshots. Since phase 7 (architecture.md "btree"
+ * redesign Sec 7.1), also tracks background space-reclaim compaction candidacy for new-engine
+ * sealed segments (dead-byte fraction, re-derived fresh every run alongside the existing
+ * whole-file-unlink dead-byte sum, same crash-consistency posture) -- see
+ * get_compaction_candidates()/compaction_dead_offsets()/compaction_item_budget(). Deliberately
+ * stays schema/tree-shape-unaware doing so, same as every other responsibility here: it reports
+ * *which* segments and offsets, never decodes or moves bytes itself -- that's
+ * IndexWriter::bulk_copy_for_compaction()/apply_compaction_batch()'s job, orchestrated by
+ * MutableTable::run_compaction_cycle().
  */
 class Vacuumer final : public Singleton<Vacuumer> {
         friend class Singleton<Vacuumer>;
@@ -105,6 +139,132 @@ public:
      * @param xid The XID at which the extent was overwritten
      */
     void expire_extent(const std::filesystem::path &file, uint64_t extent_id, uint32_t size, uint64_t xid);
+
+    /**
+     * @brief Mark `file` as a sealed (never written to again) segment of a new-engine tree
+     *        (architecture.md "btree" redesign Sec 7, phase-6's SegmentSet), eligible for
+     *        whole-file reclamation once nothing in it is reachable, instead of the legacy
+     *        hole-punch path's "punch holes in an ever-growing file, never delete it" model.
+     *        Idempotent: safe to call again (e.g. every time a later generation's writer
+     *        resumes into an already-sealed segment) with no effect beyond re-affirming
+     *        membership -- "sealed" is otherwise never persisted anywhere else (see
+     *        SegmentSet's class comment).
+     * @param file The sealed segment file's path.
+     */
+    void register_sealed_segment(const std::filesystem::path &file);
+
+    /**
+     * @brief Segments currently judged partially-dead-enough to warrant background
+     *        space-reclaim compaction (architecture.md "btree" redesign Sec 7.1): dead-byte
+     *        fraction (computed against the reclaim-safe cutoff, same as the whole-file-unlink
+     *        decision just above it in _do_vacuum_run()) at or above
+     *        compaction_dead_fraction_threshold, but not yet fully dead (a fully-dead segment
+     *        is unlinked outright and never appears here). Re-derived fresh every vacuum run
+     *        from the same global vacuum log the whole-file-unlink decision already reads --
+     *        no separate persisted counter, for the same crash-consistency reason documented at
+     *        the call site -- so this is a point-in-time snapshot, not a durable queue: a
+     *        segment a caller doesn't compact away this call will simply be offered again (or
+     *        not, if it changed) on a later call. Deliberately unbounded (not capped to a small
+     *        "top N"): the one singleton Vacuumer instance is shared across every table/db in
+     *        the process (and, in tests, across the whole test binary's lifetime) and each
+     *        caller only ever acts on the single candidate relevant to the tree it owns, so
+     *        capping here would just risk an unrelated tree's candidate crowding out this one's.
+     * @return Every currently-candidate segment's path.
+     */
+    std::vector<std::filesystem::path> get_compaction_candidates();
+
+    /**
+     * @brief The set of in-segment byte offsets within `file` already known (as of the most
+     *        recent vacuum run) to be superseded -- i.e. no longer reachable from this tree's
+     *        *current* structure, regardless of whether they're yet safe to physically reclaim
+     *        (architecture.md Sec 4: superseded is superseded the moment a newer version
+     *        exists; reclaim-safety is a separate, later question). Used by a tree's own
+     *        phase-1 bulk copy (IndexWriter::bulk_copy_for_compaction()) to skip extents that
+     *        are already dead rather than copying them into the dense replacement -- a stale
+     *        (slightly out-of-date) snapshot only ever errs toward *not* skipping something
+     *        that became dead moments ago, never the reverse, so this is safe to use without
+     *        re-deriving it per call.
+     * @param file A segment path previously returned by get_compaction_candidates().
+     * @return The known-dead offsets, or an empty set if `file` isn't a tracked candidate.
+     */
+    std::set<uint64_t> compaction_dead_offsets(const std::filesystem::path &file);
+
+    /**
+     * @brief The configured per-cycle extent-copy budget for background space-reclaim
+     *        compaction's phase-1 bulk copy (phase-7.md's Throttling task) -- see
+     *        VacuumConfig::COMPACTION_ITEM_BUDGET for the default and
+     *        "storage.vacuum_config.compaction_item_budget" for the config knob.
+     */
+    uint64_t compaction_item_budget() const { return _compaction_item_budget; }
+
+    /**
+     * @brief One underfull-node flag raised by the delete path (architecture.md "btree"
+     *        redesign Sec 7.1, phase 8: background structural-reclaim/merge). Mirrors
+     *        IndexWriter::CompactionItem's shape exactly, for the same reason CompactionItem
+     *        has that shape: a real id plus a search key is enough for a later, independent
+     *        lookup to re-find and re-validate a specific node, and nothing about storing that
+     *        pair needs tree-shape knowledge -- only *consuming* one (ask the parent for a
+     *        sibling) does, which is why consumption lives in IndexWriter/MutableTable, not
+     *        here (see phases/phase-8.md's "Design notes" for the full reasoning).
+     */
+    struct UnderfullFlag {
+        uint64_t old_id;
+        ValueTuplePtr search_key;
+    };
+
+    /**
+     * @brief Raise a "node at old_id is underfull" flag for `tree_file` (architecture.md Sec
+     *        7.1, phase 8). Called inline by IndexWriter::_flush_node() the moment a non-root,
+     *        non-empty node it flushes is below the strategy's occupancy threshold -- never
+     *        called directly by anything else. In-memory only, deliberately *not* given
+     *        _compaction_candidates's recompute-from-log crash-consistency treatment: losing a
+     *        flag (process restart) only delays a merge that would otherwise eventually have
+     *        happened, it never under-protects anything irreversible the way losing a dead-byte
+     *        count could (that gates an actual whole-file delete) -- see phases/phase-8.md's
+     *        Design notes for the full argument.
+     * @param tree_file The tree's own base file path (IndexWriter::get_file_path()), *not* a
+     *        segment path -- a flagged node's real id can land in any segment this tree ever
+     *        writes to over its lifetime, so flags are grouped per tree, not per segment.
+     */
+    void raise_underfull_flag(const std::filesystem::path &tree_file, uint64_t old_id,
+                              ValueTuplePtr search_key);
+
+    /**
+     * @brief Every underfull flag currently raised for `tree_file`, in raise order. Read-only --
+     *        does not retire anything (see clear_underfull_flag()). Call once per merge cycle,
+     *        not once per candidate node (mirrors compaction_dead_offsets()'s own usage
+     *        contract -- round-1 review finding 2 is the precedent for why that distinction
+     *        matters: this is the same process-wide-singleton mutex the vacuum thread itself
+     *        takes).
+     * @param tree_file A tree's base file path, as passed to raise_underfull_flag().
+     * @return The currently-raised flags, or empty if none.
+     */
+    std::vector<UnderfullFlag> get_underfull_flags(const std::filesystem::path &tree_file);
+
+    /**
+     * @brief Retire exactly the one flag matching `old_id` for `tree_file` -- never a broader
+     *        clear (e.g. "every flag for this tree"), mirroring the lesson that a tracker's
+     *        retirement path needs the same ownership gating as its claim path. Called by the
+     *        background merge consumer once it has resolved `old_id`'s flag, whatever the
+     *        outcome (merged, found stale, or no sibling had room) -- all three are terminal
+     *        for that one flag; a no-op if already cleared or never raised.
+     */
+    void clear_underfull_flag(const std::filesystem::path &tree_file, uint64_t old_id);
+
+    /**
+     * @brief The configured occupancy threshold (as a fraction of a tree's max extent size)
+     *        below which background structural-reclaim (merge) considers a node underfull --
+     *        see VacuumConfig::UNDERFULL_OCCUPANCY_FRACTION for the default and
+     *        "storage.vacuum_config.underfull_occupancy_fraction" for the config knob.
+     */
+    double underfull_occupancy_fraction() const { return _underfull_occupancy_fraction; }
+
+    /**
+     * @brief The configured per-cycle item budget for background structural-reclaim (merge) --
+     *        see VacuumConfig::MERGE_ITEM_BUDGET for the default and
+     *        "storage.vacuum_config.merge_item_budget" for the config knob.
+     */
+    uint64_t merge_item_budget() const { return _merge_item_budget; }
 
     /**
      * Register a table snapshot to be expired by the vacuumer.
@@ -257,6 +417,51 @@ private:
     std::mutex _mutex; ///< Protects the internal maps
     ExtentMap _extent_map; ///< Maps File -> XID -> list of expired extent
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
+
+    /**
+     * New-engine sealed segment files (SegmentSet), registered via register_sealed_segment().
+     * Gates which files in _extent_map are eligible for whole-file reclamation (phase 6) rather
+     * than the legacy hole-punch path -- membership here is the one signal Vacuumer has for
+     * "this is a segment, never hole-punch it," since nothing about a bare file path alone
+     * distinguishes a sealed segment from a legacy ever-growing file.
+     */
+    std::set<std::filesystem::path> _sealed_segments;
+
+    /**
+     * Background space-reclaim compaction candidacy (architecture.md "btree" redesign Sec 7.1):
+     * segment path -> the dead-offset snapshot computed for it the last time _do_vacuum_run()
+     * judged its dead-byte fraction at or above _compaction_dead_fraction_threshold. See
+     * get_compaction_candidates()/compaction_dead_offsets()'s doc comments for why this is a
+     * recomputed-fresh-every-run snapshot, not a durable queue.
+     */
+    std::map<std::filesystem::path, std::set<uint64_t>> _compaction_candidates;
+
+    /** architecture.md Sec 7.1 dead-byte-*fraction* candidacy threshold -- see
+        VacuumConfig::COMPACTION_DEAD_FRACTION_THRESHOLD. */
+    double _compaction_dead_fraction_threshold = VacuumConfig::COMPACTION_DEAD_FRACTION_THRESHOLD;
+
+    /** Per-cycle extent-copy budget -- see VacuumConfig::COMPACTION_ITEM_BUDGET. */
+    uint64_t _compaction_item_budget = VacuumConfig::COMPACTION_ITEM_BUDGET;
+
+    /**
+     * Background structural-reclaim (merge) flags (architecture.md "btree" redesign Sec 7.1,
+     * phase 8): tree base file path -> every currently-raised UnderfullFlag for that tree, in
+     * raise order. Unlike _compaction_candidates (a point-in-time snapshot recomputed fresh
+     * every vacuum run), these are discrete events raised inline by IndexWriter::_flush_node()
+     * and explicitly claimed/retired one at a time by clear_underfull_flag() -- see that
+     * method's doc comment. Guarded by `_mutex`, same as every other map here; raise/get/clear
+     * are all plain, O(1)-ish bookkeeping -- no sibling lookup or merge ever runs while holding
+     * it.
+     */
+    std::map<std::filesystem::path, std::vector<UnderfullFlag>> _underfull_flags;
+
+    /** architecture.md Sec 7.1 occupancy threshold -- see
+        VacuumConfig::UNDERFULL_OCCUPANCY_FRACTION. */
+    double _underfull_occupancy_fraction = VacuumConfig::UNDERFULL_OCCUPANCY_FRACTION;
+
+    /** Per-cycle merge-item budget -- see VacuumConfig::MERGE_ITEM_BUDGET. */
+    uint64_t _merge_item_budget = VacuumConfig::MERGE_ITEM_BUDGET;
+
     std::condition_variable _cv; ///< Condition variable to wake up the vacuumer thread
 
     /**

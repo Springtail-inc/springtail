@@ -206,6 +206,14 @@ namespace {
                     EXPECT_EQ(j["cmd"], "create index");
                     EXPECT_EQ(test_msg, nullptr);
                     EXPECT_NE(pub_msg, nullptr);
+                    // index-kind plumbing (btree redesign phase 9): index_type/opclass must
+                    // actually be carried through decode, not just parsed without error.
+                    {
+                        auto const& decoded = std::get<PgMsgIndex>(msg->msg);
+                        EXPECT_EQ(decoded.index_type, "btree");
+                        ASSERT_EQ(decoded.columns.size(), 1u);
+                        EXPECT_EQ(decoded.columns[0].opclass, "int4_ops");
+                    }
                     break;
                 case PgMsgEnum::INSERT:
                     EXPECT_EQ(j["cmd"], "insert");

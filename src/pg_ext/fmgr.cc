@@ -75,14 +75,23 @@ OidOutputFunctionCall(Oid function_oid, Datum value)
 
 Datum DirectFunctionCall3(PGFunction func, Datum arg1, Datum arg2, Datum arg3)
 {
-    LOCAL_FCINFO(fcinfo, 2);
+    // NOSONAR - nargs must be 3 here: this previously allocated/declared only 2 args and never
+    // wrote arg3 into fcinfo->args[2] at all, so any 3-arg callee reading its 3rd argument (e.g.
+    // GIST_PENALTY's output pointer, or a receive function's typmod) read uninitialized stack
+    // memory past the end of the 2-slot LOCAL_FCINFO buffer. Found while wiring GIST_PENALTY
+    // (btree redesign phase 10) through this call -- a real, pre-existing bug, not introduced
+    // here; every other caller of DirectFunctionCall3 today happens to invoke a function that
+    // never reads its 3rd argument, so this never manifested before.
+    LOCAL_FCINFO(fcinfo, 3);
 
-    InitFunctionCallInfoData(*fcinfo, nullptr, 2, 0, nullptr, nullptr);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 3, 0, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
     fcinfo->args[1].value = arg2;
     fcinfo->args[1].isnull = false;
+    fcinfo->args[2].value = arg3;
+    fcinfo->args[2].isnull = false;
 
     return func(fcinfo);
 }
@@ -90,18 +99,65 @@ Datum DirectFunctionCall3(PGFunction func, Datum arg1, Datum arg2, Datum arg3)
 Datum
 DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3)
 {
-    LOCAL_FCINFO(fcinfo, 2);
+    // NOSONAR - see DirectFunctionCall3's comment above; the same undersized-buffer/missing-arg3
+    // bug existed here too.
+    LOCAL_FCINFO(fcinfo, 3);
 
-    InitFunctionCallInfoData(*fcinfo, nullptr, 2, collation, nullptr, nullptr);
+    InitFunctionCallInfoData(*fcinfo, nullptr, 3, collation, nullptr, nullptr);
 
     fcinfo->args[0].value = arg1;
     fcinfo->args[0].isnull = false;
     fcinfo->args[1].value = arg2;
     fcinfo->args[1].isnull = false;
+    fcinfo->args[2].value = arg3;
+    fcinfo->args[2].isnull = false;
 
     Datum result = (*func)(fcinfo);
 
     return result;
+}
+
+Datum
+DirectFunctionCall4(PGFunction func, Datum arg1, Datum arg2, Datum arg3, Datum arg4)
+{
+    LOCAL_FCINFO(fcinfo, 4);
+
+    InitFunctionCallInfoData(*fcinfo, nullptr, 4, 0, nullptr, nullptr);
+
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].value = arg2;
+    fcinfo->args[1].isnull = false;
+    fcinfo->args[2].value = arg3;
+    fcinfo->args[2].isnull = false;
+    fcinfo->args[3].value = arg4;
+    fcinfo->args[3].isnull = false;
+
+    return func(fcinfo);
+}
+
+Datum
+DirectFunctionCall5(PGFunction func, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5)
+{
+    // Added for GIST_CONSISTENT (btree redesign phase 10), whose real Postgres signature is
+    // (GISTENTRY *entry, Datum query, StrategyNumber strategy, Oid subtype, bool *recheck) -- 5
+    // args -- and had no DirectFunctionCallN counterpart here before.
+    LOCAL_FCINFO(fcinfo, 5);
+
+    InitFunctionCallInfoData(*fcinfo, nullptr, 5, 0, nullptr, nullptr);
+
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].value = arg2;
+    fcinfo->args[1].isnull = false;
+    fcinfo->args[2].value = arg3;
+    fcinfo->args[2].isnull = false;
+    fcinfo->args[3].value = arg4;
+    fcinfo->args[3].isnull = false;
+    fcinfo->args[4].value = arg5;
+    fcinfo->args[4].isnull = false;
+
+    return func(fcinfo);
 }
 
 Datum

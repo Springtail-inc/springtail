@@ -193,7 +193,7 @@ namespace springtail::committer {
             if (params.is_status(IndexStatus::BUILDING)) {
                 _add_to_pending_reconciliation(_build(st, key, params));
             } else {
-                _add_to_pending_reconciliation(IndexState{nullptr, key, params, std::numeric_limits<uint64_t>::max(), nullptr});
+                _add_to_pending_reconciliation(IndexState{AnyIndexRoot{}, key, params, std::numeric_limits<uint64_t>::max(), nullptr});
             }
         }
         LOG_INFO("Indexer thread joined");
@@ -271,11 +271,63 @@ namespace springtail::committer {
             auto idx_cols = _get_index_cols(info);
             auto table =
                 TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), end_xid, end_xid, {PgExtnRegistry::get_instance()->comparator_func});
-            auto root = table->create_index_root(index_id, idx_cols, {PgExtnRegistry::get_instance()->comparator_func});
-            if (it->extent_id != constant::UNKNOWN_EXTENT) {
-                root->init(it->extent_id);
-                root->truncate();
-                root->finalize();
+
+            // Dispatch on access_method (btree redesign phase 10, the third call site
+            // phase-9.md's handoff named explicitly): dropping a GIST index must construct its
+            // root via create_gist_index_root(), never create_index_root(), or it would
+            // misinterpret the GiST tree's content as a btree while truncating it.
+            //
+            // index_access_method_from_string() throws on any unrecognized index_type string by
+            // design (phase 9, architecture.md Decisions log entry 10) -- "a throwing validator
+            // is only as safe as its least-protected caller", so this call site needs its own
+            // local catch, matching _build()'s dispatch four lines below in this same file (round-
+            // 1 review of this phase, finding 1: this call site was new in this commit and was
+            // the one sibling of that pattern left unprotected -- info.index_type() is read fresh
+            // from the catalog here, and nothing upstream of _drop() re-validates it, so this
+            // can't assume _upsert_index_name's write-side guard is the only thing ever able to
+            // reach this line). Unlike _build(), there's no valid root to truncate if the access
+            // method can't even be classified, so log and leave this index's `IndexNames` row as
+            // whatever the caller already set it (BEING_DELETED) rather than inventing a partial
+            // drop -- non-destructive, and this call site is unreachable today under ordinary DDL
+            // for the same reason _build()'s dispatch is: the write-side guard already stops
+            // this exact string from reaching the catalog.
+            try {
+                auto access_method = index_access_method_from_string(info.index_type());
+                if (access_method == IndexAccessMethod::GIST) {
+                    auto opclass_names = _get_index_opclasses(info);
+                    auto gist_root = table->create_gist_index_root(index_id, idx_cols, opclass_names,
+                            {PgExtnRegistry::get_instance()->comparator_func});
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        gist_root->init(it->extent_id);
+                        gist_root->truncate();
+                        gist_root->finalize();
+                    }
+                } else if (access_method == IndexAccessMethod::GIN) {
+                    // Dispatch on access_method (btree redesign phase 11, mirroring phase 10's
+                    // identical GIST fix above): dropping a GIN index must construct its root via
+                    // create_gin_index_root(), never create_index_root(), or it would misinterpret
+                    // the GIN entry tree's content as a btree while truncating it.
+                    auto opclass_names = _get_index_opclasses(info);
+                    auto gin_root = table->create_gin_index_root(index_id, idx_cols, opclass_names,
+                            {PgExtnRegistry::get_instance()->comparator_func});
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        gin_root->init(it->extent_id);
+                        gin_root->truncate();
+                        gin_root->finalize();
+                    }
+                } else {
+                    auto root = table->create_index_root(index_id, idx_cols,
+                            {PgExtnRegistry::get_instance()->comparator_func}, access_method);
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        root->init(it->extent_id);
+                        root->truncate();
+                        root->finalize();
+                    }
+                }
+            } catch (const Error& e) {
+                LOG_ERROR("Index drop failed to resolve access method, index left at its current "
+                        "state: {}:{} - {}", db_id, index_id, e.what());
+                return;
             }
 
             // Truncate look-aside index if this is the last index in the table getting dropped
@@ -297,8 +349,11 @@ namespace springtail::committer {
             server->update_roots(db_id, info.table_id(), end_xid, *meta);
         }
 
-        // Cleanup table-index map
-        _remove_index_key(db_id, info.table_id(), key);
+        // Cleanup table-index map. _drop() operates on an index that was already READY (it must
+        // have gone through a prior _commit_build() to get BEING_DELETED in the first place), so
+        // it never owns the look-aside bootstrap tracker entry for this table -- never clear it
+        // here.
+        _remove_index_key(db_id, info.table_id(), key, false);
 
         LOG_INFO("Index dropped: {}:{} @ {}", db_id, index_id, end_xid);
     }
@@ -324,8 +379,42 @@ namespace springtail::committer {
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
         auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid, {PgExtnRegistry::get_instance()->comparator_func});
-        MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols, {PgExtnRegistry::get_instance()->comparator_func});
-        root->init_empty();
+
+        // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8):
+        // resolve the index's access method from the catalog-carried index_type string. GIST
+        // (phase 10) builds a GistWriter via create_gist_index_root(), GIN (phase 11) builds a
+        // GinWriteStrategy via create_gin_index_root(), both wrapped in AnyIndexRoot so the rest
+        // of this function (and _commit_build()/_reconcile_index()'s catch-up) can stay
+        // kind-agnostic; any unrecognized/corrupt index_type string still fails exactly like the
+        // original stub (never silently defaults to BTREE) -- see
+        // index_access_method_from_string()'s own doc comment.
+        AnyIndexRoot root;
+        try {
+            auto access_method =
+                index_access_method_from_string(idx._index_request.index().index_type());
+            if (access_method == IndexAccessMethod::GIST) {
+                auto opclass_names = _get_index_opclasses(idx._index_request.index());
+                root = mutable_table->create_gist_index_root(index_id, idx_cols, opclass_names,
+                        {PgExtnRegistry::get_instance()->comparator_func});
+            } else if (access_method == IndexAccessMethod::GIN) {
+                auto opclass_names = _get_index_opclasses(idx._index_request.index());
+                root = mutable_table->create_gin_index_root(index_id, idx_cols, opclass_names,
+                        {PgExtnRegistry::get_instance()->comparator_func});
+            } else {
+                root = mutable_table->create_index_root(index_id, idx_cols,
+                        {PgExtnRegistry::get_instance()->comparator_func}, access_method);
+            }
+        } catch (const Error& e) {
+            // Leave the index at NOT_READY -- the same outcome _commit_build() already gives a
+            // build interrupted by st.stop_requested() below -- rather than inventing a new
+            // "permanently failed" state: IndexNames::State has no such state, and once phase
+            // 11 lands, the next recover_indexes() pass (daemon restart) retries this exact
+            // still-NOT_READY row and builds it for real instead of reusing a stale failure.
+            LOG_ERROR("Index build failed, index will remain not-ready: {}:{} - {}", db_id,
+                    index_id, e.what());
+            return {AnyIndexRoot{}, key, idx, tid, nullptr};
+        }
+        root.init_empty();
 
         auto look_aside_index = mutable_table->look_aside_index();
         bool build_look_aside = false;
@@ -335,10 +424,37 @@ namespace springtail::committer {
 
             auto la_tracker_it = _look_aside_build_tracker.find(tid);
             if (la_tracker_it == _look_aside_build_tracker.end()) {
+                // We are the first concurrent "first index on this table" build to arrive --
+                // create and own the look-aside index's bootstrap, catch-up, and finalize for
+                // the whole duration of this table's "no look-aside index yet" window
+                // (architecture.md Sec 5.4 case 2).
                 look_aside_index = mutable_table->create_look_aside_root({PgExtnRegistry::get_instance()->comparator_func});
                 look_aside_index->init_empty();
-                _look_aside_build_tracker[tid] = true;
+                _look_aside_build_tracker[tid] = look_aside_index;
                 build_look_aside = true;
+            } else {
+                // Another builder already owns this table's look-aside bootstrap this
+                // generation. Discover its instance (architecture.md Sec 5.4 case 2: "others...
+                // discover it already exists") rather than silently staying null regardless of
+                // which MutableTable instance we got (TableMgr::get_mutable_table() constructs a
+                // fresh MutableTable per call, so this builder's own mutable_table->
+                // look_aside_index() can never reflect a sibling builder's create_look_aside_root()
+                // call -- confirmed by reading table_mgr.cc). We are NOT the owner, though, so we
+                // must never call a mutating method (insert/remove/truncate/finalize) on it:
+                // IndexWriter has no internal locking (Sec 5.4), and the owner is already relying
+                // on exclusive access for the rest of its build -- sharing a second live mutator
+                // would violate that contract and risk a double finalize(). The owner's own
+                // bootstrap scan (a complete snapshot as of its own start xid) plus its own
+                // reconciliation catch-up (through its own commit) plus steady-state ordinary
+                // ingest after that commit together cover the table's whole timeline with no gap
+                // that this builder needs to help fill -- this builder's own secondary index is
+                // built directly off the primary table, never off look-aside. See phases/
+                // phase-3.md for the full audit, including a known, separate, pre-existing gap
+                // this fix does not close: if the *owner's* build is itself aborted/dropped
+                // mid-flight while this builder is still in flight, responsibility is not handed
+                // off and the look-aside index is left permanently incomplete for historical
+                // rows -- flagged there as a deferred risk, not introduced by this phase.
+                look_aside_index = la_tracker_it->second;
             }
         }
 
@@ -365,7 +481,7 @@ namespace springtail::committer {
             for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
                 if (st.stop_requested()) {
                     look_aside_index->truncate();
-                    return {nullptr, key, idx, tid, look_aside_index};
+                    return {AnyIndexRoot{}, key, idx, tid, look_aside_index};
                 }
 
                 auto extent_id = row_i.extent_id();
@@ -394,27 +510,49 @@ namespace springtail::committer {
         row_cnt = 0;
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
-                root->truncate();
+                root.truncate();
                 if (build_look_aside) {
                     look_aside_index->truncate();
                 }
-                return {nullptr, key, idx, tid, look_aside_index};
+                // Only the owning (build_look_aside) builder may ever hand back a non-null
+                // look-aside root -- see the discovery comment above.
+                return {AnyIndexRoot{}, key, idx, tid, build_look_aside ? look_aside_index : nullptr};
             }
             // check if the index was dropped
             if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
-                return {root, key, idx, tid, look_aside_index};
+                return {root, key, idx, tid, build_look_aside ? look_aside_index : nullptr};
             }
 
             // insert key
             auto &&row = *row_i;
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
             auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, &row);
-            root->insert(svalue);
+
+            // A throwing validator is only as safe as its least-protected caller (phase 9's
+            // round-1/round-2 lesson): GistWriter::insert() -> gist_helpers::compress_leaf_entry()
+            // throws Error for any GiST column type/opclass combination this phase doesn't support
+            // (e.g. a non-TEXT column -- see gist_helpers.hh's documented scope limit), and this
+            // loop runs on Indexer's own worker thread, which (like PgLogReader's DDL thread) has
+            // no outer try/catch of its own. Caught here, not just at construction time (the
+            // access_method dispatch above), because the throw can only actually happen once real
+            // row data flows through -- confirmed directly: reusing this fixture's existing
+            // INT32-typed columns for a GIST build throws exactly this, uncaught, before this fix.
+            try {
+                root.insert(svalue);
+            } catch (const Error& e) {
+                LOG_ERROR("Index build failed on row data, index will remain not-ready: {}:{} - {}",
+                        db_id, index_id, e.what());
+                root.truncate();
+                if (build_look_aside) {
+                    look_aside_index->truncate();
+                }
+                return {AnyIndexRoot{}, key, idx, tid, build_look_aside ? look_aside_index : nullptr};
+            }
 
             ++row_cnt;
         }
         LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
-        return {root, key, idx, tid, look_aside_index};
+        return {root, key, idx, tid, build_look_aside ? look_aside_index : nullptr};
     }
 
     std::vector<uint32_t>
@@ -439,6 +577,24 @@ namespace springtail::committer {
         return idx_cols;
     }
 
+    std::vector<std::string>
+    Indexer::_get_index_opclasses(proto::IndexInfo index_info)
+    {
+        std::vector<std::pair<uint32_t, std::string>> temp;
+        for (const auto& column : index_info.columns()) {
+            temp.emplace_back(column.idx_position(), column.opclass());
+        }
+        std::sort(temp.begin(), temp.end(),
+                 [](auto const &a, auto const &b) { return a.first < b.first; });
+
+        std::vector<std::string> opclasses;
+        opclasses.reserve(temp.size());
+        for (const auto& [_, opclass] : temp) {
+            opclasses.push_back(opclass);
+        }
+        return opclasses;
+    }
+
     bool
     Indexer::_was_dropped(const Key& key)
     {
@@ -449,8 +605,8 @@ namespace springtail::committer {
     }
 
     void
-    Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx,
-            uint64_t end_xid, MutableBTreePtr look_aside_root)
+    Indexer::_commit_build(AnyIndexRoot root, const Key& key, const IndexParams& idx,
+            uint64_t end_xid, IndexWriterPtr look_aside_root)
     {
         auto [db_id, index_id] = key;
         auto tid = idx._index_request.index().table_id();
@@ -471,8 +627,8 @@ namespace springtail::committer {
         if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::DELETED) {
             // Index building was attempted, truncate and finalize
             if (root) {
-                root->truncate();
-                root->finalize();
+                root.truncate();
+                root.finalize();
                 if (look_aside_root) {
                     look_aside_root->truncate();
                     look_aside_root->finalize();
@@ -498,7 +654,7 @@ namespace springtail::committer {
                 }
             } else {
                 // Index building was attempted, finalize and process build/abort
-                auto extent_id = root->finalize();
+                auto extent_id = root.finalize();
                 if (work_item.is_status(IndexStatus::BUILDING)) {
                     auto meta = server->get_roots(db_id, tid, end_xid);
                     meta->roots.clear();
@@ -513,8 +669,8 @@ namespace springtail::committer {
                     // the index was deleted while we were building it
                     // lets also finalize here as part of the tree
                     // may have got finalized while we were building.
-                    root->truncate();
-                    root->finalize();
+                    root.truncate();
+                    root.finalize();
                     if (look_aside_root) {
                         look_aside_root->truncate();
                         look_aside_root->finalize();
@@ -524,8 +680,11 @@ namespace springtail::committer {
             }
         }
 
-        // Cleanup table-index map
-        _remove_index_key(db_id, tid, key);
+        // Cleanup table-index map. look_aside_root is non-null here iff *this* build is the one
+        // that owns the table's look-aside bootstrap (indexer.cc's _build(): only the owner's
+        // IndexState ever carries a non-null look_aside_root) -- only the owner may retire the
+        // tracker entry, regardless of whether this call landed via success, abort, or deletion.
+        _remove_index_key(db_id, tid, key, look_aside_root != nullptr);
     }
 
     // Index reconciliation flows
@@ -620,6 +779,20 @@ namespace springtail::committer {
             // we will do full flush of root once at whichever stage it is in,
             // truncate and flush again
             _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid, idx_state._look_aside_root);
+        } else if (!idx_state._root) {
+            // The build never produced a root -- for an ordinary (non-abort/non-drop) work item
+            // this previously could only mean st.stop_requested() (process shutting down, so
+            // this code never ran again on the stale IndexState) or _was_dropped() (which routes
+            // through is_drop_while_processing above instead). Phase 9's GIST/GIN dispatch stub
+            // (Indexer::_build's catch block) is a third, new way to reach a null root while the
+            // work item stays BUILDING -- with the process very much still running and ordinary
+            // DML on the table still triggering catch-up reconciliation for it. Skip straight to
+            // _commit_build(), which is already null-root-safe (leaves the index NOT_READY)
+            // rather than falling into the catch-up loop below, which unconditionally
+            // dereferences idx_state._root and would crash.
+            LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1,
+                    "Index reconciliation skipped, build never produced a root: {}:{}", db_id, index_id);
+            _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid, idx_state._look_aside_root);
         } else {
             LOG_DEBUG(LOG_COMMITTER, LOG_LEVEL_DEBUG1, "Index reconciliation in progress: {}:{}", db_id, index_id);
 
@@ -677,7 +850,19 @@ namespace springtail::committer {
                     for (auto &row: *prev_extent) {
                         (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
                         auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-                        idx_state._root->remove(svalue);
+                        // Same "a throwing validator is only as safe as its least-protected
+                        // caller" concern as _build()'s own insert loop (see that fix's comment)
+                        // -- this reconciliation catch-up runs synchronously on whichever thread
+                        // calls process_index_reconciliation(), which for a real daemon is a
+                        // Committer worker with no outer try/catch of its own. Log and skip this
+                        // one row's catch-up rather than letting the index build silently poison
+                        // that caller.
+                        try {
+                            idx_state._root.remove(svalue);
+                        } catch (const Error& e) {
+                            LOG_ERROR("Index reconciliation catch-up (remove) failed on row data for "
+                                    "{}:{}: {}", db_id, index_id, e.what());
+                        }
                     }
 
                     // Insert into a set to skip for other extents pointing
@@ -696,7 +881,12 @@ namespace springtail::committer {
                 for (auto &row: *next_extent) {
                     (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id_f->get_uint64(&row));
                     auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-                    idx_state._root->insert(svalue);
+                    try {
+                        idx_state._root.insert(svalue);
+                    } catch (const Error& e) {
+                        LOG_ERROR("Index reconciliation catch-up (insert) failed on row data for "
+                                "{}:{}: {}", db_id, index_id, e.what());
+                    }
                 }
 
                 // Get the next extent if next_offset is present, else exit the reconciliation
@@ -717,7 +907,7 @@ namespace springtail::committer {
         }
     }
 
-    void Indexer::_remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key)
+    void Indexer::_remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key, bool owns_look_aside)
     {
         std::scoped_lock lock(_table_idx_map_mtx);
         auto db_it = _table_idx_map.find(db_id);
@@ -738,12 +928,19 @@ namespace springtail::committer {
             }
         }
 
-        // Clear look aside index tracker
-        {
+        // Clear the look-aside build tracker *only* when this completing build is the one that
+        // owns it (round-1 review finding 1). _look_aside_build_tracker[table_id]'s presence is
+        // the external serialization point for architecture.md Sec 5.4 case 2 -- "all pending
+        // index builds for this table_id finished" (the key_list.empty() signal above) is not an
+        // equivalent condition: a non-owning sibling build can legitimately finish (and call this
+        // function) before the owner's own look-aside bootstrap/catch-up/finalize does, and
+        // erasing the entry then would let a third concurrent "first index" build on the same
+        // table conclude it must start its own, independent look-aside bootstrap while the real
+        // owner is still mid-build.
+        if (owns_look_aside) {
             std::unique_lock g(_look_aside_mutex);
             _look_aside_build_tracker.erase(table_id);
         }
-
     }
 
 }  // namespace springtail::gc

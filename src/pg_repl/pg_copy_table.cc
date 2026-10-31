@@ -123,12 +123,16 @@ namespace springtail
         "    a.attname AS column_name, "
         "    s.snum AS secondary_index_num, "
         "    a.attnum AS column_attnum, "
-        "    idx.indisunique AS is_unique "
+        "    idx.indisunique AS is_unique, "
+        "    am.amname AS access_method, "
+        "    opc.opcname AS opclass "
         "FROM pg_index idx "
         "JOIN pg_class i ON i.oid = idx.indexrelid "
         "JOIN pg_namespace ns ON ns.oid = i.relnamespace "
+        "JOIN pg_am am ON am.oid = i.relam "
         "JOIN pg_attribute a ON a.attrelid = idx.indrelid "
         "JOIN generate_subscripts(idx.indkey, 1) s(snum) ON idx.indkey[s.snum] = a.attnum "
+        "LEFT JOIN pg_opclass opc ON opc.oid = idx.indclass[s.snum] "
         "LEFT JOIN pg_constraint c ON c.conindid = idx.indexrelid AND c.contype = 'p' "
         "WHERE idx.indrelid = {} "
         "  AND c.conname IS NULL "
@@ -294,10 +298,13 @@ namespace springtail
             std::uint32_t secondary_index_num = _connection.get_int32(i, 3);
             std::uint32_t column_attnum = _connection.get_int32(i, 4);
             bool is_unique = _connection.get_boolean(i, 5);
+            std::string access_method = _connection.get_string(i, 6);
+            std::string opclass = _connection.get_string(i, 7);
 
             Index::Column index_column;
             index_column.idx_position = secondary_index_num;
             index_column.position = column_attnum;
+            index_column.opclass = opclass;
 
             std::vector<Index::Column> columns;
             // If the existing key is found, use the list of columns from that.
@@ -316,6 +323,19 @@ namespace springtail
             index_obj.columns = std::move(columns);
             // set the index state to ready since its part of the initial table copy
             index_obj.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+            // Carries access_method through so Table/MutableTable's reload path doesn't
+            // misinterpret a pre-existing GiST/GIN index's content as a btree (the same bug
+            // class phase 10's DDL-path fix closes -- this is the initial-full-copy sibling of
+            // that path). Logs and falls back to BTREE rather than throwing: amname read
+            // straight off a live pg_am catalog row is always a real, recognized access method
+            // (unlike a raw DDL-carried string, there's no "corrupt input" case here, but this
+            // function is shared and this call site has no surrounding try/catch).
+            try {
+                index_obj.access_method = index_access_method_from_string(access_method);
+            } catch (const Error &e) {
+                LOG_ERROR("Unrecognized index access method for index {} ({}): {} -- defaulting to BTREE",
+                          index_id, index_name, e.what());
+            }
 
             secondary_indexes[index_name] = std::move(index_obj);
         }

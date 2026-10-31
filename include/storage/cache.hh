@@ -935,6 +935,24 @@ namespace springtail {
                 return _extents.size();
             }
 
+            /**
+             * Returns the single Extent backing this Page, for callers that know in advance this
+             * Page was constructed without roll-forward (StorageCache::get() called with
+             * access_xid == target_xid, e.g. every call IndexReader's StorageCacheExtentSource
+             * makes -- architecture.md "btree" redesign Sec 5.3/6) and so can never have more than
+             * one backing extent. Returns a plain shared_ptr<Extent>, independent of this Page's
+             * own pin: the caller may keep it after this Page itself is put() back to the cache,
+             * since DataCache's use-count bookkeeping (decremented when the local SafeExtent below
+             * goes out of scope) only ever moves an extent onto its eviction LRU, never frees the
+             * object out from under a shared_ptr still holding it.
+             */
+            std::shared_ptr<Extent> extent() {
+                boost::shared_lock lock(_mutex);
+                assert(_extents.size() == 1);
+                SafeExtent se = _extents.front().make_safe_extent(_file, _database_id);
+                return *se;
+            }
+
             bool dirty() const {
                 return _is_dirty;
             }

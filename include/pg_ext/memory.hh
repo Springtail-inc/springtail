@@ -109,7 +109,20 @@ private:
     };
 
     using BlockList = std::list<std::unique_ptr<MemoryBlock>>;
-    using BlockMap = std::map<size_t, std::unique_ptr<MemoryBlock>>;
+    // multimap, not map: keyed by remaining() space, which is small, size_t-valued, and
+    // routinely collides across distinct blocks (e.g. two freshly-rolled-over blocks with the
+    // same init_size, or two blocks independently reduced to the same remaining() by same-sized
+    // allocations). A plain map's operator[]/insert()-after-extract() on a colliding key either
+    // overwrites or silently drops the moved-in node, destroying a MemoryBlock (and freeing its
+    // backing memory) that earlier alloc() calls already handed live pointers into -- a real,
+    // confirmed use-after-free (found via btree redesign phase 10's GiST opclass-calling glue,
+    // which repeatedly allocates many same-sized small buffers through this exact path and hit
+    // it directly, with a signature matching this exactly: an intermittent, ASLR-correlated
+    // SIGSEGV deep inside a real Postgres contrib .so that went away under AddressSanitizer --
+    // consistent with a layout-dependent use-after-free ASan's own allocator happened not to
+    // place adjacent to anything else, not with a fixed out-of-bounds access it would have
+    // caught directly).
+    using BlockMap = std::multimap<size_t, std::unique_ptr<MemoryBlock>>;
     using LargeAllocMap = absl::flat_hash_map<char*, std::unique_ptr<MemoryBlock>>;
 
     BlockMap _blocks; ///< A map of remaining space to blocks that still have free space

@@ -574,4 +574,59 @@ namespace {
         test(GREATER_THAN_EQUALS, false, 2);
         test(GREATER_THAN_EQUALS, true, 2);
     }
+
+    TEST_F(FDWWhere_Test, Test_SortPushdown_SkipsNonBtreeIndex)
+    {
+        // btree redesign phase 12 round-1 review finding 2: fdw_can_sort()'s check_index lambda
+        // must reject a non-BTREE index the same way _get_index_quals() does (pg_fdw_mgr.cc) --
+        // otherwise a GiST/GIN index whose columns happen to match an ORDER BY clause would be
+        // selected as sortgroup_index, and _set_scan_iterators() would later try to drive a
+        // MergeTable::lower_bound()/upper_bound() scan over it, which only ever resolves a
+        // btree-shaped secondary index (Table::index()'s .at() on an id that only lives in
+        // Table's separate _gist_indexes/_gin_indexes maps -- a crash). No real GiST/GIN index
+        // is built here -- a synthetic Index is injected directly into state->indexes, which is
+        // enough to exercise check_index()'s own logic without the heavier Indexer/opclass
+        // machinery a real non-BTREE index build would need.
+        //
+        // col5 (attnum 5) is used because it is not a usable prefix match for any *real* index
+        // on this fixture's table: the primary key is (col1, col2, col3) and the secondary index
+        // is (col4, col5) in that column order, so a single-column ORDER BY on col5 alone
+        // doesn't match either real index's first column -- the only index that could satisfy it
+        // is the synthetic one this test injects, so this test actually exercises the guard
+        // instead of being satisfied by a real index first.
+        PgFdwMgr *mgr = PgFdwMgr::get_instance();
+
+        SpringtailPlanState plan{_db_id, _tid, _table_xid, _table_xid};
+        for (const auto &[name, attnum] : _target_list) {
+            plan.add_target_column(name, attnum);
+        }
+
+        double rows;
+        int width;
+        mgr->fdw_get_rel_size(&plan, nullptr, NIL, &rows, &width);
+
+        PgFdwState *state = mgr->create_scan_state(&plan);
+
+        springtail::Index fake_gin_idx;
+        fake_gin_idx.id = 9999;
+        fake_gin_idx.name = "fake_gin_idx";
+        fake_gin_idx.table_id = _tid;
+        fake_gin_idx.is_unique = false;
+        fake_gin_idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+        fake_gin_idx.access_method = IndexAccessMethod::GIN;
+        springtail::Index::Column fake_col;
+        fake_col.idx_position = 0;
+        fake_col.position = _columns[4].position;  // col5
+        fake_gin_idx.columns.push_back(fake_col);
+        state->indexes.push_back(fake_gin_idx);
+
+        auto sortgroup = _add_sortgroup(_columns[4].position, false);
+
+        List *result = mgr->fdw_can_sort(&plan, state, sortgroup, nullptr, true);
+
+        EXPECT_EQ(result, nullptr);
+        EXPECT_FALSE(state->sortgroup_index.has_value());
+
+        delete state;
+    }
 } // namespace

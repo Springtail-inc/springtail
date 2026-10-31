@@ -265,6 +265,22 @@ namespace springtail {
             metadata.roots.emplace_back(index_id, constant::UNKNOWN_EXTENT);
         }
 
+        // Truncate GiST/GIN secondary indexes too (btree redesign final-3) -- mirrors the
+        // _secondary_indexes loop above exactly. Both steps are required: ->truncate() resets
+        // the in-memory writer, and the UNKNOWN_EXTENT entry in metadata.roots is what actually
+        // persists the reset, since Server::_set_roots_info() upserts one TableRoots row per
+        // (table_id, index_id) rather than wholesale-replacing a table's roots -- omitting an
+        // index from metadata.roots here would leave its pre-truncate root as the one any later
+        // reload finds, even though the in-memory writer was reset.
+        for (auto& [index_id, idx]: _gist_indexes) {
+            idx.first->truncate();
+            metadata.roots.emplace_back(index_id, constant::UNKNOWN_EXTENT);
+        }
+        for (auto& [index_id, idx]: _gin_indexes) {
+            idx.first->truncate();
+            metadata.roots.emplace_back(index_id, constant::UNKNOWN_EXTENT);
+        }
+
         // update the roots and stats
         sys_tbl_mgr::Server::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
 

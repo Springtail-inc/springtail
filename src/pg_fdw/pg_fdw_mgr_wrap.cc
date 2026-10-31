@@ -117,6 +117,16 @@ extern "C" {
     fdw_explain_scan(ForeignScanState *node, ExplainState *es)
     {
         const PgFdwState* state = static_cast<PgFdwState*>(node->fdw_state);
+        // Pre-existing bug, found while verifying this phase's own EXPLAIN-based test (not
+        // part of this phase's own scope, fixed here because it crashes the backend on any
+        // plain EXPLAIN of any foreign-table query, not just a GIN-routed one): for a plain
+        // EXPLAIN without ANALYZE, springtail_BeginForeignScan() deliberately never runs
+        // (pg_fdw.c's own "XXX Do nothing in EXPLAIN" early return for EXEC_FLAG_EXPLAIN_ONLY),
+        // so node->fdw_state is never set and stays NULL -- fdw_explain_scan() must tolerate
+        // that instead of dereferencing it.
+        if (state == nullptr) {
+            return;
+        }
         auto v = get_fdw_mgr()->fdw_explain_scan(state);
 
         for (auto const& [name, value]: v) {

@@ -1,8 +1,12 @@
+#include <algorithm>
 #include <memory>
 
 #include <common/constants.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
+
+#include <storage/index_engine/segment_set.hh>
+#include <storage/vacuumer.hh>
 
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/mutable_table.hh>
@@ -22,6 +26,16 @@ static auto get_max_extent_size_secondary() {
     return constant::MAX_EXTENT_SIZE_SECONDARY;
 }
 
+// Background structural-reclaim (merge, architecture.md "btree" redesign Sec 7.1 / phase-8.md
+// OQ5): every BtreeWriteStrategy this table constructs shares the same Vacuumer-configured
+// occupancy threshold, read fresh at construction time rather than baked into a constant the
+// way max_extent_size is -- underfull() is actually consulted at runtime against a live config
+// knob (storage.vacuum_config.underfull_occupancy_fraction), unlike max_extent_size's own
+// never-configured constants above.
+static auto get_underfull_occupancy_fraction() {
+    return Vacuumer::get_instance()->underfull_occupancy_fraction();
+}
+
 namespace indexer_helpers {
 
     /**
@@ -34,7 +48,7 @@ namespace indexer_helpers {
     static void _update_secondary_index(
             uint64_t                        extent_id,
             const RowPtrT                  &rows,        // pointer-like, supports *rows
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -64,24 +78,52 @@ namespace indexer_helpers {
             row_id);
     }
 
-    template <IndexOperation op>            // Operation on the index - insert/remove
+    /**
+     * Applies an insert/remove to every index in `indexes` for one row -- templated on the
+     * indexes-cache type (btree redesign final-2) rather than hardcoded to SecondaryIndexesCache,
+     * so the identical body serves _secondary_indexes (IndexWriterPtr), _gist_indexes
+     * (GistWriterPtr), and _gin_indexes (GinWriterPtr) alike: all three maps share the same
+     * (root, index_cols) shape, and GistWriter::insert()/remove()/GinWriteStrategy::insert()/
+     * remove() are deliberately call-compatible with IndexWriter's (see those classes' own doc
+     * comments) -- the KeyValueTuple this builds (indexed column(s) + internal_row_id) is exactly
+     * the calling convention all three expect.
+     *
+     * Each index's insert/remove is individually try/catch-guarded: GistWriter::insert()/
+     * GinWriteStrategy::insert() can throw Error for a row whose opclass/column-type combination
+     * isn't supported (gist_helpers.hh/gin_helpers.hh's own documented scope limits) -- in
+     * practice unreachable for a READY index (the same check already passed on every existing row
+     * during Indexer's build), but this per-row dispatch runs on Committer's call chain
+     * (committer.cc), which (unlike Indexer::_build()'s own loop) has no outer try/catch of its
+     * own -- "a throw-based validator is only as safe as its least-protected caller" (this
+     * project's established lesson, phase 9/10). Catching here logs and skips just that one
+     * index's maintenance for this one row, matching Indexer::_reconcile_index()'s own catch-up
+     * loop precedent (indexer.cc), rather than letting an ordinary DML commit crash the daemon.
+     * A no-op for IndexWriterPtr (confirmed: IndexWriter<Strategy>::insert()/remove() never
+     * throw), so wrapping the pre-existing _secondary_indexes call site too changes nothing there.
+     */
+    template <IndexOperation op, typename IndexesCacheT>
     void index_mutation_handler(
             const ExtentSchemaPtr schema,
-            const SecondaryIndexesCache& secondary_indexes,
+            const IndexesCacheT& indexes,
             const Extent::Row& row)
     {
         auto internal_row_id_f = schema->get_field(constant::INTERNAL_ROW_ID);
         auto internal_row_id = internal_row_id_f->get_uint64(&row);
         auto value_fields = std::make_shared<FieldArray>(1);
 
-        for (auto const& [index_id, idx]: secondary_indexes) {
+        for (auto const& [index_id, idx]: indexes) {
             auto idx_col_fields = schema->get_fields(schema->get_column_names(idx.second));
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(internal_row_id);
             auto &&svalue = std::make_shared<KeyValueTuple>(idx_col_fields, value_fields, &row);
-            if constexpr (op == IndexOperation::Insert) {
-                idx.first->insert(svalue);
-            } else { /* op == IndexOperation::Remove */
-                idx.first->remove(svalue);
+            try {
+                if constexpr (op == IndexOperation::Insert) {
+                    idx.first->insert(svalue);
+                } else { /* op == IndexOperation::Remove */
+                    idx.first->remove(svalue);
+                }
+            } catch (const Error& e) {
+                LOG_ERROR("Secondary index {} mutation failed on row data, internal_row_id={}: {}",
+                        index_id, internal_row_id, e.what());
             }
         }
     }
@@ -89,7 +131,7 @@ namespace indexer_helpers {
     /* ------------------------------  PAGE  ----------------------------------- */
     void populate_index_for_page(uint64_t extent_id,
             const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -99,7 +141,7 @@ namespace indexer_helpers {
 
     void invalidate_index_for_page(uint64_t extent_id,
             const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -110,7 +152,7 @@ namespace indexer_helpers {
     /* -----------------------------  EXTENT  ---------------------------------- */
     void populate_index_for_extent(uint64_t extent_id,
             const std::shared_ptr<Extent>  &extent,
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -120,7 +162,7 @@ namespace indexer_helpers {
 
     void invalidate_index_for_extent(uint64_t extent_id,
             const std::shared_ptr<Extent>  &extent,
-            const MutableBTreePtr          &root,
+            const IndexWriterPtr           &root,
             const std::vector<std::string> &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
@@ -129,16 +171,23 @@ namespace indexer_helpers {
     }
 
     /**
-     * Struct to hold context to be passed to the callback from cache
+     * Struct to hold context to be passed to the callback from cache. Carries all three
+     * indexes-cache kinds (btree redesign final-2) so one mutation_handler() call maintains
+     * _secondary_indexes, _gist_indexes, and _gin_indexes together -- every MutationType
+     * (INSERT/APPEND/UPDATE/UPSERT/REMOVE/REMOVE_BY_SCAN) already routes through this one
+     * ctx/callback pair (_mutation_wrapper()), so widening it here is the single place that
+     * reaches every per-row mutation path at once.
      */
     struct IndexMutationContext
     {
         const ExtentSchemaPtr schema;
         const SecondaryIndexesCache& indexes;
+        const GistIndexesCache& gist_indexes;
+        const GinIndexesCache& gin_indexes;
     };
 
     /**
-     * Handler that does the secondary index mutations
+     * Handler that does the secondary/GiST/GIN index mutations
      * @param row   Extent row holding the content
      * @param ctx   Generic pointer to an IndexMutationContext
      */
@@ -146,6 +195,8 @@ namespace indexer_helpers {
     static void mutation_handler(const Extent::Row& row, void* ctx) {
         auto* c = static_cast<const IndexMutationContext*>(ctx);
         index_mutation_handler<op>(c->schema, c->indexes, row);
+        index_mutation_handler<op>(c->schema, c->gist_indexes, row);
+        index_mutation_handler<op>(c->schema, c->gin_indexes, row);
     }
 
 } // namespace indexer_helpers
@@ -234,19 +285,25 @@ namespace indexer_helpers {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
             primary_schema = _schema->create_index_schema({}, { extent_c }, non_primary_key, extension_callback);
 
-            _primary_index = std::make_shared<MutableBTree>(_db_id,
+            _primary_index = std::make_shared<IndexWriterT>(_db_id,
                                                             _table_dir / constant::INDEX_PRIMARY_FILE,
                                                             non_primary_key,
                                                             primary_schema,
-                                                            _target_xid, get_max_extent_size(), extension_callback);
+                                                            _target_xid,
+                                                            IndexExtentCache::get_instance(),
+                                                            BtreeWriteStrategy{get_max_extent_size(), get_underfull_occupancy_fraction()},
+                                                            extension_callback);
         } else {
             primary_schema = _schema->create_index_schema(primary_key, { extent_c }, primary_key, extension_callback);
 
-            _primary_index = std::make_shared<MutableBTree>(_db_id,
+            _primary_index = std::make_shared<IndexWriterT>(_db_id,
                                                             _table_dir / constant::INDEX_PRIMARY_FILE,
                                                             primary_key,
                                                             primary_schema,
-                                                            _target_xid, get_max_extent_size(), extension_callback);
+                                                            _target_xid,
+                                                            IndexExtentCache::get_instance(),
+                                                            BtreeWriteStrategy{get_max_extent_size(), get_underfull_occupancy_fraction()},
+                                                            extension_callback);
         }
 
 
@@ -280,25 +337,72 @@ namespace indexer_helpers {
             }
             if (!idx_cols.empty()) {
 
-                auto btree = create_index_root(idx.id, idx_cols, extension_callback);
-
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
 
-                if (it->extent_id != constant::UNKNOWN_EXTENT) {
-                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init with root: {}", idx.id, it->extent_id);
-                    btree->init(it->extent_id);
+                // Dispatch on access_method (btree redesign phase 10/11, closing the gap
+                // phase-9.md's handoff named explicitly) -- see Table::init()'s identical fix
+                // (table.cc) and AnyIndexRoot's class comment (table.hh) for why GIST/GIN each
+                // get their own map/construction method rather than reusing create_index_root().
+                if (idx.access_method == IndexAccessMethod::GIST) {
+                    std::vector<std::string> opclass_names;
+                    opclass_names.reserve(idx.columns.size());
+                    for (auto const &col : idx.columns) {
+                        opclass_names.push_back(col.opclass);
+                    }
+                    auto gist_root = create_gist_index_root(idx.id, idx_cols, opclass_names, extension_callback);
+
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} (gist) init with root: {}", idx.id, it->extent_id);
+                        gist_root->init(it->extent_id);
+                    } else {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} (gist) init empty", idx.id);
+                        gist_root->init_empty();
+                    }
+                    assert(_gist_indexes.find(idx.id) == _gist_indexes.end());
+                    _gist_indexes[idx.id] = {gist_root, idx_cols};
+                } else if (idx.access_method == IndexAccessMethod::GIN) {
+                    std::vector<std::string> opclass_names;
+                    opclass_names.reserve(idx.columns.size());
+                    for (auto const &col : idx.columns) {
+                        opclass_names.push_back(col.opclass);
+                    }
+                    auto gin_root = create_gin_index_root(idx.id, idx_cols, opclass_names, extension_callback);
+
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} (gin) init with root: {}", idx.id, it->extent_id);
+                        gin_root->init(it->extent_id);
+                    } else {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} (gin) init empty", idx.id);
+                        gin_root->init_empty();
+                    }
+                    assert(_gin_indexes.find(idx.id) == _gin_indexes.end());
+                    _gin_indexes[idx.id] = {gin_root, idx_cols};
                 } else {
-                    LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init empty", idx.id);
-                    btree->init_empty();
+                    auto btree = create_index_root(idx.id, idx_cols, extension_callback);
+
+                    if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init with root: {}", idx.id, it->extent_id);
+                        btree->init(it->extent_id);
+                    } else {
+                        LOG_DEBUG(LOG_BTREE, LOG_LEVEL_DEBUG1, "Secondary {} init empty", idx.id);
+                        btree->init_empty();
+                    }
+                    assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
+                    _secondary_indexes[idx.id] = {btree, idx_cols};
                 }
-                assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
-                _secondary_indexes[idx.id] = {btree, idx_cols};
             }
         }
 
-        // Look-aside exists only with secondary indexes
-        auto initialize_look_aside = !_secondary_indexes.empty();
+        // Look-aside exists whenever any secondary index does, regardless of kind -- a table
+        // whose only secondary index is a GiST/GIN one still needs the shared look-aside index
+        // reloaded (architecture.md Sec 5.5 generalizes look-aside indirection to every index
+        // kind; GistWriter's/GinWriteStrategy's leaf entries reference rows via internal_row_id
+        // through this same table-wide look-aside index). Missing this would silently skip
+        // reloading look-aside for any table whose only secondary index happens to be GiST/GIN --
+        // caught while widening this loop for phase 10, not a pre-existing bug (no non-btree
+        // secondary index could exist before phase 9).
+        auto initialize_look_aside = !_secondary_indexes.empty() || !_gist_indexes.empty() || !_gin_indexes.empty();
 
         if (initialize_look_aside) {
             // find look-aside index root
@@ -534,9 +638,28 @@ namespace indexer_helpers {
     {
         std::vector<std::filesystem::path> r;
         r.emplace_back(_data_file);
-        r.emplace_back(_primary_index->get_file_path());
+
+        // get_segment_paths() (not get_file_path() alone) -- phase 6's segment-set abstraction
+        // means an index's content can now span more than one physical file, every one of
+        // which needs to be fsync'ed before a commit batch is considered durable.
+        auto primary_segments = _primary_index->get_segment_paths();
+        r.insert(r.end(), primary_segments.begin(), primary_segments.end());
         for (auto &secondary : _secondary_indexes) {
-            r.emplace_back(secondary.second.first->get_file_path());
+            auto secondary_segments = secondary.second.first->get_segment_paths();
+            r.insert(r.end(), secondary_segments.begin(), secondary_segments.end());
+        }
+        // GiST/GIN secondary indexes (btree redesign final-2): now that ordinary DML dirties
+        // their segments too (mutation_handler(), above), they need the same pre-ack fsync
+        // coverage from TableSyncProcessor (committer.cc) that _secondary_indexes already gets --
+        // without this, a crash after commit-ack but before some later, unrelated fsync could
+        // lose a GiST/GIN mutation that was never actually durable.
+        for (auto &gist : _gist_indexes) {
+            auto gist_segments = gist.second.first->get_segment_paths();
+            r.insert(r.end(), gist_segments.begin(), gist_segments.end());
+        }
+        for (auto &gin : _gin_indexes) {
+            auto gin_segments = gin.second.first->get_segment_paths();
+            r.insert(r.end(), gin_segments.begin(), gin_segments.end());
         }
 
         if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
@@ -544,6 +667,108 @@ namespace indexer_helpers {
         }
 
         return r;
+    }
+
+    std::vector<IndexWriterPtr>
+    MutableTable::all_index_writers() const
+    {
+        std::vector<IndexWriterPtr> writers;
+        writers.push_back(_primary_index);
+        if (_look_aside_index) {
+            writers.push_back(_look_aside_index);
+        }
+        for (auto &secondary : _secondary_indexes) {
+            writers.push_back(secondary.second.first);
+        }
+        return writers;
+    }
+
+    MutableTable::PreparedCompaction
+    MutableTable::prepare_compaction_cycle()
+    {
+        auto *vacuumer = Vacuumer::get_instance();
+        auto candidates = vacuumer->get_compaction_candidates();
+        if (candidates.empty()) {
+            return {};
+        }
+
+        for (auto &writer : all_index_writers()) {
+            for (auto &segment : writer->get_segment_paths()) {
+                if (std::find(candidates.begin(), candidates.end(), segment) == candidates.end()) {
+                    continue;
+                }
+
+                auto scratch_file = segment;
+                scratch_file += ".compact_scratch";
+
+                // Fetched once per candidate segment, not once per extent scanned (round-1
+                // review finding 2) -- compaction_dead_offsets()'s own doc comment says a
+                // snapshot taken once per cycle is exactly the intended, safe usage; querying
+                // Vacuumer (a process-wide singleton, and the same mutex its background thread
+                // holds for an entire vacuum pass) on every extent the scan touches contended
+                // with that background thread and copied this set far more often than needed.
+                auto dead_offsets = vacuumer->compaction_dead_offsets(segment);
+                auto is_dead = [&dead_offsets](uint64_t real_id) {
+                    return dead_offsets.count(SegmentSet::offset_of(real_id)) > 0;
+                };
+
+                auto items = writer->bulk_copy_for_compaction(segment, scratch_file, is_dead,
+                                                               vacuumer->compaction_item_budget());
+                if (items.empty()) {
+                    // One candidate segment per cycle across the whole table keeps this bounded
+                    // (phase-7.md's Throttling task) -- don't fall through to try another
+                    // segment this same call.
+                    return {};
+                }
+
+                return PreparedCompaction{ writer, scratch_file, std::move(items) };
+            }
+        }
+        return {};
+    }
+
+    void
+    MutableTable::apply_compaction_cycle(PreparedCompaction &batch)
+    {
+        if (!batch.writer) {
+            return;
+        }
+        batch.writer->apply_compaction_batch(batch.scratch_file, batch.items);
+    }
+
+    void
+    MutableTable::run_compaction_cycle()
+    {
+        auto batch = prepare_compaction_cycle();
+        apply_compaction_cycle(batch);
+    }
+
+    void
+    MutableTable::run_merge_cycle()
+    {
+        auto *vacuumer = Vacuumer::get_instance();
+        uint64_t budget = vacuumer->merge_item_budget();
+        uint64_t processed = 0;
+
+        for (auto &writer : all_index_writers()) {
+            if (processed >= budget) {
+                break;
+            }
+
+            // Read-only (get_underfull_flags() retires nothing) -- resolution below retires
+            // each flag it examines individually via clear_underfull_flag(), never a broader
+            // "clear everything for this tree" sweep.
+            auto flags = vacuumer->get_underfull_flags(writer->get_file_path());
+            for (auto &flag : flags) {
+                if (processed >= budget) {
+                    break;
+                }
+
+                writer->try_merge_underfull(flag.old_id, flag.search_key);
+                vacuumer->clear_underfull_flag(writer->get_file_path(), flag.old_id);
+                processed++;
+            }
+        }
     }
 
     void
@@ -559,6 +784,12 @@ namespace indexer_helpers {
         _primary_index->sync();
         for (auto &secondary : _secondary_indexes) {
             secondary.second.first->sync();
+        }
+        for (auto &gist : _gist_indexes) {
+            gist.second.first->sync();
+        }
+        for (auto &gin : _gin_indexes) {
+            gin.second.first->sync();
         }
 
         if (_id <= constant::MAX_SYSTEM_TABLE_ID) {
@@ -610,6 +841,19 @@ namespace indexer_helpers {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize(false));
         }
 
+        // Flush GiST/GIN secondary indexes too (btree redesign final-2) -- without this, a
+        // mutation applied in-memory by this generation's per-row maintenance (mutation_handler(),
+        // above) has nowhere durable to land, and the next Table::init()/MutableTable reload would
+        // reconstruct the index at its stale, pre-mutation root. Table::init()'s reload loop
+        // (table.cc) looks these up by index_id in metadata.roots exactly like any other secondary
+        // index -- no change needed there, confirmed by reading it directly.
+        for (auto &gist : _gist_indexes) {
+            metadata.roots.emplace_back(gist.first, gist.second.first->finalize(false));
+        }
+        for (auto &gin : _gin_indexes) {
+            metadata.roots.emplace_back(gin.first, gin.second.first->finalize(false));
+        }
+
         metadata.stats = _stats;
         metadata.snapshot_xid = _snapshot_xid;
 
@@ -650,7 +894,7 @@ namespace indexer_helpers {
         return metadata;
     }
 
-    MutableBTreePtr
+    IndexWriterPtr
     MutableTable::create_look_aside_root(const ExtensionCallback& extension_callback)
     {
         // Get the singleton look-aside schema
@@ -659,17 +903,46 @@ namespace indexer_helpers {
         std::vector<std::string> look_aside_keys;
         look_aside_keys.push_back(constant::INTERNAL_ROW_ID);
 
-        _look_aside_index = std::make_shared<MutableBTree>(_db_id, _table_dir / constant::INDEX_LOOK_ASIDE_FILE,
+        _look_aside_index = std::make_shared<IndexWriterT>(_db_id, _table_dir / constant::INDEX_LOOK_ASIDE_FILE,
                 look_aside_keys,
                 _look_aside_schema,
-                _target_xid, get_max_extent_size_secondary(), extension_callback);
+                _target_xid,
+                IndexExtentCache::get_instance(),
+                BtreeWriteStrategy{get_max_extent_size_secondary(), get_underfull_occupancy_fraction()},
+                extension_callback);
 
         return _look_aside_index;
     }
 
-    MutableBTreePtr
-    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, const ExtensionCallback& extension_callback)
+    IndexWriterPtr
+    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns,
+            const ExtensionCallback& extension_callback, IndexAccessMethod access_method)
     {
+        // Dispatch point (btree redesign phase 9, architecture.md Decisions log entry 8). This
+        // was originally written as "the only place phase 10/11 need to touch to go from 'not
+        // yet implemented' to a real construction" -- that stopped being true once decision 11
+        // (GiST) and its phase-11 follow-on (GIN) found that neither GistWriterPtr nor
+        // GinWriterPtr is an IndexWriterPtr, so neither can actually be returned from this
+        // function. The GIST/GIN cases below are therefore permanently unreachable in practice
+        // (every caller of this 4-arg overload is itself gated behind an access_method dispatch
+        // that routes GIST/GIN to create_gist_index_root()/create_gin_index_root() instead,
+        // never here -- confirmed by grep) and structurally can't be filled in without changing
+        // this function's return type. They're kept only so this switch stays exhaustive over
+        // IndexAccessMethod's three variants, not as a marker for future work -- real GiST/GIN
+        // write-root construction lives in create_gist_index_root()/create_gin_index_root()
+        // (this file) and is reached via Indexer::_build()'s/_drop()'s own access_method
+        // dispatch and this class's own reload-loop constructor, not through here.
+        switch (access_method) {
+            case IndexAccessMethod::BTREE:
+                break;
+            case IndexAccessMethod::GIST:
+                throw Error("GIST index builds are not yet implemented (index " +
+                        std::to_string(index_id) + ")");
+            case IndexAccessMethod::GIN:
+                throw Error("GIN index builds are not yet implemented (index " +
+                        std::to_string(index_id) + ")");
+        }
+
         // Get the index schema - bypass cache if this is a snapshot table without system table metadata
         auto index_schema = _bypass_schema_cache
             ? schema_helpers::create_index_schema(_schema, index_columns, index_id, extension_callback)
@@ -680,14 +953,43 @@ namespace indexer_helpers {
         auto key = col_names;
         key.push_back(constant::INTERNAL_ROW_ID);
 
-        auto btree = std::make_shared<MutableBTree>(_db_id,
+        auto btree = std::make_shared<IndexWriterT>(_db_id,
                 _table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 key, index_schema,
                 _target_xid,
-                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary(),
+                IndexExtentCache::get_instance(),
+                BtreeWriteStrategy{
+                        index_id == constant::INDEX_PRIMARY ? get_max_extent_size() : get_max_extent_size_secondary(),
+                        get_underfull_occupancy_fraction()},
                 extension_callback
                 );
         return btree;
+    }
+
+    GistWriterPtr
+    MutableTable::create_gist_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+            const std::vector<std::string> &opclass_names, const ExtensionCallback &extension_callback)
+    {
+        (void)index_columns;
+        (void)extension_callback;
+        return std::make_shared<GistWriter>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                _target_xid,
+                GistWriteStrategy{opclass_names, get_max_extent_size_secondary()},
+                IndexExtentCache::get_instance());
+    }
+
+    GinWriterPtr
+    MutableTable::create_gin_index_root(uint64_t index_id, const std::vector<uint32_t> &index_columns,
+            const std::vector<std::string> &opclass_names, const ExtensionCallback &extension_callback)
+    {
+        (void)index_columns;
+        (void)extension_callback;
+        return std::make_shared<GinWriteStrategy>(_db_id,
+                _table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                _target_xid,
+                opclass_names, get_max_extent_size_secondary(),
+                IndexExtentCache::get_instance());
     }
 
     template <MutableTable::MutationType m_type>
@@ -698,7 +1000,7 @@ namespace indexer_helpers {
 
         // Create a context to passed to cache and so the same will be
         // passed back to the mutation_handler
-        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes };
+        indexer_helpers::IndexMutationContext ctx{ _schema, _secondary_indexes, _gist_indexes, _gin_indexes };
 
         // Find and invoke appropriate mutations in the cache
         if constexpr (m_type == MutationType::INSERT) {

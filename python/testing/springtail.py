@@ -79,11 +79,36 @@ ALL_DAEMONS_SHUTDOWN = ALL_DAEMONS_NAMES[::-1]
 
 PG_CONFIG_BACKUP_PATH = '/tmp/pg_config_backup.txt'
 
+# Default name of the btree-redesign shared decompressed-extent buffer pool's shared-memory
+# segment (architecture.md Sec 6) -- must match
+# SharedExtentPool::DEFAULT_NAME in include/storage/index_engine/shared_extent_pool.hh.
+# Deliberately host-wide and process-restart-persistent in production (that's the whole point:
+# many backend processes share it without any one of them wiping it on its own start/shutdown).
+# But cleanup_filesystem() below simulates "a fresh host" for test purposes by wiping
+# table_dir/mount_path on every --start/--kill -- wipe this too, or a stale entry from a
+# previous test run's data generation can be handed back for a completely different table that
+# happens to reuse the same (file, extent_id) key in this run (file paths and extent_ids are
+# deterministic/low-numbered across repeated test runs in a way production's monotonically
+# unique table_id/xid naming never collides on).
+SHARED_EXTENT_POOL_NAME = 'springtail.extent_pool'
+
 def get_lib_ext() -> str:
     """Get the library extension for the current platform."""
     if is_linux():
         return 'so'
     return 'dylib'
+
+
+def cleanup_shared_extent_pool() -> None:
+    """Remove the shared extent pool's shared-memory segment, if present. See
+    SHARED_EXTENT_POOL_NAME's comment for why this is test-only cleanup, not something
+    production code does on every process start/shutdown."""
+    for suffix in ('', '.mutex'):
+        path = os.path.join('/dev/shm', SHARED_EXTENT_POOL_NAME + suffix)
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
 
 
 def cleanup_filesystem(props : Properties) -> None:
@@ -94,6 +119,7 @@ def cleanup_filesystem(props : Properties) -> None:
     pid_path = props.get_pid_path()
 
     clean_fs(mount_path, log_path)
+    cleanup_shared_extent_pool()
 
     # Create log path if it doesn't exist
     makedir(log_path, '777')

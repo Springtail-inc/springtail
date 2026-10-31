@@ -1,12 +1,12 @@
-#include <algorithm>
+#include <fmt/core.h>
 #include <stdlib.h>
+
+#include <algorithm>
 #include <memory>
 #include <optional>
+#include <set>
 #include <shared_mutex>
 #include <sstream>
-
-#include <fmt/core.h>
-#include <nlohmann/json.hpp>
 
 #include <common/constants.hh>
 #include <common/exception.hh>
@@ -17,14 +17,11 @@
 #include <common/properties.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
-
-#include <redis/redis_ddl.hh>
-
-#include <pg_repl/pg_common.hh>
-
+#include <nlohmann/json.hpp>
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
-
+#include <pg_repl/pg_common.hh>
+#include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <sys_tbl_mgr/system_tables.hh>
@@ -361,6 +358,24 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_get_index_quals(const std::map<uint32_t, SchemaColumn>& columns, Index const& idx, List const* qual_list)
     {
         if (!qual_list) {
+            return {};
+        }
+
+        // btree redesign phase 12: get_ready_indexes() returns every READY index regardless of
+        // kind, including GiST/GIN rows (see Table::init()'s reload loop) -- but this function's
+        // caller-side contract (both PgFdwMgr::_init_quals()'s execution-time best-index
+        // selection and _compute_planning_metadata()'s planning-time estimate) assumes whatever
+        // it returns can drive an ordinary MergeTable::lower_bound()/upper_bound() scan, which
+        // only ever resolves through Table::index()/_secondary_indexes -- GiST/GIN indexes live
+        // in Table's separate _gist_indexes/_gin_indexes maps and aren't reachable there at all.
+        // Before this phase, nothing populated a GiST/GIN index's own GistReaderPtr/GinReaderPtr
+        // with real query-time data, so this was a latent, never-hit crash risk (Table::index()
+        // doing .at() on a missing key) rather than an active bug; this phase's own routing
+        // makes GiST/GIN-indexed columns something a plain WHERE col = ... query can now hit
+        // for real, so guard it here explicitly rather than leave it latent. GIN routing for the
+        // one operator this phase supports (GIN_SIMILAR) never goes through this function at all
+        // -- see PgFdwMgr::_try_init_gin_scan().
+        if (idx.access_method != IndexAccessMethod::BTREE) {
             return {};
         }
 
@@ -1016,6 +1031,18 @@ namespace springtail::pg_fdw {
         // for ASC order, scan from iter_start to iter_end with (iter_start++)
         // for DESC order, scan from iter_end to iter_end with (iter_end--)
         // make sure to handle the special case for NOT_EQUALS while scanning
+
+        // btree redesign phase 12: a GIN-routed scan was already fully set up by
+        // _try_init_gin_scan() (called from _init_quals()) -- it populates
+        // state->gin_match_ids directly, not state->index/filtered_quals, since GIN indexes
+        // aren't reachable through Table::index()/MergeTable's btree-shaped
+        // lower_bound()/upper_bound() at all (see Table::gin_index()'s own comment). Leave
+        // iter_start/iter_end unset; fdw_iterate_scan() checks gin_match_ids before ever
+        // touching them.
+        if (state->gin_match_ids.has_value()) {
+            return;
+        }
+
         if (!state->index.has_value()) {
             LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting up iterators for full table scan: tid={}, ASC={}, quals={}",
                     state->tid, state->scan_asc, state->filtered_quals.size());
@@ -1076,12 +1103,151 @@ namespace springtail::pg_fdw {
             case UNSUPPORTED:
                 CHECK(false);
                 break;
+            case GIN_SIMILAR:
+                // Never reaches here: a GIN_SIMILAR qual either got routed to gin_match_ids (see
+                // this function's own early-return above) or wasn't recognized at all, in which
+                // case it's never added to filtered_quals in the first place (_get_index_quals()
+                // gates on _is_type_sortable(), which deliberately never accepts GIN_SIMILAR --
+                // see phases/phase-12.md's Design notes for why that gate, not this switch, is
+                // where GIN_SIMILAR must be kept out of the ordinary btree bound-comparison path).
+                // This case exists only so -Werror=switch stays exhaustive.
+                CHECK(false);
+                break;
         }
+    }
+
+    namespace {
+    /** The one real opclass this phase routes GIN scans against -- see phases/phase-12.md's
+        Design notes for why only gin_trgm_ops/"%"  this phase (environment constraint:
+        btree_gin's opclasses don't dlopen here at all; see AGENTS.md). */
+    constexpr char GIN_TRGM_OPCLASS[] = "gin_trgm_ops";
+    }  // namespace
+
+    bool
+    PgFdwMgr::_try_init_gin_scan(PgFdwState *state, const List *qual_list)
+    {
+        if (!qual_list) {
+            return false;
+        }
+
+        const ListCell *lc;
+        foreach (lc, qual_list) {
+            ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
+
+            if (qual->base.op != GIN_SIMILAR || qual->base.right_type != T_Const || qual->isnull ||
+                qual->base.isArray || qual->base.useOr) {
+                continue;
+            }
+
+            for (auto const &idx : state->indexes) {
+                if (idx.access_method != IndexAccessMethod::GIN || idx.columns.size() != 1 ||
+                    idx.columns[0].position != qual->base.varattno ||
+                    idx.columns[0].opclass != GIN_TRGM_OPCLASS) {
+                    continue;
+                }
+
+                auto reader = state->table()->gin_index(idx.id);
+                if (!reader) {
+                    // Catalog says READY but the reader isn't actually populated (e.g. a
+                    // vacant/never-built table) -- fall back rather than throw.
+                    continue;
+                }
+
+                const char *pattern = TextDatumGetCString(qual->value);
+
+                std::vector<std::vector<char>> terms;
+                try {
+                    terms = sys_tbl_mgr::Client::get_instance()->extract_gin_query_terms(
+                        idx.columns[0].opclass, std::string(pattern));
+                } catch (const Error &e) {
+                    // RPC/opclass failure at query time (daemon down, opclass not registered,
+                    // ...) -- fall back to the existing full-scan/filter path rather than
+                    // letting an exception from a daemon RPC propagate out of a real Postgres
+                    // backend process (see this phase's own Behavioral notes on throw-based
+                    // validators).
+                    LOG_WARN("GIN query term extraction failed for index {}: {}", idx.id, e.what());
+                    continue;
+                }
+
+                if (terms.empty()) {
+                    // No extractable terms (e.g. a pattern too short to yield a trigram) --
+                    // a GIN scan can't safely narrow candidates from nothing, so leave the
+                    // full-scan/filter fallback in control rather than returning zero rows.
+                    continue;
+                }
+
+                // OR (union) across every extracted term, not AND/intersection: a true
+                // similarity match only needs to share *some* trigrams with the query, not
+                // all of them (see phases/phase-12.md's Design notes for the full argument --
+                // in short, this is a sound superset as long as pg_trgm.similarity_threshold
+                // is above 0, which is both the default and effectively always true in
+                // practice). Postgres's own recheck of the real "%" predicate on every
+                // returned row (multicorn_getForeignPlan() never removes a qual from the
+                // scan's own recheck list) is what makes a superset here safe rather than
+                // requiring exact candidate generation.
+                std::set<uint64_t> matched;
+                for (auto const &term : terms) {
+                    auto ids = reader->lookup(term);
+                    matched.insert(ids.begin(), ids.end());
+                }
+
+                state->gin_match_ids.emplace(matched.begin(), matched.end());
+                state->gin_scan_pos = 0;
+                state->gin_index = idx;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool
+    PgFdwMgr::_gin_iterate_scan(PgFdwState *state, Datum *values, bool *nulls, bool *eos)
+    {
+        // Not static -- needs _get_datum_from_field(), exactly like fdw_iterate_scan() itself.
+        auto &ids = *state->gin_match_ids;
+        size_t num_attrs = state->_attrs.size();
+        *eos = false;
+
+        if (state->gin_scan_pos >= ids.size()) {
+            *eos = true;
+            return false;
+        }
+
+        uint64_t internal_row_id = ids[state->gin_scan_pos++];
+        auto [page, row] = state->table()->read_row_by_internal_id(internal_row_id);
+        state->rows_fetched++;
+
+        memset(nulls, true, num_attrs * sizeof(bool));
+        memset(values, 0, num_attrs * sizeof(values[0]));
+
+        // No per-column qual filter is ever attached to target_columns for a GIN-routed scan
+        // (the matched GIN_SIMILAR qual never becomes a PgFdwState::TargetColumn::Filter --
+        // see _init_quals()), so every target column is emitted unconditionally here, unlike
+        // the ordinary iterator path's interleaved filter check.
+        for (const auto &c : state->target_columns) {
+            auto attno = c.pg_attr.attnum;
+            const FieldPtr &field = state->fields->at(c.field_idx);
+            if (!field->is_null(&row)) {
+                values[attno - 1] = _get_datum_from_field(state, field.get(), row, c.sp_pg_type,
+                                                          c.pg_attr.atttypid, c.pg_attr.atttypmod);
+                nulls[attno - 1] = false;
+            }
+        }
+
+        return true;
     }
 
     void
     PgFdwMgr::_init_quals(PgFdwState *state, const List *qual_list)
     {
+        // btree redesign phase 12: clear any GIN routing left over from a previous
+        // (re)scan -- fdw_reset_scan() calls this again with (possibly) different quals, and a
+        // stale gin_match_ids from an earlier call must not leak into this one.
+        state->gin_match_ids.reset();
+        state->gin_scan_pos = 0;
+        state->gin_index.reset();
+
         if (!state->sortgroup_index) {
             // If the sortgroup index isn't set, select the best index to use from quals.
             std::optional<Index> best_index;
@@ -1111,6 +1277,20 @@ namespace springtail::pg_fdw {
             state->index = *state->sortgroup_index;
             auto index_quals = _get_index_quals(state->columns, *state->sortgroup_index, qual_list);
             state->filtered_quals = std::move(index_quals);
+        }
+
+        // btree redesign phase 12: no ordinary (btree-shaped) index qual matched above -- see
+        // if a GIN index can serve this query instead. Only attempted when state->index is
+        // still unset: additive-only, so it can't change behavior for any query that already
+        // had a usable btree/primary index match. Deliberately doesn't touch
+        // state->filtered_quals -- a GIN-routed scan's own result filtering happens entirely in
+        // gin_match_ids/GinReadStrategy, not via the ordinary qual_fields/iterator machinery
+        // below (see this phase's Design notes for why: Postgres always rechecks every original
+        // qual against the row it gets back regardless of what the FDW internally used to
+        // narrow candidates -- see multicorn_getForeignPlan()'s own "All quals are meant to be
+        // rechecked" comment -- so GIN only needs to be a sound superset, never exact).
+        if (!state->index.has_value()) {
+            _try_init_gin_scan(state, qual_list);
         }
 
         // note: just because we have some quals doesn't mean we can use them
@@ -1194,6 +1374,14 @@ namespace springtail::pg_fdw {
 
         // default to not end of scan
         *eos = false;
+
+        // btree redesign phase 12: a GIN-routed scan has no iter_start/iter_end at all (see
+        // _set_scan_iterators()'s own early return for gin_match_ids) -- handle it entirely
+        // separately before the iterator-based checks below, which would otherwise see
+        // iter_start unset and incorrectly report end-of-scan.
+        if (state->gin_match_ids.has_value()) {
+            return _gin_iterate_scan(state, values, nulls, eos);
+        }
 
         // check iterator is valid
         if (!state->iter_start.has_value()) {
@@ -1354,7 +1542,19 @@ namespace springtail::pg_fdw {
             pg_state->scan_asc = (reversed == false);
         }
 
-        auto check_index = [pg_state](const Index& idx, const List* sortgroup) -> List* {
+        auto check_index = [pg_state](const Index &idx, const List *sortgroup) -> List * {
+            // btree redesign phase 12: same guard as _get_index_quals() (grep'd as a sibling
+            // call site -- see phases/phase-12.md's Design notes). A GiST/GIN index's columns
+            // matching an ORDER BY clause exactly would otherwise let this lambda pick it as
+            // pg_state->sortgroup_index, which _init_quals()/_set_scan_iterators() then feed
+            // into MergeTable::lower_bound()/upper_bound() -- a crash, since GiST/GIN indexes
+            // live in Table's separate _gist_indexes/_gin_indexes maps, never reachable via
+            // Table::index()/_secondary_indexes. Sort pushdown onto a GiST/GIN index isn't
+            // meaningful anyway (neither kind is ordered by its own key the way a btree is).
+            if (idx.access_method != IndexAccessMethod::BTREE) {
+                return {};
+            }
+
             int i = 0;
             ListCell *lc;
             std::vector<DeparsedSortGroup*> keys;
@@ -1483,6 +1683,17 @@ namespace springtail::pg_fdw {
         auto join_indexes = planstate->get_cached_join_indexes();
 
         for (auto const& idx: indexes) {
+            // btree redesign final-2: same guard as _get_index_quals()/fdw_can_sort()'s
+            // check_index (grep'd as sibling call sites phase 12's round-1 review already fixed;
+            // this one was missed). Not a correctness bug today -- confirmed independently that
+            // the pathkey entries built below only ever feed join/equivalence-class costing via
+            // multicorn_util.c's findPaths(), never an asserted sort order -- but added anyway for
+            // consistency with the established pattern, since a future consumer of these pathkeys
+            // might not stay equally tolerant of a GiST/GIN index appearing here.
+            if (idx.access_method != IndexAccessMethod::BTREE) {
+                continue;
+            }
+
             // note: rel_rows has taken quals into account in fdw_get_rel_size
             auto rows = rel_rows;
 
@@ -1521,7 +1732,7 @@ namespace springtail::pg_fdw {
             List      *attnums = NULL;
             List      *item = NULL;
             LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "adding index path: {}", idx.id);
-            for (const auto col: idx.columns) {
+            for (const auto &col: idx.columns) {
                 LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "adding pathkey attnum: {}", col.position);
                 attnums = list_append_unique_int(attnums, col.position);
             }
@@ -1677,6 +1888,15 @@ namespace springtail::pg_fdw {
             if (state->index_only_scan) {
                 r.emplace_back("   Scan type", "index only");
             }
+        }
+
+        // btree redesign phase 12: GIN-routed scan -- state->index is deliberately never set
+        // for this case (see gin_index's own comment), so it needs its own EXPLAIN line; this
+        // is the marker this phase's integration test greps for to confirm the GIN path (not a
+        // full scan) was actually taken.
+        if (state->gin_index) {
+            r.emplace_back("   Scan index", state->gin_index->name + " [GIN similarity]");
+            r.emplace_back("   Scan type", "GIN index");
         }
 
         // collect quals

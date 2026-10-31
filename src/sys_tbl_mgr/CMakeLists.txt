@@ -41,7 +41,7 @@ add_library(springtail_sys_tbl_mgr ${SYS_TBL_MGR_SOURCES})
 target_include_directories(springtail_sys_tbl_mgr PUBLIC ${CMAKE_BINARY_DIR}/src PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_sys_tbl_mgr
   PUBLIC springtail_common springtail_grpc springtail_storage springtail_xid_mgr
-  PRIVATE proto_sys_tbl_mgr proto_ddl
+  PRIVATE springtail_opclass_engine proto_sys_tbl_mgr proto_ddl
   PRIVATE Boost::thread)
 
 # add the library target

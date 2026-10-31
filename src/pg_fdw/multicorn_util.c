@@ -389,6 +389,10 @@ getOpEnum(char *opname)
         return GREATER_THAN;
     } else if (strcmp(opname, ">=") == 0) {
         return GREATER_THAN_EQUALS;
+    } else if (strcmp(opname, "%") == 0) {
+        /* pg_trgm's similarity operator (btree redesign phase 12) -- see QualOpName's own
+         * comment on GIN_SIMILAR for why only this operator, not also LIKE/regex, this phase. */
+        return GIN_SIMILAR;
     }
     return UNSUPPORTED;
 }

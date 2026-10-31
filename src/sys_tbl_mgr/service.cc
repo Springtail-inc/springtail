@@ -1,7 +1,10 @@
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/grpcpp.h>
 
+#include <common/exception.hh>
 #include <grpc/grpc_server.hh>
+#include <storage/field.hh>
+#include <storage/index_engine/gin_helpers.hh>
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
@@ -137,6 +140,55 @@ Service::GetUserType(grpc::ServerContext* context,
         response->set_exists(info->exists);
     } else {
         response->set_exists(false);
+    }
+
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status
+Service::GinExtractQueryTerms(grpc::ServerContext* context,
+                              const proto::GinExtractQueryTermsRequest* request,
+                              proto::GinExtractQueryTermsResponse* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "GinExtractQueryTerms");
+
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "got GinExtractQueryTerms() -- opclass {}",
+              request->opclass());
+
+    // Build the one-column TEXT tuple gin_helpers::extract_terms() expects (its own
+    // GIN_EXTRACTVALUE calling convention -- field 1, unused here, is normally the row's
+    // internal_row_id). This is the same call GinWriteStrategy makes at index build time; see
+    // this RPC's own proto comment for why that's a sound stand-in for a real EXTRACTQUERY call
+    // here, and phases/phase-12.md's Design notes for the full reasoning.
+    auto fields = std::make_shared<FieldArray>();
+    fields->push_back(std::make_shared<ConstTypeField<std::string>>(request->query()));
+    fields->push_back(std::make_shared<ConstTypeField<uint64_t>>(uint64_t{0}));
+    auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
+
+    try {
+        auto terms = gin_helpers::extract_terms(tuple, request->opclass());
+        for (auto& term : terms) {
+            response->add_terms(std::string(term.begin(), term.end()));
+        }
+    } catch (const Error& e) {
+        // extract_terms() throws for an unrecognized/unregistered opclass or an unsupported
+        // column type -- a real, expected-at-runtime condition (not a programming error), so it
+        // must become a Status the client can catch and fall back on, not an exception
+        // propagating out through gRPC's C callback boundary (see this phase's own Behavioral
+        // notes on throw-based validators only being as safe as their least-protected caller).
+        //
+        // FAILED_PRECONDITION, not INTERNAL (round-1 review finding 1): this failure is
+        // deterministic for a given (opclass, db) pair -- retrying the identical request
+        // cannot succeed -- but include/grpc/grpc_client.hh's should_retry() treats INTERNAL as
+        // retryable and retry_rpc_status() retries it up to 50 times with exponential backoff
+        // (~226s worst case) before giving up, blocking the issuing Postgres backend connection
+        // that whole time before the safe full-scan/filter fallback in
+        // PgFdwMgr::_try_init_gin_scan() ever gets a chance to run. FAILED_PRECONDITION is not
+        // in should_retry()'s set, matching the existing non-retryable NOT_FOUND convention
+        // this file already uses for a comparably deterministic condition (Exists(), above).
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
+        return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, e.what());
     }
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);

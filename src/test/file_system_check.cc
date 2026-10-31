@@ -268,7 +268,7 @@ FSCheck::_read_tables(uint64_t db_id, uint64_t max_xid)
 
                 // 8. set primary key positions in the table
                 if (index_id == constant::INDEX_PRIMARY) {
-                    for (auto col_iter: fs_index.index.columns) {
+                    for (const auto &col_iter: fs_index.index.columns) {
                         _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).pos_to_column.at(col_iter.position).pkey_position = col_iter.idx_position;
                     }
                 }
@@ -456,7 +456,7 @@ FSCheck::_validate_primary_extent(std::shared_ptr<Table> table, ExtentSchemaPtr 
 {
     FieldArrayPtr table_key_fields = table_schema->get_sort_fields();
 
-    BTreePtr table_btree = table->index(constant::INDEX_PRIMARY);
+    IndexReaderPtr table_btree = table->index(constant::INDEX_PRIMARY);
     CHECK(table_btree.get() != nullptr);
     LOG_INFO("\tPrimary index created with path = {}, xid = {}, primary_schema size = {}, extent id = {}",
             table_btree->get_file_path().c_str(), table_btree->get_xid(), table_btree->get_schema()->get_sort_keys().size(), table_btree->get_root_offset());
@@ -505,7 +505,7 @@ FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaP
     FieldArrayPtr table_fields = table_schema->get_fields();
     std::vector<uint64_t> index_ids = table->get_secondary_idx_ids();
     for (auto id: index_ids) {
-        BTreePtr table_btree = table->index(id);
+        IndexReaderPtr table_btree = table->index(id);
         CHECK(table_btree.get() != nullptr);
         LOG_INFO("\tSecondary index {} created with path = {}, xid = {}, primary_schema size = {}, extent id = {}",
                 id, table_btree->get_file_path().c_str(), table_btree->get_xid(),
@@ -584,7 +584,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
         LOG_INFO("\tVerifying Index {}:{}:{}, is_unique {}, state {}",
             index.schema, index.id, index.name, index.is_unique, index.state
         );
-        for (auto idx_col_it: index.columns) {
+        for (const auto &idx_col_it: index.columns) {
             LOG_INFO("\t\tIndex position: {}, table column: {}:{}",
                 idx_col_it.idx_position, idx_col_it.position, fs_table.pos_to_column.at(idx_col_it.position).name
             );

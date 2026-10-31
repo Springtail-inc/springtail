@@ -17,7 +17,6 @@ namespace springtail {
         INDEX,                // Secondary index schema (has index_id)
         PRIMARY_INDEX,        // Primary index schema (index_id = 0)
         LOOK_ASIDE,           // Look-aside index schema (maps internal_row_id to extent_id/row_id)
-        BTREE_BRANCH,         // Branch schema for MutableBTree internal nodes
         PG_LOG_BATCH,         // PgLogReader batch schema (with __springtail_op/lsn)
         CUSTOM                // Other derived schemas from create_schema()
     };

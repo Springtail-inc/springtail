@@ -151,4 +151,103 @@ namespace {
 
         EXPECT_FALSE(PgFdwMgr::check_type_compatibility(column, qual));
     }
+
+    /**
+     * Qual-recognition tests for the GiST/GIN qual routing seam added in the btree redesign's
+     * phase 12 (see phases/phase-12.md's Design notes). GIN_SIMILAR ("%", pg_trgm's similarity
+     * operator) must never be picked up by the ordinary btree qual-matching path
+     * (_is_type_sortable()/_get_index_quals()) the way EQUALS/NOT_EQUALS/etc. are -- that path
+     * feeds MergeTable::lower_bound()/upper_bound(), which only resolves a btree-shaped
+     * secondary index (Table::index()), not a GiST/GIN one (Table::gist_index()/gin_index()).
+     * GIN_SIMILAR's own routing (PgFdwMgr::_try_init_gin_scan()) is exercised by this phase's
+     * integration test instead, since it needs a real Table/GinReadStrategy to search.
+     */
+    class PgFdwGinQualRoutingTest : public ::testing::Test {
+    protected:
+        ConstQual *make_qual(AttrNumber varattno, QualOpName op, Oid typeoid, Datum value)
+        {
+            ConstQual *q = new ConstQual();
+            q->base.varattno = varattno;
+            q->base.op = op;
+            q->base.typeoid = typeoid;
+            q->base.right_type = T_Const;
+            q->base.isArray = false;
+            q->base.useOr = false;
+            q->value = value;
+            q->isnull = false;
+            quals_owned.push_back(q);
+            return q;
+        }
+
+        void TearDown() override
+        {
+            for (auto *q : quals_owned) {
+                delete q;
+            }
+        }
+
+        std::vector<ConstQual *> quals_owned;
+    };
+
+    TEST_F(PgFdwGinQualRoutingTest, IsTypeSortable_GinSimilarNeverSortable)
+    {
+        // GIN_SIMILAR must stay out of the ordinary btree range-scan bound comparison
+        // (_set_scan_iterators()'s switch) regardless of column type -- it's routed entirely
+        // through _try_init_gin_scan() instead.
+        EXPECT_FALSE(PgFdwMgr::_is_type_sortable(TEXTOID, GIN_SIMILAR));
+    }
+
+    TEST_F(PgFdwGinQualRoutingTest, IsTypeSortable_TextEqualityStillSortable)
+    {
+        // Regression guard: adding GIN_SIMILAR must not disturb TEXT's existing EQUALS/
+        // NOT_EQUALS eligibility.
+        EXPECT_TRUE(PgFdwMgr::_is_type_sortable(TEXTOID, EQUALS));
+        EXPECT_TRUE(PgFdwMgr::_is_type_sortable(TEXTOID, NOT_EQUALS));
+    }
+
+    TEST_F(PgFdwGinQualRoutingTest, GetIndexQuals_SkipsGinIndexEvenForEqualsQual)
+    {
+        // A GIN index's own column is never a valid match for _get_index_quals() (the ordinary
+        // btree-shaped prefix-match used by _compute_planning_metadata()/_init_quals()'s best-
+        // index selection), even for an operator (EQUALS) that would otherwise match -- GIN
+        // indexes aren't reachable through Table::index()/MergeTable's btree-shaped
+        // lower_bound()/upper_bound() at all. Without this guard, a plain "WHERE tags = ..."
+        // query against a GIN-indexed column would crash (Table::index() doing .at() on a
+        // index id that only lives in Table's separate _gin_indexes map).
+        std::map<uint32_t, SchemaColumn> columns;
+        columns.try_emplace(1, SchemaColumn("tags", 1, SchemaType::TEXT, TEXTOID, true));
+
+        springtail::Index idx;
+        idx.id = 42;
+        idx.access_method = IndexAccessMethod::GIN;
+        idx.columns.push_back(springtail::Index::Column{0, 1, "gin_trgm_ops"});
+
+        List *qual_list = nullptr;
+        qual_list = lappend(
+            qual_list, make_qual(1, EQUALS, TEXTOID, PointerGetDatum(cstring_to_text("apple"))));
+
+        auto matched = PgFdwMgr::_get_index_quals(columns, idx, qual_list);
+        EXPECT_TRUE(matched.empty());
+    }
+
+    TEST_F(PgFdwGinQualRoutingTest, GetIndexQuals_StillMatchesOrdinaryBtreeIndex)
+    {
+        // Regression guard: the access_method == BTREE case (the overwhelming majority of
+        // indexes) must still match exactly as before.
+        std::map<uint32_t, SchemaColumn> columns;
+        columns.try_emplace(1, SchemaColumn("tags", 1, SchemaType::TEXT, TEXTOID, true));
+
+        springtail::Index idx;
+        idx.id = 42;
+        idx.access_method = IndexAccessMethod::BTREE;
+        idx.columns.push_back(springtail::Index::Column{0, 1, ""});
+
+        List *qual_list = nullptr;
+        qual_list = lappend(
+            qual_list, make_qual(1, EQUALS, TEXTOID, PointerGetDatum(cstring_to_text("apple"))));
+
+        auto matched = PgFdwMgr::_get_index_quals(columns, idx, qual_list);
+        ASSERT_EQ(matched.size(), 1u);
+        EXPECT_EQ(matched[0]->base.op, EQUALS);
+    }
 }
